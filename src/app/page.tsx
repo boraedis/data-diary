@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { Button } from "@/components/ui/button";
+import { TodayLink } from "@/components/today-link";
 import {
   Card,
   CardContent,
@@ -39,7 +40,7 @@ export default async function HomePage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Data Diary</CardTitle>
-          <CardDescription>Phase 1 skeleton is live.</CardDescription>
+          <CardDescription>Phase 2: day entries are live.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between rounded-md border p-3 text-sm">
@@ -48,6 +49,7 @@ export default async function HomePage() {
               {health.ok ? "Connected" : `Failed: ${health.error ?? "unknown"}`}
             </span>
           </div>
+          <TodayLink />
           <form action="/api/auth/logout" method="post">
             <Button type="submit" variant="outline" className="w-full">
               Sign out

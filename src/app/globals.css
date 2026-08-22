@@ -72,7 +72,10 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
+  /* Slightly tighter corners for a denser, more dashboard-like feel — this
+     is the first visual-identity pass (Phase 2), applied globally since
+     the app is dark-by-default now (see .dark below and layout.tsx). */
+  --radius: 0.5rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -83,38 +86,45 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+/* Dark, data-dense — the app's default (and, for now, only real) theme; see
+   `dark` on <html> in layout.tsx. Near-black neutrals with a single teal
+   accent for interactive/primary elements, plus a small 5-color qualitative
+   palette on chart-1..5 seeded now so Phase 4's chart layer has a coherent
+   starting point instead of the legacy grayscale-only set. Full chart color
+   and interaction conventions are still a Phase 4 decision — this is just a
+   reasonable default, not a final answer. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.13 0.005 240);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.18 0.006 240);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.18 0.006 240);
+  --popover-foreground: oklch(0.96 0 0);
+  --primary: oklch(0.78 0.14 195);
+  --primary-foreground: oklch(0.15 0.02 195);
+  --secondary: oklch(0.24 0.006 240);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.22 0.006 240);
+  --muted-foreground: oklch(0.65 0.01 240);
+  --accent: oklch(0.24 0.006 240);
+  --accent-foreground: oklch(0.96 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.78 0.14 195 / 60%);
+  --chart-1: oklch(0.78 0.14 195);
+  --chart-2: oklch(0.8 0.16 80);
+  --chart-3: oklch(0.72 0.19 20);
+  --chart-4: oklch(0.72 0.14 300);
+  --chart-5: oklch(0.82 0.18 130);
+  --sidebar: oklch(0.16 0.006 240);
+  --sidebar-foreground: oklch(0.96 0 0);
+  --sidebar-primary: oklch(0.78 0.14 195);
+  --sidebar-primary-foreground: oklch(0.15 0.02 195);
+  --sidebar-accent: oklch(0.24 0.006 240);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.78 0.14 195 / 60%);
 }
 
 @layer base {
