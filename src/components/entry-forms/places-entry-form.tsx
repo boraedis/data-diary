@@ -3,49 +3,41 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import type { DayPayload, PlaceEntry, PlacesPayload } from "@/lib/days";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CatalogPicker, type CatalogItem } from "@/components/entry-forms/catalog-picker";
+import { PLACE_SLOTS, type DayPayload, type PlacesPayload } from "@/lib/days";
 
-function emptyPlace(sortOrder: number): PlaceEntry {
-  return { name: "", sortOrder };
+function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[] {
+  const arr: (number | null)[] = Array(PLACE_SLOTS).fill(null);
+  for (const e of entries) {
+    if (e.slot < PLACE_SLOTS) arr[e.slot] = e.placeId;
+  }
+  return arr;
 }
 
-export function PlacesEntryForm({ date, initial }: { date: string; initial: PlacesPayload }) {
+export function PlacesEntryForm({
+  date,
+  initial,
+  catalog,
+}: {
+  date: string;
+  initial: PlacesPayload;
+  catalog: CatalogItem[];
+}) {
   const router = useRouter();
-  const [places, setPlaces] = useState<PlacesPayload>(initial);
+  const [items, setItems] = useState<CatalogItem[]>(catalog);
+  const [slots, setSlots] = useState<(number | null)[]>(() => hydrate(initial.entries));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  function updateEntry(index: number, patch: Partial<PlaceEntry>) {
-    setSavedAt(null);
-    setPlaces((prev) => {
-      const next = [...prev.places];
-      next[index] = { ...next[index], ...patch };
-      return { places: next };
-    });
+  function handleCreated(item: CatalogItem) {
+    setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
-  function addEntry() {
+  function setSlot(slot: number, placeId: number | null) {
     setSavedAt(null);
-    setPlaces((prev) => ({ places: [...prev.places, emptyPlace(prev.places.length)] }));
-  }
-
-  function removeEntry(index: number) {
-    setSavedAt(null);
-    setPlaces((prev) => ({
-      places: prev.places
-        .filter((_, i) => i !== index)
-        .map((p, i) => ({ ...p, sortOrder: i })),
-    }));
+    setSlots((prev) => prev.map((v, i) => (i === slot ? placeId : v)));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -53,11 +45,15 @@ export function PlacesEntryForm({ date, initial }: { date: string; initial: Plac
     setSaving(true);
     setError(null);
 
+    const entries: PlacesPayload["entries"] = slots
+      .map((placeId, slot) => (placeId !== null ? { slot, placeId } : null))
+      .filter((e): e is PlacesPayload["entries"][number] => e !== null);
+
     try {
       const res = await fetch(`/api/days/${date}/places`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(places),
+        body: JSON.stringify({ entries }),
       });
       const body = await res.json();
 
@@ -67,7 +63,7 @@ export function PlacesEntryForm({ date, initial }: { date: string; initial: Plac
       }
 
       const saved = body as DayPayload;
-      setPlaces({ places: saved.places });
+      setSlots(hydrate(saved.places));
       setSavedAt(Date.now());
       router.refresh();
     } catch {
@@ -83,34 +79,23 @@ export function PlacesEntryForm({ date, initial }: { date: string; initial: Plac
         <CardHeader>
           <CardTitle>Places</CardTitle>
           <CardDescription>
-            {places.places.length === 0 ? "None logged yet." : `${places.places.length} logged.`}
+            {PLACE_SLOTS} places — pick from your places list, or add somewhere new.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {places.places.map((entry, i) => (
-            <div key={i} className="flex items-end gap-2">
-              <div className="flex-1 space-y-1.5">
-                <Label htmlFor={`place-name-${i}`}>Name</Label>
-                <Input
-                  id={`place-name-${i}`}
-                  value={entry.name}
-                  onChange={(e) => updateEntry(i, { name: e.target.value })}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label="Remove place"
-                onClick={() => removeEntry(i)}
-              >
-                &times;
-              </Button>
-            </div>
+        <CardContent className="flex flex-col gap-2">
+          {slots.map((placeId, slot) => (
+            <CatalogPicker
+              key={slot}
+              id={`place-${slot}`}
+              itemLabel="Place"
+              items={items}
+              valueId={placeId}
+              onChange={(id) => setSlot(slot, id)}
+              onCreated={handleCreated}
+              createApiPath="/api/places"
+              addLabel="New place"
+            />
           ))}
-          <Button type="button" variant="outline" onClick={addEntry}>
-            + Add place
-          </Button>
         </CardContent>
       </Card>
 

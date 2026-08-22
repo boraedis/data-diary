@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { DurationInput } from "@/components/ui/duration-input";
 import {
   Card,
   CardContent,
@@ -13,50 +13,53 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { DayPayload, EntertainmentEntry, EntertainmentPayload } from "@/lib/days";
+import {
+  EntertainmentPicker,
+  type EntertainmentCatalogItem,
+} from "@/components/entry-forms/entertainment-picker";
+import type { DayPayload } from "@/lib/days";
 
-function emptyEntry(): EntertainmentEntry {
-  return { kind: "movie", title: "", notes: null };
-}
-
-const KIND_LABELS: Record<EntertainmentEntry["kind"], string> = {
-  movie: "Movie",
-  tvshow: "TV show",
-  sport: "Sport",
-  book: "Book",
-  game: "Game",
-};
+type Row = { entertainmentId: number | null; durationMinutes: number | null; notes: string | null };
 
 export function EntertainmentEntryForm({
   date,
   initial,
+  catalog,
 }: {
   date: string;
-  initial: EntertainmentPayload;
+  initial: DayPayload["entertainment"];
+  catalog: EntertainmentCatalogItem[];
 }) {
   const router = useRouter();
-  const [entertainment, setEntertainment] = useState<EntertainmentPayload>(initial);
+  const [items, setItems] = useState<EntertainmentCatalogItem[]>(catalog);
+  const [rows, setRows] = useState<Row[]>(
+    initial.map((e) => ({
+      entertainmentId: e.entertainmentId,
+      durationMinutes: e.durationMinutes,
+      notes: e.notes,
+    }))
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  function updateEntry(index: number, patch: Partial<EntertainmentEntry>) {
-    setSavedAt(null);
-    setEntertainment((prev) => {
-      const next = [...prev.entries];
-      next[index] = { ...next[index], ...patch };
-      return { entries: next };
-    });
+  function handleCreated(item: EntertainmentCatalogItem) {
+    setItems((prev) => [...prev, item].sort((a, b) => a.title.localeCompare(b.title)));
   }
 
-  function addEntry() {
+  function updateRow(index: number, patch: Partial<Row>) {
     setSavedAt(null);
-    setEntertainment((prev) => ({ entries: [...prev.entries, emptyEntry()] }));
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
-  function removeEntry(index: number) {
+  function addRow() {
     setSavedAt(null);
-    setEntertainment((prev) => ({ entries: prev.entries.filter((_, i) => i !== index) }));
+    setRows((prev) => [...prev, { entertainmentId: null, durationMinutes: null, notes: null }]);
+  }
+
+  function removeRow(index: number) {
+    setSavedAt(null);
+    setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -64,11 +67,16 @@ export function EntertainmentEntryForm({
     setSaving(true);
     setError(null);
 
+    const entries = rows.filter(
+      (r): r is { entertainmentId: number; durationMinutes: number | null; notes: string | null } =>
+        r.entertainmentId !== null
+    );
+
     try {
       const res = await fetch(`/api/days/${date}/entertainment`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(entertainment),
+        body: JSON.stringify({ entries }),
       });
       const body = await res.json();
 
@@ -78,7 +86,13 @@ export function EntertainmentEntryForm({
       }
 
       const saved = body as DayPayload;
-      setEntertainment({ entries: saved.entertainment });
+      setRows(
+        saved.entertainment.map((e) => ({
+          entertainmentId: e.entertainmentId,
+          durationMinutes: e.durationMinutes,
+          notes: e.notes,
+        }))
+      );
       setSavedAt(Date.now());
       router.refresh();
     } catch {
@@ -94,60 +108,50 @@ export function EntertainmentEntryForm({
         <CardHeader>
           <CardTitle>Entertainment</CardTitle>
           <CardDescription>
-            {entertainment.entries.length === 0
-              ? "None logged yet."
-              : `${entertainment.entries.length} logged.`}
+            {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`}
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {entertainment.entries.map((entry, i) => (
-            <div key={i} className="rounded-lg border border-border p-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor={`ent-kind-${i}`}>Kind</Label>
-                  <Select
-                    id={`ent-kind-${i}`}
-                    value={entry.kind}
-                    onChange={(e) =>
-                      updateEntry(i, { kind: e.target.value as EntertainmentEntry["kind"] })
-                    }
-                  >
-                    {Object.entries(KIND_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`ent-title-${i}`}>Title</Label>
-                  <Input
-                    id={`ent-title-${i}`}
-                    value={entry.title}
-                    onChange={(e) => updateEntry(i, { title: e.target.value })}
-                  />
-                </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label htmlFor={`ent-notes-${i}`}>Notes</Label>
-                  <Input
-                    id={`ent-notes-${i}`}
-                    value={entry.notes ?? ""}
-                    onChange={(e) => updateEntry(i, { notes: e.target.value || null })}
-                  />
-                </div>
+        <CardContent className="flex flex-col gap-3">
+          {rows.map((row, i) => (
+            <div key={i} className="flex flex-col gap-3 rounded-lg border border-border p-3">
+              <div className="space-y-1.5">
+                <Label htmlFor={`entertainment-${i}`}>Title</Label>
+                <EntertainmentPicker
+                  id={`entertainment-${i}`}
+                  items={items}
+                  valueId={row.entertainmentId}
+                  onChange={(id) => updateRow(i, { entertainmentId: id })}
+                  onCreated={handleCreated}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`entertainment-duration-${i}-hours`}>Duration</Label>
+                <DurationInput
+                  id={`entertainment-duration-${i}`}
+                  totalMinutes={row.durationMinutes}
+                  onChange={(v) => updateRow(i, { durationMinutes: v })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={`entertainment-notes-${i}`}>Notes</Label>
+                <Input
+                  id={`entertainment-notes-${i}`}
+                  value={row.notes ?? ""}
+                  onChange={(e) => updateRow(i, { notes: e.target.value || null })}
+                />
               </div>
               <Button
                 type="button"
                 variant="destructive"
                 size="xs"
-                className="mt-3"
-                onClick={() => removeEntry(i)}
+                className="self-start"
+                onClick={() => removeRow(i)}
               >
                 Remove
               </Button>
             </div>
           ))}
-          <Button type="button" variant="outline" onClick={addEntry}>
+          <Button type="button" variant="outline" onClick={addRow}>
             + Add entry
           </Button>
         </CardContent>

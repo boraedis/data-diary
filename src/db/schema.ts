@@ -3,7 +3,6 @@ import {
   date,
   index,
   integer,
-  jsonb,
   pgEnum,
   pgTable,
   real,
@@ -11,6 +10,7 @@ import {
   smallint,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // --- Enums -------------------------------------------------------------
@@ -46,6 +46,20 @@ export const commuteEnum = pgEnum("commute_option", [
 export const workoutDataSourceEnum = pgEnum("workout_data_source", [
   "manual",
   "hevy",
+]);
+
+// What fields a workout needs is driven by the *category* of exercise, not
+// the exercise itself: distance/cardio exercises (running, jogging, ...)
+// track duration + distance + perceived effort; sport exercises (tennis,
+// basketball, ...) just track duration; strength exercises use the existing
+// per-set reps/weight structure (workout_sets) and no scalar duration at
+// all. Every exercise in the catalog below is tagged with exactly one of
+// these, and the entry form shows the matching fields once an exercise is
+// picked.
+export const exerciseCategoryEnum = pgEnum("exercise_category", [
+  "distance",
+  "sport",
+  "strength",
 ]);
 
 export const personValenceEnum = pgEnum("person_valence", ["positive", "negative"]);
@@ -131,19 +145,45 @@ export const days = pgTable("days", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// --- exercises / exercise_locations --------------------------------------
+// Catalogs, not free text: the legacy app drove workout entry off Firestore
+// config docs (`searchs/exercises`, `searchs/places`) rather than letting
+// you type anything, and that's worth carrying forward — it's what keeps
+// years of workout data using consistent names instead of "Running" one day
+// and "running" the next. Both start empty and grow via the entry form's
+// "+ New" flow rather than being seeded with a guessed list.
+//
+// `category` on `exercises` is what drives which fields the entry form
+// shows (see exerciseCategoryEnum above); `exercise_locations` are scoped
+// to a category too (a running location list looks nothing like a lifting
+// location list), not shared across all exercises.
+export const exercises = pgTable("exercises", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  category: exerciseCategoryEnum("category").notNull(),
+});
+
+export const exerciseLocations = pgTable(
+  "exercise_locations",
+  {
+    id: serial("id").primaryKey(),
+    category: exerciseCategoryEnum("category").notNull(),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("exercise_locations_category_name_idx").on(table.category, table.name)]
+);
+
 // --- workouts / workout_sets ---------------------------------------------
 // The one repeating structure in the health domain: a day can have any
 // number of workouts, each with any number of sets. Modeled as satellite
 // tables (per the rebuild plan) instead of the legacy nested-array-on-a-
 // document shape.
 //
-// `details` is a deliberate escape hatch: the legacy app drives extra,
-// category-specific fields (e.g. a lifting exercise needing weight/reps
-// fields a cardio one doesn't) off an external Firestore config
-// (`searchs/exercise_categories`) that isn't available in this migration.
-// Rather than guess at that shape, category-specific extras land here as
-// JSON for now and get promoted to real columns in Phase 3 once real data
-// migrates over and the actual patterns are visible.
+// Which of durationMinutes/distanceKm/effort get used depends on the
+// exercise's category (see exerciseCategoryEnum): distance exercises use
+// durationMinutes + distanceKm + effort, sport exercises use just
+// durationMinutes, and strength exercises use none of the three — they
+// carry their data entirely in workout_sets instead.
 export const workouts = pgTable(
   "workouts",
   {
@@ -152,15 +192,16 @@ export const workouts = pgTable(
       .notNull()
       .references(() => days.date, { onDelete: "cascade" }),
     sortOrder: integer("sort_order").notNull().default(0),
-    // Free text for now, same reasoning as sleepLocationType above — the
-    // legacy `searchs/exercises` and `searchs/places` catalogs aren't part
-    // of this migration.
-    exercise: text("exercise").notNull(),
-    subtype: text("subtype").notNull(),
+    exerciseId: integer("exercise_id")
+      .notNull()
+      .references(() => exercises.id, { onDelete: "restrict" }),
+    locationId: integer("location_id").references(() => exerciseLocations.id, {
+      onDelete: "set null",
+    }),
     dataSource: workoutDataSourceEnum("data_source").notNull().default("manual"),
-    location: text("location"),
     durationMinutes: integer("duration_minutes"),
-    details: jsonb("details").$type<Record<string, unknown>>(),
+    distanceKm: real("distance_km"),
+    effort: smallint("effort"), // 0-100 perceived effort, distance category only
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("workouts_date_idx").on(table.date)]
@@ -201,12 +242,31 @@ export const subEntries = pgTable(
   (table) => [index("sub_entries_date_idx").on(table.date)]
 );
 
+// --- people / places (catalogs) ------------------------------------------
+// The legacy app referenced a `searchs/people` / `searchs/places` catalog —
+// day-level people/places entries always pointed at a name from a
+// maintained list, never free text. These are that catalog, rebuilt: they
+// start empty and grow via the entry form's "+ New" flow.
+export const people = pgTable("people", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const places = pgTable("places", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- day_people / day_places -------------------------------------------
-// The legacy app referenced a `searchs/people` / `searchs/places` catalog
-// (fixed 7-positive/3-negative person slots, 2 place slots) that isn't part
-// of this migration. Free-text name plus a sort order carries the same
-// "who/where, in order" shape forward without needing the catalog rebuilt
-// first — same reasoning as workouts.exercise/location being free text.
+// Legacy fixed the slate at 7 positive + 3 negative person slots and 2
+// place slots — always that many, whether or not they're all filled in on
+// a given day. `slot` is that fixed position (0-6 for positive people, 0-2
+// for negative people, 0-1 for places), not a free sort order; the unique
+// index on (date, valence, slot) / (date, slot) enforces one entry per
+// slot per day. personId/placeId point at the catalogs above rather than
+// storing a name.
 export const dayPeople = pgTable(
   "day_people",
   {
@@ -214,11 +274,16 @@ export const dayPeople = pgTable(
     date: date("date", { mode: "string" })
       .notNull()
       .references(() => days.date, { onDelete: "cascade" }),
-    personName: text("person_name").notNull(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "restrict" }),
     valence: personValenceEnum("valence").notNull(),
-    sortOrder: integer("sort_order").notNull().default(0),
+    slot: integer("slot").notNull(),
   },
-  (table) => [index("day_people_date_idx").on(table.date)]
+  (table) => [
+    index("day_people_date_idx").on(table.date),
+    uniqueIndex("day_people_date_valence_slot_idx").on(table.date, table.valence, table.slot),
+  ]
 );
 
 export const dayPlaces = pgTable(
@@ -228,22 +293,36 @@ export const dayPlaces = pgTable(
     date: date("date", { mode: "string" })
       .notNull()
       .references(() => days.date, { onDelete: "cascade" }),
-    placeName: text("place_name").notNull(),
-    sortOrder: integer("sort_order").notNull().default(0),
+    placeId: integer("place_id")
+      .notNull()
+      .references(() => places.id, { onDelete: "restrict" }),
+    slot: integer("slot").notNull(),
   },
-  (table) => [index("day_places_date_idx").on(table.date)]
+  (table) => [
+    index("day_places_date_idx").on(table.date),
+    uniqueIndex("day_places_date_slot_idx").on(table.date, table.slot),
+  ]
 );
 
-// --- entertainment_entries -------------------------------------------------
-// Deliberately lightweight: the legacy app's entertainment day-link is five
-// very different catalog-referencing shapes (movies/tvshows/sports/books/
-// games), each pulling from its own catalog and dynamic enums (location
-// types, sports game types, device lists) that aren't part of this
-// migration. Fully modeling that relational catalog domain is already its
-// own planned phase (Phase 5). This table captures just enough now — what
-// you consumed today, free-text title, optional notes, and a JSON escape
-// hatch for anything else you want to jot down — without trying to build
-// the catalog domain a phase early.
+// --- entertainment_catalog / entertainment_entries ------------------------
+// Same catalog-not-free-text shape as people/places/exercises: what you
+// consumed is picked from a maintained (kind, title) catalog via the "+
+// New" flow, not typed fresh every time. Deliberately still lightweight
+// compared to the legacy app's five full catalog-referencing entertainment
+// shapes (movies/tvshows/sports/books/games each had their own schema and
+// external catalogs) — that's real catalog-domain work already scoped as
+// Phase 5. This just needs "what, and for how long" until then.
+export const entertainmentCatalog = pgTable(
+  "entertainment_catalog",
+  {
+    id: serial("id").primaryKey(),
+    kind: entertainmentKindEnum("kind").notNull(),
+    title: text("title").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("entertainment_catalog_kind_title_idx").on(table.kind, table.title)]
+);
+
 export const entertainmentEntries = pgTable(
   "entertainment_entries",
   {
@@ -251,10 +330,11 @@ export const entertainmentEntries = pgTable(
     date: date("date", { mode: "string" })
       .notNull()
       .references(() => days.date, { onDelete: "cascade" }),
-    kind: entertainmentKindEnum("kind").notNull(),
-    title: text("title").notNull(),
+    entertainmentId: integer("entertainment_id")
+      .notNull()
+      .references(() => entertainmentCatalog.id, { onDelete: "restrict" }),
+    durationMinutes: integer("duration_minutes"),
     notes: text("notes"),
-    details: jsonb("details").$type<Record<string, unknown>>(),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (table) => [index("entertainment_entries_date_idx").on(table.date)]
@@ -265,5 +345,6 @@ export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
+export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
 export type PersonValence = (typeof personValenceEnum.enumValues)[number];
 export type EntertainmentKind = (typeof entertainmentKindEnum.enumValues)[number];

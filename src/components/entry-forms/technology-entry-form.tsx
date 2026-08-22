@@ -3,16 +3,10 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DurationInput } from "@/components/ui/duration-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DayPayload, TechnologyPayload } from "@/lib/days";
-
-function parseNumber(value: string): number | null {
-  if (value.trim() === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 
 export function TechnologyEntryForm({
   date,
@@ -73,36 +67,27 @@ export function TechnologyEntryForm({
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor="phoneUsageMinutes">Phone usage (minutes)</Label>
-            <Input
+            <Label htmlFor="phoneUsageMinutes-hours">Phone usage</Label>
+            <DurationInput
               id="phoneUsageMinutes"
-              type="number"
-              step="1"
-              min="0"
-              value={technology.phoneUsageMinutes ?? ""}
-              onChange={(e) => set("phoneUsageMinutes", parseNumber(e.target.value))}
+              totalMinutes={technology.phoneUsageMinutes}
+              onChange={(v) => set("phoneUsageMinutes", v)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="laptopUsageMinutes">Laptop usage (minutes)</Label>
-            <Input
+            <Label htmlFor="laptopUsageMinutes-hours">Laptop usage</Label>
+            <DurationInput
               id="laptopUsageMinutes"
-              type="number"
-              step="1"
-              min="0"
-              value={technology.laptopUsageMinutes ?? ""}
-              onChange={(e) => set("laptopUsageMinutes", parseNumber(e.target.value))}
+              totalMinutes={technology.laptopUsageMinutes}
+              onChange={(v) => set("laptopUsageMinutes", v)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="instagramUsageMinutes">Instagram usage (minutes)</Label>
-            <Input
+            <Label htmlFor="instagramUsageMinutes-hours">Instagram usage</Label>
+            <DurationInput
               id="instagramUsageMinutes"
-              type="number"
-              step="1"
-              min="0"
-              value={technology.instagramUsageMinutes ?? ""}
-              onChange={(e) => set("instagramUsageMinutes", parseNumber(e.target.value))}
+              totalMinutes={technology.instagramUsageMinutes}
+              onChange={(v) => set("instagramUsageMinutes", v)}
             />
           </div>
         </CardContent>

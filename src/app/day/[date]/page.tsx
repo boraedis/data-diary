@@ -3,7 +3,13 @@ import { notFound } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DayNav } from "@/components/day-nav";
 import { isValidDateString } from "@/lib/date";
-import { loadDay, type DayPayload } from "@/lib/days";
+import {
+  loadDay,
+  NEGATIVE_PEOPLE_SLOTS,
+  PLACE_SLOTS,
+  POSITIVE_PEOPLE_SLOTS,
+  type DayPayload,
+} from "@/lib/days";
 
 // Always a live DB read for the given date — never statically cached.
 export const dynamic = "force-dynamic";
@@ -78,9 +84,15 @@ function summarize(day: DayPayload): CategorySummary[] {
       filled: present([day.instagramFollowers, day.instagramFollowing]),
       total: 2,
     },
-    { key: "subs", label: "Subscriptions", kind: "count", count: day.subs.length },
-    { key: "people", label: "People", kind: "count", count: day.people.length },
-    { key: "places", label: "Places", kind: "count", count: day.places.length },
+    { key: "subs", label: "Subs", kind: "count", count: day.subs.length },
+    {
+      key: "people",
+      label: "People",
+      kind: "progress",
+      filled: day.people.length,
+      total: POSITIVE_PEOPLE_SLOTS + NEGATIVE_PEOPLE_SLOTS,
+    },
+    { key: "places", label: "Places", kind: "progress", filled: day.places.length, total: PLACE_SLOTS },
     { key: "entertainment", label: "Entertainment", kind: "count", count: day.entertainment.length },
   ];
 }

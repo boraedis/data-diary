@@ -3,20 +3,14 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DurationInput } from "@/components/ui/duration-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { DayPayload, WorkPayload } from "@/lib/days";
 
 const WORK_LOCATIONS = ["home", "office", "cafe", "travel", "other"] as const;
 const COMMUTES = ["car", "carpool", "taxi", "public_transit", "bike", "walk", "other"] as const;
-
-function parseNumber(value: string): number | null {
-  if (value.trim() === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 
 function TogglePill({
   active,
@@ -137,14 +131,11 @@ export function WorkEntryForm({ date, initial }: { date: string; initial: WorkPa
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="workDurationMinutes">Work duration (minutes)</Label>
-            <Input
+            <Label htmlFor="workDurationMinutes-hours">Work duration</Label>
+            <DurationInput
               id="workDurationMinutes"
-              type="number"
-              step="1"
-              min="0"
-              value={work.workDurationMinutes ?? ""}
-              onChange={(e) => set("workDurationMinutes", parseNumber(e.target.value))}
+              totalMinutes={work.workDurationMinutes}
+              onChange={(v) => set("workDurationMinutes", v)}
             />
           </div>
           <div className="space-y-1.5">

@@ -5,14 +5,9 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DurationInput } from "@/components/ui/duration-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DayPayload, SleepPayload } from "@/lib/days";
-
-function parseNumber(value: string): number | null {
-  if (value.trim() === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 
 export function SleepEntryForm({ date, initial }: { date: string; initial: SleepPayload }) {
   const router = useRouter();
@@ -115,14 +110,11 @@ export function SleepEntryForm({ date, initial }: { date: string; initial: Sleep
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="napMinutes">Naps (minutes)</Label>
-            <Input
+            <Label htmlFor="napMinutes-hours">Naps</Label>
+            <DurationInput
               id="napMinutes"
-              type="number"
-              step="1"
-              min="0"
-              value={sleep.napMinutes ?? ""}
-              onChange={(e) => set("napMinutes", parseNumber(e.target.value))}
+              totalMinutes={sleep.napMinutes}
+              onChange={(v) => set("napMinutes", v)}
             />
           </div>
         </CardContent>

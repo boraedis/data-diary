@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { DurationInput } from "@/components/ui/duration-input";
 import {
   Card,
   CardContent,
@@ -13,18 +14,43 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { DayPayload, HealthPayload, WorkoutPayload } from "@/lib/days";
+import { CatalogPicker, type CatalogItem } from "@/components/entry-forms/catalog-picker";
+import { ExercisePicker, type ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
+import type { DayPayload, HealthPayload, LocationCatalogItem, WorkoutPayload, WorkoutSetPayload } from "@/lib/days";
+import type { ExerciseCategory, WorkoutDataSource } from "@/db/schema";
 
-function emptyWorkout(): WorkoutPayload {
+type WorkoutDraft = {
+  exerciseId: number | null;
+  locationId: number | null;
+  dataSource: WorkoutDataSource;
+  durationMinutes: number | null;
+  distanceKm: number | null;
+  effort: number | null;
+  sets: WorkoutSetPayload[];
+};
+
+function emptyWorkout(): WorkoutDraft {
   return {
-    exercise: "",
-    subtype: "",
+    exerciseId: null,
+    locationId: null,
     dataSource: "manual",
-    location: null,
     durationMinutes: null,
-    details: null,
+    distanceKm: null,
+    effort: null,
     sets: [],
   };
+}
+
+function toDrafts(workouts: WorkoutPayload[]): WorkoutDraft[] {
+  return workouts.map((w) => ({
+    exerciseId: w.exerciseId,
+    locationId: w.locationId,
+    dataSource: w.dataSource,
+    durationMinutes: w.durationMinutes,
+    distanceKm: w.distanceKm,
+    effort: w.effort,
+    sets: w.sets,
+  }));
 }
 
 function parseNumber(value: string): number | null {
@@ -33,97 +59,138 @@ function parseNumber(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function HealthEntryForm({ date, initial }: { date: string; initial: HealthPayload }) {
+export function HealthEntryForm({
+  date,
+  initial,
+  exerciseCatalog,
+  locationCatalog,
+}: {
+  date: string;
+  initial: HealthPayload;
+  exerciseCatalog: ExerciseCatalogItem[];
+  locationCatalog: LocationCatalogItem[];
+}) {
   const router = useRouter();
-  const [health, setHealth] = useState<HealthPayload>(initial);
+  const [health, setHealth] = useState<{
+    distanceWalkedKm: number | null;
+    coffees: number | null;
+    sick: boolean | null;
+  }>({
+    distanceWalkedKm: initial.distanceWalkedKm,
+    coffees: initial.coffees,
+    sick: initial.sick,
+  });
+  const [workouts, setWorkouts] = useState<WorkoutDraft[]>(() => toDrafts(initial.workouts));
+  const [exercises, setExercises] = useState<ExerciseCatalogItem[]>(exerciseCatalog);
+  const [allLocations, setAllLocations] = useState<LocationCatalogItem[]>(locationCatalog);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  function set<K extends keyof HealthPayload>(key: K, value: HealthPayload[K]) {
+  function set<K extends keyof typeof health>(key: K, value: (typeof health)[K]) {
     setSavedAt(null);
     setHealth((prev) => ({ ...prev, [key]: value }));
   }
 
-  function updateWorkout(index: number, patch: Partial<WorkoutPayload>) {
+  function updateWorkout(index: number, patch: Partial<WorkoutDraft>) {
     setSavedAt(null);
-    setHealth((prev) => {
-      const nextWorkouts = [...prev.workouts];
-      nextWorkouts[index] = { ...nextWorkouts[index], ...patch };
-      return { ...prev, workouts: nextWorkouts };
+    setWorkouts((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...patch };
+      return next;
     });
   }
 
-  function updateSet(
-    workoutIndex: number,
-    setIndex: number,
-    patch: Partial<WorkoutPayload["sets"][number]>
-  ) {
+  function updateSet(workoutIndex: number, setIndex: number, patch: Partial<WorkoutSetPayload>) {
     setSavedAt(null);
-    setHealth((prev) => {
-      const nextWorkouts = [...prev.workouts];
-      const workout = nextWorkouts[workoutIndex];
+    setWorkouts((prev) => {
+      const next = [...prev];
+      const workout = next[workoutIndex];
       const nextSets = [...workout.sets];
       nextSets[setIndex] = { ...nextSets[setIndex], ...patch };
-      nextWorkouts[workoutIndex] = { ...workout, sets: nextSets };
-      return { ...prev, workouts: nextWorkouts };
+      next[workoutIndex] = { ...workout, sets: nextSets };
+      return next;
     });
   }
 
   function addWorkout() {
     setSavedAt(null);
-    setHealth((prev) => ({ ...prev, workouts: [...prev.workouts, emptyWorkout()] }));
+    setWorkouts((prev) => [...prev, emptyWorkout()]);
   }
 
   function removeWorkout(index: number) {
     setSavedAt(null);
-    setHealth((prev) => ({
-      ...prev,
-      workouts: prev.workouts.filter((_, i) => i !== index),
-    }));
+    setWorkouts((prev) => prev.filter((_, i) => i !== index));
   }
 
   function addSet(workoutIndex: number) {
     setSavedAt(null);
-    setHealth((prev) => {
-      const nextWorkouts = [...prev.workouts];
-      const workout = nextWorkouts[workoutIndex];
-      nextWorkouts[workoutIndex] = {
+    setWorkouts((prev) => {
+      const next = [...prev];
+      const workout = next[workoutIndex];
+      next[workoutIndex] = {
         ...workout,
         sets: [
           ...workout.sets,
           { setNumber: workout.sets.length + 1, reps: null, weightLbs: null, durationSeconds: null },
         ],
       };
-      return { ...prev, workouts: nextWorkouts };
+      return next;
     });
   }
 
   function removeSet(workoutIndex: number, setIndex: number) {
     setSavedAt(null);
-    setHealth((prev) => {
-      const nextWorkouts = [...prev.workouts];
-      const workout = nextWorkouts[workoutIndex];
-      nextWorkouts[workoutIndex] = {
+    setWorkouts((prev) => {
+      const next = [...prev];
+      const workout = next[workoutIndex];
+      next[workoutIndex] = {
         ...workout,
         sets: workout.sets
           .filter((_, i) => i !== setIndex)
           .map((s, i) => ({ ...s, setNumber: i + 1 })),
       };
-      return { ...prev, workouts: nextWorkouts };
+      return next;
     });
+  }
+
+  function handleExerciseCreated(item: ExerciseCatalogItem) {
+    setExercises((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
+  }
+
+  function handleLocationCreated(item: CatalogItem, category: ExerciseCategory) {
+    setAllLocations((prev) => [...prev, { ...item, category }]);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
     setError(null);
+
+    if (workouts.some((w) => w.exerciseId === null)) {
+      setError("Every workout needs an exercise selected");
+      return;
+    }
+
+    setSaving(true);
+
+    const payload: HealthPayload = {
+      ...health,
+      workouts: workouts.map((w) => ({
+        exerciseId: w.exerciseId as number,
+        locationId: w.locationId,
+        dataSource: w.dataSource,
+        durationMinutes: w.durationMinutes,
+        distanceKm: w.distanceKm,
+        effort: w.effort,
+        sets: w.sets,
+      })),
+    };
 
     try {
       const res = await fetch(`/api/days/${date}/health`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(health),
+        body: JSON.stringify(payload),
       });
       const body = await res.json();
 
@@ -137,8 +204,8 @@ export function HealthEntryForm({ date, initial }: { date: string; initial: Heal
         distanceWalkedKm: saved.distanceWalkedKm,
         coffees: saved.coffees,
         sick: saved.sick,
-        workouts: saved.workouts,
       });
+      setWorkouts(toDrafts(saved.workouts));
       setSavedAt(Date.now());
       router.refresh();
     } catch {
@@ -196,108 +263,165 @@ export function HealthEntryForm({ date, initial }: { date: string; initial: Heal
         <CardHeader>
           <CardTitle>Workouts</CardTitle>
           <CardDescription>
-            {health.workouts.length === 0 ? "None logged yet." : `${health.workouts.length} logged.`}
+            {workouts.length === 0 ? "None logged yet." : `${workouts.length} logged.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {health.workouts.map((workout, wi) => (
-            <div key={wi} className="rounded-lg border border-border p-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor={`exercise-${wi}`}>Exercise</Label>
-                  <Input
-                    id={`exercise-${wi}`}
-                    value={workout.exercise}
-                    onChange={(e) => updateWorkout(wi, { exercise: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`subtype-${wi}`}>Subtype</Label>
-                  <Input
-                    id={`subtype-${wi}`}
-                    value={workout.subtype}
-                    onChange={(e) => updateWorkout(wi, { subtype: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`location-${wi}`}>Location</Label>
-                  <Input
-                    id={`location-${wi}`}
-                    value={workout.location ?? ""}
-                    onChange={(e) => updateWorkout(wi, { location: e.target.value || null })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`duration-${wi}`}>Duration (minutes)</Label>
-                  <Input
-                    id={`duration-${wi}`}
-                    type="number"
-                    step="1"
-                    min="0"
-                    value={workout.durationMinutes ?? ""}
-                    onChange={(e) => updateWorkout(wi, { durationMinutes: parseNumber(e.target.value) })}
-                  />
-                </div>
-              </div>
+          {workouts.map((workout, wi) => {
+            const exercise = exercises.find((e) => e.id === workout.exerciseId);
+            const category = exercise?.category ?? null;
+            const locationsForCategory = category
+              ? allLocations.filter((l) => l.category === category)
+              : [];
 
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Sets</Label>
-                  <Button type="button" variant="ghost" size="xs" onClick={() => addSet(wi)}>
-                    + Add set
-                  </Button>
-                </div>
-                {workout.sets.map((workoutSet, si) => (
-                  <div key={si} className="flex items-center gap-2">
-                    <span className="w-5 shrink-0 font-mono text-xs text-muted-foreground">
-                      {workoutSet.setNumber}
-                    </span>
-                    <Input
-                      type="number"
-                      placeholder="reps"
-                      aria-label="Reps"
-                      value={workoutSet.reps ?? ""}
-                      onChange={(e) => updateSet(wi, si, { reps: parseNumber(e.target.value) })}
+            return (
+              <div key={wi} className="rounded-lg border border-border p-3">
+                <div className="flex flex-col gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`exercise-${wi}`}>Exercise</Label>
+                    <ExercisePicker
+                      id={`exercise-${wi}`}
+                      items={exercises}
+                      valueId={workout.exerciseId}
+                      onChange={(id) => updateWorkout(wi, { exerciseId: id, locationId: null })}
+                      onCreated={handleExerciseCreated}
                     />
-                    <Input
-                      type="number"
-                      step="0.5"
-                      placeholder="lbs"
-                      aria-label="Weight in pounds"
-                      value={workoutSet.weightLbs ?? ""}
-                      onChange={(e) => updateSet(wi, si, { weightLbs: parseNumber(e.target.value) })}
-                    />
-                    <Input
-                      type="number"
-                      placeholder="seconds"
-                      aria-label="Duration in seconds"
-                      value={workoutSet.durationSeconds ?? ""}
-                      onChange={(e) => updateSet(wi, si, { durationSeconds: parseNumber(e.target.value) })}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="Remove set"
-                      onClick={() => removeSet(wi, si)}
-                    >
-                      &times;
-                    </Button>
                   </div>
-                ))}
-              </div>
 
-              <Button
-                type="button"
-                variant="destructive"
-                size="xs"
-                className="mt-3"
-                onClick={() => removeWorkout(wi)}
-              >
-                Remove workout
-              </Button>
-            </div>
-          ))}
+                  {category ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`location-${wi}`}>Location</Label>
+                      <CatalogPicker
+                        id={`location-${wi}`}
+                        itemLabel="Location"
+                        items={locationsForCategory}
+                        valueId={workout.locationId}
+                        onChange={(id) => updateWorkout(wi, { locationId: id })}
+                        onCreated={(item) => handleLocationCreated(item, category)}
+                        createApiPath="/api/exercise-locations"
+                        addLabel={`New ${category} location`}
+                        extraCreateFields={{ category }}
+                      />
+                    </div>
+                  ) : null}
+
+                  {category === "distance" ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`duration-${wi}-hours`}>Time</Label>
+                        <DurationInput
+                          id={`duration-${wi}`}
+                          totalMinutes={workout.durationMinutes}
+                          onChange={(v) => updateWorkout(wi, { durationMinutes: v })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`distance-${wi}`}>Distance (km)</Label>
+                        <Input
+                          id={`distance-${wi}`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={workout.distanceKm ?? ""}
+                          onChange={(e) => updateWorkout(wi, { distanceKm: parseNumber(e.target.value) })}
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor={`effort-${wi}`}>Effort</Label>
+                          <span className="font-mono text-sm text-muted-foreground">
+                            {workout.effort ?? "—"}%
+                          </span>
+                        </div>
+                        <input
+                          id={`effort-${wi}`}
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={workout.effort ?? 50}
+                          onChange={(e) => updateWorkout(wi, { effort: Number(e.target.value) })}
+                          className="w-full accent-primary"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {category === "sport" ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`duration-${wi}-hours`}>Duration</Label>
+                      <DurationInput
+                        id={`duration-${wi}`}
+                        totalMinutes={workout.durationMinutes}
+                        onChange={(v) => updateWorkout(wi, { durationMinutes: v })}
+                      />
+                    </div>
+                  ) : null}
+
+                  {category === "strength" ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Sets</Label>
+                        <Button type="button" variant="ghost" size="xs" onClick={() => addSet(wi)}>
+                          + Add set
+                        </Button>
+                      </div>
+                      {workout.sets.map((workoutSet, si) => (
+                        <div key={si} className="flex items-center gap-2">
+                          <span className="w-5 shrink-0 font-mono text-xs text-muted-foreground">
+                            {workoutSet.setNumber}
+                          </span>
+                          <Input
+                            type="number"
+                            placeholder="reps"
+                            aria-label="Reps"
+                            value={workoutSet.reps ?? ""}
+                            onChange={(e) => updateSet(wi, si, { reps: parseNumber(e.target.value) })}
+                          />
+                          <Input
+                            type="number"
+                            step="0.5"
+                            placeholder="lbs"
+                            aria-label="Weight in pounds"
+                            value={workoutSet.weightLbs ?? ""}
+                            onChange={(e) => updateSet(wi, si, { weightLbs: parseNumber(e.target.value) })}
+                          />
+                          <Input
+                            type="number"
+                            placeholder="seconds"
+                            aria-label="Duration in seconds"
+                            value={workoutSet.durationSeconds ?? ""}
+                            onChange={(e) =>
+                              updateSet(wi, si, { durationSeconds: parseNumber(e.target.value) })
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Remove set"
+                            onClick={() => removeSet(wi, si)}
+                          >
+                            &times;
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="xs"
+                  className="mt-3"
+                  onClick={() => removeWorkout(wi)}
+                >
+                  Remove workout
+                </Button>
+              </div>
+            );
+          })}
           <Button type="button" variant="outline" onClick={addWorkout}>
             + Add workout
           </Button>

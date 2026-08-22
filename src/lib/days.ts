@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   commuteEnum,
@@ -6,9 +6,15 @@ import {
   dayPlaces,
   days,
   dayTypeEnum,
+  entertainmentCatalog,
   entertainmentEntries,
   entertainmentKindEnum,
+  exerciseCategoryEnum,
+  exerciseLocations,
+  exercises,
+  people,
   personValenceEnum,
+  places,
   subEntries,
   workLocationEnum,
   workoutDataSourceEnum,
@@ -17,10 +23,18 @@ import {
   type CommuteOption,
   type DayType,
   type EntertainmentKind,
+  type ExerciseCategory,
   type PersonValence,
   type WorkLocationOption,
   type WorkoutDataSource,
 } from "@/db/schema";
+
+// Fixed slot counts, carried over from the legacy app's `searchs/people` /
+// `searchs/places` catalogs: always 7 positive + 3 negative person slots,
+// always 2 place slots, whether or not every slot is filled on a given day.
+export const POSITIVE_PEOPLE_SLOTS = 7;
+export const NEGATIVE_PEOPLE_SLOTS = 3;
+export const PLACE_SLOTS = 2;
 
 export type WorkoutSetPayload = {
   setNumber: number;
@@ -29,14 +43,30 @@ export type WorkoutSetPayload = {
   durationSeconds: number | null;
 };
 
+// What a workout save actually needs. `sets` only makes sense for
+// strength-category exercises; durationMinutes/distanceKm/effort only make
+// sense for distance/sport-category ones — see exerciseCategoryEnum in the
+// schema for which fields a given exercise's category expects. Nothing here
+// enforces that pairing (the form does, by only showing the relevant
+// fields); saving is happy to store nulls for whichever fields don't apply.
 export type WorkoutPayload = {
-  exercise: string;
-  subtype: string;
+  exerciseId: number;
+  locationId: number | null;
   dataSource: WorkoutDataSource;
-  location: string | null;
   durationMinutes: number | null;
-  details: Record<string, unknown> | null;
+  distanceKm: number | null;
+  effort: number | null;
   sets: WorkoutSetPayload[];
+};
+
+// The read-side shape of a workout: same fields as WorkoutPayload, plus the
+// exercise's name/category and the location's name resolved via join, so
+// the entry form and summary page don't need a second catalog round-trip
+// just to label what's already saved.
+export type WorkoutEntry = WorkoutPayload & {
+  exerciseName: string;
+  exerciseCategory: ExerciseCategory;
+  locationName: string | null;
 };
 
 /** The full day record — every section's fields together. This is what
@@ -65,7 +95,7 @@ export type DayPayload = {
   workDurationMinutes: number | null;
   workLocation: WorkLocationOption[];
   commute: CommuteOption[];
-  workouts: WorkoutPayload[];
+  workouts: WorkoutEntry[];
   phoneUsageMinutes: number | null;
   laptopUsageMinutes: number | null;
   instagramUsageMinutes: number | null;
@@ -130,14 +160,32 @@ export type SocialMediaPayload = {
 export type SubEntry = { name: string; value: number };
 export type SubsPayload = { entries: SubEntry[] };
 
-export type PersonEntry = { name: string; valence: PersonValence; sortOrder: number };
-export type PeoplePayload = { people: PersonEntry[] };
+// personId/placeId point at the people/places catalogs; slot is the fixed
+// position within its valence (people) or within the day (places) — see
+// the POSITIVE_PEOPLE_SLOTS/NEGATIVE_PEOPLE_SLOTS/PLACE_SLOTS constants
+// above. `name` is resolved via join for display and isn't part of what
+// gets saved (see PeoplePayload/PlacesPayload below).
+export type PersonEntry = { slot: number; valence: PersonValence; personId: number; name: string };
+export type PeoplePayload = { entries: { slot: number; valence: PersonValence; personId: number }[] };
 
-export type PlaceEntry = { name: string; sortOrder: number };
-export type PlacesPayload = { places: PlaceEntry[] };
+export type PlaceEntry = { slot: number; placeId: number; name: string };
+export type PlacesPayload = { entries: { slot: number; placeId: number }[] };
 
-export type EntertainmentEntry = { kind: EntertainmentKind; title: string; notes: string | null };
-export type EntertainmentPayload = { entries: EntertainmentEntry[] };
+export type EntertainmentEntry = {
+  entertainmentId: number;
+  kind: EntertainmentKind;
+  title: string;
+  durationMinutes: number | null;
+  notes: string | null;
+};
+export type EntertainmentPayload = {
+  entries: { entertainmentId: number; durationMinutes: number | null; notes: string | null }[];
+};
+
+export type CatalogItem = { id: number; name: string };
+export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
+export type LocationCatalogItem = { id: number; name: string; category: ExerciseCategory };
+export type EntertainmentCatalogItem = { id: number; kind: EntertainmentKind; title: string };
 
 /** Reads one day's full record — the scalar day row plus its workouts and
  * their sets — straight from the database. Used by the summary page, by
@@ -149,8 +197,21 @@ export async function loadDay(date: string): Promise<DayPayload> {
 
   const [dayRow] = await db.select().from(days).where(eq(days.date, date));
   const workoutRows = await db
-    .select()
+    .select({
+      id: workouts.id,
+      exerciseId: workouts.exerciseId,
+      exerciseName: exercises.name,
+      exerciseCategory: exercises.category,
+      locationId: workouts.locationId,
+      locationName: exerciseLocations.name,
+      dataSource: workouts.dataSource,
+      durationMinutes: workouts.durationMinutes,
+      distanceKm: workouts.distanceKm,
+      effort: workouts.effort,
+    })
     .from(workouts)
+    .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+    .leftJoin(exerciseLocations, eq(workouts.locationId, exerciseLocations.id))
     .where(eq(workouts.date, date))
     .orderBy(asc(workouts.sortOrder), asc(workouts.id));
 
@@ -173,14 +234,33 @@ export async function loadDay(date: string): Promise<DayPayload> {
   const [subRows, peopleRows, placesRows, entertainmentRows] = await Promise.all([
     db.select().from(subEntries).where(eq(subEntries.date, date)).orderBy(asc(subEntries.id)),
     db
-      .select()
+      .select({
+        slot: dayPeople.slot,
+        valence: dayPeople.valence,
+        personId: dayPeople.personId,
+        name: people.name,
+      })
       .from(dayPeople)
+      .innerJoin(people, eq(dayPeople.personId, people.id))
       .where(eq(dayPeople.date, date))
-      .orderBy(asc(dayPeople.valence), asc(dayPeople.sortOrder)),
-    db.select().from(dayPlaces).where(eq(dayPlaces.date, date)).orderBy(asc(dayPlaces.sortOrder)),
+      .orderBy(asc(dayPeople.valence), asc(dayPeople.slot)),
     db
-      .select()
+      .select({ slot: dayPlaces.slot, placeId: dayPlaces.placeId, name: places.name })
+      .from(dayPlaces)
+      .innerJoin(places, eq(dayPlaces.placeId, places.id))
+      .where(eq(dayPlaces.date, date))
+      .orderBy(asc(dayPlaces.slot)),
+    db
+      .select({
+        entertainmentId: entertainmentEntries.entertainmentId,
+        durationMinutes: entertainmentEntries.durationMinutes,
+        notes: entertainmentEntries.notes,
+        sortOrder: entertainmentEntries.sortOrder,
+        kind: entertainmentCatalog.kind,
+        title: entertainmentCatalog.title,
+      })
       .from(entertainmentEntries)
+      .innerJoin(entertainmentCatalog, eq(entertainmentEntries.entertainmentId, entertainmentCatalog.id))
       .where(eq(entertainmentEntries.date, date))
       .orderBy(asc(entertainmentEntries.sortOrder)),
   ]);
@@ -205,12 +285,15 @@ export async function loadDay(date: string): Promise<DayPayload> {
     workLocation: dayRow?.workLocation ?? [],
     commute: dayRow?.commute ?? [],
     workouts: workoutRows.map((w) => ({
-      exercise: w.exercise,
-      subtype: w.subtype,
+      exerciseId: w.exerciseId,
+      exerciseName: w.exerciseName,
+      exerciseCategory: w.exerciseCategory,
+      locationId: w.locationId,
+      locationName: w.locationName,
       dataSource: w.dataSource,
-      location: w.location,
       durationMinutes: w.durationMinutes,
-      details: w.details ?? null,
+      distanceKm: w.distanceKm,
+      effort: w.effort,
       sets: (setsByWorkout.get(w.id) ?? []).map((s) => ({
         setNumber: s.setNumber,
         reps: s.reps,
@@ -228,14 +311,17 @@ export async function loadDay(date: string): Promise<DayPayload> {
     instagramFollowing: dayRow?.instagramFollowing ?? null,
     subs: subRows.map((s) => ({ name: s.name, value: s.value })),
     people: peopleRows.map((p) => ({
-      name: p.personName,
+      slot: p.slot,
       valence: p.valence,
-      sortOrder: p.sortOrder,
+      personId: p.personId,
+      name: p.name,
     })),
-    places: placesRows.map((p) => ({ name: p.placeName, sortOrder: p.sortOrder })),
+    places: placesRows.map((p) => ({ slot: p.slot, placeId: p.placeId, name: p.name })),
     entertainment: entertainmentRows.map((e) => ({
+      entertainmentId: e.entertainmentId,
       kind: e.kind,
       title: e.title,
+      durationMinutes: e.durationMinutes,
       notes: e.notes,
     })),
   };
@@ -247,6 +333,7 @@ const COMMUTES = new Set<string>(commuteEnum.enumValues);
 const DATA_SOURCES = new Set<string>(workoutDataSourceEnum.enumValues);
 const PERSON_VALENCES = new Set<string>(personValenceEnum.enumValues);
 const ENTERTAINMENT_KINDS = new Set<string>(entertainmentKindEnum.enumValues);
+const EXERCISE_CATEGORIES = new Set<string>(exerciseCategoryEnum.enumValues);
 
 function isPercent(value: unknown): value is number {
   return (
@@ -263,10 +350,10 @@ function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
   const workoutsInput = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
   const parsed: WorkoutPayload[] = [];
   for (const w of workoutsInput) {
-    const exercise = typeof w.exercise === "string" ? w.exercise.trim() : "";
-    const subtype = typeof w.subtype === "string" ? w.subtype.trim() : "";
-    if (!exercise) return { ok: false, error: "Every workout needs an exercise name" };
-    if (!subtype) return { ok: false, error: "Every workout needs a subtype" };
+    const exerciseId = typeof w.exerciseId === "number" ? w.exerciseId : NaN;
+    if (!Number.isInteger(exerciseId)) {
+      return { ok: false, error: "Every workout needs an exercise" };
+    }
 
     const dataSource = DATA_SOURCES.has(w.dataSource as string)
       ? (w.dataSource as WorkoutDataSource)
@@ -274,12 +361,12 @@ function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
 
     const setsInput = Array.isArray(w.sets) ? (w.sets as Record<string, unknown>[]) : [];
     parsed.push({
-      exercise,
-      subtype,
+      exerciseId,
+      locationId: typeof w.locationId === "number" ? w.locationId : null,
       dataSource,
-      location: typeof w.location === "string" && w.location.trim() ? w.location.trim() : null,
       durationMinutes: typeof w.durationMinutes === "number" ? w.durationMinutes : null,
-      details: w.details && typeof w.details === "object" ? (w.details as Record<string, unknown>) : null,
+      distanceKm: typeof w.distanceKm === "number" ? w.distanceKm : null,
+      effort: typeof w.effort === "number" ? w.effort : null,
       sets: setsInput.map((s, i) => ({
         setNumber: typeof s.setNumber === "number" ? s.setNumber : i + 1,
         reps: typeof s.reps === "number" ? s.reps : null,
@@ -464,10 +551,10 @@ export function validateSubsPayload(body: unknown): Result<SubsPayload> {
   const entries: SubEntry[] = [];
   for (const e of input) {
     const name = typeof e.name === "string" ? e.name.trim() : "";
-    if (!name) return { ok: false, error: "Every subscription needs a name" };
+    if (!name) return { ok: false, error: "Every sub needs a name" };
     const value = typeof e.value === "number" ? e.value : NaN;
     // Legacy range was 0-10 (an in-app usage/satisfaction rating, not a
-    // dollar amount, despite the category name).
+    // dollar amount, despite the category being subscriptions).
     if (!Number.isInteger(value) || value < 0 || value > 10) {
       return { ok: false, error: `${name}: value must be a whole number between 0 and 10` };
     }
@@ -483,22 +570,33 @@ export function validatePeoplePayload(body: unknown): Result<PeoplePayload> {
   }
   const b = body as Record<string, unknown>;
 
-  const input = Array.isArray(b.people) ? (b.people as Record<string, unknown>[]) : [];
-  const people: PersonEntry[] = [];
-  for (const p of input) {
-    const name = typeof p.name === "string" ? p.name.trim() : "";
-    if (!name) return { ok: false, error: "Every person needs a name" };
-    if (!PERSON_VALENCES.has(p.valence as string)) {
-      return { ok: false, error: `${name}: invalid valence` };
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const seenSlots = new Set<string>();
+  const entries: PeoplePayload["entries"] = [];
+  for (const e of input) {
+    const valence = e.valence as string;
+    if (!PERSON_VALENCES.has(valence)) {
+      return { ok: false, error: "Invalid valence" };
     }
-    people.push({
-      name,
-      valence: p.valence as PersonValence,
-      sortOrder: typeof p.sortOrder === "number" ? p.sortOrder : people.length,
-    });
+    const maxSlot = valence === "positive" ? POSITIVE_PEOPLE_SLOTS - 1 : NEGATIVE_PEOPLE_SLOTS - 1;
+    const slot = typeof e.slot === "number" ? e.slot : NaN;
+    if (!Number.isInteger(slot) || slot < 0 || slot > maxSlot) {
+      return { ok: false, error: `Invalid slot for ${valence} person` };
+    }
+    const slotKey = `${valence}:${slot}`;
+    if (seenSlots.has(slotKey)) {
+      return { ok: false, error: "Duplicate person slot" };
+    }
+    seenSlots.add(slotKey);
+
+    const personId = typeof e.personId === "number" ? e.personId : NaN;
+    if (!Number.isInteger(personId)) {
+      return { ok: false, error: "Invalid person" };
+    }
+    entries.push({ slot, valence: valence as PersonValence, personId });
   }
 
-  return { ok: true, value: { people } };
+  return { ok: true, value: { entries } };
 }
 
 export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
@@ -507,15 +605,27 @@ export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
   }
   const b = body as Record<string, unknown>;
 
-  const input = Array.isArray(b.places) ? (b.places as Record<string, unknown>[]) : [];
-  const places: PlaceEntry[] = [];
-  for (const p of input) {
-    const name = typeof p.name === "string" ? p.name.trim() : "";
-    if (!name) return { ok: false, error: "Every place needs a name" };
-    places.push({ name, sortOrder: typeof p.sortOrder === "number" ? p.sortOrder : places.length });
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const seenSlots = new Set<number>();
+  const entries: PlacesPayload["entries"] = [];
+  for (const e of input) {
+    const slot = typeof e.slot === "number" ? e.slot : NaN;
+    if (!Number.isInteger(slot) || slot < 0 || slot > PLACE_SLOTS - 1) {
+      return { ok: false, error: "Invalid place slot" };
+    }
+    if (seenSlots.has(slot)) {
+      return { ok: false, error: "Duplicate place slot" };
+    }
+    seenSlots.add(slot);
+
+    const placeId = typeof e.placeId === "number" ? e.placeId : NaN;
+    if (!Number.isInteger(placeId)) {
+      return { ok: false, error: "Invalid place" };
+    }
+    entries.push({ slot, placeId });
   }
 
-  return { ok: true, value: { places } };
+  return { ok: true, value: { entries } };
 }
 
 export function validateEntertainmentPayload(body: unknown): Result<EntertainmentPayload> {
@@ -525,21 +635,68 @@ export function validateEntertainmentPayload(body: unknown): Result<Entertainmen
   const b = body as Record<string, unknown>;
 
   const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
-  const entries: EntertainmentEntry[] = [];
+  const entries: EntertainmentPayload["entries"] = [];
   for (const e of input) {
-    const title = typeof e.title === "string" ? e.title.trim() : "";
-    if (!title) return { ok: false, error: "Every entry needs a title" };
-    if (!ENTERTAINMENT_KINDS.has(e.kind as string)) {
-      return { ok: false, error: `${title}: invalid kind` };
+    const entertainmentId = typeof e.entertainmentId === "number" ? e.entertainmentId : NaN;
+    if (!Number.isInteger(entertainmentId)) {
+      return { ok: false, error: "Invalid entertainment selection" };
     }
     entries.push({
-      kind: e.kind as EntertainmentKind,
-      title,
+      entertainmentId,
+      durationMinutes: typeof e.durationMinutes === "number" ? e.durationMinutes : null,
       notes: typeof e.notes === "string" && e.notes.trim() ? e.notes.trim() : null,
     });
   }
 
   return { ok: true, value: { entries } };
+}
+
+export function validateCatalogName(body: unknown): Result<string> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  return { ok: true, value: name };
+}
+
+export function validateExerciseCatalogEntry(
+  body: unknown
+): Result<{ name: string; category: ExerciseCategory }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  if (!EXERCISE_CATEGORIES.has(b.category as string)) {
+    return { ok: false, error: "Invalid category" };
+  }
+  return { ok: true, value: { name, category: b.category as ExerciseCategory } };
+}
+
+export function validateLocationCatalogEntry(
+  body: unknown
+): Result<{ name: string; category: ExerciseCategory }> {
+  // Same shape as an exercise catalog entry — a location is scoped to a
+  // category exactly like an exercise is.
+  return validateExerciseCatalogEntry(body);
+}
+
+export function validateEntertainmentCatalogEntry(
+  body: unknown
+): Result<{ kind: EntertainmentKind; title: string }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const title = typeof b.title === "string" ? b.title.trim() : "";
+  if (!title) return { ok: false, error: "Title is required" };
+  if (!ENTERTAINMENT_KINDS.has(b.kind as string)) {
+    return { ok: false, error: "Invalid kind" };
+  }
+  return { ok: true, value: { kind: b.kind as EntertainmentKind, title } };
 }
 
 /**
@@ -565,12 +722,12 @@ async function replaceWorkouts(date: string, list: WorkoutPayload[]): Promise<vo
       .values({
         date,
         sortOrder: i,
-        exercise: w.exercise,
-        subtype: w.subtype,
+        exerciseId: w.exerciseId,
+        locationId: w.locationId,
         dataSource: w.dataSource,
-        location: w.location,
         durationMinutes: w.durationMinutes,
-        details: w.details,
+        distanceKm: w.distanceKm,
+        effort: w.effort,
       })
       .returning({ id: workouts.id });
 
@@ -781,12 +938,12 @@ export async function saveSocialMedia(date: string, value: SocialMediaPayload): 
   return loadDay(date);
 }
 
-// The remaining four sections (subs, people, places, entertainment) are all
-// pure lists with no scalar day-row fields of their own — saving them is a
-// straight replace-on-save against their satellite table, no `days` upsert
-// needed at all (though if the day row doesn't exist yet, e.g. logging
-// people before touching any other section, it's created bare so the FK on
-// each satellite row has something to reference).
+// The remaining sections (subs, people, places, entertainment) have no
+// scalar day-row fields of their own — saving them is a straight
+// replace-on-save against their satellite table, no `days` upsert needed
+// (though if the day row doesn't exist yet, e.g. logging people before
+// touching any other section, it's created bare so the FK on each
+// satellite row has something to reference).
 
 async function ensureDayRow(date: string): Promise<void> {
   const db = getDb();
@@ -812,14 +969,9 @@ export async function savePeople(date: string, value: PeoplePayload): Promise<Da
   await ensureDayRow(date);
 
   await db.delete(dayPeople).where(eq(dayPeople.date, date));
-  if (value.people.length > 0) {
+  if (value.entries.length > 0) {
     await db.insert(dayPeople).values(
-      value.people.map((p) => ({
-        date,
-        personName: p.name,
-        valence: p.valence,
-        sortOrder: p.sortOrder,
-      }))
+      value.entries.map((e) => ({ date, personId: e.personId, valence: e.valence, slot: e.slot }))
     );
   }
 
@@ -831,9 +983,9 @@ export async function savePlaces(date: string, value: PlacesPayload): Promise<Da
   await ensureDayRow(date);
 
   await db.delete(dayPlaces).where(eq(dayPlaces.date, date));
-  if (value.places.length > 0) {
+  if (value.entries.length > 0) {
     await db.insert(dayPlaces).values(
-      value.places.map((p) => ({ date, placeName: p.name, sortOrder: p.sortOrder }))
+      value.entries.map((e) => ({ date, placeId: e.placeId, slot: e.slot }))
     );
   }
 
@@ -849,8 +1001,8 @@ export async function saveEntertainment(date: string, value: EntertainmentPayloa
     await db.insert(entertainmentEntries).values(
       value.entries.map((e, i) => ({
         date,
-        kind: e.kind,
-        title: e.title,
+        entertainmentId: e.entertainmentId,
+        durationMinutes: e.durationMinutes,
         notes: e.notes,
         sortOrder: i,
       }))
@@ -858,4 +1010,137 @@ export async function saveEntertainment(date: string, value: EntertainmentPayloa
   }
 
   return loadDay(date);
+}
+
+// --- Catalogs --------------------------------------------------------------
+// People/places/exercises/exercise-locations/entertainment all follow the
+// same "pick from a maintained list, add new via a quick create" pattern
+// instead of free text. Every create function is an upsert-by-name (or
+// upsert-by-(category,name) / (kind,title) where the catalog needs a
+// compound identity) rather than a plain insert: typing a name that
+// already exists just selects the existing catalog row instead of erroring
+// or creating a duplicate, which matters for a quick "+ New" modal where
+// erroring on an accidental re-type would be an annoying dead end.
+
+export async function listPeopleCatalog(): Promise<CatalogItem[]> {
+  const db = getDb();
+  return db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name));
+}
+
+export async function createPersonCatalogEntry(name: string): Promise<CatalogItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(people)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: people.name })
+    .returning({ id: people.id, name: people.name });
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select({ id: people.id, name: people.name })
+    .from(people)
+    .where(eq(people.name, trimmed));
+  return existing;
+}
+
+export async function listPlacesCatalog(): Promise<CatalogItem[]> {
+  const db = getDb();
+  return db.select({ id: places.id, name: places.name }).from(places).orderBy(asc(places.name));
+}
+
+export async function createPlaceCatalogEntry(name: string): Promise<CatalogItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(places)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: places.name })
+    .returning({ id: places.id, name: places.name });
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select({ id: places.id, name: places.name })
+    .from(places)
+    .where(eq(places.name, trimmed));
+  return existing;
+}
+
+export async function listEntertainmentCatalog(): Promise<EntertainmentCatalogItem[]> {
+  const db = getDb();
+  return db
+    .select({ id: entertainmentCatalog.id, kind: entertainmentCatalog.kind, title: entertainmentCatalog.title })
+    .from(entertainmentCatalog)
+    .orderBy(asc(entertainmentCatalog.kind), asc(entertainmentCatalog.title));
+}
+
+export async function createEntertainmentCatalogEntry(
+  kind: EntertainmentKind,
+  title: string
+): Promise<EntertainmentCatalogItem> {
+  const db = getDb();
+  const trimmed = title.trim();
+  const [inserted] = await db
+    .insert(entertainmentCatalog)
+    .values({ kind, title: trimmed })
+    .onConflictDoNothing({ target: [entertainmentCatalog.kind, entertainmentCatalog.title] })
+    .returning({ id: entertainmentCatalog.id, kind: entertainmentCatalog.kind, title: entertainmentCatalog.title });
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select({ id: entertainmentCatalog.id, kind: entertainmentCatalog.kind, title: entertainmentCatalog.title })
+    .from(entertainmentCatalog)
+    .where(and(eq(entertainmentCatalog.kind, kind), eq(entertainmentCatalog.title, trimmed)));
+  return existing;
+}
+
+export async function listExercisesCatalog(): Promise<ExerciseCatalogItem[]> {
+  const db = getDb();
+  return db
+    .select({ id: exercises.id, name: exercises.name, category: exercises.category })
+    .from(exercises)
+    .orderBy(asc(exercises.name));
+}
+
+export async function createExerciseCatalogEntry(
+  name: string,
+  category: ExerciseCategory
+): Promise<ExerciseCatalogItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(exercises)
+    .values({ name: trimmed, category })
+    .onConflictDoNothing({ target: exercises.name })
+    .returning({ id: exercises.id, name: exercises.name, category: exercises.category });
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select({ id: exercises.id, name: exercises.name, category: exercises.category })
+    .from(exercises)
+    .where(eq(exercises.name, trimmed));
+  return existing;
+}
+
+export async function listExerciseLocationsCatalog(): Promise<LocationCatalogItem[]> {
+  const db = getDb();
+  return db
+    .select({ id: exerciseLocations.id, name: exerciseLocations.name, category: exerciseLocations.category })
+    .from(exerciseLocations)
+    .orderBy(asc(exerciseLocations.category), asc(exerciseLocations.name));
+}
+
+export async function createExerciseLocationCatalogEntry(
+  name: string,
+  category: ExerciseCategory
+): Promise<LocationCatalogItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(exerciseLocations)
+    .values({ name: trimmed, category })
+    .onConflictDoNothing({ target: [exerciseLocations.category, exerciseLocations.name] })
+    .returning({ id: exerciseLocations.id, name: exerciseLocations.name, category: exerciseLocations.category });
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select({ id: exerciseLocations.id, name: exerciseLocations.name, category: exerciseLocations.category })
+    .from(exerciseLocations)
+    .where(and(eq(exerciseLocations.category, category), eq(exerciseLocations.name, trimmed)));
+  return existing;
 }
