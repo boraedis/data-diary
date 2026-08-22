@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
 import { isValidDateString } from "@/lib/date";
-import { loadDay } from "@/lib/days";
+import { saveWork, validateWorkPayload } from "@/lib/days";
 
-// Never statically cache this — it's always a live DB read for a specific
-// date. Each section saves through its own /api/days/[date]/<section>
-// route (PATCH) — this route is read-only, used by the day summary page.
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  _request: Request,
+export async function PATCH(
+  request: Request,
   { params }: { params: Promise<{ date: string }> }
 ) {
   const { date } = await params;
@@ -16,9 +13,21 @@ export async function GET(
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
+  let body: unknown;
   try {
-    const day = await loadDay(date);
-    return NextResponse.json(day);
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const parsed = validateWorkPayload(body);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  try {
+    const saved = await saveWork(date, parsed.value);
+    return NextResponse.json(saved);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
