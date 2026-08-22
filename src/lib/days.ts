@@ -182,10 +182,35 @@ export type EntertainmentPayload = {
   entries: { entertainmentId: number; durationMinutes: number | null; notes: string | null }[];
 };
 
-export type CatalogItem = { id: number; name: string };
+// Catalog item shapes carry every field the legacy "New Person"/"New Place"/
+// "New entertainment" modals captured (see the schema comments above people/
+// places/entertainmentCatalog for exactly what was and wasn't carried over)
+// — the entry forms need these for both the "+ New" creation modals and for
+// building disambiguating secondary/search text in the search panel (see
+// components/entry-forms/search-panel.tsx).
+export type PersonCatalogItem = {
+  id: number;
+  name: string;
+  nicknames: string[];
+  birthdate: string | null;
+  gender: string | null;
+  tag: string | null;
+};
+export type PlaceCatalogItem = {
+  id: number;
+  name: string;
+  alias: string | null;
+  address: string | null;
+  category: string | null;
+};
 export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
 export type LocationCatalogItem = { id: number; name: string; category: ExerciseCategory };
-export type EntertainmentCatalogItem = { id: number; kind: EntertainmentKind; title: string };
+export type EntertainmentCatalogItem = {
+  id: number;
+  kind: EntertainmentKind;
+  title: string;
+  detail: string | null;
+};
 
 /** Reads one day's full record — the scalar day row plus its workouts and
  * their sets — straight from the database. Used by the summary page, by
@@ -651,14 +676,60 @@ export function validateEntertainmentPayload(body: unknown): Result<Entertainmen
   return { ok: true, value: { entries } };
 }
 
-export function validateCatalogName(body: unknown): Result<string> {
+type PersonCatalogInput = {
+  name: string;
+  nicknames: string[];
+  birthdate: string | null;
+  gender: string | null;
+  tag: string | null;
+};
+
+// Only `name` is required — the legacy "New Person" modal treated
+// nicknames/birthdate/gender/tag as optional extras, not gatekeeping fields.
+export function validatePersonCatalogEntry(body: unknown): Result<PersonCatalogInput> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
   const b = body as Record<string, unknown>;
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) return { ok: false, error: "Name is required" };
-  return { ok: true, value: name };
+
+  const nicknames = Array.isArray(b.nicknames)
+    ? (b.nicknames as unknown[])
+        .filter((n): n is string => typeof n === "string" && n.trim() !== "")
+        .map((n) => n.trim())
+    : [];
+  const birthdate = typeof b.birthdate === "string" && b.birthdate.trim() ? b.birthdate.trim() : null;
+  const gender = typeof b.gender === "string" && b.gender.trim() ? b.gender.trim() : null;
+  const tag = typeof b.tag === "string" && b.tag.trim() ? b.tag.trim() : null;
+
+  return { ok: true, value: { name, nicknames, birthdate, gender, tag } };
+}
+
+type PlaceCatalogInput = {
+  name: string;
+  alias: string | null;
+  address: string | null;
+  category: string | null;
+};
+
+// Same "only name is required" rule as people — alias/address/category are
+// the legacy "New Place" modal's optional extras (with its region hierarchy
+// and category/subcategory tree deliberately not carried over, see the
+// schema comment above the `places` table).
+export function validatePlaceCatalogEntry(body: unknown): Result<PlaceCatalogInput> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+
+  const alias = typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null;
+  const address = typeof b.address === "string" && b.address.trim() ? b.address.trim() : null;
+  const category = typeof b.category === "string" && b.category.trim() ? b.category.trim() : null;
+
+  return { ok: true, value: { name, alias, address, category } };
 }
 
 export function validateExerciseCatalogEntry(
@@ -686,7 +757,7 @@ export function validateLocationCatalogEntry(
 
 export function validateEntertainmentCatalogEntry(
   body: unknown
-): Result<{ kind: EntertainmentKind; title: string }> {
+): Result<{ kind: EntertainmentKind; title: string; detail: string | null }> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -696,7 +767,8 @@ export function validateEntertainmentCatalogEntry(
   if (!ENTERTAINMENT_KINDS.has(b.kind as string)) {
     return { ok: false, error: "Invalid kind" };
   }
-  return { ok: true, value: { kind: b.kind as EntertainmentKind, title } };
+  const detail = typeof b.detail === "string" && b.detail.trim() ? b.detail.trim() : null;
+  return { ok: true, value: { kind: b.kind as EntertainmentKind, title, detail } };
 }
 
 /**
@@ -1022,70 +1094,100 @@ export async function saveEntertainment(date: string, value: EntertainmentPayloa
 // or creating a duplicate, which matters for a quick "+ New" modal where
 // erroring on an accidental re-type would be an annoying dead end.
 
-export async function listPeopleCatalog(): Promise<CatalogItem[]> {
+const PERSON_COLUMNS = {
+  id: people.id,
+  name: people.name,
+  nicknames: people.nicknames,
+  birthdate: people.birthdate,
+  gender: people.gender,
+  tag: people.tag,
+};
+
+export async function listPeopleCatalog(): Promise<PersonCatalogItem[]> {
   const db = getDb();
-  return db.select({ id: people.id, name: people.name }).from(people).orderBy(asc(people.name));
+  return db.select(PERSON_COLUMNS).from(people).orderBy(asc(people.name));
 }
 
-export async function createPersonCatalogEntry(name: string): Promise<CatalogItem> {
+export async function createPersonCatalogEntry(input: PersonCatalogInput): Promise<PersonCatalogItem> {
   const db = getDb();
-  const trimmed = name.trim();
+  const trimmed = input.name.trim();
   const [inserted] = await db
     .insert(people)
-    .values({ name: trimmed })
+    .values({
+      name: trimmed,
+      nicknames: input.nicknames,
+      birthdate: input.birthdate,
+      gender: input.gender,
+      tag: input.tag,
+    })
     .onConflictDoNothing({ target: people.name })
-    .returning({ id: people.id, name: people.name });
+    .returning(PERSON_COLUMNS);
   if (inserted) return inserted;
-  const [existing] = await db
-    .select({ id: people.id, name: people.name })
-    .from(people)
-    .where(eq(people.name, trimmed));
+  const [existing] = await db.select(PERSON_COLUMNS).from(people).where(eq(people.name, trimmed));
   return existing;
 }
 
-export async function listPlacesCatalog(): Promise<CatalogItem[]> {
+const PLACE_COLUMNS = {
+  id: places.id,
+  name: places.name,
+  alias: places.alias,
+  address: places.address,
+  category: places.category,
+};
+
+export async function listPlacesCatalog(): Promise<PlaceCatalogItem[]> {
   const db = getDb();
-  return db.select({ id: places.id, name: places.name }).from(places).orderBy(asc(places.name));
+  return db.select(PLACE_COLUMNS).from(places).orderBy(asc(places.name));
 }
 
-export async function createPlaceCatalogEntry(name: string): Promise<CatalogItem> {
+export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
   const db = getDb();
-  const trimmed = name.trim();
+  const trimmed = input.name.trim();
   const [inserted] = await db
     .insert(places)
-    .values({ name: trimmed })
+    .values({
+      name: trimmed,
+      alias: input.alias,
+      address: input.address,
+      category: input.category,
+    })
     .onConflictDoNothing({ target: places.name })
-    .returning({ id: places.id, name: places.name });
+    .returning(PLACE_COLUMNS);
   if (inserted) return inserted;
-  const [existing] = await db
-    .select({ id: places.id, name: places.name })
-    .from(places)
-    .where(eq(places.name, trimmed));
+  const [existing] = await db.select(PLACE_COLUMNS).from(places).where(eq(places.name, trimmed));
   return existing;
 }
+
+const ENTERTAINMENT_CATALOG_COLUMNS = {
+  id: entertainmentCatalog.id,
+  kind: entertainmentCatalog.kind,
+  title: entertainmentCatalog.title,
+  detail: entertainmentCatalog.detail,
+};
 
 export async function listEntertainmentCatalog(): Promise<EntertainmentCatalogItem[]> {
   const db = getDb();
   return db
-    .select({ id: entertainmentCatalog.id, kind: entertainmentCatalog.kind, title: entertainmentCatalog.title })
+    .select(ENTERTAINMENT_CATALOG_COLUMNS)
     .from(entertainmentCatalog)
     .orderBy(asc(entertainmentCatalog.kind), asc(entertainmentCatalog.title));
 }
 
 export async function createEntertainmentCatalogEntry(
   kind: EntertainmentKind,
-  title: string
+  title: string,
+  detail: string | null = null
 ): Promise<EntertainmentCatalogItem> {
   const db = getDb();
   const trimmed = title.trim();
   const [inserted] = await db
     .insert(entertainmentCatalog)
-    .values({ kind, title: trimmed })
+    .values({ kind, title: trimmed, detail })
     .onConflictDoNothing({ target: [entertainmentCatalog.kind, entertainmentCatalog.title] })
-    .returning({ id: entertainmentCatalog.id, kind: entertainmentCatalog.kind, title: entertainmentCatalog.title });
+    .returning(ENTERTAINMENT_CATALOG_COLUMNS);
   if (inserted) return inserted;
   const [existing] = await db
-    .select({ id: entertainmentCatalog.id, kind: entertainmentCatalog.kind, title: entertainmentCatalog.title })
+    .select(ENTERTAINMENT_CATALOG_COLUMNS)
     .from(entertainmentCatalog)
     .where(and(eq(entertainmentCatalog.kind, kind), eq(entertainmentCatalog.title, trimmed)));
   return existing;

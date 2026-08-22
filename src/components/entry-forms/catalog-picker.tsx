@@ -4,24 +4,27 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
+import type { SearchItem } from "@/components/entry-forms/search-panel";
 
 export type CatalogItem = { id: number; name: string };
 
 /**
- * Select-from-catalog + "+ New" modal, shared by every plain (id, name)
- * catalog in this app (people, places). Picking always beats free text
- * here — the whole point of a catalog is that "Mom" means the same row
- * every time, not a new string each entry. `extraCreateFields` lets a
- * caller send additional fixed fields on create without needing a second
- * component (used by the exercise-location picker to carry the exercise's
- * category along with the new location's name).
+ * Search-and-select-from-catalog + "+ New" modal, for simple (id, name[,
+ * extra fields]) catalogs that don't warrant their own dedicated picker —
+ * currently just exercise locations (people/places/exercises/entertainment
+ * each have richer fields and get their own picker/form instead). Built on
+ * SearchCombobox rather than a plain `<select>` for the same reason as the
+ * other pickers: once a catalog has more than a handful of entries, a plain
+ * dropdown stops being usable. `toSearchItem` lets a caller add a
+ * disambiguating secondary line (e.g. showing a location's category).
  */
-export function CatalogPicker({
+export function CatalogPicker<T extends CatalogItem>({
   id,
   itemLabel,
   items,
+  toSearchItem,
   valueId,
   onChange,
   onCreated,
@@ -31,10 +34,11 @@ export function CatalogPicker({
 }: {
   id: string;
   itemLabel: string;
-  items: CatalogItem[];
+  items: T[];
+  toSearchItem?: (item: T) => SearchItem;
   valueId: number | null;
   onChange: (id: number | null) => void;
-  onCreated: (item: CatalogItem) => void;
+  onCreated: (item: T) => void;
   createApiPath: string;
   addLabel: string;
   extraCreateFields?: Record<string, unknown>;
@@ -43,6 +47,10 @@ export function CatalogPicker({
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const searchItems: SearchItem[] = items.map((item) =>
+    toSearchItem ? toSearchItem(item) : { id: item.id, primary: item.name }
+  );
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -59,7 +67,7 @@ export function CatalogPicker({
         setError(typeof body?.error === "string" ? body.error : "Failed to create");
         return;
       }
-      const created = body as CatalogItem;
+      const created = body as T;
       onCreated(created);
       onChange(created.id);
       setNewName("");
@@ -74,19 +82,13 @@ export function CatalogPicker({
   return (
     <>
       <div className="flex items-center gap-2">
-        <Select
+        <SearchCombobox
           id={id}
-          className="flex-1"
-          value={valueId ?? ""}
-          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        >
-          <option value="">—</option>
-          {items.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-            </option>
-          ))}
-        </Select>
+          items={searchItems}
+          valueId={valueId}
+          onChange={onChange}
+          placeholder={`Search ${itemLabel.toLowerCase()}s…`}
+        />
         <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
           + New
         </Button>

@@ -15,8 +15,18 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CatalogPicker, type CatalogItem } from "@/components/entry-forms/catalog-picker";
-import { ExercisePicker, type ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
-import type { DayPayload, HealthPayload, LocationCatalogItem, WorkoutPayload, WorkoutSetPayload } from "@/lib/days";
+import {
+  ExercisePicker,
+  EXERCISE_CATEGORY_LABELS,
+  type ExerciseCatalogItem,
+} from "@/components/entry-forms/exercise-picker";
+import type {
+  DayPayload,
+  HealthPayload,
+  LocationCatalogItem,
+  WorkoutPayload,
+  WorkoutSetPayload,
+} from "@/lib/days";
 import type { ExerciseCategory, WorkoutDataSource } from "@/db/schema";
 
 type WorkoutDraft = {
@@ -299,7 +309,7 @@ export function HealthEntryForm({
                         onChange={(id) => updateWorkout(wi, { locationId: id })}
                         onCreated={(item) => handleLocationCreated(item, category)}
                         createApiPath="/api/exercise-locations"
-                        addLabel={`New ${category} location`}
+                        addLabel={`New ${EXERCISE_CATEGORY_LABELS[category]} location`}
                         extraCreateFields={{ category }}
                       />
                     </div>

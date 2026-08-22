@@ -3,19 +3,252 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CatalogPicker, type CatalogItem } from "@/components/entry-forms/catalog-picker";
-import { NEGATIVE_PEOPLE_SLOTS, POSITIVE_PEOPLE_SLOTS, type DayPayload, type PeoplePayload } from "@/lib/days";
+import { Modal } from "@/components/ui/modal";
+import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import {
+  NEGATIVE_PEOPLE_SLOTS,
+  POSITIVE_PEOPLE_SLOTS,
+  type DayPayload,
+  type PeoplePayload,
+  type PersonCatalogItem,
+} from "@/lib/days";
 
-type SlotEntries = { slot: number; valence: "positive" | "negative"; personId: number }[];
+type Valence = "positive" | "negative";
+type SlotEntries = { slot: number; valence: Valence; personId: number }[];
 
-function hydrate(entries: SlotEntries, valence: "positive" | "negative", count: number): (number | null)[] {
+function hydrate(entries: SlotEntries, valence: Valence, count: number): (number | null)[] {
   const arr: (number | null)[] = Array(count).fill(null);
   for (const e of entries) {
     if (e.valence === valence && e.slot < count) arr[e.slot] = e.personId;
   }
   return arr;
+}
+
+function toSearchItem(person: PersonCatalogItem): SearchItem {
+  return {
+    id: person.id,
+    primary: person.name,
+    secondary: person.tag,
+    searchTerms: person.nicknames,
+  };
+}
+
+/** New-person creation form — fields mirror the legacy "New Person" modal
+ * (functions/views/entry/database/new_person_form.*): full name,
+ * comma-separated nicknames (matched during search, same as the legacy
+ * app), an optional birthdate, an optional gender, and an optional
+ * relationship "tag" (e.g. "family", "coworker") shown as the search
+ * result's secondary line. Only name is required. */
+function NewPersonModal({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (item: PersonCatalogItem) => void;
+}) {
+  const [name, setName] = useState("");
+  const [nicknames, setNicknames] = useState("");
+  const [birthdate, setBirthdate] = useState("");
+  const [gender, setGender] = useState("");
+  const [tag, setTag] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function reset() {
+    setName("");
+    setNicknames("");
+    setBirthdate("");
+    setGender("");
+    setTag("");
+    setError(null);
+  }
+
+  async function handleCreate() {
+    if (!name.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/people", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          nicknames: nicknames
+            .split(",")
+            .map((n) => n.trim())
+            .filter(Boolean),
+          birthdate: birthdate || null,
+          gender: gender.trim() || null,
+          tag: tag.trim() || null,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(typeof body?.error === "string" ? body.error : "Failed to create");
+        return;
+      }
+      onCreated(body as PersonCatalogItem);
+      reset();
+      onClose();
+    } catch {
+      setError("Network error");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => {
+        reset();
+        onClose();
+      }}
+      title="New person"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="new-person-name">Name</Label>
+          <Input id="new-person-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-person-nicknames">Nicknames</Label>
+          <Input
+            id="new-person-nicknames"
+            value={nicknames}
+            onChange={(e) => setNicknames(e.target.value)}
+            placeholder="comma-separated"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-person-birthdate">Birthdate</Label>
+            <Input
+              id="new-person-birthdate"
+              type="date"
+              value={birthdate}
+              onChange={(e) => setBirthdate(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-person-gender">Gender</Label>
+            <Input id="new-person-gender" value={gender} onChange={(e) => setGender(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-person-tag">Tag</Label>
+          <Input
+            id="new-person-tag"
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            placeholder="family, coworker, friend…"
+          />
+        </div>
+        {error ? <span className="text-sm text-destructive">{error}</span> : null}
+        <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
+          {creating ? "Adding…" : "Add"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** One valence's add panel: a search box over the shared people catalog
+ * (people already used today, on either side, are filtered out so you
+ * can't double-pick someone) plus a "+ New person" trigger. Picking a
+ * result — by search or by creating new — always fills the next empty slot
+ * for this valence, mirroring the legacy app's addPositive/addNegative
+ * "loop and take the first empty slot" behavior; you never choose a slot by
+ * hand, you just populate them in order. */
+function PersonAddPanel({
+  label,
+  items,
+  usedIds,
+  onPick,
+  onCreated,
+}: {
+  label: string;
+  items: PersonCatalogItem[];
+  usedIds: Set<number>;
+  onPick: (personId: number) => void;
+  onCreated: (item: PersonCatalogItem) => void;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const searchItems = items.filter((p) => !usedIds.has(p.id)).map(toSearchItem);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label>{label}</Label>
+        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
+          + New person
+        </Button>
+      </div>
+      <SearchPanel
+        items={searchItems}
+        onSelect={onPick}
+        placeholder="Search people…"
+        emptyMessage="No matches — try “+ New person”."
+      />
+      <NewPersonModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreated={(item) => {
+          onCreated(item);
+          onPick(item.id);
+        }}
+      />
+    </div>
+  );
+}
+
+function SlotRow({
+  index,
+  personId,
+  people,
+  onRemove,
+  onPromote,
+}: {
+  index: number;
+  personId: number | null;
+  people: PersonCatalogItem[];
+  onRemove: () => void;
+  onPromote: (() => void) | null;
+}) {
+  const person = personId !== null ? people.find((p) => p.id === personId) ?? null : null;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">
+          {index + 1}
+          {person ? "" : " — empty"}
+        </p>
+        {person ? (
+          <>
+            <p className="truncate text-sm">{person.name}</p>
+            {person.tag ? <p className="truncate text-xs text-muted-foreground">{person.tag}</p> : null}
+          </>
+        ) : null}
+      </div>
+      {person ? (
+        <div className="flex shrink-0 items-center gap-1">
+          {onPromote ? (
+            <Button type="button" variant="ghost" size="icon-xs" aria-label="Move up" onClick={onPromote}>
+              ↑
+            </Button>
+          ) : null}
+          <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove" onClick={onRemove}>
+            &times;
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function PeopleEntryForm({
@@ -25,10 +258,10 @@ export function PeopleEntryForm({
 }: {
   date: string;
   initial: PeoplePayload;
-  catalog: CatalogItem[];
+  catalog: PersonCatalogItem[];
 }) {
   const router = useRouter();
-  const [items, setItems] = useState<CatalogItem[]>(catalog);
+  const [items, setItems] = useState<PersonCatalogItem[]>(catalog);
   const [positive, setPositive] = useState<(number | null)[]>(() =>
     hydrate(initial.entries, "positive", POSITIVE_PEOPLE_SLOTS)
   );
@@ -39,17 +272,39 @@ export function PeopleEntryForm({
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  function handleCreated(item: CatalogItem) {
+  const usedIds = new Set([...positive, ...negative].filter((v): v is number => v !== null));
+
+  function handleCreated(item: PersonCatalogItem) {
     setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
-  function setSlot(valence: "positive" | "negative", slot: number, personId: number | null) {
+  function addToValence(valence: Valence, personId: number) {
     setSavedAt(null);
-    if (valence === "positive") {
-      setPositive((prev) => prev.map((v, i) => (i === slot ? personId : v)));
-    } else {
-      setNegative((prev) => prev.map((v, i) => (i === slot ? personId : v)));
-    }
+    const setter = valence === "positive" ? setPositive : setNegative;
+    setter((prev) => {
+      const idx = prev.findIndex((v) => v === null);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = personId;
+      return next;
+    });
+  }
+
+  function removeSlot(valence: Valence, slot: number) {
+    setSavedAt(null);
+    const setter = valence === "positive" ? setPositive : setNegative;
+    setter((prev) => prev.map((v, i) => (i === slot ? null : v)));
+  }
+
+  function promoteSlot(valence: Valence, slot: number) {
+    setSavedAt(null);
+    const setter = valence === "positive" ? setPositive : setNegative;
+    setter((prev) => {
+      if (slot === 0) return prev;
+      const next = [...prev];
+      [next[slot - 1], next[slot]] = [next[slot], next[slot - 1]];
+      return next;
+    });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -97,42 +352,55 @@ export function PeopleEntryForm({
         <CardHeader>
           <CardTitle>People</CardTitle>
           <CardDescription>
-            {POSITIVE_PEOPLE_SLOTS} positive, {NEGATIVE_PEOPLE_SLOTS} negative — pick from your people
-            list, or add someone new.
+            {POSITIVE_PEOPLE_SLOTS} positive, {NEGATIVE_PEOPLE_SLOTS} negative. Search to pick someone —
+            it fills the next open slot on that side.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="space-y-2">
-            <Label>Positive</Label>
-            {positive.map((personId, slot) => (
-              <CatalogPicker
-                key={`positive-${slot}`}
-                id={`person-positive-${slot}`}
-                itemLabel="Person"
-                items={items}
-                valueId={personId}
-                onChange={(id) => setSlot("positive", slot, id)}
-                onCreated={handleCreated}
-                createApiPath="/api/people"
-                addLabel="New person"
-              />
-            ))}
+        <CardContent className="flex flex-col gap-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Positive</p>
+              {positive.map((personId, slot) => (
+                <SlotRow
+                  key={`positive-${slot}`}
+                  index={slot}
+                  personId={personId}
+                  people={items}
+                  onRemove={() => removeSlot("positive", slot)}
+                  onPromote={slot > 0 ? () => promoteSlot("positive", slot) : null}
+                />
+              ))}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Negative</p>
+              {negative.map((personId, slot) => (
+                <SlotRow
+                  key={`negative-${slot}`}
+                  index={slot}
+                  personId={personId}
+                  people={items}
+                  onRemove={() => removeSlot("negative", slot)}
+                  onPromote={slot > 0 ? () => promoteSlot("negative", slot) : null}
+                />
+              ))}
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label>Negative</Label>
-            {negative.map((personId, slot) => (
-              <CatalogPicker
-                key={`negative-${slot}`}
-                id={`person-negative-${slot}`}
-                itemLabel="Person"
-                items={items}
-                valueId={personId}
-                onChange={(id) => setSlot("negative", slot, id)}
-                onCreated={handleCreated}
-                createApiPath="/api/people"
-                addLabel="New person"
-              />
-            ))}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <PersonAddPanel
+              label="Add positive"
+              items={items}
+              usedIds={usedIds}
+              onPick={(id) => addToValence("positive", id)}
+              onCreated={handleCreated}
+            />
+            <PersonAddPanel
+              label="Add negative"
+              items={items}
+              usedIds={usedIds}
+              onPick={(id) => addToValence("negative", id)}
+              onCreated={handleCreated}
+            />
           </div>
         </CardContent>
       </Card>

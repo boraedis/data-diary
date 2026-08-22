@@ -6,9 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
+import type { SearchItem } from "@/components/entry-forms/search-panel";
 import type { EntertainmentKind } from "@/db/schema";
 
-export type EntertainmentCatalogItem = { id: number; kind: EntertainmentKind; title: string };
+export type EntertainmentCatalogItem = {
+  id: number;
+  kind: EntertainmentKind;
+  title: string;
+  detail: string | null;
+};
 
 export const ENTERTAINMENT_KIND_LABELS: Record<EntertainmentKind, string> = {
   movie: "Movie",
@@ -18,10 +25,15 @@ export const ENTERTAINMENT_KIND_LABELS: Record<EntertainmentKind, string> = {
   game: "Game",
 };
 
-/** Select-from-catalog + "+ New" modal for entertainment. Unlike the plain
- * CatalogPicker (people/places), a new entertainment entry needs a kind
- * picked alongside its title — the catalog's identity is (kind, title), not
- * title alone ("Dune" the book and "Dune" the movie are different rows). */
+/** Search-and-select-from-catalog + "+ New" modal for entertainment. Unlike
+ * the plain CatalogPicker (exercise locations), a new entertainment entry
+ * needs a kind picked alongside its title — the catalog's identity is
+ * (kind, title), not title alone ("Dune" the book and "Dune" the movie are
+ * different rows. `detail` is a free-text disambiguator (a year, an author,
+ * a platform — whatever tells two same-titled entries apart) shown as each
+ * result's secondary line alongside the kind; the legacy app got this for
+ * free from TMDB/catalog lookups, this catalog isn't wired to an external
+ * API so it's just typed in. */
 export function EntertainmentPicker({
   id,
   items,
@@ -38,8 +50,17 @@ export function EntertainmentPicker({
   const [modalOpen, setModalOpen] = useState(false);
   const [kind, setKind] = useState<EntertainmentKind>("movie");
   const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const searchItems: SearchItem[] = items.map((item) => ({
+    id: item.id,
+    primary: item.title,
+    secondary: item.detail
+      ? `${ENTERTAINMENT_KIND_LABELS[item.kind]} · ${item.detail}`
+      : ENTERTAINMENT_KIND_LABELS[item.kind],
+  }));
 
   async function handleCreate() {
     if (!title.trim()) return;
@@ -49,7 +70,7 @@ export function EntertainmentPicker({
       const res = await fetch("/api/entertainment-catalog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, title: title.trim() }),
+        body: JSON.stringify({ kind, title: title.trim(), detail: detail.trim() || null }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -60,6 +81,7 @@ export function EntertainmentPicker({
       onCreated(created);
       onChange(created.id);
       setTitle("");
+      setDetail("");
       setModalOpen(false);
     } catch {
       setError("Network error");
@@ -71,19 +93,13 @@ export function EntertainmentPicker({
   return (
     <>
       <div className="flex items-center gap-2">
-        <Select
+        <SearchCombobox
           id={id}
-          className="flex-1"
-          value={valueId ?? ""}
-          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        >
-          <option value="">—</option>
-          {items.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.title} ({ENTERTAINMENT_KIND_LABELS[item.kind]})
-            </option>
-          ))}
-        </Select>
+          items={searchItems}
+          valueId={valueId}
+          onChange={onChange}
+          placeholder="Search entertainment…"
+        />
         <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
           + New
         </Button>
@@ -112,6 +128,15 @@ export function EntertainmentPicker({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-new-detail`}>Detail</Label>
+            <Input
+              id={`${id}-new-detail`}
+              value={detail}
+              onChange={(e) => setDetail(e.target.value)}
+              placeholder="year, author, platform…"
             />
           </div>
           {error ? <span className="text-sm text-destructive">{error}</span> : null}

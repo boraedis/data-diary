@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
+import type { SearchItem } from "@/components/entry-forms/search-panel";
 import type { ExerciseCategory } from "@/db/schema";
 
 export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
@@ -16,10 +18,13 @@ export const EXERCISE_CATEGORY_LABELS: Record<ExerciseCategory, string> = {
   strength: "Strength / lifting",
 };
 
-/** Select-from-catalog + "+ New" modal for exercises. A new exercise needs
- * a category picked alongside its name — the category is what decides
- * which fields the workout row shows afterward (see the health entry
- * form), so it has to be set at creation time, not guessed later. */
+/** Search-and-select-from-catalog + "+ New" modal for exercises. A new
+ * exercise needs a category picked alongside its name — the category is
+ * what decides which fields the workout row shows afterward (see the
+ * health entry form), so it has to be set at creation time, not guessed
+ * later. The category is shown as each result's secondary line, since with
+ * enough exercises in the list "Running" (distance) and "Running" (a sport
+ * drill) would otherwise be indistinguishable. */
 export function ExercisePicker({
   id,
   items,
@@ -38,6 +43,12 @@ export function ExercisePicker({
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const searchItems: SearchItem[] = items.map((item) => ({
+    id: item.id,
+    primary: item.name,
+    secondary: EXERCISE_CATEGORY_LABELS[item.category],
+  }));
 
   async function handleCreate() {
     if (!name.trim()) return;
@@ -69,19 +80,13 @@ export function ExercisePicker({
   return (
     <>
       <div className="flex items-center gap-2">
-        <Select
+        <SearchCombobox
           id={id}
-          className="flex-1"
-          value={valueId ?? ""}
-          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        >
-          <option value="">—</option>
-          {items.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name} ({EXERCISE_CATEGORY_LABELS[item.category]})
-            </option>
-          ))}
-        </Select>
+          items={searchItems}
+          valueId={valueId}
+          onChange={onChange}
+          placeholder="Search exercises…"
+        />
         <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
           + New
         </Button>

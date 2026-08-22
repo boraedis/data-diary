@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createPlaceCatalogEntry, listPlacesCatalog, validateCatalogName } from "@/lib/days";
+import { createPlaceCatalogEntry, listPlacesCatalog, validatePlaceCatalogEntry } from "@/lib/days";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const parsed = validateCatalogName(body);
+  const parsed = validatePlaceCatalogEntry(body);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }

@@ -247,15 +247,35 @@ export const subEntries = pgTable(
 // day-level people/places entries always pointed at a name from a
 // maintained list, never free text. These are that catalog, rebuilt: they
 // start empty and grow via the entry form's "+ New" flow.
+//
+// Fields mirror the legacy "New Person"/"New Place" modals (functions/
+// views/entry/database/new_person_form.*, new_place_form.*) — the legacy
+// app searched people by nicknames (a person's full name was itself always
+// pushed into that list, so matching "nicknames OR name" isn't needed as a
+// separate rule) plus an optional single "tag" (a relationship label like
+// "family"/"coworker"); places by an alias plus name. Deliberately NOT
+// carried over: the legacy places catalog's full country -> region ->
+// subregion hierarchy and category/subcategory taxonomy tree (functions/
+// views/entry/database/world.*, new_place_form.js's addRegions/loadCategory)
+// — that's a real nested-catalog domain of its own, not a search-UX fix;
+// `category` here is a single free-text field standing in for it until
+// that's worth building for real.
 export const people = pgTable("people", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
+  nicknames: text("nicknames").array().notNull().default([]),
+  birthdate: date("birthdate", { mode: "string" }),
+  gender: text("gender"),
+  tag: text("tag"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const places = pgTable("places", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
+  alias: text("alias"),
+  address: text("address"),
+  category: text("category"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -318,6 +338,12 @@ export const entertainmentCatalog = pgTable(
     id: serial("id").primaryKey(),
     kind: entertainmentKindEnum("kind").notNull(),
     title: text("title").notNull(),
+    // Free-text disambiguator (a year, an author, a platform, whatever tells
+    // two same-titled entries apart) — the legacy app got this for free from
+    // TMDB lookups (release_date) or catalog fields (books' authors); since
+    // this catalog isn't wired to any external API, it's just a field you
+    // fill in yourself.
+    detail: text("detail"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("entertainment_catalog_kind_title_idx").on(table.kind, table.title)]

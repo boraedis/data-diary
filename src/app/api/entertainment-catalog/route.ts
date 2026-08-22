@@ -26,7 +26,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const created = await createEntertainmentCatalogEntry(parsed.value.kind, parsed.value.title);
+    const created = await createEntertainmentCatalogEntry(
+      parsed.value.kind,
+      parsed.value.title,
+      parsed.value.detail
+    );
     return NextResponse.json(created);
   } catch (error) {
     return NextResponse.json(
