@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { getSql } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,21 +8,21 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+// Never statically cache this — it's a live DB check.
+export const dynamic = "force-dynamic";
+
 type HealthResult = { ok: boolean; error?: string };
 
+// Checks the database directly, in-process — no self-fetch over HTTP.
+// A server component calling its own /api/health route via fetch() is
+// fragile on Vercel (e.g. deployment protection intercepting the
+// server-to-server request and returning an HTML page instead of JSON),
+// and it's strictly slower than just querying here.
 async function getHealth(): Promise<HealthResult> {
-  const headerList = await headers();
-  const host = headerList.get("host");
-  const protocol = process.env.NODE_ENV === "development" ? "http" : "https";
-
   try {
-    const res = await fetch(`${protocol}://${host}/api/health`, {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}` };
-    }
-    return res.json();
+    const sql = getSql();
+    await sql`select 1`;
+    return { ok: true };
   } catch (error) {
     return {
       ok: false,
