@@ -2,14 +2,22 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   commuteEnum,
+  dayPeople,
+  dayPlaces,
   days,
   dayTypeEnum,
+  entertainmentEntries,
+  entertainmentKindEnum,
+  personValenceEnum,
+  subEntries,
   workLocationEnum,
   workoutDataSourceEnum,
   workouts,
   workoutSets,
   type CommuteOption,
   type DayType,
+  type EntertainmentKind,
+  type PersonValence,
   type WorkLocationOption,
   type WorkoutDataSource,
 } from "@/db/schema";
@@ -58,6 +66,18 @@ export type DayPayload = {
   workLocation: WorkLocationOption[];
   commute: CommuteOption[];
   workouts: WorkoutPayload[];
+  phoneUsageMinutes: number | null;
+  laptopUsageMinutes: number | null;
+  instagramUsageMinutes: number | null;
+  weightKg: number | null;
+  bodyFatPercent: number | null;
+  muscleMassKg: number | null;
+  instagramFollowers: number | null;
+  instagramFollowing: number | null;
+  subs: SubEntry[];
+  people: PersonEntry[];
+  places: PlaceEntry[];
+  entertainment: EntertainmentEntry[];
 };
 
 export type HealthPayload = {
@@ -90,6 +110,35 @@ export type WorkPayload = {
   commute: CommuteOption[];
 };
 
+export type TechnologyPayload = {
+  phoneUsageMinutes: number | null;
+  laptopUsageMinutes: number | null;
+  instagramUsageMinutes: number | null;
+};
+
+export type WeightPayload = {
+  weightKg: number | null;
+  bodyFatPercent: number | null;
+  muscleMassKg: number | null;
+};
+
+export type SocialMediaPayload = {
+  instagramFollowers: number | null;
+  instagramFollowing: number | null;
+};
+
+export type SubEntry = { name: string; value: number };
+export type SubsPayload = { entries: SubEntry[] };
+
+export type PersonEntry = { name: string; valence: PersonValence; sortOrder: number };
+export type PeoplePayload = { people: PersonEntry[] };
+
+export type PlaceEntry = { name: string; sortOrder: number };
+export type PlacesPayload = { places: PlaceEntry[] };
+
+export type EntertainmentEntry = { kind: EntertainmentKind; title: string; notes: string | null };
+export type EntertainmentPayload = { entries: EntertainmentEntry[] };
+
 /** Reads one day's full record — the scalar day row plus its workouts and
  * their sets — straight from the database. Used by the summary page, by
  * each section's own entry page (each just reads the slice it needs), and
@@ -120,6 +169,21 @@ export async function loadDay(date: string): Promise<DayPayload> {
     list.push(set);
     setsByWorkout.set(set.workoutId, list);
   }
+
+  const [subRows, peopleRows, placesRows, entertainmentRows] = await Promise.all([
+    db.select().from(subEntries).where(eq(subEntries.date, date)).orderBy(asc(subEntries.id)),
+    db
+      .select()
+      .from(dayPeople)
+      .where(eq(dayPeople.date, date))
+      .orderBy(asc(dayPeople.valence), asc(dayPeople.sortOrder)),
+    db.select().from(dayPlaces).where(eq(dayPlaces.date, date)).orderBy(asc(dayPlaces.sortOrder)),
+    db
+      .select()
+      .from(entertainmentEntries)
+      .where(eq(entertainmentEntries.date, date))
+      .orderBy(asc(entertainmentEntries.sortOrder)),
+  ]);
 
   return {
     date,
@@ -154,6 +218,26 @@ export async function loadDay(date: string): Promise<DayPayload> {
         durationSeconds: s.durationSeconds,
       })),
     })),
+    phoneUsageMinutes: dayRow?.phoneUsageMinutes ?? null,
+    laptopUsageMinutes: dayRow?.laptopUsageMinutes ?? null,
+    instagramUsageMinutes: dayRow?.instagramUsageMinutes ?? null,
+    weightKg: dayRow?.weightKg ?? null,
+    bodyFatPercent: dayRow?.bodyFatPercent ?? null,
+    muscleMassKg: dayRow?.muscleMassKg ?? null,
+    instagramFollowers: dayRow?.instagramFollowers ?? null,
+    instagramFollowing: dayRow?.instagramFollowing ?? null,
+    subs: subRows.map((s) => ({ name: s.name, value: s.value })),
+    people: peopleRows.map((p) => ({
+      name: p.personName,
+      valence: p.valence,
+      sortOrder: p.sortOrder,
+    })),
+    places: placesRows.map((p) => ({ name: p.placeName, sortOrder: p.sortOrder })),
+    entertainment: entertainmentRows.map((e) => ({
+      kind: e.kind,
+      title: e.title,
+      notes: e.notes,
+    })),
   };
 }
 
@@ -161,6 +245,8 @@ const DAY_TYPES = new Set<string>(dayTypeEnum.enumValues);
 const WORK_LOCATIONS = new Set<string>(workLocationEnum.enumValues);
 const COMMUTES = new Set<string>(commuteEnum.enumValues);
 const DATA_SOURCES = new Set<string>(workoutDataSourceEnum.enumValues);
+const PERSON_VALENCES = new Set<string>(personValenceEnum.enumValues);
+const ENTERTAINMENT_KINDS = new Set<string>(entertainmentKindEnum.enumValues);
 
 function isPercent(value: unknown): value is number {
   return (
@@ -318,6 +404,142 @@ export function validateWorkPayload(body: unknown): Result<WorkPayload> {
       commute: commute as CommuteOption[],
     },
   };
+}
+
+export function validateTechnologyPayload(body: unknown): Result<TechnologyPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  return {
+    ok: true,
+    value: {
+      phoneUsageMinutes: typeof b.phoneUsageMinutes === "number" ? b.phoneUsageMinutes : null,
+      laptopUsageMinutes: typeof b.laptopUsageMinutes === "number" ? b.laptopUsageMinutes : null,
+      instagramUsageMinutes:
+        typeof b.instagramUsageMinutes === "number" ? b.instagramUsageMinutes : null,
+    },
+  };
+}
+
+export function validateWeightPayload(body: unknown): Result<WeightPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  return {
+    ok: true,
+    value: {
+      weightKg: typeof b.weightKg === "number" ? b.weightKg : null,
+      bodyFatPercent: typeof b.bodyFatPercent === "number" ? b.bodyFatPercent : null,
+      muscleMassKg: typeof b.muscleMassKg === "number" ? b.muscleMassKg : null,
+    },
+  };
+}
+
+export function validateSocialMediaPayload(body: unknown): Result<SocialMediaPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  return {
+    ok: true,
+    value: {
+      instagramFollowers: typeof b.instagramFollowers === "number" ? b.instagramFollowers : null,
+      instagramFollowing: typeof b.instagramFollowing === "number" ? b.instagramFollowing : null,
+    },
+  };
+}
+
+export function validateSubsPayload(body: unknown): Result<SubsPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: SubEntry[] = [];
+  for (const e of input) {
+    const name = typeof e.name === "string" ? e.name.trim() : "";
+    if (!name) return { ok: false, error: "Every subscription needs a name" };
+    const value = typeof e.value === "number" ? e.value : NaN;
+    // Legacy range was 0-10 (an in-app usage/satisfaction rating, not a
+    // dollar amount, despite the category name).
+    if (!Number.isInteger(value) || value < 0 || value > 10) {
+      return { ok: false, error: `${name}: value must be a whole number between 0 and 10` };
+    }
+    entries.push({ name, value });
+  }
+
+  return { ok: true, value: { entries } };
+}
+
+export function validatePeoplePayload(body: unknown): Result<PeoplePayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.people) ? (b.people as Record<string, unknown>[]) : [];
+  const people: PersonEntry[] = [];
+  for (const p of input) {
+    const name = typeof p.name === "string" ? p.name.trim() : "";
+    if (!name) return { ok: false, error: "Every person needs a name" };
+    if (!PERSON_VALENCES.has(p.valence as string)) {
+      return { ok: false, error: `${name}: invalid valence` };
+    }
+    people.push({
+      name,
+      valence: p.valence as PersonValence,
+      sortOrder: typeof p.sortOrder === "number" ? p.sortOrder : people.length,
+    });
+  }
+
+  return { ok: true, value: { people } };
+}
+
+export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.places) ? (b.places as Record<string, unknown>[]) : [];
+  const places: PlaceEntry[] = [];
+  for (const p of input) {
+    const name = typeof p.name === "string" ? p.name.trim() : "";
+    if (!name) return { ok: false, error: "Every place needs a name" };
+    places.push({ name, sortOrder: typeof p.sortOrder === "number" ? p.sortOrder : places.length });
+  }
+
+  return { ok: true, value: { places } };
+}
+
+export function validateEntertainmentPayload(body: unknown): Result<EntertainmentPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: EntertainmentEntry[] = [];
+  for (const e of input) {
+    const title = typeof e.title === "string" ? e.title.trim() : "";
+    if (!title) return { ok: false, error: "Every entry needs a title" };
+    if (!ENTERTAINMENT_KINDS.has(e.kind as string)) {
+      return { ok: false, error: `${title}: invalid kind` };
+    }
+    entries.push({
+      kind: e.kind as EntertainmentKind,
+      title,
+      notes: typeof e.notes === "string" && e.notes.trim() ? e.notes.trim() : null,
+    });
+  }
+
+  return { ok: true, value: { entries } };
 }
 
 /**
@@ -482,6 +704,158 @@ export async function saveWork(date: string, value: WorkPayload): Promise<DayPay
         updatedAt: new Date(),
       },
     });
+
+  return loadDay(date);
+}
+
+export async function saveTechnology(date: string, value: TechnologyPayload): Promise<DayPayload> {
+  const db = getDb();
+
+  await db
+    .insert(days)
+    .values({
+      date,
+      phoneUsageMinutes: value.phoneUsageMinutes,
+      laptopUsageMinutes: value.laptopUsageMinutes,
+      instagramUsageMinutes: value.instagramUsageMinutes,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: days.date,
+      set: {
+        phoneUsageMinutes: value.phoneUsageMinutes,
+        laptopUsageMinutes: value.laptopUsageMinutes,
+        instagramUsageMinutes: value.instagramUsageMinutes,
+        updatedAt: new Date(),
+      },
+    });
+
+  return loadDay(date);
+}
+
+export async function saveWeight(date: string, value: WeightPayload): Promise<DayPayload> {
+  const db = getDb();
+
+  await db
+    .insert(days)
+    .values({
+      date,
+      weightKg: value.weightKg,
+      bodyFatPercent: value.bodyFatPercent,
+      muscleMassKg: value.muscleMassKg,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: days.date,
+      set: {
+        weightKg: value.weightKg,
+        bodyFatPercent: value.bodyFatPercent,
+        muscleMassKg: value.muscleMassKg,
+        updatedAt: new Date(),
+      },
+    });
+
+  return loadDay(date);
+}
+
+export async function saveSocialMedia(date: string, value: SocialMediaPayload): Promise<DayPayload> {
+  const db = getDb();
+
+  await db
+    .insert(days)
+    .values({
+      date,
+      instagramFollowers: value.instagramFollowers,
+      instagramFollowing: value.instagramFollowing,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: days.date,
+      set: {
+        instagramFollowers: value.instagramFollowers,
+        instagramFollowing: value.instagramFollowing,
+        updatedAt: new Date(),
+      },
+    });
+
+  return loadDay(date);
+}
+
+// The remaining four sections (subs, people, places, entertainment) are all
+// pure lists with no scalar day-row fields of their own — saving them is a
+// straight replace-on-save against their satellite table, no `days` upsert
+// needed at all (though if the day row doesn't exist yet, e.g. logging
+// people before touching any other section, it's created bare so the FK on
+// each satellite row has something to reference).
+
+async function ensureDayRow(date: string): Promise<void> {
+  const db = getDb();
+  await db.insert(days).values({ date }).onConflictDoNothing({ target: days.date });
+}
+
+export async function saveSubs(date: string, value: SubsPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(subEntries).where(eq(subEntries.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(subEntries).values(
+      value.entries.map((e) => ({ date, name: e.name, value: e.value }))
+    );
+  }
+
+  return loadDay(date);
+}
+
+export async function savePeople(date: string, value: PeoplePayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(dayPeople).where(eq(dayPeople.date, date));
+  if (value.people.length > 0) {
+    await db.insert(dayPeople).values(
+      value.people.map((p) => ({
+        date,
+        personName: p.name,
+        valence: p.valence,
+        sortOrder: p.sortOrder,
+      }))
+    );
+  }
+
+  return loadDay(date);
+}
+
+export async function savePlaces(date: string, value: PlacesPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(dayPlaces).where(eq(dayPlaces.date, date));
+  if (value.places.length > 0) {
+    await db.insert(dayPlaces).values(
+      value.places.map((p) => ({ date, placeName: p.name, sortOrder: p.sortOrder }))
+    );
+  }
+
+  return loadDay(date);
+}
+
+export async function saveEntertainment(date: string, value: EntertainmentPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(entertainmentEntries).where(eq(entertainmentEntries.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(entertainmentEntries).values(
+      value.entries.map((e, i) => ({
+        date,
+        kind: e.kind,
+        title: e.title,
+        notes: e.notes,
+        sortOrder: i,
+      }))
+    );
+  }
 
   return loadDay(date);
 }

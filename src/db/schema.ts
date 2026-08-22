@@ -48,6 +48,16 @@ export const workoutDataSourceEnum = pgEnum("workout_data_source", [
   "hevy",
 ]);
 
+export const personValenceEnum = pgEnum("person_valence", ["positive", "negative"]);
+
+export const entertainmentKindEnum = pgEnum("entertainment_kind", [
+  "movie",
+  "tvshow",
+  "sport",
+  "book",
+  "game",
+]);
+
 // --- days ----------------------------------------------------------------
 // One row per calendar day. "date" is a plain, timezone-free calendar date —
 // whatever date you say you're journaling for, not a timestamp derived from
@@ -97,6 +107,25 @@ export const days = pgTable("days", {
   workDurationMinutes: integer("work_duration_minutes"),
   workLocation: workLocationEnum("work_location").array(),
   commute: commuteEnum("commute").array(),
+
+  // --- Technology ---
+  // Legacy stored each as {hours, mins}; flattened to one total per
+  // category, same pattern as napMinutes/workDurationMinutes above.
+  phoneUsageMinutes: integer("phone_usage_minutes"),
+  laptopUsageMinutes: integer("laptop_usage_minutes"),
+  instagramUsageMinutes: integer("instagram_usage_minutes"),
+
+  // --- Weight ---
+  // The legacy app actually saved these as raw strings on the day document
+  // (a bug — only its `views/weight` mirror parsed them as floats). Storing
+  // as real here from the start rather than carrying that bug forward.
+  weightKg: real("weight_kg"),
+  bodyFatPercent: real("body_fat_percent"),
+  muscleMassKg: real("muscle_mass_kg"),
+
+  // --- Social media ---
+  instagramFollowers: integer("instagram_followers"),
+  instagramFollowing: integer("instagram_following"),
 
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -152,8 +181,89 @@ export const workoutSets = pgTable(
   (table) => [index("workout_sets_workout_id_idx").on(table.workoutId)]
 );
 
+// --- sub_entries -----------------------------------------------------------
+// The legacy app's subscription list was itself configurable — it read the
+// set of tracked subscription names from a separate Firestore config doc
+// (`entry_structure/Subs`) rather than hardcoding them, and that doc wasn't
+// available during this migration. A normalized (date, name, value) table
+// carries that same flexibility forward without needing fixed columns per
+// subscription — new subscriptions just become new rows, no schema change.
+export const subEntries = pgTable(
+  "sub_entries",
+  {
+    id: serial("id").primaryKey(),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    value: integer("value").notNull(), // legacy range was 0-10
+  },
+  (table) => [index("sub_entries_date_idx").on(table.date)]
+);
+
+// --- day_people / day_places -------------------------------------------
+// The legacy app referenced a `searchs/people` / `searchs/places` catalog
+// (fixed 7-positive/3-negative person slots, 2 place slots) that isn't part
+// of this migration. Free-text name plus a sort order carries the same
+// "who/where, in order" shape forward without needing the catalog rebuilt
+// first — same reasoning as workouts.exercise/location being free text.
+export const dayPeople = pgTable(
+  "day_people",
+  {
+    id: serial("id").primaryKey(),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    personName: text("person_name").notNull(),
+    valence: personValenceEnum("valence").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [index("day_people_date_idx").on(table.date)]
+);
+
+export const dayPlaces = pgTable(
+  "day_places",
+  {
+    id: serial("id").primaryKey(),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    placeName: text("place_name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [index("day_places_date_idx").on(table.date)]
+);
+
+// --- entertainment_entries -------------------------------------------------
+// Deliberately lightweight: the legacy app's entertainment day-link is five
+// very different catalog-referencing shapes (movies/tvshows/sports/books/
+// games), each pulling from its own catalog and dynamic enums (location
+// types, sports game types, device lists) that aren't part of this
+// migration. Fully modeling that relational catalog domain is already its
+// own planned phase (Phase 5). This table captures just enough now — what
+// you consumed today, free-text title, optional notes, and a JSON escape
+// hatch for anything else you want to jot down — without trying to build
+// the catalog domain a phase early.
+export const entertainmentEntries = pgTable(
+  "entertainment_entries",
+  {
+    id: serial("id").primaryKey(),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    kind: entertainmentKindEnum("kind").notNull(),
+    title: text("title").notNull(),
+    notes: text("notes"),
+    details: jsonb("details").$type<Record<string, unknown>>(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [index("entertainment_entries_date_idx").on(table.date)]
+);
+
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
+export type PersonValence = (typeof personValenceEnum.enumValues)[number];
+export type EntertainmentKind = (typeof entertainmentKindEnum.enumValues)[number];
