@@ -157,3 +157,73 @@ export async function getPlaceLeaderboardData(limit = 15): Promise<PlaceLeaderbo
 
   return rows.map((r) => ({ name: r.name, value: Number(r.value) }));
 }
+
+// --- Happiness averager ---------------------------------------------------
+
+export type MonthlyAverage = { month: string; avg: number; count: number }; // month = "YYYY-MM"
+
+/** Monthly average happiness (plus the sample size behind each point, so the
+ * chart can size markers by how many days actually fed each average — a
+ * month with 2 entries and a month with 30 shouldn't look equally
+ * confident). The legacy "Averager" pattern (functions/views/vis/charts/
+ * happiness_averager.js) bins by day-type too; that's left out here since
+ * it'd need a second grouping dimension this first pass doesn't have a UI
+ * for yet. */
+export async function getHappinessAveragerData(): Promise<MonthlyAverage[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, happiness: days.happiness })
+    .from(days)
+    .where(isNotNull(days.happiness))
+    .orderBy(asc(days.date));
+
+  const byMonth = new Map<string, { sum: number; count: number }>();
+  for (const r of rows) {
+    const month = r.date.slice(0, 7);
+    const cur = byMonth.get(month) ?? { sum: 0, count: 0 };
+    cur.sum += r.happiness as number;
+    cur.count += 1;
+    byMonth.set(month, cur);
+  }
+  return [...byMonth.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, { sum, count }]) => ({ month, avg: sum / count, count }));
+}
+
+// --- Subs small multiples ---------------------------------------------------
+
+/** One row per day that has at least one of the 9 subs filled in; `values`
+ * is aligned index-for-index with SUB_NAMES from `@/lib/days` (the single
+ * source of truth for sub ordering — reused here rather than re-declared,
+ * same as every other place in the app that touches subs). */
+export type SubsSeries = { date: string; values: (number | null)[] };
+
+export async function getSubsScrollerData(): Promise<SubsSeries[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: days.date,
+      subA: days.subA,
+      subW: days.subW,
+      subC: days.subC,
+      subL: days.subL,
+      subNi: days.subNi,
+      subNO: days.subNO,
+      subAd: days.subAd,
+      subD: days.subD,
+      subK: days.subK,
+    })
+    .from(days)
+    .where(
+      sql`${days.subA} is not null or ${days.subW} is not null or ${days.subC} is not null
+        or ${days.subL} is not null or ${days.subNi} is not null or ${days.subNO} is not null
+        or ${days.subAd} is not null or ${days.subD} is not null or ${days.subK} is not null`,
+    )
+    .orderBy(asc(days.date));
+
+  // Order matches SUB_NAMES = ["A", "W", "C", "L", "Ni", "NO", "Ad", "D", "K"].
+  return rows.map((r) => ({
+    date: r.date,
+    values: [r.subA, r.subW, r.subC, r.subL, r.subNi, r.subNO, r.subAd, r.subD, r.subK],
+  }));
+}

@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-// Phase 4, first batch — five charts covering five different D3 archetypes
-// (histogram, zoomable line, calendar heatmap, dual-axis combo, ranked
-// list), all backed by domains already migrated. See REBUILD_PLAN.md for
-// the full ~55-chart legacy inventory and what's still blocked pending
-// Phase 5 (entertainment/finance/location catalogs).
+// Phase 4 — see REBUILD_PLAN.md for the full ~55-chart legacy inventory,
+// which of these were picked first and why, and what's still blocked
+// pending Phase 5 (entertainment/finance/location catalogs).
 const CHARTS = [
   {
     href: "/charts/happiness",
     title: "Happiness distribution",
     description: "How your day-to-day happiness score is spread out, 0-100.",
+  },
+  {
+    href: "/charts/happiness-trend",
+    title: "Happiness trend",
+    description: "Monthly average happiness over time.",
   },
   {
     href: "/charts/weight",
@@ -26,6 +29,11 @@ const CHARTS = [
     href: "/charts/gym",
     title: "Weight & training volume",
     description: "Body weight against how many workouts you logged each month.",
+  },
+  {
+    href: "/charts/subs",
+    title: "Subs over time",
+    description: "A mini trend chart per sub, side by side.",
   },
   {
     href: "/charts/places",
