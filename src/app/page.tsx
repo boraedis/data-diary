@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { getSql } from "@/lib/db";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { TodayLink } from "@/components/today-link";
 import {
   Card,
@@ -40,7 +41,7 @@ export default async function HomePage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Data Diary</CardTitle>
-          <CardDescription>Phase 2: day entries are live.</CardDescription>
+          <CardDescription>Phase 4: charts are live.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between rounded-md border p-3 text-sm">
@@ -50,6 +51,9 @@ export default async function HomePage() {
             </span>
           </div>
           <TodayLink />
+          <Link href="/charts" className={buttonVariants({ variant: "outline", className: "w-full" })}>
+            Charts
+          </Link>
           <form action="/api/auth/logout" method="post">
             <Button type="submit" variant="outline" className="w-full">
               Sign out

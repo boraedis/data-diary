@@ -56,13 +56,27 @@ export const workoutDataSourceEnum = pgEnum("workout_data_source", [
 // all. Every exercise in the catalog below is tagged with exactly one of
 // these, and the entry form shows the matching fields once an exercise is
 // picked.
+//
+// The legacy app's real `searchs/exercise_categories` catalog is actually a
+// free-text, user-managed list (arbitrary category names, each with its own
+// custom form-field config) rather than this fixed 3-value set — discovered
+// while scoping the Phase 3 historical migration. Deliberately kept as a
+// fixed enum for now (simplicity, and the real category names aren't known
+// without live Firestore access), but the intent is to let this become a
+// real user-managed catalog later. When that happens: don't try to grow
+// this enum in place — Postgres enums can gain values but not lose/rename
+// them cleanly — instead add a proper `exercise_categories` table (id, name,
+// same shape as `people`/`places` below) and swap `exercises.category` /
+// this column's few call sites over to a foreign key, the same migration
+// shape people/places/subs went through when they moved off satellite
+// tables. Every place that currently pattern-matches on the three literal
+// category strings (health-entry-form.tsx's field toggling, most notably)
+// is exactly the list of call sites that swap would need to update.
 export const exerciseCategoryEnum = pgEnum("exercise_category", [
   "distance",
   "sport",
   "strength",
 ]);
-
-export const personValenceEnum = pgEnum("person_valence", ["positive", "negative"]);
 
 export const entertainmentKindEnum = pgEnum("entertainment_kind", [
   "movie",
@@ -141,37 +155,94 @@ export const days = pgTable("days", {
   instagramFollowers: integer("instagram_followers"),
   instagramFollowing: integer("instagram_following"),
 
+  // --- People (always exactly 7 positive + 3 negative slots) ---
+  // The legacy Firestore day document stored these directly as
+  // `person1`..`person7` / `negperson1`..`negperson3` fields on the day
+  // itself, not in a separate collection — the slot count never varies, so
+  // there's nothing a satellite table buys here that a fixed column
+  // wouldn't. Each points at the `people` catalog below; "restrict" means a
+  // person can't be deleted from that catalog while still referenced by
+  // some day's slot. POSITIVE_PEOPLE_SLOTS/NEGATIVE_PEOPLE_SLOTS in
+  // src/lib/days.ts are the source of truth for the slot counts.
+  positivePerson1Id: integer("positive_person_1_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  positivePerson2Id: integer("positive_person_2_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  positivePerson3Id: integer("positive_person_3_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  positivePerson4Id: integer("positive_person_4_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  positivePerson5Id: integer("positive_person_5_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  positivePerson6Id: integer("positive_person_6_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  positivePerson7Id: integer("positive_person_7_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  negativePerson1Id: integer("negative_person_1_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  negativePerson2Id: integer("negative_person_2_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+  negativePerson3Id: integer("negative_person_3_id").references(() => people.id, {
+    onDelete: "restrict",
+  }),
+
+  // --- Places (always exactly 2 slots) ---
+  // Same reasoning as people above — legacy stored `place1`/`place2`
+  // directly on the day document. PLACE_SLOTS in src/lib/days.ts is the
+  // source of truth.
+  place1Id: integer("place_1_id").references(() => places.id, { onDelete: "restrict" }),
+  place2Id: integer("place_2_id").references(() => places.id, { onDelete: "restrict" }),
+
+  // --- Subs (always exactly these nine, see SUB_NAMES in src/lib/days.ts) ---
+  // Same reasoning again: nine fixed, named values (0-10) straight from the
+  // user (the legacy `entry_structure/Subs` config doc wasn't reachable
+  // during this migration) — not an open-ended list, so fixed columns beat
+  // a normalized (date, name, value) table. Column names are the sub
+  // abbreviations themselves.
+  subA: smallint("sub_a"),
+  subW: smallint("sub_w"),
+  subC: smallint("sub_c"),
+  subL: smallint("sub_l"),
+  subNi: smallint("sub_ni"),
+  subNO: smallint("sub_no"),
+  subAd: smallint("sub_ad"),
+  subD: smallint("sub_d"),
+  subK: smallint("sub_k"),
+
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// --- exercises / exercise_locations --------------------------------------
-// Catalogs, not free text: the legacy app drove workout entry off Firestore
-// config docs (`searchs/exercises`, `searchs/places`) rather than letting
-// you type anything, and that's worth carrying forward — it's what keeps
-// years of workout data using consistent names instead of "Running" one day
-// and "running" the next. Both start empty and grow via the entry form's
-// "+ New" flow rather than being seeded with a guessed list.
+// --- exercises -------------------------------------------------------------
+// A catalog, not free text: the legacy app drove workout entry off a
+// Firestore config doc (`searchs/exercises`) rather than letting you type
+// anything, and that's worth carrying forward — it's what keeps years of
+// workout data using consistent names instead of "Running" one day and
+// "running" the next. Starts empty and grows via the entry form's "+ New"
+// flow rather than being seeded with a guessed list.
 //
-// `category` on `exercises` is what drives which fields the entry form
-// shows (see exerciseCategoryEnum above); `exercise_locations` are scoped
-// to a category too (a running location list looks nothing like a lifting
-// location list), not shared across all exercises.
+// `category` is what drives which fields the entry form shows (see
+// exerciseCategoryEnum above). Workout *location* is NOT its own catalog —
+// confirmed while scoping the Phase 3 migration that the legacy app points
+// workout locations at the exact same `places` catalog day-level places
+// use (`places[workout.location].name` in the legacy entry code); an
+// earlier pass here had invented a separate, category-scoped
+// `exercise_locations` table that didn't match that reality, so it's gone —
+// see `workouts.locationId` below.
 export const exercises = pgTable("exercises", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
   category: exerciseCategoryEnum("category").notNull(),
 });
-
-export const exerciseLocations = pgTable(
-  "exercise_locations",
-  {
-    id: serial("id").primaryKey(),
-    category: exerciseCategoryEnum("category").notNull(),
-    name: text("name").notNull(),
-  },
-  (table) => [uniqueIndex("exercise_locations_category_name_idx").on(table.category, table.name)]
-);
 
 // --- workouts / workout_sets ---------------------------------------------
 // The one repeating structure in the health domain: a day can have any
@@ -195,9 +266,18 @@ export const workouts = pgTable(
     exerciseId: integer("exercise_id")
       .notNull()
       .references(() => exercises.id, { onDelete: "restrict" }),
-    locationId: integer("location_id").references(() => exerciseLocations.id, {
+    locationId: integer("location_id").references(() => places.id, {
       onDelete: "set null",
     }),
+    // Equipment/variant free text (e.g. "Barbell" vs "Smith Machine" vs
+    // "Dumbbell" for the same named exercise). The legacy app required this
+    // on every workout and it turned out to carry real signal — the Phase 3
+    // migration's dry run found subtype values on effectively every
+    // exercise in the catalog — so it's carried forward here even though
+    // the Phase 2 catalog redesign originally dropped it. Free text (not a
+    // catalog) since it's exercise-specific and the legacy app treated it
+    // the same way.
+    subtype: text("subtype"),
     dataSource: workoutDataSourceEnum("data_source").notNull().default("manual"),
     durationMinutes: integer("duration_minutes"),
     distanceKm: real("distance_km"),
@@ -220,29 +300,6 @@ export const workoutSets = pgTable(
     durationSeconds: integer("duration_seconds"),
   },
   (table) => [index("workout_sets_workout_id_idx").on(table.workoutId)]
-);
-
-// --- sub_entries -----------------------------------------------------------
-// The legacy app read its tracked subscription names from a separate
-// Firestore config doc (`entry_structure/Subs`) rather than hardcoding them;
-// that doc wasn't reachable during this migration, so the real list came
-// straight from the user instead: A, W, C, L, Ni, NO, Ad, D, K (see
-// SUB_NAMES in src/lib/days.ts, which is what the entry form actually
-// renders — this table has no CHECK constraint enforcing that list). Kept
-// as a normalized (date, name, value) table rather than one column per sub
-// specifically so that list can change later without a schema migration —
-// new subscriptions just become new rows.
-export const subEntries = pgTable(
-  "sub_entries",
-  {
-    id: serial("id").primaryKey(),
-    date: date("date", { mode: "string" })
-      .notNull()
-      .references(() => days.date, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    value: integer("value").notNull(), // legacy range was 0-10
-  },
-  (table) => [index("sub_entries_date_idx").on(table.date)]
 );
 
 // --- people / places (catalogs) ------------------------------------------
@@ -281,51 +338,6 @@ export const places = pgTable("places", {
   category: text("category"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
-
-// --- day_people / day_places -------------------------------------------
-// Legacy fixed the slate at 7 positive + 3 negative person slots and 2
-// place slots — always that many, whether or not they're all filled in on
-// a given day. `slot` is that fixed position (0-6 for positive people, 0-2
-// for negative people, 0-1 for places), not a free sort order; the unique
-// index on (date, valence, slot) / (date, slot) enforces one entry per
-// slot per day. personId/placeId point at the catalogs above rather than
-// storing a name.
-export const dayPeople = pgTable(
-  "day_people",
-  {
-    id: serial("id").primaryKey(),
-    date: date("date", { mode: "string" })
-      .notNull()
-      .references(() => days.date, { onDelete: "cascade" }),
-    personId: integer("person_id")
-      .notNull()
-      .references(() => people.id, { onDelete: "restrict" }),
-    valence: personValenceEnum("valence").notNull(),
-    slot: integer("slot").notNull(),
-  },
-  (table) => [
-    index("day_people_date_idx").on(table.date),
-    uniqueIndex("day_people_date_valence_slot_idx").on(table.date, table.valence, table.slot),
-  ]
-);
-
-export const dayPlaces = pgTable(
-  "day_places",
-  {
-    id: serial("id").primaryKey(),
-    date: date("date", { mode: "string" })
-      .notNull()
-      .references(() => days.date, { onDelete: "cascade" }),
-    placeId: integer("place_id")
-      .notNull()
-      .references(() => places.id, { onDelete: "restrict" }),
-    slot: integer("slot").notNull(),
-  },
-  (table) => [
-    index("day_places_date_idx").on(table.date),
-    uniqueIndex("day_places_date_slot_idx").on(table.date, table.slot),
-  ]
-);
 
 // --- entertainment_catalog / entertainment_entries ------------------------
 // Same catalog-not-free-text shape as people/places/exercises: what you
@@ -375,5 +387,8 @@ export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
-export type PersonValence = (typeof personValenceEnum.enumValues)[number];
+// Not a DB enum — "positive"/"negative" is which fixed column group on
+// `days` a person slot belongs to (positivePersonNId vs negativePersonNId),
+// not a stored value, now that day_people is gone in favor of those columns.
+export type PersonValence = "positive" | "negative";
 export type EntertainmentKind = (typeof entertainmentKindEnum.enumValues)[number];

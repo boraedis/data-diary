@@ -2,20 +2,15 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   commuteEnum,
-  dayPeople,
-  dayPlaces,
   days,
   dayTypeEnum,
   entertainmentCatalog,
   entertainmentEntries,
   entertainmentKindEnum,
   exerciseCategoryEnum,
-  exerciseLocations,
   exercises,
   people,
-  personValenceEnum,
   places,
-  subEntries,
   workLocationEnum,
   workoutDataSourceEnum,
   workouts,
@@ -32,6 +27,9 @@ import {
 // Fixed slot counts, carried over from the legacy app's `searchs/people` /
 // `searchs/places` catalogs: always 7 positive + 3 negative person slots,
 // always 2 place slots, whether or not every slot is filled on a given day.
+// These are stored as fixed columns on `days` (positivePerson1Id..7Id,
+// negativePerson1Id..3Id, place1Id/place2Id) rather than a satellite table —
+// see the schema.ts comment above those columns for why.
 export const POSITIVE_PEOPLE_SLOTS = 7;
 export const NEGATIVE_PEOPLE_SLOTS = 3;
 export const PLACE_SLOTS = 2;
@@ -39,11 +37,30 @@ export const PLACE_SLOTS = 2;
 // The legacy app's tracked subscription list was itself a configurable
 // Firestore doc (`entry_structure/Subs`), not hardcoded — that doc wasn't
 // reachable during this migration, so this is the real list, straight from
-// the user: exactly these nine abbreviations, nothing else. `sub_entries`
-// stays a normalized (date, name, value) table rather than one column per
-// sub (see schema.ts) so this list can still change later without a schema
-// migration, but the entry form only ever renders these nine.
+// the user: exactly these nine abbreviations, nothing else. Stored as nine
+// fixed columns on `days` (subA..subK, see schema.ts) rather than a
+// normalized table, same reasoning as people/places above.
 export const SUB_NAMES = ["A", "W", "C", "L", "Ni", "NO", "Ad", "D", "K"] as const;
+
+// Maps each fixed slot to the `days` column that holds it, in slot order —
+// used by both loadDay (reading the columns back out) and savePeople/
+// savePlaces/saveSubs (building the partial-upsert `set`).
+const POSITIVE_PERSON_COLUMNS = [
+  "positivePerson1Id",
+  "positivePerson2Id",
+  "positivePerson3Id",
+  "positivePerson4Id",
+  "positivePerson5Id",
+  "positivePerson6Id",
+  "positivePerson7Id",
+] as const;
+const NEGATIVE_PERSON_COLUMNS = [
+  "negativePerson1Id",
+  "negativePerson2Id",
+  "negativePerson3Id",
+] as const;
+const PLACE_ID_COLUMNS = ["place1Id", "place2Id"] as const;
+const SUB_COLUMNS = ["subA", "subW", "subC", "subL", "subNi", "subNO", "subAd", "subD", "subK"] as const;
 
 export type WorkoutSetPayload = {
   setNumber: number;
@@ -61,6 +78,7 @@ export type WorkoutSetPayload = {
 export type WorkoutPayload = {
   exerciseId: number;
   locationId: number | null;
+  subtype: string | null;
   dataSource: WorkoutDataSource;
   durationMinutes: number | null;
   distanceKm: number | null;
@@ -213,7 +231,6 @@ export type PlaceCatalogItem = {
   category: string | null;
 };
 export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
-export type LocationCatalogItem = { id: number; name: string; category: ExerciseCategory };
 export type EntertainmentCatalogItem = {
   id: number;
   kind: EntertainmentKind;
@@ -237,7 +254,8 @@ export async function loadDay(date: string): Promise<DayPayload> {
       exerciseName: exercises.name,
       exerciseCategory: exercises.category,
       locationId: workouts.locationId,
-      locationName: exerciseLocations.name,
+      locationName: places.name,
+      subtype: workouts.subtype,
       dataSource: workouts.dataSource,
       durationMinutes: workouts.durationMinutes,
       distanceKm: workouts.distanceKm,
@@ -245,7 +263,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
     })
     .from(workouts)
     .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
-    .leftJoin(exerciseLocations, eq(workouts.locationId, exerciseLocations.id))
+    .leftJoin(places, eq(workouts.locationId, places.id))
     .where(eq(workouts.date, date))
     .orderBy(asc(workouts.sortOrder), asc(workouts.id));
 
@@ -265,25 +283,23 @@ export async function loadDay(date: string): Promise<DayPayload> {
     setsByWorkout.set(set.workoutId, list);
   }
 
-  const [subRows, peopleRows, placesRows, entertainmentRows] = await Promise.all([
-    db.select().from(subEntries).where(eq(subEntries.date, date)).orderBy(asc(subEntries.id)),
-    db
-      .select({
-        slot: dayPeople.slot,
-        valence: dayPeople.valence,
-        personId: dayPeople.personId,
-        name: people.name,
-      })
-      .from(dayPeople)
-      .innerJoin(people, eq(dayPeople.personId, people.id))
-      .where(eq(dayPeople.date, date))
-      .orderBy(asc(dayPeople.valence), asc(dayPeople.slot)),
-    db
-      .select({ slot: dayPlaces.slot, placeId: dayPlaces.placeId, name: places.name })
-      .from(dayPlaces)
-      .innerJoin(places, eq(dayPlaces.placeId, places.id))
-      .where(eq(dayPlaces.date, date))
-      .orderBy(asc(dayPlaces.slot)),
+  // Fixed-slot people/places/subs all live as columns straight on `dayRow`
+  // now (see schema.ts) — no satellite table to query. What's left to fetch
+  // is just the *names* for whichever person/place ids are actually filled
+  // in, via one batched lookup each rather than N individual ones.
+  const positiveIds = POSITIVE_PERSON_COLUMNS.map((key) => dayRow?.[key] ?? null);
+  const negativeIds = NEGATIVE_PERSON_COLUMNS.map((key) => dayRow?.[key] ?? null);
+  const placeIds = PLACE_ID_COLUMNS.map((key) => dayRow?.[key] ?? null);
+  const allPersonIds = [...positiveIds, ...negativeIds].filter((id): id is number => id !== null);
+  const allPlaceIds = placeIds.filter((id): id is number => id !== null);
+
+  const [peopleNameRows, placeNameRows, entertainmentRows] = await Promise.all([
+    allPersonIds.length
+      ? db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, allPersonIds))
+      : Promise.resolve([]),
+    allPlaceIds.length
+      ? db.select({ id: places.id, name: places.name }).from(places).where(inArray(places.id, allPlaceIds))
+      : Promise.resolve([]),
     db
       .select({
         entertainmentId: entertainmentEntries.entertainmentId,
@@ -298,6 +314,37 @@ export async function loadDay(date: string): Promise<DayPayload> {
       .where(eq(entertainmentEntries.date, date))
       .orderBy(asc(entertainmentEntries.sortOrder)),
   ]);
+
+  const personNameById = new Map(peopleNameRows.map((p) => [p.id, p.name]));
+  const placeNameById = new Map(placeNameRows.map((p) => [p.id, p.name]));
+
+  const personEntries: PersonEntry[] = [];
+  positiveIds.forEach((personId, slot) => {
+    if (personId === null) return;
+    const name = personNameById.get(personId);
+    if (name === undefined) return; // shouldn't happen given the FK, but don't blow up the whole page over it
+    personEntries.push({ slot, valence: "positive", personId, name });
+  });
+  negativeIds.forEach((personId, slot) => {
+    if (personId === null) return;
+    const name = personNameById.get(personId);
+    if (name === undefined) return;
+    personEntries.push({ slot, valence: "negative", personId, name });
+  });
+
+  const placeEntries: PlaceEntry[] = [];
+  placeIds.forEach((placeId, slot) => {
+    if (placeId === null) return;
+    const name = placeNameById.get(placeId);
+    if (name === undefined) return;
+    placeEntries.push({ slot, placeId, name });
+  });
+
+  const subEntryList: SubEntry[] = [];
+  SUB_COLUMNS.forEach((key, i) => {
+    const value = dayRow?.[key] ?? null;
+    if (value !== null) subEntryList.push({ name: SUB_NAMES[i], value });
+  });
 
   return {
     date,
@@ -324,6 +371,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
       exerciseCategory: w.exerciseCategory,
       locationId: w.locationId,
       locationName: w.locationName,
+      subtype: w.subtype,
       dataSource: w.dataSource,
       durationMinutes: w.durationMinutes,
       distanceKm: w.distanceKm,
@@ -343,14 +391,9 @@ export async function loadDay(date: string): Promise<DayPayload> {
     muscleMassKg: dayRow?.muscleMassKg ?? null,
     instagramFollowers: dayRow?.instagramFollowers ?? null,
     instagramFollowing: dayRow?.instagramFollowing ?? null,
-    subs: subRows.map((s) => ({ name: s.name, value: s.value })),
-    people: peopleRows.map((p) => ({
-      slot: p.slot,
-      valence: p.valence,
-      personId: p.personId,
-      name: p.name,
-    })),
-    places: placesRows.map((p) => ({ slot: p.slot, placeId: p.placeId, name: p.name })),
+    subs: subEntryList,
+    people: personEntries,
+    places: placeEntries,
     entertainment: entertainmentRows.map((e) => ({
       entertainmentId: e.entertainmentId,
       kind: e.kind,
@@ -365,7 +408,7 @@ const DAY_TYPES = new Set<string>(dayTypeEnum.enumValues);
 const WORK_LOCATIONS = new Set<string>(workLocationEnum.enumValues);
 const COMMUTES = new Set<string>(commuteEnum.enumValues);
 const DATA_SOURCES = new Set<string>(workoutDataSourceEnum.enumValues);
-const PERSON_VALENCES = new Set<string>(personValenceEnum.enumValues);
+const PERSON_VALENCES = new Set<string>(["positive", "negative"] satisfies PersonValence[]);
 const ENTERTAINMENT_KINDS = new Set<string>(entertainmentKindEnum.enumValues);
 const EXERCISE_CATEGORIES = new Set<string>(exerciseCategoryEnum.enumValues);
 
@@ -397,6 +440,7 @@ function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
     parsed.push({
       exerciseId,
       locationId: typeof w.locationId === "number" ? w.locationId : null,
+      subtype: typeof w.subtype === "string" && w.subtype.trim() ? w.subtype.trim() : null,
       dataSource,
       durationMinutes: typeof w.durationMinutes === "number" ? w.durationMinutes : null,
       distanceKm: typeof w.distanceKm === "number" ? w.distanceKm : null,
@@ -765,14 +809,6 @@ export function validateExerciseCatalogEntry(
   return { ok: true, value: { name, category: b.category as ExerciseCategory } };
 }
 
-export function validateLocationCatalogEntry(
-  body: unknown
-): Result<{ name: string; category: ExerciseCategory }> {
-  // Same shape as an exercise catalog entry — a location is scoped to a
-  // category exactly like an exercise is.
-  return validateExerciseCatalogEntry(body);
-}
-
 export function validateEntertainmentCatalogEntry(
   body: unknown
 ): Result<{ kind: EntertainmentKind; title: string; detail: string | null }> {
@@ -814,6 +850,7 @@ async function replaceWorkouts(date: string, list: WorkoutPayload[]): Promise<vo
         sortOrder: i,
         exerciseId: w.exerciseId,
         locationId: w.locationId,
+        subtype: w.subtype,
         dataSource: w.dataSource,
         durationMinutes: w.durationMinutes,
         distanceKm: w.distanceKm,
@@ -1028,12 +1065,14 @@ export async function saveSocialMedia(date: string, value: SocialMediaPayload): 
   return loadDay(date);
 }
 
-// The remaining sections (subs, people, places, entertainment) have no
-// scalar day-row fields of their own — saving them is a straight
-// replace-on-save against their satellite table, no `days` upsert needed
-// (though if the day row doesn't exist yet, e.g. logging people before
-// touching any other section, it's created bare so the FK on each
-// satellite row has something to reference).
+// Subs/people/places are fixed-count (see POSITIVE_PEOPLE_SLOTS/
+// NEGATIVE_PEOPLE_SLOTS/PLACE_SLOTS/SUB_NAMES above), so — like every other
+// section — they're partial upserts straight onto `days`'s own columns, no
+// satellite table involved. Entertainment is the one remaining section with
+// no scalar day-row fields of its own: it's genuinely open-ended, so saving
+// it stays a replace-on-save against its own satellite table, and needs the
+// day row to exist first (bare, via ensureDayRow) so its FK has something
+// to reference.
 
 async function ensureDayRow(date: string): Promise<void> {
   const db = getDb();
@@ -1042,42 +1081,76 @@ async function ensureDayRow(date: string): Promise<void> {
 
 export async function saveSubs(date: string, value: SubsPayload): Promise<DayPayload> {
   const db = getDb();
-  await ensureDayRow(date);
 
-  await db.delete(subEntries).where(eq(subEntries.date, date));
-  if (value.entries.length > 0) {
-    await db.insert(subEntries).values(
-      value.entries.map((e) => ({ date, name: e.name, value: e.value }))
-    );
-  }
+  const byName = new Map(value.entries.map((e) => [e.name, e.value]));
+  const columns = {
+    subA: byName.get("A") ?? null,
+    subW: byName.get("W") ?? null,
+    subC: byName.get("C") ?? null,
+    subL: byName.get("L") ?? null,
+    subNi: byName.get("Ni") ?? null,
+    subNO: byName.get("NO") ?? null,
+    subAd: byName.get("Ad") ?? null,
+    subD: byName.get("D") ?? null,
+    subK: byName.get("K") ?? null,
+  };
+
+  await db
+    .insert(days)
+    .values({ date, ...columns, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: days.date, set: { ...columns, updatedAt: new Date() } });
 
   return loadDay(date);
 }
 
 export async function savePeople(date: string, value: PeoplePayload): Promise<DayPayload> {
   const db = getDb();
-  await ensureDayRow(date);
 
-  await db.delete(dayPeople).where(eq(dayPeople.date, date));
-  if (value.entries.length > 0) {
-    await db.insert(dayPeople).values(
-      value.entries.map((e) => ({ date, personId: e.personId, valence: e.valence, slot: e.slot }))
-    );
+  const positive: (number | null)[] = Array(POSITIVE_PEOPLE_SLOTS).fill(null);
+  const negative: (number | null)[] = Array(NEGATIVE_PEOPLE_SLOTS).fill(null);
+  for (const e of value.entries) {
+    if (e.valence === "positive" && e.slot < POSITIVE_PEOPLE_SLOTS) positive[e.slot] = e.personId;
+    if (e.valence === "negative" && e.slot < NEGATIVE_PEOPLE_SLOTS) negative[e.slot] = e.personId;
   }
+
+  const columns = {
+    positivePerson1Id: positive[0],
+    positivePerson2Id: positive[1],
+    positivePerson3Id: positive[2],
+    positivePerson4Id: positive[3],
+    positivePerson5Id: positive[4],
+    positivePerson6Id: positive[5],
+    positivePerson7Id: positive[6],
+    negativePerson1Id: negative[0],
+    negativePerson2Id: negative[1],
+    negativePerson3Id: negative[2],
+  };
+
+  await db
+    .insert(days)
+    .values({ date, ...columns, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: days.date, set: { ...columns, updatedAt: new Date() } });
 
   return loadDay(date);
 }
 
 export async function savePlaces(date: string, value: PlacesPayload): Promise<DayPayload> {
   const db = getDb();
-  await ensureDayRow(date);
 
-  await db.delete(dayPlaces).where(eq(dayPlaces.date, date));
-  if (value.entries.length > 0) {
-    await db.insert(dayPlaces).values(
-      value.entries.map((e) => ({ date, placeId: e.placeId, slot: e.slot }))
-    );
+  const slots: (number | null)[] = Array(PLACE_SLOTS).fill(null);
+  for (const e of value.entries) {
+    if (e.slot < PLACE_SLOTS) slots[e.slot] = e.placeId;
   }
+
+  const columns = {
+    place1Id: slots[0],
+    place2Id: slots[1],
+  };
+
+  await db
+    .insert(days)
+    .values({ date, ...columns, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: days.date, set: { ...columns, updatedAt: new Date() } });
 
   return loadDay(date);
 }
@@ -1238,29 +1311,6 @@ export async function createExerciseCatalogEntry(
   return existing;
 }
 
-export async function listExerciseLocationsCatalog(): Promise<LocationCatalogItem[]> {
-  const db = getDb();
-  return db
-    .select({ id: exerciseLocations.id, name: exerciseLocations.name, category: exerciseLocations.category })
-    .from(exerciseLocations)
-    .orderBy(asc(exerciseLocations.category), asc(exerciseLocations.name));
-}
-
-export async function createExerciseLocationCatalogEntry(
-  name: string,
-  category: ExerciseCategory
-): Promise<LocationCatalogItem> {
-  const db = getDb();
-  const trimmed = name.trim();
-  const [inserted] = await db
-    .insert(exerciseLocations)
-    .values({ name: trimmed, category })
-    .onConflictDoNothing({ target: [exerciseLocations.category, exerciseLocations.name] })
-    .returning({ id: exerciseLocations.id, name: exerciseLocations.name, category: exerciseLocations.category });
-  if (inserted) return inserted;
-  const [existing] = await db
-    .select({ id: exerciseLocations.id, name: exerciseLocations.name, category: exerciseLocations.category })
-    .from(exerciseLocations)
-    .where(and(eq(exerciseLocations.category, category), eq(exerciseLocations.name, trimmed)));
-  return existing;
-}
+// Workout locations are the `places` catalog above (listPlacesCatalog/
+// createPlaceCatalogEntry) — see the comment above the `exercises` table in
+// schema.ts for why there's no separate exercise-locations catalog here.

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { DayNav } from "@/components/day-nav";
 import { HealthEntryForm } from "@/components/entry-forms/health-entry-form";
 import { isValidDateString } from "@/lib/date";
-import { listExerciseLocationsCatalog, listExercisesCatalog, loadDay } from "@/lib/days";
+import { listExercisesCatalog, listPlacesCatalog, loadDay } from "@/lib/days";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +16,10 @@ export default async function HealthEntryPage({
     notFound();
   }
 
-  const [day, exerciseCatalog, locationCatalog] = await Promise.all([
+  const [day, exerciseCatalog, placeCatalog] = await Promise.all([
     loadDay(date),
     listExercisesCatalog(),
-    listExerciseLocationsCatalog(),
+    listPlacesCatalog(),
   ]);
 
   return (
@@ -34,7 +34,7 @@ export default async function HealthEntryPage({
           workouts: day.workouts,
         }}
         exerciseCatalog={exerciseCatalog}
-        locationCatalog={locationCatalog}
+        placeCatalog={placeCatalog}
       />
     </main>
   );

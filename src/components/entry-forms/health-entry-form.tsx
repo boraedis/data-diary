@@ -14,24 +14,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { CatalogPicker, type CatalogItem } from "@/components/entry-forms/catalog-picker";
-import {
-  ExercisePicker,
-  EXERCISE_CATEGORY_LABELS,
-  type ExerciseCatalogItem,
-} from "@/components/entry-forms/exercise-picker";
+import { CatalogPicker } from "@/components/entry-forms/catalog-picker";
+import { ExercisePicker, type ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
 import type {
   DayPayload,
   HealthPayload,
-  LocationCatalogItem,
+  PlaceCatalogItem,
   WorkoutPayload,
   WorkoutSetPayload,
 } from "@/lib/days";
-import type { ExerciseCategory, WorkoutDataSource } from "@/db/schema";
+import type { WorkoutDataSource } from "@/db/schema";
 
 type WorkoutDraft = {
   exerciseId: number | null;
   locationId: number | null;
+  subtype: string | null;
   dataSource: WorkoutDataSource;
   durationMinutes: number | null;
   distanceKm: number | null;
@@ -43,6 +40,7 @@ function emptyWorkout(): WorkoutDraft {
   return {
     exerciseId: null,
     locationId: null,
+    subtype: null,
     dataSource: "manual",
     durationMinutes: null,
     distanceKm: null,
@@ -55,6 +53,7 @@ function toDrafts(workouts: WorkoutPayload[]): WorkoutDraft[] {
   return workouts.map((w) => ({
     exerciseId: w.exerciseId,
     locationId: w.locationId,
+    subtype: w.subtype,
     dataSource: w.dataSource,
     durationMinutes: w.durationMinutes,
     distanceKm: w.distanceKm,
@@ -73,12 +72,12 @@ export function HealthEntryForm({
   date,
   initial,
   exerciseCatalog,
-  locationCatalog,
+  placeCatalog,
 }: {
   date: string;
   initial: HealthPayload;
   exerciseCatalog: ExerciseCatalogItem[];
-  locationCatalog: LocationCatalogItem[];
+  placeCatalog: PlaceCatalogItem[];
 }) {
   const router = useRouter();
   const [health, setHealth] = useState<{
@@ -92,7 +91,7 @@ export function HealthEntryForm({
   });
   const [workouts, setWorkouts] = useState<WorkoutDraft[]>(() => toDrafts(initial.workouts));
   const [exercises, setExercises] = useState<ExerciseCatalogItem[]>(exerciseCatalog);
-  const [allLocations, setAllLocations] = useState<LocationCatalogItem[]>(locationCatalog);
+  const [places, setPlaces] = useState<PlaceCatalogItem[]>(placeCatalog);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -168,8 +167,8 @@ export function HealthEntryForm({
     setExercises((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
-  function handleLocationCreated(item: CatalogItem, category: ExerciseCategory) {
-    setAllLocations((prev) => [...prev, { ...item, category }]);
+  function handlePlaceCreated(item: PlaceCatalogItem) {
+    setPlaces((prev) => [...prev, item]);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -188,6 +187,7 @@ export function HealthEntryForm({
       workouts: workouts.map((w) => ({
         exerciseId: w.exerciseId as number,
         locationId: w.locationId,
+        subtype: w.subtype,
         dataSource: w.dataSource,
         durationMinutes: w.durationMinutes,
         distanceKm: w.distanceKm,
@@ -280,9 +280,6 @@ export function HealthEntryForm({
           {workouts.map((workout, wi) => {
             const exercise = exercises.find((e) => e.id === workout.exerciseId);
             const category = exercise?.category ?? null;
-            const locationsForCategory = category
-              ? allLocations.filter((l) => l.category === category)
-              : [];
 
             return (
               <div key={wi} className="rounded-lg border border-border p-3">
@@ -300,17 +297,33 @@ export function HealthEntryForm({
 
                   {category ? (
                     <div className="space-y-1.5">
+                      <Label htmlFor={`subtype-${wi}`}>Variant</Label>
+                      <Input
+                        id={`subtype-${wi}`}
+                        placeholder="e.g. Barbell, Dumbbell, Machine"
+                        value={workout.subtype ?? ""}
+                        onChange={(e) =>
+                          updateWorkout(wi, { subtype: e.target.value.trim() === "" ? null : e.target.value })
+                        }
+                      />
+                    </div>
+                  ) : null}
+
+                  {category ? (
+                    <div className="space-y-1.5">
                       <Label htmlFor={`location-${wi}`}>Location</Label>
+                      {/* Workout location is the same places catalog day-level
+                          places uses (not a category-scoped catalog — see the
+                          comment above the `exercises` table in schema.ts). */}
                       <CatalogPicker
                         id={`location-${wi}`}
-                        itemLabel="Location"
-                        items={locationsForCategory}
+                        itemLabel="Place"
+                        items={places}
                         valueId={workout.locationId}
                         onChange={(id) => updateWorkout(wi, { locationId: id })}
-                        onCreated={(item) => handleLocationCreated(item, category)}
-                        createApiPath="/api/exercise-locations"
-                        addLabel={`New ${EXERCISE_CATEGORY_LABELS[category]} location`}
-                        extraCreateFields={{ category }}
+                        onCreated={handlePlaceCreated}
+                        createApiPath="/api/places"
+                        addLabel="New place"
                       />
                     </div>
                   ) : null}

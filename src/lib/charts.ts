@@ -1,0 +1,159 @@
+import { asc, desc, isNotNull, sql } from "drizzle-orm";
+import { getDb } from "@/lib/db";
+import { days, places, workouts } from "@/db/schema";
+
+// Phase 4, first batch: five chart data-fetchers, each backed entirely by
+// domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
+// list of legacy charts and why these five were picked first (data-ready,
+// and five genuinely different D3 chart archetypes). Every function returns
+// plain serializable data (no Date objects, no Drizzle row wrappers) since
+// it's passed from a server component straight into a client chart
+// component as a prop.
+
+// --- Happiness histogram ---------------------------------------------------
+
+/** Every recorded happiness value (0-100), oldest first. Binning is left to
+ * the chart component (d3.bin has better judgment about bucket width than a
+ * pre-aggregated count would) rather than done here. */
+export async function getHappinessHistogramData(): Promise<number[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ happiness: days.happiness })
+    .from(days)
+    .where(isNotNull(days.happiness))
+    .orderBy(asc(days.date));
+  return rows.map((r) => r.happiness as number);
+}
+
+// --- Weight scroller ---------------------------------------------------
+
+export type WeightPoint = { date: string; weightKg: number };
+
+/** Every recorded weight, oldest first — feeds a zoomable line chart via a
+ * brush on a mini overview strip (the legacy "scroller" pattern). */
+export async function getWeightScrollerData(): Promise<WeightPoint[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, weightKg: days.weightKg })
+    .from(days)
+    .where(isNotNull(days.weightKg))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, weightKg: r.weightKg as number }));
+}
+
+// --- Sleep calendar ---------------------------------------------------
+
+export type SleepDay = { date: string; durationMinutes: number };
+
+function hhmmToMinutes(hhmm: string): number | null {
+  const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+/** Sleep duration per day, derived from sleepTime/wakeTime + the explicit
+ * wakeCrossedMidnight flag (see schema.ts's comment on that column — the
+ * legacy app computed this client-side and then discarded it, so duration
+ * across midnight is only recoverable going forward, not for old data that
+ * predates the flag... except the flag is backfilled by the Phase 3
+ * migration script from the same wake<sleep heuristic, so it's populated
+ * for historical data too). Days missing either time are skipped rather
+ * than guessed at. */
+export async function getSleepCalendarData(): Promise<SleepDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: days.date,
+      sleepTime: days.sleepTime,
+      wakeTime: days.wakeTime,
+      wakeCrossedMidnight: days.wakeCrossedMidnight,
+    })
+    .from(days)
+    .where(sql`${days.sleepTime} is not null and ${days.wakeTime} is not null`)
+    .orderBy(asc(days.date));
+
+  const out: SleepDay[] = [];
+  for (const r of rows) {
+    const sleepMin = hhmmToMinutes(r.sleepTime as string);
+    const wakeMin = hhmmToMinutes(r.wakeTime as string);
+    if (sleepMin === null || wakeMin === null) continue;
+    const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
+    if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
+    out.push({ date: r.date, durationMinutes });
+  }
+  return out;
+}
+
+// --- Weight + workout volume combo ---------------------------------------------------
+
+export type WorkoutMonth = { month: string; count: number }; // month = "YYYY-MM"
+
+export type GymWeightComboData = {
+  weight: WeightPoint[];
+  workoutsByMonth: WorkoutMonth[];
+};
+
+/** Weight (line) alongside workout frequency (bars, one per calendar month —
+ * daily workout counts would be too sparse/spiky to read as bars over a
+ * multi-year range, monthly is the legacy chart's effective resolution
+ * too). Two independently-shaped series sharing one time x-axis and two
+ * y-axes, ported from the legacy app's bespoke `LineBarChart` in
+ * gym-weight_chart.js. */
+export async function getGymWeightComboData(): Promise<GymWeightComboData> {
+  const db = getDb();
+  const [weightRows, workoutDates] = await Promise.all([
+    db
+      .select({ date: days.date, weightKg: days.weightKg })
+      .from(days)
+      .where(isNotNull(days.weightKg))
+      .orderBy(asc(days.date)),
+    db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)),
+  ]);
+
+  const monthCounts = new Map<string, number>();
+  for (const { date } of workoutDates) {
+    const month = date.slice(0, 7); // "YYYY-MM-DD" -> "YYYY-MM"
+    monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
+  }
+  const workoutsByMonth = [...monthCounts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, count]) => ({ month, count }));
+
+  return {
+    weight: weightRows.map((r) => ({ date: r.date, weightKg: r.weightKg as number })),
+    workoutsByMonth,
+  };
+}
+
+// --- Place leaderboard ---------------------------------------------------
+
+export type PlaceLeaderboardEntry = { name: string; value: number };
+
+/** Ranks places by how often they were logged in a day's two place slots,
+ * weighting slot 1 double slot 2 — the exact scheme the legacy
+ * `location_leaderboard` chart used (`places[mens.place1].value += 2`,
+ * `+= 1` for place2). The legacy chart then grouped results into a
+ * metro/category hierarchy for a nested table; that enrichment isn't in
+ * this schema yet (see REBUILD_PLAN.md), so this is the flat top-15
+ * ranking underneath it — still the real, meaningful part. */
+export async function getPlaceLeaderboardData(limit = 15): Promise<PlaceLeaderboardEntry[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      name: places.name,
+      value: sql<number>`
+        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
+        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
+      `.as("value"),
+    })
+    .from(places)
+    .innerJoin(
+      days,
+      sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`,
+    )
+    .groupBy(places.id, places.name)
+    .orderBy(desc(sql`value`))
+    .limit(limit);
+
+  return rows.map((r) => ({ name: r.name, value: Number(r.value) }));
+}
