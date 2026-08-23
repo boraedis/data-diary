@@ -36,6 +36,15 @@ export const POSITIVE_PEOPLE_SLOTS = 7;
 export const NEGATIVE_PEOPLE_SLOTS = 3;
 export const PLACE_SLOTS = 2;
 
+// The legacy app's tracked subscription list was itself a configurable
+// Firestore doc (`entry_structure/Subs`), not hardcoded — that doc wasn't
+// reachable during this migration, so this is the real list, straight from
+// the user: exactly these nine abbreviations, nothing else. `sub_entries`
+// stays a normalized (date, name, value) table rather than one column per
+// sub (see schema.ts) so this list can still change later without a schema
+// migration, but the entry form only ever renders these nine.
+export const SUB_NAMES = ["A", "W", "C", "L", "Ni", "NO", "Ad", "D", "K"] as const;
+
 export type WorkoutSetPayload = {
   setNumber: number;
   reps: number | null;
@@ -566,6 +575,8 @@ export function validateSocialMediaPayload(body: unknown): Result<SocialMediaPay
   };
 }
 
+const SUB_NAME_SET = new Set<string>(SUB_NAMES);
+
 export function validateSubsPayload(body: unknown): Result<SubsPayload> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
@@ -573,10 +584,17 @@ export function validateSubsPayload(body: unknown): Result<SubsPayload> {
   const b = body as Record<string, unknown>;
 
   const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const seenNames = new Set<string>();
   const entries: SubEntry[] = [];
   for (const e of input) {
     const name = typeof e.name === "string" ? e.name.trim() : "";
-    if (!name) return { ok: false, error: "Every sub needs a name" };
+    if (!SUB_NAME_SET.has(name)) {
+      return { ok: false, error: `Unknown sub "${name}" — must be one of ${SUB_NAMES.join(", ")}` };
+    }
+    if (seenNames.has(name)) {
+      return { ok: false, error: `Duplicate sub "${name}"` };
+    }
+    seenNames.add(name);
     const value = typeof e.value === "number" ? e.value : NaN;
     // Legacy range was 0-10 (an in-app usage/satisfaction rating, not a
     // dollar amount, despite the category being subscriptions).

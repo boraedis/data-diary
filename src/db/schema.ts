@@ -223,12 +223,15 @@ export const workoutSets = pgTable(
 );
 
 // --- sub_entries -----------------------------------------------------------
-// The legacy app's subscription list was itself configurable — it read the
-// set of tracked subscription names from a separate Firestore config doc
-// (`entry_structure/Subs`) rather than hardcoding them, and that doc wasn't
-// available during this migration. A normalized (date, name, value) table
-// carries that same flexibility forward without needing fixed columns per
-// subscription — new subscriptions just become new rows, no schema change.
+// The legacy app read its tracked subscription names from a separate
+// Firestore config doc (`entry_structure/Subs`) rather than hardcoding them;
+// that doc wasn't reachable during this migration, so the real list came
+// straight from the user instead: A, W, C, L, Ni, NO, Ad, D, K (see
+// SUB_NAMES in src/lib/days.ts, which is what the entry form actually
+// renders — this table has no CHECK constraint enforcing that list). Kept
+// as a normalized (date, name, value) table rather than one column per sub
+// specifically so that list can change later without a schema migration —
+// new subscriptions just become new rows.
 export const subEntries = pgTable(
   "sub_entries",
   {

@@ -158,24 +158,26 @@ function NewPersonModal({
   );
 }
 
-/** One valence's add panel: a search box over the shared people catalog
- * (people already used today, on either side, are filtered out so you
- * can't double-pick someone) plus a "+ New person" trigger. Picking a
- * result — by search or by creating new — always fills the next empty slot
- * for this valence, mirroring the legacy app's addPositive/addNegative
- * "loop and take the first empty slot" behavior; you never choose a slot by
- * hand, you just populate them in order. */
+/** The single add panel for both valences: one search box over the shared
+ * people catalog (people already used today, on either side, are filtered
+ * out so you can't double-pick someone) plus a "+ New person" trigger.
+ * Negative people are rare, so positive is the default action — tapping a
+ * result adds them as positive, filling the next empty positive slot. The
+ * small "−" button on each row is the alternate path, adding that person as
+ * negative instead. Either way this mirrors the legacy app's
+ * addPositive/addNegative "loop and take the first empty slot" behavior —
+ * you never choose a slot by hand, you just populate them in order. */
 function PersonAddPanel({
-  label,
   items,
   usedIds,
-  onPick,
+  onAddPositive,
+  onAddNegative,
   onCreated,
 }: {
-  label: string;
   items: PersonCatalogItem[];
   usedIds: Set<number>;
-  onPick: (personId: number) => void;
+  onAddPositive: (personId: number) => void;
+  onAddNegative: (personId: number) => void;
   onCreated: (item: PersonCatalogItem) => void;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
@@ -184,23 +186,27 @@ function PersonAddPanel({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label>{label}</Label>
+        <Label>Add a person</Label>
         <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
           + New person
         </Button>
       </div>
       <SearchPanel
         items={searchItems}
-        onSelect={onPick}
+        onSelect={onAddPositive}
+        secondaryAction={{ ariaLabel: "Add as negative", icon: "−", onSelect: onAddNegative }}
         placeholder="Search people…"
         emptyMessage="No matches — try “+ New person”."
       />
+      <p className="text-xs text-muted-foreground">
+        Tap a result to add as positive. Tap the − to add as negative instead.
+      </p>
       <NewPersonModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onCreated={(item) => {
           onCreated(item);
-          onPick(item.id);
+          onAddPositive(item.id);
         }}
       />
     </div>
@@ -352,12 +358,12 @@ export function PeopleEntryForm({
         <CardHeader>
           <CardTitle>People</CardTitle>
           <CardDescription>
-            {POSITIVE_PEOPLE_SLOTS} positive, {NEGATIVE_PEOPLE_SLOTS} negative. Search to pick someone —
-            it fills the next open slot on that side.
+            {POSITIVE_PEOPLE_SLOTS} positive, {NEGATIVE_PEOPLE_SLOTS} negative (rare). Tap a search
+            result to add as positive, or use the − for negative.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-4">
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase text-muted-foreground">Positive</p>
               {positive.map((personId, slot) => (
@@ -386,22 +392,13 @@ export function PeopleEntryForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <PersonAddPanel
-              label="Add positive"
-              items={items}
-              usedIds={usedIds}
-              onPick={(id) => addToValence("positive", id)}
-              onCreated={handleCreated}
-            />
-            <PersonAddPanel
-              label="Add negative"
-              items={items}
-              usedIds={usedIds}
-              onPick={(id) => addToValence("negative", id)}
-              onCreated={handleCreated}
-            />
-          </div>
+          <PersonAddPanel
+            items={items}
+            usedIds={usedIds}
+            onAddPositive={(id) => addToValence("positive", id)}
+            onAddNegative={(id) => addToValence("negative", id)}
+            onCreated={handleCreated}
+          />
         </CardContent>
       </Card>
 

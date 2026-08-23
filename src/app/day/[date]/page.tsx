@@ -8,16 +8,19 @@ import {
   NEGATIVE_PEOPLE_SLOTS,
   PLACE_SLOTS,
   POSITIVE_PEOPLE_SLOTS,
+  SUB_NAMES,
   type DayPayload,
 } from "@/lib/days";
 
 // Always a live DB read for the given date — never statically cached.
 export const dynamic = "force-dynamic";
 
-// Scalar sections show "X/N filled" with a progress bar. List sections
-// (subs/people/places/entertainment) have no fixed field count, so they
-// show a simple "N logged" badge instead — same "at a glance, not exact"
-// spirit as the scalar sections, just without a manufactured denominator.
+// Scalar sections show "X/N filled" with a progress bar. Subs/people/places
+// now have a fixed field count too (SUB_NAMES / the people & place slot
+// constants), so they get the same treatment. Entertainment is still a
+// genuinely open-ended list, so it shows a simple "N logged" badge instead —
+// same "at a glance, not exact" spirit, just without a manufactured
+// denominator.
 type CategorySummary =
   | { key: string; label: string; kind: "progress"; filled: number; total: number }
   | { key: string; label: string; kind: "count"; count: number };
@@ -84,7 +87,7 @@ function summarize(day: DayPayload): CategorySummary[] {
       filled: present([day.instagramFollowers, day.instagramFollowing]),
       total: 2,
     },
-    { key: "subs", label: "Subs", kind: "count", count: day.subs.length },
+    { key: "subs", label: "Subs", kind: "progress", filled: day.subs.length, total: SUB_NAMES.length },
     {
       key: "people",
       label: "People",

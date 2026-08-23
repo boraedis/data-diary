@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -32,10 +32,15 @@ function matches(item: SearchItem, query: string): boolean {
  * for a plain dropdown to be usable. Each row can carry a secondary line
  * for disambiguation (two people named "Alex", a movie and a book both
  * called "It") — both primary and secondary text are searchable.
+ *
+ * `secondaryAction` adds a small extra button on every row for a rare
+ * alternate pick (e.g. "add as negative" next to the default "add as
+ * positive") — tapping the row itself still runs `onSelect`.
  */
 export function SearchPanel({
   items,
   onSelect,
+  secondaryAction,
   placeholder = "Search…",
   emptyMessage = "No matches.",
   className,
@@ -43,6 +48,11 @@ export function SearchPanel({
 }: {
   items: SearchItem[];
   onSelect: (id: number) => void;
+  secondaryAction?: {
+    ariaLabel: string;
+    icon: ReactNode;
+    onSelect: (id: number) => void;
+  };
   placeholder?: string;
   emptyMessage?: string;
   className?: string;
@@ -64,20 +74,38 @@ export function SearchPanel({
           <p className="p-3 text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
           filtered.map((item) => (
-            <button
+            <div
               key={item.id}
-              type="button"
-              onClick={() => {
-                onSelect(item.id);
-                setQuery("");
-              }}
-              className="flex w-full flex-col items-start gap-0.5 border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-accent"
+              className="flex items-stretch border-b border-border last:border-b-0"
             >
-              <span className="text-sm">{item.primary}</span>
-              {item.secondary ? (
-                <span className="text-xs text-muted-foreground">{item.secondary}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect(item.id);
+                  setQuery("");
+                }}
+                className="flex flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
+              >
+                <span className="text-sm">{item.primary}</span>
+                {item.secondary ? (
+                  <span className="text-xs text-muted-foreground">{item.secondary}</span>
+                ) : null}
+              </button>
+              {secondaryAction ? (
+                <button
+                  type="button"
+                  aria-label={secondaryAction.ariaLabel}
+                  title={secondaryAction.ariaLabel}
+                  onClick={() => {
+                    secondaryAction.onSelect(item.id);
+                    setQuery("");
+                  }}
+                  className="flex w-10 shrink-0 items-center justify-center border-l border-border text-muted-foreground hover:bg-accent hover:text-destructive"
+                >
+                  {secondaryAction.icon}
+                </button>
               ) : null}
-            </button>
+            </div>
           ))
         )}
       </div>
