@@ -9,6 +9,8 @@ import {
   entertainmentKindEnum,
   exerciseCategoryEnum,
   exercises,
+  movies,
+  movieWatches,
   people,
   places,
   workLocationEnum,
@@ -135,6 +137,7 @@ export type DayPayload = {
   people: PersonEntry[];
   places: PlaceEntry[];
   entertainment: EntertainmentEntry[];
+  movies: MovieWatchEntry[];
 };
 
 export type HealthPayload = {
@@ -209,6 +212,25 @@ export type EntertainmentPayload = {
   entries: { entertainmentId: number; durationMinutes: number | null; notes: string | null }[];
 };
 
+// Movies are open-ended like entertainment (any number of watches per day,
+// including the same movie twice — a matinee and a rewatch that evening),
+// so, like entertainment, saving is a replace-on-save against a satellite
+// table rather than a fixed set of `days` columns — see saveMovies below.
+// `title`/`releaseDate`/`posterPath`/`runtimeMinutes` on the read side are
+// resolved via join purely for display and aren't part of what gets saved.
+export type MovieWatchEntry = {
+  id: number;
+  movieId: number;
+  title: string;
+  releaseDate: string | null;
+  posterPath: string | null;
+  runtimeMinutes: number | null;
+  rating: number | null;
+  locationType: string | null;
+};
+export type MovieWatchPayload = { movieId: number; rating: number | null; locationType: string | null };
+export type MoviesPayload = { entries: MovieWatchPayload[] };
+
 // Catalog item shapes carry every field the legacy "New Person"/"New Place"/
 // "New entertainment" modals captured (see the schema comments above people/
 // places/entertainmentCatalog for exactly what was and wasn't carried over)
@@ -236,6 +258,20 @@ export type EntertainmentCatalogItem = {
   kind: EntertainmentKind;
   title: string;
   detail: string | null;
+};
+// The movies catalog is populated from TMDB (see src/lib/tmdb.ts and
+// src/app/api/movies/route.ts), not typed in by hand like the catalogs
+// above — every field here is real TMDB metadata, fetched once per movie
+// and cached in the `movies` table so repeat watches don't refetch it.
+export type MovieCatalogItem = {
+  id: number;
+  tmdbId: number;
+  title: string;
+  releaseDate: string | null;
+  runtimeMinutes: number | null;
+  posterPath: string | null;
+  genres: string[];
+  collectionName: string | null;
 };
 
 /** Reads one day's full record — the scalar day row plus its workouts and
@@ -293,7 +329,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
   const allPersonIds = [...positiveIds, ...negativeIds].filter((id): id is number => id !== null);
   const allPlaceIds = placeIds.filter((id): id is number => id !== null);
 
-  const [peopleNameRows, placeNameRows, entertainmentRows] = await Promise.all([
+  const [peopleNameRows, placeNameRows, entertainmentRows, movieWatchRows] = await Promise.all([
     allPersonIds.length
       ? db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, allPersonIds))
       : Promise.resolve([]),
@@ -313,6 +349,21 @@ export async function loadDay(date: string): Promise<DayPayload> {
       .innerJoin(entertainmentCatalog, eq(entertainmentEntries.entertainmentId, entertainmentCatalog.id))
       .where(eq(entertainmentEntries.date, date))
       .orderBy(asc(entertainmentEntries.sortOrder)),
+    db
+      .select({
+        id: movieWatches.id,
+        movieId: movieWatches.movieId,
+        title: movies.title,
+        releaseDate: movies.releaseDate,
+        posterPath: movies.posterPath,
+        runtimeMinutes: movies.runtimeMinutes,
+        rating: movieWatches.rating,
+        locationType: movieWatches.locationType,
+      })
+      .from(movieWatches)
+      .innerJoin(movies, eq(movieWatches.movieId, movies.id))
+      .where(eq(movieWatches.date, date))
+      .orderBy(asc(movieWatches.id)),
   ]);
 
   const personNameById = new Map(peopleNameRows.map((p) => [p.id, p.name]));
@@ -400,6 +451,16 @@ export async function loadDay(date: string): Promise<DayPayload> {
       title: e.title,
       durationMinutes: e.durationMinutes,
       notes: e.notes,
+    })),
+    movies: movieWatchRows.map((w) => ({
+      id: w.id,
+      movieId: w.movieId,
+      title: w.title,
+      releaseDate: w.releaseDate,
+      posterPath: w.posterPath,
+      runtimeMinutes: w.runtimeMinutes,
+      rating: w.rating,
+      locationType: w.locationType,
     })),
   };
 }
@@ -736,6 +797,54 @@ export function validateEntertainmentPayload(body: unknown): Result<Entertainmen
   }
 
   return { ok: true, value: { entries } };
+}
+
+export function validateMoviesPayload(body: unknown): Result<MoviesPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: MoviesPayload["entries"] = [];
+  for (const e of input) {
+    const movieId = typeof e.movieId === "number" ? e.movieId : NaN;
+    if (!Number.isInteger(movieId)) {
+      return { ok: false, error: "Invalid movie selection" };
+    }
+
+    let rating: number | null = null;
+    if (e.rating !== null && e.rating !== undefined) {
+      const r = typeof e.rating === "number" ? e.rating : NaN;
+      if (!Number.isInteger(r) || r < 1 || r > 10) {
+        return { ok: false, error: "Rating must be a whole number between 1 and 10" };
+      }
+      rating = r;
+    }
+
+    const locationType =
+      typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    entries.push({ movieId, rating, locationType });
+  }
+
+  return { ok: true, value: { entries } };
+}
+
+// Unlike people/places/entertainment's "+ New" modals, a new movie isn't
+// hand-typed — the client only ever sends a tmdbId (picked from a TMDB
+// search result); the rest of the catalog row is fetched server-side (see
+// src/app/api/movies/route.ts) so metadata always matches TMDB rather than
+// whatever a user might mistype.
+export function validateMovieCatalogRequest(body: unknown): Result<{ tmdbId: number }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const tmdbId = typeof b.tmdbId === "number" ? b.tmdbId : NaN;
+  if (!Number.isInteger(tmdbId) || tmdbId <= 0) {
+    return { ok: false, error: "Invalid tmdbId" };
+  }
+  return { ok: true, value: { tmdbId } };
 }
 
 type PersonCatalogInput = {
@@ -1175,6 +1284,28 @@ export async function saveEntertainment(date: string, value: EntertainmentPayloa
   return loadDay(date);
 }
 
+// Same replace-on-save shape as saveEntertainment above (open-ended, needs
+// the day row to exist first via ensureDayRow), just against the
+// movie_watches satellite table instead.
+export async function saveMovies(date: string, value: MoviesPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(movieWatches).where(eq(movieWatches.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(movieWatches).values(
+      value.entries.map((e) => ({
+        date,
+        movieId: e.movieId,
+        rating: e.rating,
+        locationType: e.locationType,
+      }))
+    );
+  }
+
+  return loadDay(date);
+}
+
 // --- Catalogs --------------------------------------------------------------
 // People/places/exercises/exercise-locations/entertainment all follow the
 // same "pick from a maintained list, add new via a quick create" pattern
@@ -1314,3 +1445,43 @@ export async function createExerciseCatalogEntry(
 // Workout locations are the `places` catalog above (listPlacesCatalog/
 // createPlaceCatalogEntry) — see the comment above the `exercises` table in
 // schema.ts for why there's no separate exercise-locations catalog here.
+
+const MOVIE_COLUMNS = {
+  id: movies.id,
+  tmdbId: movies.tmdbId,
+  title: movies.title,
+  releaseDate: movies.releaseDate,
+  runtimeMinutes: movies.runtimeMinutes,
+  posterPath: movies.posterPath,
+  genres: movies.genres,
+  collectionName: movies.collectionName,
+};
+
+export async function listMoviesCatalog(): Promise<MovieCatalogItem[]> {
+  const db = getDb();
+  return db.select(MOVIE_COLUMNS).from(movies).orderBy(asc(movies.title));
+}
+
+// Upsert-by-tmdbId, same "typing/picking something that already exists just
+// selects the existing row" reasoning as the catalogs above — here it's
+// picking the same TMDB search result twice (e.g. a rewatch) rather than a
+// retyped name, but the effect is the same: no duplicate row, no error.
+export async function createMovieCatalogEntry(input: {
+  tmdbId: number;
+  title: string;
+  releaseDate: string | null;
+  runtimeMinutes: number | null;
+  posterPath: string | null;
+  genres: string[];
+  collectionName: string | null;
+}): Promise<MovieCatalogItem> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(movies)
+    .values(input)
+    .onConflictDoNothing({ target: movies.tmdbId })
+    .returning(MOVIE_COLUMNS);
+  if (inserted) return inserted;
+  const [existing] = await db.select(MOVIE_COLUMNS).from(movies).where(eq(movies.tmdbId, input.tmdbId));
+  return existing;
+}

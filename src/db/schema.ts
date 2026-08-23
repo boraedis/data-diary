@@ -381,6 +381,355 @@ export const entertainmentEntries = pgTable(
   (table) => [index("entertainment_entries_date_idx").on(table.date)]
 );
 
+// --- Entertainment: movies & TV shows -------------------------------------
+// Phase 5's first real entertainment domain — added alongside
+// entertainmentCatalog/entertainmentEntries above rather than replacing
+// them yet; those stay live until the new per-kind entry forms/routes are
+// built and swapped over, so the app keeps building in the meantime. See
+// REBUILD_PLAN.md for the staged rollout.
+//
+// Per your call, ported at full parity with the legacy app rather than
+// simplified: real TMDB (themoviedb.org) metadata lookups on add (poster
+// art, genres, runtime), and for TV, true episode-by-episode watch
+// tracking rather than show-level-only. Needs a `TMDB_API_KEY` env var —
+// TMDB's API is free to use but does require signing up for a key; the
+// legacy app hardcoded one directly in client-side JS (findable in its git
+// history), which is deliberately not being carried forward — see the
+// Phase 6 cleanup note on rotating/not-repeating exposed secrets.
+export const movies = pgTable("movies", {
+  id: serial("id").primaryKey(),
+  tmdbId: integer("tmdb_id").notNull().unique(),
+  title: text("title").notNull(),
+  releaseDate: date("release_date", { mode: "string" }),
+  runtimeMinutes: integer("runtime_minutes"),
+  posterPath: text("poster_path"),
+  genres: text("genres").array().notNull().default([]),
+  // Franchise name, from TMDB's belongs_to_collection — optional.
+  collectionName: text("collection_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One row per watch, including rewatches — replaces the legacy's
+// day-array-plus-separate-per-day-watch-count-map duplication (`searchs/
+// media[id].watches: {date: count}`, kept in sync by hand on every save).
+// A rewatch count here is just `count(*) group by movie_id`, nothing to
+// keep in sync.
+export const movieWatches = pgTable(
+  "movie_watches",
+  {
+    id: serial("id").primaryKey(),
+    movieId: integer("movie_id")
+      .notNull()
+      .references(() => movies.id, { onDelete: "restrict" }),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    rating: smallint("rating"), // 1-10, matches the legacy slider
+    // Free text, not a catalog table — the legacy `entertainment/extras.
+    // location_types` list is itself just a small user-managed string
+    // list, not worth a real table yet (same call already made for
+    // `days.sleepLocationType`).
+    locationType: text("location_type"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("movie_watches_date_idx").on(table.date)]
+);
+
+export const movieWatchlist = pgTable("movie_watchlist", {
+  movieId: integer("movie_id")
+    .primaryKey()
+    .references(() => movies.id, { onDelete: "cascade" }),
+  addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// The current top-10 ranked list, replace-on-save (delete all rows,
+// reinsert) rather than fixed rank1Id..rank10Id columns — unlike the
+// legacy-confirmed-fixed person/place slot counts on `days`, "top 10" isn't
+// a load-bearing fixed count from the source app, just this feature's
+// current shape, so a satellite table stays easier to adjust later.
+export const movieRankings = pgTable("movie_rankings", {
+  rank: smallint("rank").primaryKey(), // 1-10
+  movieId: integer("movie_id")
+    .notNull()
+    .references(() => movies.id, { onDelete: "cascade" }),
+});
+
+export const tvShows = pgTable("tv_shows", {
+  id: serial("id").primaryKey(),
+  tmdbId: integer("tmdb_id").notNull().unique(),
+  title: text("title").notNull(),
+  posterPath: text("poster_path"),
+  genres: text("genres").array().notNull().default([]),
+  status: text("status"), // TMDB status string, e.g. "Ended" / "Returning Series"
+  // Whether you're still actively following this show — the legacy
+  // "interested" toggle, flips off (with a date) once you drop a show.
+  interested: boolean("interested").notNull().default(true),
+  uninterestedDate: date("uninterested_date", { mode: "string" }),
+  lastRefreshed: date("last_refreshed", { mode: "string" }),
+  nextEpisodeDate: date("next_episode_date", { mode: "string" }),
+  nextEpisodeSeason: integer("next_episode_season"),
+  nextEpisodeNumber: integer("next_episode_number"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Episode metadata catalog — one row per known episode, not per watch (see
+// tvEpisodeWatches below for that).
+export const tvEpisodes = pgTable(
+  "tv_episodes",
+  {
+    id: serial("id").primaryKey(),
+    showId: integer("show_id")
+      .notNull()
+      .references(() => tvShows.id, { onDelete: "cascade" }),
+    tmdbEpisodeId: integer("tmdb_episode_id").notNull().unique(),
+    season: integer("season").notNull(),
+    episode: integer("episode").notNull(),
+    name: text("name"),
+    airDate: date("air_date", { mode: "string" }),
+    runtimeMinutes: integer("runtime_minutes"),
+  },
+  (table) => [index("tv_episodes_show_id_idx").on(table.showId)]
+);
+
+// One row per watch, including rewatches — replaces the legacy's
+// per-episode `watches: {date: count}` map, same reasoning as
+// movieWatches above. `date` is nullable specifically for the legacy
+// app's "I watched this at some point before I started tracking" bulk
+// mark (its special "legacy" pseudo-date key): a null date means "watched,
+// exact date unknown" rather than "not watched" — absence of a row at all
+// is what "not watched" means here.
+export const tvEpisodeWatches = pgTable(
+  "tv_episode_watches",
+  {
+    id: serial("id").primaryKey(),
+    episodeId: integer("episode_id")
+      .notNull()
+      .references(() => tvEpisodes.id, { onDelete: "restrict" }),
+    date: date("date", { mode: "string" }).references(() => days.date, { onDelete: "cascade" }),
+    locationType: text("location_type"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("tv_episode_watches_episode_id_idx").on(table.episodeId),
+    index("tv_episode_watches_date_idx").on(table.date),
+  ]
+);
+
+// --- Entertainment: books ---------------------------------------------
+// Real Google Books metadata on add (needs a `GOOGLE_BOOKS_API_KEY` env
+// var — same call as movies/TV: free API, but the legacy app's hardcoded
+// key isn't being carried forward). Deliberately NOT stored: a cached
+// "bookmark" (current page) or completions counter — the legacy app kept
+// both in sync by hand (the completions count via a full rescan of every
+// day's entertainment log on every relevant save). Both are trivial to
+// compute on read in Postgres instead (current page = `max(end_page)`
+// ordered by date since the last completed session; completions =
+// `count(*) where completed`), so there's nothing to keep in sync at all.
+export const books = pgTable("books", {
+  id: serial("id").primaryKey(),
+  googleBooksId: text("google_books_id").notNull().unique(),
+  title: text("title").notNull(),
+  authors: text("authors").array().notNull().default([]),
+  publisher: text("publisher"),
+  // Google Books returns partial dates ("1997", "1997-06") as well as full
+  // ones — free text rather than a real date column since it's not always
+  // a complete date.
+  publishedDate: text("published_date"),
+  description: text("description"),
+  thumbnailUrl: text("thumbnail_url"),
+  pageCount: integer("page_count"),
+  categories: text("categories").array().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const bookReadingSessions = pgTable(
+  "book_reading_sessions",
+  {
+    id: serial("id").primaryKey(),
+    bookId: integer("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "restrict" }),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    startPage: integer("start_page"),
+    endPage: integer("end_page"),
+    // String "true"/"false" in the legacy app (a radio field) — a real
+    // boolean here, no reason to carry that forward.
+    completed: boolean("completed").notNull().default(false),
+    locationType: text("location_type"),
+    durationMinutes: integer("duration_minutes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("book_reading_sessions_date_idx").on(table.date),
+    index("book_reading_sessions_book_id_idx").on(table.bookId),
+  ]
+);
+
+export const bookWatchlist = pgTable("book_watchlist", {
+  bookId: integer("book_id")
+    .primaryKey()
+    .references(() => books.id, { onDelete: "cascade" }),
+  addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const bookRankings = pgTable("book_rankings", {
+  rank: smallint("rank").primaryKey(), // 1-10
+  bookId: integer("book_id")
+    .notNull()
+    .references(() => books.id, { onDelete: "cascade" }),
+});
+
+// --- Entertainment: sports ---------------------------------------------
+// Fully manual catalog, no external API — the historical survey found this
+// domain genuinely complete and well-used in the legacy app (unlike games
+// below), so it's ported closely: sport -> league -> team, all user-entered
+// via "+ New" flows like people/places/exercises. Seasons and divisions
+// stay free text on the log/team rather than getting their own catalog
+// tables — in the legacy app they're just label lists scoped to a league
+// (`leagues[name].seasons`/`.divisions`), not real entities with their own
+// attributes, so a whole table each would be overhead a label doesn't need.
+export const sports = pgTable("sports", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  isTeamSport: boolean("is_team_sport").notNull().default(true),
+});
+
+export const sportsLeagues = pgTable(
+  "sports_leagues",
+  {
+    id: serial("id").primaryKey(),
+    sportId: integer("sport_id")
+      .notNull()
+      .references(() => sports.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: text("type"),
+  },
+  (table) => [uniqueIndex("sports_leagues_sport_id_name_idx").on(table.sportId, table.name)]
+);
+
+export const sportsTeams = pgTable(
+  "sports_teams",
+  {
+    id: serial("id").primaryKey(),
+    sportId: integer("sport_id")
+      .notNull()
+      .references(() => sports.id, { onDelete: "cascade" }),
+    leagueId: integer("league_id").references(() => sportsLeagues.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    alias: text("alias"),
+    // The legacy field was named `city` for team sports and (via an actual
+    // typo, "nationaltity") for individual-athlete sports where a "team" is
+    // really just a person — one honestly-named free-text field here
+    // instead of carrying the typo or the dual-meaning-by-sport-type
+    // ambiguity forward.
+    homeLocation: text("home_location"),
+    color: text("color"),
+    division: text("division"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("sports_teams_sport_id_name_idx").on(table.sportId, table.name)]
+);
+
+export const sportsWatches = pgTable(
+  "sports_watches",
+  {
+    id: serial("id").primaryKey(),
+    sportId: integer("sport_id")
+      .notNull()
+      .references(() => sports.id, { onDelete: "restrict" }),
+    leagueId: integer("league_id").references(() => sportsLeagues.id, { onDelete: "set null" }),
+    season: text("season"),
+    gameType: text("game_type"),
+    homeTeamId: integer("home_team_id").references(() => sportsTeams.id, { onDelete: "set null" }),
+    awayTeamId: integer("away_team_id").references(() => sportsTeams.id, { onDelete: "set null" }),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    watchedLive: boolean("watched_live").notNull().default(false),
+    durationMinutes: integer("duration_minutes"),
+    locationType: text("location_type"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("sports_watches_date_idx").on(table.date)]
+);
+
+// --- Entertainment: games ---------------------------------------------
+// Kept intentionally minimal — the historical survey found the legacy games
+// domain was effectively a stub: its catalog-edit function called an API
+// method that was never defined, and a copy-pasted stand-in for it silently
+// clobbered the *books* edit function instead (wrong-namespace bug); its
+// browse UI was leftover sports-catalog code, never adapted. There's no
+// real intended richer design underneath to reverse-engineer, so this is
+// just enough to log "played X for N minutes" — same treatment as
+// finance/todo/goals in spirit, just not fully dropped since logging a
+// game session is at least a working, real feature today.
+export const games = pgTable("games", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  type: text("type"),
+  subtype: text("subtype"),
+});
+
+export const gameSessions = pgTable(
+  "game_sessions",
+  {
+    id: serial("id").primaryKey(),
+    gameId: integer("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "restrict" }),
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "cascade" }),
+    durationMinutes: integer("duration_minutes"),
+    device: text("device"),
+    locationType: text("location_type"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("game_sessions_date_idx").on(table.date)]
+);
+
+// --- Music (Spotify listen history) ---------------------------------------
+// Architecturally separate from the five kinds above: the legacy app never
+// logged listens as part of day-to-day entry at all — it bulk-read raw
+// Spotify "Extended Streaming History" export JSON files fresh at
+// chart-render time, nothing persisted per-listen in Firestore. This table
+// is the persisted version of that export data, populated by an in-app
+// upload/import flow (per your call — not a one-off migration script) —
+// there's no day-entry form for this, just an import page elsewhere in the
+// app. The artist/album/genre enrichment layer the legacy app had
+// (`music/artists`, `music/albums`, `music/genres`) is deliberately NOT
+// ported yet: the historical survey found nothing in the legacy codebase
+// actually wrote to it (seemingly synced by some process outside the repo),
+// so there's no real source data behind it to migrate — revisit if that
+// enrichment turns out to matter once raw listens are in.
+export const musicListens = pgTable(
+  "music_listens",
+  {
+    id: serial("id").primaryKey(),
+    playedAt: timestamp("played_at", { withTimezone: true }).notNull(),
+    msPlayed: integer("ms_played").notNull(),
+    trackName: text("track_name"),
+    artistName: text("artist_name"),
+    albumName: text("album_name"),
+    // Set instead of trackName/artistName for podcast episodes, matching
+    // the Spotify export's own shape (episode_show_name).
+    podcastShowName: text("podcast_show_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("music_listens_played_at_idx").on(table.playedAt),
+    // Re-uploading the same export (or overlapping exports — Spotify
+    // splits a year into multiple numbered files once it's large enough,
+    // and boundary-adjacent pairs like 2019/2019_1 are exactly the kind of
+    // file split that could double-count a listen near the boundary)
+    // should be a safe no-op, not duplicate rows — the import route uses
+    // ON CONFLICT DO NOTHING against this index.
+    uniqueIndex("music_listens_dedupe_idx").on(table.playedAt, table.trackName, table.msPlayed),
+  ]
+);
+
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];

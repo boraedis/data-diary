@@ -97,6 +97,7 @@ function summarize(day: DayPayload): CategorySummary[] {
     },
     { key: "places", label: "Places", kind: "progress", filled: day.places.length, total: PLACE_SLOTS },
     { key: "entertainment", label: "Entertainment", kind: "count", count: day.entertainment.length },
+    { key: "movies", label: "Movies", kind: "count", count: day.movies.length },
   ];
 }
 
