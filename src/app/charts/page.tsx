@@ -40,6 +40,11 @@ const CHARTS = [
     title: "Most-visited places",
     description: "Ranked by how often each place filled your day's two place slots.",
   },
+  {
+    href: "/charts/people",
+    title: "People network",
+    description: "Who gets logged together — drag nodes to reposition.",
+  },
 ] as const;
 
 export default function ChartsIndexPage() {

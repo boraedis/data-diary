@@ -1,6 +1,6 @@
-import { asc, desc, isNotNull, sql } from "drizzle-orm";
+import { asc, desc, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { days, places, workouts } from "@/db/schema";
+import { days, people, places, workouts } from "@/db/schema";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
 // domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
@@ -226,4 +226,90 @@ export async function getSubsScrollerData(): Promise<SubsSeries[]> {
     date: r.date,
     values: [r.subA, r.subW, r.subC, r.subL, r.subNi, r.subNO, r.subAd, r.subD, r.subK],
   }));
+}
+
+// --- People network ---------------------------------------------------
+
+export type NetworkNode = { id: number; name: string; count: number };
+export type NetworkEdge = { source: number; target: number; weight: number };
+export type PeopleNetworkData = { nodes: NetworkNode[]; edges: NetworkEdge[] };
+
+/** A co-occurrence graph: nodes are people, sized by how many days they were
+ * logged in any of the 10 person slots; edges connect two people who were
+ * both logged on the same day, weighted by how often that's happened.
+ * Computed in JS rather than SQL — the 10 slots are 10 separate FK columns
+ * (see schema.ts), not rows in a table, so there's nothing to GROUP BY;
+ * unpivoting them per day and tallying pairs is simplest done here, and
+ * `days` is only ~3-4k rows, cheap to pull whole. Capped to the `maxNodes`
+ * most-mentioned people — the legacy app didn't cap this at all, but a
+ * force-directed layout with (in this diary's case) 700 catalog people
+ * would be unreadable regardless of screen size. */
+export async function getPeopleNetworkData(maxNodes = 40): Promise<PeopleNetworkData> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      p1: days.positivePerson1Id,
+      p2: days.positivePerson2Id,
+      p3: days.positivePerson3Id,
+      p4: days.positivePerson4Id,
+      p5: days.positivePerson5Id,
+      p6: days.positivePerson6Id,
+      p7: days.positivePerson7Id,
+      n1: days.negativePerson1Id,
+      n2: days.negativePerson2Id,
+      n3: days.negativePerson3Id,
+    })
+    .from(days);
+
+  const appearanceCount = new Map<number, number>();
+  const coOccurrence = new Map<string, number>(); // key `${lowerId}-${higherId}`
+
+  for (const row of rows) {
+    const ids = [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7, row.n1, row.n2, row.n3].filter(
+      (id): id is number => id !== null,
+    );
+    const unique = [...new Set(ids)];
+    for (const id of unique) {
+      appearanceCount.set(id, (appearanceCount.get(id) ?? 0) + 1);
+    }
+    for (let i = 0; i < unique.length; i++) {
+      for (let j = i + 1; j < unique.length; j++) {
+        const [a, b] = unique[i] < unique[j] ? [unique[i], unique[j]] : [unique[j], unique[i]];
+        const key = `${a}-${b}`;
+        coOccurrence.set(key, (coOccurrence.get(key) ?? 0) + 1);
+      }
+    }
+  }
+
+  const topIds = [...appearanceCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxNodes)
+    .map(([id]) => id);
+  const topSet = new Set(topIds);
+
+  if (topIds.length === 0) return { nodes: [], edges: [] };
+
+  const peopleRows = await db
+    .select({ id: people.id, name: people.name })
+    .from(people)
+    .where(inArray(people.id, topIds));
+  const nameById = new Map<number, string>(
+    peopleRows.map((p): [number, string] => [p.id, p.name]),
+  );
+
+  const nodes: NetworkNode[] = topIds.map((id) => ({
+    id,
+    name: nameById.get(id) ?? "?",
+    count: appearanceCount.get(id) ?? 0,
+  }));
+
+  const edges: NetworkEdge[] = [];
+  for (const [key, weight] of coOccurrence) {
+    const [aStr, bStr] = key.split("-");
+    const a = Number(aStr);
+    const b = Number(bStr);
+    if (topSet.has(a) && topSet.has(b)) edges.push({ source: a, target: b, weight });
+  }
+
+  return { nodes, edges };
 }
