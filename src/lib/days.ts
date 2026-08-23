@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   commuteEnum,
@@ -1349,6 +1349,75 @@ export async function createPersonCatalogEntry(input: PersonCatalogInput): Promi
   return existing;
 }
 
+// --- Catalog administration --------------------------------------------
+// Get-one/update/delete + a "where is this used" usage check per catalog,
+// for the /manage pages (src/app/manage/**) — the legacy app's "database"
+// section, where you go to fix a typo'd name or retire something you don't
+// use anymore, as opposed to the entry forms' "+ New" which only ever adds.
+// Every delete is preceded by a usage check so the UI can block (or warn
+// about) removing something still referenced, mirroring the legacy app's
+// person.js delete flow — see the comment above each usage function for
+// which FK columns actually enforce that at the DB level (`restrict`) versus
+// which just get nulled out (`set null`, e.g. a workout's location).
+
+export async function getPersonCatalogEntry(id: number): Promise<PersonCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(PERSON_COLUMNS).from(people).where(eq(people.id, id));
+  return row ?? null;
+}
+
+export async function updatePersonCatalogEntry(
+  id: number,
+  input: PersonCatalogInput
+): Promise<PersonCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(people)
+    .set({
+      name: input.name.trim(),
+      nicknames: input.nicknames,
+      birthdate: input.birthdate,
+      gender: input.gender,
+      tag: input.tag,
+    })
+    .where(eq(people.id, id))
+    .returning(PERSON_COLUMNS);
+  return updated;
+}
+
+export type PersonUsage = { dates: string[] };
+
+// A person is referenced by the 7 positive + 3 negative slot columns on
+// `days` (onDelete: "restrict" on every one — the DB itself would refuse
+// the delete too, this just lets the UI explain why and link to the days).
+export async function getPersonUsage(id: number): Promise<PersonUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date })
+    .from(days)
+    .where(
+      or(
+        eq(days.positivePerson1Id, id),
+        eq(days.positivePerson2Id, id),
+        eq(days.positivePerson3Id, id),
+        eq(days.positivePerson4Id, id),
+        eq(days.positivePerson5Id, id),
+        eq(days.positivePerson6Id, id),
+        eq(days.positivePerson7Id, id),
+        eq(days.negativePerson1Id, id),
+        eq(days.negativePerson2Id, id),
+        eq(days.negativePerson3Id, id)
+      )
+    )
+    .orderBy(asc(days.date));
+  return { dates: rows.map((r) => r.date) };
+}
+
+export async function deletePersonCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(people).where(eq(people.id, id));
+}
+
 const PLACE_COLUMNS = {
   id: places.id,
   name: places.name,
@@ -1378,6 +1447,56 @@ export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise
   if (inserted) return inserted;
   const [existing] = await db.select(PLACE_COLUMNS).from(places).where(eq(places.name, trimmed));
   return existing;
+}
+
+export async function getPlaceCatalogEntry(id: number): Promise<PlaceCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(PLACE_COLUMNS).from(places).where(eq(places.id, id));
+  return row ?? null;
+}
+
+export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(places)
+    .set({
+      name: input.name.trim(),
+      alias: input.alias,
+      address: input.address,
+      category: input.category,
+    })
+    .where(eq(places.id, id))
+    .returning(PLACE_COLUMNS);
+  return updated;
+}
+
+// A place is referenced two ways: as one of a day's 2 place slots
+// (onDelete: "restrict" — blocks deletion, same as people above) and as a
+// workout's location (onDelete: "set null" — deleting the place just clears
+// that field on the workout rather than blocking, since a location is a
+// minor, forgettable detail of a workout in a way a day's actual place
+// isn't). `workoutDates` is reported as a warning, not a hard block.
+export type PlaceUsage = { dayDates: string[]; workoutDates: string[] };
+
+export async function getPlaceUsage(id: number): Promise<PlaceUsage> {
+  const db = getDb();
+  const [dayRows, workoutRows] = await Promise.all([
+    db
+      .select({ date: days.date })
+      .from(days)
+      .where(or(eq(days.place1Id, id), eq(days.place2Id, id)))
+      .orderBy(asc(days.date)),
+    db.select({ date: workouts.date }).from(workouts).where(eq(workouts.locationId, id)).orderBy(asc(workouts.date)),
+  ]);
+  return {
+    dayDates: dayRows.map((r) => r.date),
+    workoutDates: [...new Set(workoutRows.map((r) => r.date))],
+  };
+}
+
+export async function deletePlaceCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(places).where(eq(places.id, id));
 }
 
 const ENTERTAINMENT_CATALOG_COLUMNS = {
@@ -1415,12 +1534,54 @@ export async function createEntertainmentCatalogEntry(
   return existing;
 }
 
+export async function getEntertainmentCatalogEntry(id: number): Promise<EntertainmentCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db
+    .select(ENTERTAINMENT_CATALOG_COLUMNS)
+    .from(entertainmentCatalog)
+    .where(eq(entertainmentCatalog.id, id));
+  return row ?? null;
+}
+
+export async function updateEntertainmentCatalogEntry(
+  id: number,
+  kind: EntertainmentKind,
+  title: string,
+  detail: string | null
+): Promise<EntertainmentCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(entertainmentCatalog)
+    .set({ kind, title: title.trim(), detail })
+    .where(eq(entertainmentCatalog.id, id))
+    .returning(ENTERTAINMENT_CATALOG_COLUMNS);
+  return updated;
+}
+
+export type EntertainmentUsage = { dates: string[] };
+
+// entertainmentEntries.entertainmentId is onDelete: "restrict" — a logged
+// day is the only way this catalog gets used, so this is the whole check.
+export async function getEntertainmentUsage(id: number): Promise<EntertainmentUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: entertainmentEntries.date })
+    .from(entertainmentEntries)
+    .where(eq(entertainmentEntries.entertainmentId, id))
+    .orderBy(asc(entertainmentEntries.date));
+  return { dates: [...new Set(rows.map((r) => r.date))] };
+}
+
+export async function deleteEntertainmentCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(entertainmentCatalog).where(eq(entertainmentCatalog.id, id));
+}
+
+const EXERCISE_COLUMNS = { id: exercises.id, name: exercises.name, category: exercises.category };
+
 export async function listExercisesCatalog(): Promise<ExerciseCatalogItem[]> {
   const db = getDb();
-  return db
-    .select({ id: exercises.id, name: exercises.name, category: exercises.category })
-    .from(exercises)
-    .orderBy(asc(exercises.name));
+  return db.select(EXERCISE_COLUMNS).from(exercises).orderBy(asc(exercises.name));
 }
 
 export async function createExerciseCatalogEntry(
@@ -1433,13 +1594,48 @@ export async function createExerciseCatalogEntry(
     .insert(exercises)
     .values({ name: trimmed, category })
     .onConflictDoNothing({ target: exercises.name })
-    .returning({ id: exercises.id, name: exercises.name, category: exercises.category });
+    .returning(EXERCISE_COLUMNS);
   if (inserted) return inserted;
-  const [existing] = await db
-    .select({ id: exercises.id, name: exercises.name, category: exercises.category })
-    .from(exercises)
-    .where(eq(exercises.name, trimmed));
+  const [existing] = await db.select(EXERCISE_COLUMNS).from(exercises).where(eq(exercises.name, trimmed));
   return existing;
+}
+
+export async function getExerciseCatalogEntry(id: number): Promise<ExerciseCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(EXERCISE_COLUMNS).from(exercises).where(eq(exercises.id, id));
+  return row ?? null;
+}
+
+export async function updateExerciseCatalogEntry(
+  id: number,
+  name: string,
+  category: ExerciseCategory
+): Promise<ExerciseCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(exercises)
+    .set({ name: name.trim(), category })
+    .where(eq(exercises.id, id))
+    .returning(EXERCISE_COLUMNS);
+  return updated;
+}
+
+export type ExerciseUsage = { dates: string[] };
+
+// workouts.exerciseId is onDelete: "restrict".
+export async function getExerciseUsage(id: number): Promise<ExerciseUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: workouts.date })
+    .from(workouts)
+    .where(eq(workouts.exerciseId, id))
+    .orderBy(asc(workouts.date));
+  return { dates: [...new Set(rows.map((r) => r.date))] };
+}
+
+export async function deleteExerciseCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(exercises).where(eq(exercises.id, id));
 }
 
 // Workout locations are the `places` catalog above (listPlacesCatalog/
@@ -1484,4 +1680,37 @@ export async function createMovieCatalogEntry(input: {
   if (inserted) return inserted;
   const [existing] = await db.select(MOVIE_COLUMNS).from(movies).where(eq(movies.tmdbId, input.tmdbId));
   return existing;
+}
+
+export async function getMovieCatalogEntry(id: number): Promise<MovieCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(MOVIE_COLUMNS).from(movies).where(eq(movies.id, id));
+  return row ?? null;
+}
+
+// Movies have no hand-editable fields — every field is TMDB metadata,
+// refreshed by re-fetching rather than typed in (see src/lib/tmdb.ts) — so
+// there's no updateMovieCatalogEntry here, unlike every other catalog.
+// "Manage" for a movie is really just: see its watch history, delete it if
+// it was added by mistake.
+export type MovieUsage = {
+  watches: { date: string; rating: number | null; locationType: string | null }[];
+};
+
+// movie_watches.movieId is onDelete: "restrict" (movie_watchlist/
+// movie_rankings both cascade instead, but neither has any UI yet — see
+// REBUILD_PLAN.md — so watches are the only usage worth surfacing).
+export async function getMovieUsage(id: number): Promise<MovieUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: movieWatches.date, rating: movieWatches.rating, locationType: movieWatches.locationType })
+    .from(movieWatches)
+    .where(eq(movieWatches.movieId, id))
+    .orderBy(asc(movieWatches.date));
+  return { watches: rows };
+}
+
+export async function deleteMovieCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(movies).where(eq(movies.id, id));
 }

@@ -96,8 +96,16 @@ function summarize(day: DayPayload): CategorySummary[] {
       total: POSITIVE_PEOPLE_SLOTS + NEGATIVE_PEOPLE_SLOTS,
     },
     { key: "places", label: "Places", kind: "progress", filled: day.places.length, total: PLACE_SLOTS },
-    { key: "entertainment", label: "Entertainment", kind: "count", count: day.entertainment.length },
-    { key: "movies", label: "Movies", kind: "count", count: day.movies.length },
+    // Movies has its own real form now, but it's still an entertainment
+    // kind, not its own day-summary category — its count folds into this
+    // tile, and the entertainment page itself links into the movies form.
+    // See the "Movies, first pass" / this note in REBUILD_PLAN.md.
+    {
+      key: "entertainment",
+      label: "Entertainment",
+      kind: "count",
+      count: day.entertainment.length + day.movies.length,
+    },
   ];
 }
 

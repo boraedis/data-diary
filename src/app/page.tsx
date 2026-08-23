@@ -54,6 +54,9 @@ export default async function HomePage() {
           <Link href="/charts" className={buttonVariants({ variant: "outline", className: "w-full" })}>
             Charts
           </Link>
+          <Link href="/manage" className={buttonVariants({ variant: "outline", className: "w-full" })}>
+            Manage
+          </Link>
           <form action="/api/auth/logout" method="post">
             <Button type="submit" variant="outline" className="w-full">
               Sign out

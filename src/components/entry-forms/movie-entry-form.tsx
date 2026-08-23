@@ -34,7 +34,7 @@ function toSearchItem(movie: MovieCatalogItem): SearchItem {
  * src/app/api/movies/route.ts) so its real TMDB metadata is cached for every
  * future watch — the client never types in a title, runtime, or genre by
  * hand for movies. */
-function TmdbSearchModal({
+export function TmdbSearchModal({
   open,
   onClose,
   onAdded,
