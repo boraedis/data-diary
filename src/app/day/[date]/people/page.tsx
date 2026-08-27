@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { DayNav } from "@/components/day-nav";
 import { PeopleEntryForm } from "@/components/entry-forms/people-entry-form";
+import { listTags } from "@/lib/catalog-admin";
 import { isValidDateString } from "@/lib/date";
 import { listPeopleCatalog, loadDay } from "@/lib/days";
 
@@ -16,12 +17,12 @@ export default async function PeopleEntryPage({
     notFound();
   }
 
-  const [day, catalog] = await Promise.all([loadDay(date), listPeopleCatalog()]);
+  const [day, catalog, tags] = await Promise.all([loadDay(date), listPeopleCatalog(), listTags()]);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-8">
       <DayNav date={date} category="people" />
-      <PeopleEntryForm date={date} initial={{ entries: day.people }} catalog={catalog} />
+      <PeopleEntryForm date={date} initial={{ entries: day.people }} catalog={catalog} tags={tags} />
     </main>
   );
 }

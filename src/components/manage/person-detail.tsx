@@ -8,17 +8,28 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { TagPicker } from "@/components/tag-picker";
 import type { PersonCatalogItem, PersonUsage } from "@/lib/days";
+import type { TagCatalogItem } from "@/lib/catalog-admin";
 
-export function PersonDetail({ person: initial, usage }: { person: PersonCatalogItem; usage: PersonUsage }) {
+export function PersonDetail({
+  person: initial,
+  usage,
+  initialTags,
+}: {
+  person: PersonCatalogItem;
+  usage: PersonUsage;
+  initialTags: TagCatalogItem[];
+}) {
   const router = useRouter();
   const [person, setPerson] = useState(initial);
+  const [tags, setTags] = useState(initialTags);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initial.name);
   const [nicknames, setNicknames] = useState(initial.nicknames.join(", "));
   const [birthdate, setBirthdate] = useState(initial.birthdate ?? "");
   const [gender, setGender] = useState(initial.gender ?? "");
-  const [tag, setTag] = useState(initial.tag ?? "");
+  const [tagId, setTagId] = useState<number | null>(initial.tagId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +38,7 @@ export function PersonDetail({ person: initial, usage }: { person: PersonCatalog
     setNicknames(person.nicknames.join(", "));
     setBirthdate(person.birthdate ?? "");
     setGender(person.gender ?? "");
-    setTag(person.tag ?? "");
+    setTagId(person.tagId);
     setError(null);
     setEditing(false);
   }
@@ -51,7 +62,7 @@ export function PersonDetail({ person: initial, usage }: { person: PersonCatalog
             .filter(Boolean),
           birthdate: birthdate.trim() || null,
           gender: gender.trim() || null,
-          tag: tag.trim() || null,
+          tagId,
         }),
       });
       const body = await res.json();
@@ -103,7 +114,13 @@ export function PersonDetail({ person: initial, usage }: { person: PersonCatalog
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="person-tag">Tag</Label>
-                <Input id="person-tag" value={tag} onChange={(e) => setTag(e.target.value)} />
+                <TagPicker
+                  id="person-tag"
+                  tags={tags}
+                  value={tagId}
+                  onChange={setTagId}
+                  onTagCreated={(t) => setTags((prev) => (prev.some((x) => x.id === t.id) ? prev : [...prev, t]))}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="person-nicknames">Nicknames</Label>
@@ -132,7 +149,22 @@ export function PersonDetail({ person: initial, usage }: { person: PersonCatalog
                 <dt className="text-muted-foreground">Gender</dt>
                 <dd>{person.gender ?? "—"}</dd>
                 <dt className="text-muted-foreground">Tag</dt>
-                <dd>{person.tag ?? "—"}</dd>
+                <dd>
+                  {person.tagName ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      {person.tagColor ? (
+                        <span
+                          aria-hidden
+                          className="inline-block size-2.5 rounded-full"
+                          style={{ backgroundColor: person.tagColor }}
+                        />
+                      ) : null}
+                      {person.tagName}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
                 <dt className="text-muted-foreground">Nicknames</dt>
                 <dd>{person.nicknames.length > 0 ? person.nicknames.join(", ") : "—"}</dd>
               </dl>

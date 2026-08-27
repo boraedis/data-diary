@@ -1,6 +1,8 @@
 import {
+  type AnyPgColumn,
   boolean,
   date,
+  doublePrecision,
   index,
   integer,
   pgEnum,
@@ -244,6 +246,71 @@ export const exercises = pgTable("exercises", {
   category: exerciseCategoryEnum("category").notNull(),
 });
 
+// --- Exercise subtypes (catalog, scoped per category) ----------------------
+// Legacy's `searchs/exercise_subtypes`: a real catalog, keyed by category
+// name -> array of subtype strings (e.g. distance: "Outdoor", "Treadmill";
+// strength: "Barbell", "Dumbbell", "Machine"), backing the workout entry
+// form's subtype dropdown. `workouts.subtype` above is (and stays) free
+// text — it was carried forward from the Phase 3 migration dry run before
+// this catalog was reachable, and every historical value already in it
+// would need to match a catalog entry to switch it to an FK. This table is
+// the real maintained list for a dropdown/autocomplete; wiring the entry
+// form to validate against it is a frontend follow-up, not enforced here.
+export const exerciseSubtypes = pgTable(
+  "exercise_subtypes",
+  {
+    id: serial("id").primaryKey(),
+    category: exerciseCategoryEnum("category").notNull(),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("exercise_subtypes_category_name_idx").on(table.category, table.name)]
+);
+
+// --- Exercise focus / subfocus (catalog + many-to-many tagging) -----------
+// Legacy's `searchs/exercise_focuses` ({focusName: [subfocusName, ...]})
+// plus each exercise doc carrying an array of {focus, subfocus, label} —
+// a classification axis entirely orthogonal to category (e.g. an exercise
+// can be tagged focus "Legs" / subfocus "Quads"). `label` in the legacy
+// shape read as a per-assignment display override, carried forward here as
+// an optional free-text field on the link row rather than dropped.
+export const exerciseFocuses = pgTable("exercise_focuses", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const exerciseSubfocuses = pgTable(
+  "exercise_subfocuses",
+  {
+    id: serial("id").primaryKey(),
+    focusId: integer("focus_id")
+      .notNull()
+      .references(() => exerciseFocuses.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("exercise_subfocuses_focus_name_idx").on(table.focusId, table.name)]
+);
+
+// A many-to-many link, not a column on `exercises` — an exercise can carry
+// more than one focus/subfocus pair (legacy stored this as an array on the
+// exercise doc). Cascades with the exercise itself on delete since this is
+// just orthogonal tagging metadata, not something worth blocking a delete
+// over the way workouts.exerciseId (real usage) does.
+export const exerciseFocusLinks = pgTable(
+  "exercise_focus_links",
+  {
+    id: serial("id").primaryKey(),
+    exerciseId: integer("exercise_id")
+      .notNull()
+      .references(() => exercises.id, { onDelete: "cascade" }),
+    focusId: integer("focus_id")
+      .notNull()
+      .references(() => exerciseFocuses.id, { onDelete: "restrict" }),
+    subfocusId: integer("subfocus_id").references(() => exerciseSubfocuses.id, { onDelete: "restrict" }),
+    label: text("label"),
+  },
+  (table) => [index("exercise_focus_links_exercise_id_idx").on(table.exerciseId)]
+);
+
 // --- workouts / workout_sets ---------------------------------------------
 // The one repeating structure in the health domain: a day can have any
 // number of workouts, each with any number of sets. Modeled as satellite
@@ -302,6 +369,70 @@ export const workoutSets = pgTable(
   (table) => [index("workout_sets_workout_id_idx").on(table.workoutId)]
 );
 
+// --- Tags (people) ---------------------------------------------------------
+// Legacy's `searchs/people_extras.tags` turned out to be a real catalog
+// (tag name -> hex color), not a scalar per person — each person doc stored
+// the tag's *name* as a plain string (max one tag per person), and renaming
+// a tag meant rewriting every member's document. Rebuilt here as a real
+// table with `people.tagId` as a proper FK instead: renaming/recoloring a
+// tag is now a single UPDATE on this row, no member-cascade needed. Legacy's
+// delete-tag and merge-tags were both dead/commented-out code (confirmed
+// while researching this) — NOT ported as-is; delete here is a real
+// block-if-has-members operation (onDelete: "restrict"), same pattern as
+// every other catalog's usage-checked delete.
+export const tags = pgTable("tags", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  color: text("color"), // hex, e.g. "#AFAFAF" — legacy's only other tag attribute
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// --- Place categories / subcategories (catalog) -----------------------------
+// Legacy's `searchs/place_categories`: {categoryName: [subcategoryName,
+// ...]} — a two-level, fully user-editable taxonomy. Subcategories are
+// scoped to their category via a real table + FK (not a second free array)
+// so the same subcategory name can mean different things under different
+// categories without collision. `places.category`/`places.subcategory`
+// below stay plain free-text strings rather than FKs into these tables —
+// that's not a shortcut, it's exactly how legacy stored them on a place doc
+// too (confirmed: never a doc reference or ID, always a denormalized
+// string copied from this catalog). These tables are the maintained list a
+// picker/autocomplete reads from and new entries get added to; nothing
+// here enforces that a place's stored category/subcategory string still
+// matches a live catalog row, same as legacy.
+export const placeCategories = pgTable("place_categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const placeSubcategories = pgTable(
+  "place_subcategories",
+  {
+    id: serial("id").primaryKey(),
+    categoryId: integer("category_id")
+      .notNull()
+      .references(() => placeCategories.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("place_subcategories_category_name_idx").on(table.categoryId, table.name)]
+);
+
+// --- Metro areas -------------------------------------------------------------
+// Legacy's `searchs/metros` ({name, municipalities: [], country, alias}) —
+// `municipalities` was a hand-maintained denormalized array of place names;
+// dropped here since it's just "places where metroId = this metro", a
+// reverse FK query, not a field anything needs to write. Legacy also
+// hardcoded a literal category=="Region" && subcategory=="Municipality"
+// string match to decide when to show the metro picker in its UI — that's
+// a frontend concern, not enforced at this layer; any place can carry a
+// metroId regardless of its category/subcategory strings.
+export const metros = pgTable("metros", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  country: text("country"),
+  alias: text("alias"),
+});
+
 // --- people / places (catalogs) ------------------------------------------
 // The legacy app referenced a `searchs/people` / `searchs/places` catalog —
 // day-level people/places entries always pointed at a name from a
@@ -312,30 +443,54 @@ export const workoutSets = pgTable(
 // views/entry/database/new_person_form.*, new_place_form.*) — the legacy
 // app searched people by nicknames (a person's full name was itself always
 // pushed into that list, so matching "nicknames OR name" isn't needed as a
-// separate rule) plus an optional single "tag" (a relationship label like
-// "family"/"coworker"); places by an alias plus name. Deliberately NOT
-// carried over: the legacy places catalog's full country -> region ->
-// subregion hierarchy and category/subcategory taxonomy tree (functions/
-// views/entry/database/world.*, new_place_form.js's addRegions/loadCategory)
-// — that's a real nested-catalog domain of its own, not a search-UX fix;
-// `category` here is a single free-text field standing in for it until
-// that's worth building for real.
+// separate rule) plus an optional single tag (see `tags` above); places by
+// an alias plus name.
 export const people = pgTable("people", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
   nicknames: text("nicknames").array().notNull().default([]),
   birthdate: date("birthdate", { mode: "string" }),
   gender: text("gender"),
-  tag: text("tag"),
+  tagId: integer("tag_id").references(() => tags.id, { onDelete: "restrict" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Places' hierarchy is a real, arbitrary-depth self-referencing tree —
+// legacy's `world` collection was a second, hand-maintained nested-map
+// index over `places` (country -> region -> subregion -> ...) that stored
+// a denormalized `path` array on every place and recursively rewrote every
+// descendant's path/order on every move. Postgres doesn't need that
+// duplication: `parentId` is the single source of truth for where a place
+// sits in the tree, and ancestry/descendants are computed on read via a
+// recursive CTE (see getPlaceAncestry/getPlaceDescendantIds in
+// src/lib/catalog-admin.ts) instead of a maintained path column — so
+// moving a place in the new app is one UPDATE, not a cascading rewrite of
+// every child underneath it. `onDelete: "restrict"` on parentId means a
+// place with children can't be deleted until they're moved or deleted
+// first (mirrored in getPlaceUsage's usage check).
 export const places = pgTable("places", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
   alias: text("alias"),
   address: text("address"),
   category: text("category"),
+  subcategory: text("subcategory"),
+  parentId: integer("parent_id").references((): AnyPgColumn => places.id, { onDelete: "restrict" }),
+  // Free-text label for what this place's children are called, e.g.
+  // "State", "Neighborhood" — legacy's per-node `subregion_name`, only
+  // meaningful on a place that actually has descendants.
+  subregionName: text("subregion_name"),
+  // Hex color — legacy only ever set this on top-level ("country") places,
+  // purely for UI color-coding; not enforced at this layer.
+  color: text("color"),
+  metroId: integer("metro_id").references(() => metros.id, { onDelete: "set null" }),
+  // Geocoded once when `address` is first set, and only re-geocoded when
+  // `address` actually changes (see geocodePlaceIfNeeded in
+  // src/lib/catalog-admin.ts) — legacy re-geocoded on every single edit
+  // regardless of what changed, burning a Maps API call every save; fixed
+  // here rather than carried forward.
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

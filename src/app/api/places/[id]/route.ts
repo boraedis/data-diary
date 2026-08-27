@@ -50,17 +50,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const updated = await updatePlaceCatalogEntry(id, parsed.value);
     return NextResponse.json(updated);
   } catch (error) {
+    // updatePlaceCatalogEntry throws a plain Error for the two
+    // hierarchy-move guards (self-parent, move-into-own-subtree) — those
+    // are bad requests, not server faults, so 400 rather than 500.
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 400 }
     );
   }
 }
 
-// Only dayDates blocks the delete (place1Id/place2Id are onDelete:
-// "restrict") — workoutDates is informational (workouts.locationId is
-// onDelete: "set null", so the DB would let this through and just clear
-// those workouts' location). See getPlaceUsage in src/lib/days.ts.
+// dayDates and childCount both block the delete (place1Id/place2Id and
+// another place's parentId are all onDelete: "restrict") — workoutDates is
+// informational only (workouts.locationId is onDelete: "set null", so the
+// DB would let this through and just clear those workouts' location). See
+// getPlaceUsage in src/lib/days.ts.
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const id = parseId((await params).id);
   if (id === null) {
@@ -68,7 +72,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   }
 
   const usage = await getPlaceUsage(id);
-  if (usage.dayDates.length > 0) {
+  if (usage.dayDates.length > 0 || usage.childCount > 0) {
     return NextResponse.json({ error: "Still in use", usage }, { status: 409 });
   }
 

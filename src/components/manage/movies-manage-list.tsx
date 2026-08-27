@@ -29,7 +29,7 @@ export function MoviesManageList({ initial }: { initial: MovieCatalogItem[] }) {
       </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
-        basePath="/manage/movies"
+        basePath="/manage/entertainment/movies"
         placeholder="Search movies…"
         emptyMessage="No matches."
       />

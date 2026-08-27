@@ -1,13 +1,13 @@
-// Server-only TMDB API wrapper — search and movie-detail lookups for the
-// movies catalog (src/app/api/tmdb/movies/search, src/app/api/movies). Never
-// import this from a "use client" component: the API key must never reach
-// the browser. This deliberately does NOT mirror the legacy app, which
-// hardcoded its TMDB key directly in client-side JS (exposed in the old
-// repo's git history — see REBUILD_PLAN.md's Phase 6 notes). The key is
-// read from `TMDB_API_KEY` at call time, not at module load, for the same
-// reason as src/lib/db.ts's lazy DATABASE_URL read: `next build` imports
-// every route handler just to inspect it, before env vars are necessarily
-// available.
+// Server-only TMDB API wrapper — search and detail lookups for the movies
+// and TV shows catalogs (src/app/api/tmdb/**, src/app/api/movies,
+// src/app/api/tvshows). Never import this from a "use client" component:
+// the API key must never reach the browser. This deliberately does NOT
+// mirror the legacy app, which hardcoded its TMDB key directly in
+// client-side JS (exposed in the old repo's git history — see
+// REBUILD_PLAN.md's Phase 6 notes). The key is read from `TMDB_API_KEY` at
+// call time, not at module load, for the same reason as src/lib/db.ts's
+// lazy DATABASE_URL read: `next build` imports every route handler just to
+// inspect it, before env vars are necessarily available.
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -99,5 +99,80 @@ export async function getMovieDetails(tmdbId: number): Promise<TmdbMovieDetails>
     posterPath: data.poster_path,
     genres: data.genres.map((g) => g.name),
     collectionName: data.belongs_to_collection?.name ?? null,
+  };
+}
+
+// --- TV shows ---------------------------------------------------------
+
+export type TmdbTvSearchResult = {
+  tmdbId: number;
+  title: string;
+  firstAirDate: string | null;
+  posterPath: string | null;
+};
+
+type TmdbTvSearchResponse = {
+  results: {
+    id: number;
+    name: string;
+    first_air_date: string | null;
+    poster_path: string | null;
+  }[];
+};
+
+export async function searchTvShows(query: string): Promise<TmdbTvSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const data = await tmdbFetch<TmdbTvSearchResponse>("/search/tv", { query: trimmed });
+  return data.results.map((r) => ({
+    tmdbId: r.id,
+    title: r.name,
+    firstAirDate: r.first_air_date || null,
+    posterPath: r.poster_path,
+  }));
+}
+
+export type TmdbTvShowDetails = {
+  tmdbId: number;
+  title: string;
+  posterPath: string | null;
+  genres: string[];
+  status: string | null;
+  nextEpisodeDate: string | null;
+  nextEpisodeSeason: number | null;
+  nextEpisodeNumber: number | null;
+};
+
+type TmdbTvShowResponse = {
+  id: number;
+  name: string;
+  poster_path: string | null;
+  genres: { id: number; name: string }[];
+  status: string | null;
+  next_episode_to_air: {
+    air_date: string | null;
+    season_number: number;
+    episode_number: number;
+  } | null;
+};
+
+/** Full detail fetch for one show, by TMDB id — same "fetch full metadata
+ * the moment something is picked" pattern as getMovieDetails, plus reused
+ * later for the "Refresh from TMDB" action on an already-added show (status
+ * and next-episode info go stale in a way a movie's fields never do). Does
+ * NOT fetch episodes — those are fetched per-season, lazily, once the
+ * episode-watch-tracking feature lands (see REBUILD_PLAN.md); a show can be
+ * added to the catalog long before any of its episodes are. */
+export async function getTvShowDetails(tmdbId: number): Promise<TmdbTvShowDetails> {
+  const data = await tmdbFetch<TmdbTvShowResponse>(`/tv/${tmdbId}`);
+  return {
+    tmdbId: data.id,
+    title: data.name,
+    posterPath: data.poster_path,
+    genres: data.genres.map((g) => g.name),
+    status: data.status,
+    nextEpisodeDate: data.next_episode_to_air?.air_date || null,
+    nextEpisodeSeason: data.next_episode_to_air?.season_number ?? null,
+    nextEpisodeNumber: data.next_episode_to_air?.episode_number ?? null,
   };
 }

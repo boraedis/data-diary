@@ -13,7 +13,7 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
   return (
     <>
       <div className="flex items-center justify-between">
-        <Link href="/manage/movies" className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <Link href="/manage/entertainment/movies" className={buttonVariants({ variant: "outline", size: "sm" })}>
           &larr; Movies
         </Link>
       </div>
@@ -57,7 +57,7 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
           <DeleteCatalogItem
             itemLabel={movie.title}
             isBlocked={usage.watches.length > 0}
-            afterDeleteHref="/manage/movies"
+            afterDeleteHref="/manage/entertainment/movies"
             onDelete={async () => {
               const res = await fetch(`/api/movies/${movie.id}`, { method: "DELETE" });
               if (!res.ok) throw new Error("Failed to delete");

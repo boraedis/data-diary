@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { PeopleManageList } from "@/components/manage/people-manage-list";
+import { listTags } from "@/lib/catalog-admin";
 import { listPeopleCatalog } from "@/lib/days";
 
 export const dynamic = "force-dynamic";
 
 export default async function ManagePeoplePage() {
-  const people = await listPeopleCatalog();
+  const [people, tags] = await Promise.all([listPeopleCatalog(), listTags()]);
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8">
@@ -16,7 +17,7 @@ export default async function ManagePeoplePage() {
           Manage
         </Link>
       </div>
-      <PeopleManageList initial={people} />
+      <PeopleManageList initial={people} initialTags={tags} />
     </main>
   );
 }

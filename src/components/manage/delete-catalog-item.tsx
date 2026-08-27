@@ -28,7 +28,12 @@ export function DeleteCatalogItem({
   blockedContent: ReactNode;
   warningContent?: ReactNode;
   onDelete: () => Promise<void>;
-  afterDeleteHref: string;
+  // Optional — a whole detail page's delete navigates back to its list
+  // (people/tvshows/sports itself); a row-level delete inside a still-open
+  // page (e.g. a league/team row on the sport detail page) has nowhere to
+  // navigate to and instead updates local state from inside `onDelete`
+  // itself, so it omits this and nothing navigates.
+  afterDeleteHref?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -40,7 +45,8 @@ export function DeleteCatalogItem({
     setError(null);
     try {
       await onDelete();
-      router.push(afterDeleteHref);
+      if (afterDeleteHref) router.push(afterDeleteHref);
+      else setOpen(false);
     } catch {
       setError("Failed to delete");
       setDeleting(false);

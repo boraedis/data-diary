@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import { TagPicker } from "@/components/tag-picker";
 import {
   NEGATIVE_PEOPLE_SLOTS,
   POSITIVE_PEOPLE_SLOTS,
@@ -15,6 +16,7 @@ import {
   type PeoplePayload,
   type PersonCatalogItem,
 } from "@/lib/days";
+import type { TagCatalogItem } from "@/lib/catalog-admin";
 
 type Valence = "positive" | "negative";
 type SlotEntries = { slot: number; valence: Valence; personId: number }[];
@@ -31,7 +33,7 @@ function toSearchItem(person: PersonCatalogItem): SearchItem {
   return {
     id: person.id,
     primary: person.name,
-    secondary: person.tag,
+    secondary: person.tagName,
     searchTerms: person.nicknames,
   };
 }
@@ -40,22 +42,27 @@ function toSearchItem(person: PersonCatalogItem): SearchItem {
  * (functions/views/entry/database/new_person_form.*): full name,
  * comma-separated nicknames (matched during search, same as the legacy
  * app), an optional birthdate, an optional gender, and an optional
- * relationship "tag" (e.g. "family", "coworker") shown as the search
- * result's secondary line. Only name is required. */
+ * relationship tag (e.g. "family", "coworker") picked from the real `tags`
+ * catalog, shown as the search result's secondary line. Only name is
+ * required. */
 function NewPersonModal({
   open,
   onClose,
   onCreated,
+  tags,
+  onTagCreated,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PersonCatalogItem) => void;
+  tags: TagCatalogItem[];
+  onTagCreated: (tag: TagCatalogItem) => void;
 }) {
   const [name, setName] = useState("");
   const [nicknames, setNicknames] = useState("");
   const [birthdate, setBirthdate] = useState("");
   const [gender, setGender] = useState("");
-  const [tag, setTag] = useState("");
+  const [tagId, setTagId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,7 +71,7 @@ function NewPersonModal({
     setNicknames("");
     setBirthdate("");
     setGender("");
-    setTag("");
+    setTagId(null);
     setError(null);
   }
 
@@ -84,7 +91,7 @@ function NewPersonModal({
             .filter(Boolean),
           birthdate: birthdate || null,
           gender: gender.trim() || null,
-          tag: tag.trim() || null,
+          tagId,
         }),
       });
       const body = await res.json();
@@ -142,12 +149,7 @@ function NewPersonModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-person-tag">Tag</Label>
-          <Input
-            id="new-person-tag"
-            value={tag}
-            onChange={(e) => setTag(e.target.value)}
-            placeholder="family, coworker, friend…"
-          />
+          <TagPicker id="new-person-tag" tags={tags} value={tagId} onChange={setTagId} onTagCreated={onTagCreated} />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
@@ -173,12 +175,16 @@ function PersonAddPanel({
   onAddPositive,
   onAddNegative,
   onCreated,
+  tags,
+  onTagCreated,
 }: {
   items: PersonCatalogItem[];
   usedIds: Set<number>;
   onAddPositive: (personId: number) => void;
   onAddNegative: (personId: number) => void;
   onCreated: (item: PersonCatalogItem) => void;
+  tags: TagCatalogItem[];
+  onTagCreated: (tag: TagCatalogItem) => void;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const searchItems = items.filter((p) => !usedIds.has(p.id)).map(toSearchItem);
@@ -208,6 +214,8 @@ function PersonAddPanel({
           onCreated(item);
           onAddPositive(item.id);
         }}
+        tags={tags}
+        onTagCreated={onTagCreated}
       />
     </div>
   );
@@ -237,7 +245,7 @@ function SlotRow({
         {person ? (
           <>
             <p className="truncate text-sm">{person.name}</p>
-            {person.tag ? <p className="truncate text-xs text-muted-foreground">{person.tag}</p> : null}
+            {person.tagName ? <p className="truncate text-xs text-muted-foreground">{person.tagName}</p> : null}
           </>
         ) : null}
       </div>
@@ -261,13 +269,16 @@ export function PeopleEntryForm({
   date,
   initial,
   catalog,
+  tags: initialTags,
 }: {
   date: string;
   initial: PeoplePayload;
   catalog: PersonCatalogItem[];
+  tags: TagCatalogItem[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<PersonCatalogItem[]>(catalog);
+  const [tags, setTags] = useState<TagCatalogItem[]>(initialTags);
   const [positive, setPositive] = useState<(number | null)[]>(() =>
     hydrate(initial.entries, "positive", POSITIVE_PEOPLE_SLOTS)
   );
@@ -398,6 +409,8 @@ export function PeopleEntryForm({
             onAddPositive={(id) => addToValence("positive", id)}
             onAddNegative={(id) => addToValence("negative", id)}
             onCreated={handleCreated}
+            tags={tags}
+            onTagCreated={(tag) => setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))}
           />
         </CardContent>
       </Card>

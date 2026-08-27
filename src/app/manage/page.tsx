@@ -2,11 +2,13 @@ import Link from "next/link";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import {
+  listBooksCatalog,
   listEntertainmentCatalog,
   listExercisesCatalog,
   listMoviesCatalog,
   listPeopleCatalog,
   listPlacesCatalog,
+  listSportsCatalog,
 } from "@/lib/days";
 
 export const dynamic = "force-dynamic";
@@ -14,31 +16,35 @@ export const dynamic = "force-dynamic";
 // The legacy app's "database" section, renamed: the place you go to fix a
 // typo'd name, merge/retire something, or clean up a mistaken add — as
 // opposed to the entry forms' "+ New", which only ever adds. One card per
-// catalog that has real entries today; catalogs get added here as their
-// real entry forms land (see REBUILD_PLAN.md).
+// top-level catalog; entertainment's own sub-kinds (movies, tv, sports,
+// books, music) live one level down at /manage/entertainment, not here —
+// see that page.
 const CATALOGS = [
   { key: "people", label: "People" },
   { key: "places", label: "Places" },
   { key: "exercises", label: "Exercises" },
   { key: "entertainment", label: "Entertainment" },
-  { key: "movies", label: "Movies" },
 ] as const;
 
 export default async function ManagePage() {
-  const [people, places, exercises, entertainment, movies] = await Promise.all([
+  const [people, places, exercises, entertainment, movies, sports, books] = await Promise.all([
     listPeopleCatalog(),
     listPlacesCatalog(),
     listExercisesCatalog(),
     listEntertainmentCatalog(),
     listMoviesCatalog(),
+    listSportsCatalog(),
+    listBooksCatalog(),
   ]);
 
   const counts: Record<(typeof CATALOGS)[number]["key"], number> = {
     people: people.length,
     places: places.length,
     exercises: exercises.length,
-    entertainment: entertainment.length,
-    movies: movies.length,
+    // The generic (not-yet-migrated) catalog plus movies, sports, and
+    // books, folded together — matches the day-summary page's same
+    // "entertainment tile counts all of it" call.
+    entertainment: entertainment.length + movies.length + sports.length + books.length,
   };
 
   return (

@@ -5,30 +5,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { TagPicker } from "@/components/tag-picker";
 import type { PersonCatalogItem } from "@/lib/days";
+import type { TagCatalogItem } from "@/lib/catalog-admin";
 
 /** Same "+ New" pattern as places/entertainment's own modals, just for the
  * People catalog's fields. Nicknames are entered comma-separated (matching
  * the legacy app's person.js) rather than as a real multi-input list — one
- * text field is plenty for something typed rarely. `tag` is free text here
- * rather than the legacy app's color-coded tag catalog (`entry/database/
- * people/tags`), same "downgrade to free text until it's worth building for
- * real" call already made for places' `category` and entertainment's
- * `detail`. */
+ * text field is plenty for something typed rarely. The relationship tag
+ * picks from the real `tags` catalog (name + color) via `tagId`, replacing
+ * the free-text field the legacy app never really needed disambiguated
+ * once a real tag catalog existed — see the `tags` table comment in
+ * schema.ts. */
 export function NewPersonModal({
   open,
   onClose,
   onCreated,
+  tags,
+  onTagCreated,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PersonCatalogItem) => void;
+  tags: TagCatalogItem[];
+  onTagCreated: (tag: TagCatalogItem) => void;
 }) {
   const [name, setName] = useState("");
   const [nicknames, setNicknames] = useState("");
   const [birthdate, setBirthdate] = useState("");
   const [gender, setGender] = useState("");
-  const [tag, setTag] = useState("");
+  const [tagId, setTagId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +43,7 @@ export function NewPersonModal({
     setNicknames("");
     setBirthdate("");
     setGender("");
-    setTag("");
+    setTagId(null);
     setError(null);
   }
 
@@ -57,7 +63,7 @@ export function NewPersonModal({
             .filter(Boolean),
           birthdate: birthdate.trim() || null,
           gender: gender.trim() || null,
-          tag: tag.trim() || null,
+          tagId,
         }),
       });
       const body = await res.json();
@@ -104,7 +110,7 @@ export function NewPersonModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-person-tag">Tag</Label>
-          <Input id="new-person-tag" value={tag} onChange={(e) => setTag(e.target.value)} />
+          <TagPicker id="new-person-tag" tags={tags} value={tagId} onChange={setTagId} onTagCreated={onTagCreated} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-person-nicknames">Nicknames</Label>

@@ -1,6 +1,10 @@
 import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
+import { geocodeAddress } from "@/lib/geocode";
 import {
+  bookReadingSessions,
+  books,
   commuteEnum,
   days,
   dayTypeEnum,
@@ -13,6 +17,14 @@ import {
   movieWatches,
   people,
   places,
+  sports,
+  sportsLeagues,
+  sportsTeams,
+  sportsWatches,
+  tags,
+  tvEpisodes,
+  tvEpisodeWatches,
+  tvShows,
   workLocationEnum,
   workoutDataSourceEnum,
   workouts,
@@ -25,6 +37,12 @@ import {
   type WorkLocationOption,
   type WorkoutDataSource,
 } from "@/db/schema";
+
+// Self-join aliases — a sports watch references `sportsTeams` twice (home
+// and away), so the two sides need distinct table aliases the same way a
+// raw SQL query would need two table aliases for one self-join.
+const homeSportsTeams = alias(sportsTeams, "home_sports_teams");
+const awaySportsTeams = alias(sportsTeams, "away_sports_teams");
 
 // Fixed slot counts, carried over from the legacy app's `searchs/people` /
 // `searchs/places` catalogs: always 7 positive + 3 negative person slots,
@@ -138,6 +156,8 @@ export type DayPayload = {
   places: PlaceEntry[];
   entertainment: EntertainmentEntry[];
   movies: MovieWatchEntry[];
+  sportsWatches: SportsWatchEntry[];
+  bookSessions: BookReadingSessionEntry[];
 };
 
 export type HealthPayload = {
@@ -231,6 +251,73 @@ export type MovieWatchEntry = {
 export type MovieWatchPayload = { movieId: number; rating: number | null; locationType: string | null };
 export type MoviesPayload = { entries: MovieWatchPayload[] };
 
+// Same open-ended replace-on-save shape as movies — any number of watches
+// per day, including the same game twice (a live watch, then a replay).
+// `sportName`/`leagueName`/`homeTeamName`/`awayTeamName` on the read side
+// are resolved via join purely for display and aren't part of what gets
+// saved. Unlike movies (a single external-lookup catalog id per watch),
+// sports watches reference the manual sport/league/team hierarchy directly
+// — there's no separate "pick a catalog item, then log details" split.
+export type SportsWatchEntry = {
+  id: number;
+  sportId: number;
+  sportName: string;
+  leagueId: number | null;
+  leagueName: string | null;
+  season: string | null;
+  gameType: string | null;
+  homeTeamId: number | null;
+  homeTeamName: string | null;
+  awayTeamId: number | null;
+  awayTeamName: string | null;
+  watchedLive: boolean;
+  durationMinutes: number | null;
+  locationType: string | null;
+};
+export type SportsWatchPayload = {
+  sportId: number;
+  leagueId: number | null;
+  season: string | null;
+  gameType: string | null;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
+  watchedLive: boolean;
+  durationMinutes: number | null;
+  locationType: string | null;
+};
+export type SportsPayload = { entries: SportsWatchPayload[] };
+
+// Same open-ended replace-on-save shape as movies/sports — any number of
+// reading sessions per day, including the same book twice (a morning
+// session and an evening session). `title`/`authors`/`thumbnailUrl`/
+// `pageCount` on the read side are resolved via join purely for display.
+// Unlike a movie watch, a session has no rating — instead it tracks
+// `startPage`/`endPage` (so "current page" can be computed on read, per the
+// schema.ts comment above `books`) and `completed` (so "completions" can
+// be computed the same way).
+export type BookReadingSessionEntry = {
+  id: number;
+  bookId: number;
+  title: string;
+  authors: string[];
+  thumbnailUrl: string | null;
+  pageCount: number | null;
+  startPage: number | null;
+  endPage: number | null;
+  completed: boolean;
+  locationType: string | null;
+  durationMinutes: number | null;
+};
+export type BookReadingSessionPayload = {
+  bookId: number;
+  startPage: number | null;
+  endPage: number | null;
+  completed: boolean;
+  locationType: string | null;
+  durationMinutes: number | null;
+};
+export type BooksPayload = { entries: BookReadingSessionPayload[] };
+
 // Catalog item shapes carry every field the legacy "New Person"/"New Place"/
 // "New entertainment" modals captured (see the schema comments above people/
 // places/entertainmentCatalog for exactly what was and wasn't carried over)
@@ -243,7 +330,12 @@ export type PersonCatalogItem = {
   nicknames: string[];
   birthdate: string | null;
   gender: string | null;
-  tag: string | null;
+  tagId: number | null;
+  // Resolved via a left join against `tags` on every read — null whenever
+  // tagId is null, never independently out of sync with it the way
+  // legacy's denormalized `searchs/people` tag-name copy could be.
+  tagName: string | null;
+  tagColor: string | null;
 };
 export type PlaceCatalogItem = {
   id: number;
@@ -251,6 +343,13 @@ export type PlaceCatalogItem = {
   alias: string | null;
   address: string | null;
   category: string | null;
+  subcategory: string | null;
+  parentId: number | null;
+  subregionName: string | null;
+  color: string | null;
+  metroId: number | null;
+  lat: number | null;
+  lng: number | null;
 };
 export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
 export type EntertainmentCatalogItem = {
@@ -272,6 +371,44 @@ export type MovieCatalogItem = {
   posterPath: string | null;
   genres: string[];
   collectionName: string | null;
+};
+
+// The sports catalog, unlike movies/tvShows, has no external API — it's a
+// fully manual sport -> league -> team hierarchy, same "+ New" pattern as
+// people/places/exercises. `leagueId` on a team is nullable (an
+// individual-athlete sport's "team" may just be a person with no league at
+// all), and a league's `type` is a free-text label (e.g. "college" vs
+// "pro"), not an enum.
+export type SportCatalogItem = { id: number; name: string; isTeamSport: boolean };
+export type SportsLeagueItem = { id: number; sportId: number; name: string; type: string | null };
+export type SportsTeamItem = {
+  id: number;
+  sportId: number;
+  leagueId: number | null;
+  name: string;
+  alias: string | null;
+  homeLocation: string | null;
+  color: string | null;
+  division: string | null;
+};
+
+// The books catalog is populated from Google Books (see
+// src/lib/google-books.ts and src/app/api/books/route.ts), same
+// upsert-once-cache-forever pattern as movies/tvShows. Reading progress
+// (`currentPage`/`completions`) is deliberately NOT part of this shape —
+// see the schema.ts comment above `books` — it's computed on read, per
+// book, by getBookProgress below.
+export type BookCatalogItem = {
+  id: number;
+  googleBooksId: string;
+  title: string;
+  authors: string[];
+  publisher: string | null;
+  publishedDate: string | null;
+  description: string | null;
+  thumbnailUrl: string | null;
+  pageCount: number | null;
+  categories: string[];
 };
 
 /** Reads one day's full record — the scalar day row plus its workouts and
@@ -329,7 +466,8 @@ export async function loadDay(date: string): Promise<DayPayload> {
   const allPersonIds = [...positiveIds, ...negativeIds].filter((id): id is number => id !== null);
   const allPlaceIds = placeIds.filter((id): id is number => id !== null);
 
-  const [peopleNameRows, placeNameRows, entertainmentRows, movieWatchRows] = await Promise.all([
+  const [peopleNameRows, placeNameRows, entertainmentRows, movieWatchRows, sportsWatchRows, bookSessionRows] =
+    await Promise.all([
     allPersonIds.length
       ? db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, allPersonIds))
       : Promise.resolve([]),
@@ -364,6 +502,48 @@ export async function loadDay(date: string): Promise<DayPayload> {
       .innerJoin(movies, eq(movieWatches.movieId, movies.id))
       .where(eq(movieWatches.date, date))
       .orderBy(asc(movieWatches.id)),
+    db
+      .select({
+        id: sportsWatches.id,
+        sportId: sportsWatches.sportId,
+        sportName: sports.name,
+        leagueId: sportsWatches.leagueId,
+        leagueName: sportsLeagues.name,
+        season: sportsWatches.season,
+        gameType: sportsWatches.gameType,
+        homeTeamId: sportsWatches.homeTeamId,
+        homeTeamName: homeSportsTeams.name,
+        awayTeamId: sportsWatches.awayTeamId,
+        awayTeamName: awaySportsTeams.name,
+        watchedLive: sportsWatches.watchedLive,
+        durationMinutes: sportsWatches.durationMinutes,
+        locationType: sportsWatches.locationType,
+      })
+      .from(sportsWatches)
+      .innerJoin(sports, eq(sportsWatches.sportId, sports.id))
+      .leftJoin(sportsLeagues, eq(sportsWatches.leagueId, sportsLeagues.id))
+      .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+      .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+      .where(eq(sportsWatches.date, date))
+      .orderBy(asc(sportsWatches.id)),
+    db
+      .select({
+        id: bookReadingSessions.id,
+        bookId: bookReadingSessions.bookId,
+        title: books.title,
+        authors: books.authors,
+        thumbnailUrl: books.thumbnailUrl,
+        pageCount: books.pageCount,
+        startPage: bookReadingSessions.startPage,
+        endPage: bookReadingSessions.endPage,
+        completed: bookReadingSessions.completed,
+        locationType: bookReadingSessions.locationType,
+        durationMinutes: bookReadingSessions.durationMinutes,
+      })
+      .from(bookReadingSessions)
+      .innerJoin(books, eq(bookReadingSessions.bookId, books.id))
+      .where(eq(bookReadingSessions.date, date))
+      .orderBy(asc(bookReadingSessions.id)),
   ]);
 
   const personNameById = new Map(peopleNameRows.map((p) => [p.id, p.name]));
@@ -461,6 +641,35 @@ export async function loadDay(date: string): Promise<DayPayload> {
       runtimeMinutes: w.runtimeMinutes,
       rating: w.rating,
       locationType: w.locationType,
+    })),
+    sportsWatches: sportsWatchRows.map((w) => ({
+      id: w.id,
+      sportId: w.sportId,
+      sportName: w.sportName,
+      leagueId: w.leagueId,
+      leagueName: w.leagueName,
+      season: w.season,
+      gameType: w.gameType,
+      homeTeamId: w.homeTeamId,
+      homeTeamName: w.homeTeamName,
+      awayTeamId: w.awayTeamId,
+      awayTeamName: w.awayTeamName,
+      watchedLive: w.watchedLive,
+      durationMinutes: w.durationMinutes,
+      locationType: w.locationType,
+    })),
+    bookSessions: bookSessionRows.map((s) => ({
+      id: s.id,
+      bookId: s.bookId,
+      title: s.title,
+      authors: s.authors,
+      thumbnailUrl: s.thumbnailUrl,
+      pageCount: s.pageCount,
+      startPage: s.startPage,
+      endPage: s.endPage,
+      completed: s.completed,
+      locationType: s.locationType,
+      durationMinutes: s.durationMinutes,
     })),
   };
 }
@@ -830,6 +1039,91 @@ export function validateMoviesPayload(body: unknown): Result<MoviesPayload> {
   return { ok: true, value: { entries } };
 }
 
+const INVALID_ID = Symbol("invalid-id");
+function optionalIntId(value: unknown): number | null | typeof INVALID_ID {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === "number" ? value : NaN;
+  return Number.isInteger(n) ? n : INVALID_ID;
+}
+
+export function validateSportsPayload(body: unknown): Result<SportsPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: SportsPayload["entries"] = [];
+  for (const e of input) {
+    const sportId = typeof e.sportId === "number" ? e.sportId : NaN;
+    if (!Number.isInteger(sportId)) {
+      return { ok: false, error: "Invalid sport selection" };
+    }
+
+    const leagueId = optionalIntId(e.leagueId);
+    if (leagueId === INVALID_ID) return { ok: false, error: "Invalid league selection" };
+    const homeTeamId = optionalIntId(e.homeTeamId);
+    if (homeTeamId === INVALID_ID) return { ok: false, error: "Invalid home team selection" };
+    const awayTeamId = optionalIntId(e.awayTeamId);
+    if (awayTeamId === INVALID_ID) return { ok: false, error: "Invalid away team selection" };
+
+    const season = typeof e.season === "string" && e.season.trim() ? e.season.trim() : null;
+    const gameType = typeof e.gameType === "string" && e.gameType.trim() ? e.gameType.trim() : null;
+    const locationType =
+      typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    const watchedLive = e.watchedLive === true;
+    const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+
+    entries.push({
+      sportId,
+      leagueId,
+      season,
+      gameType,
+      homeTeamId,
+      awayTeamId,
+      watchedLive,
+      durationMinutes,
+      locationType,
+    });
+  }
+
+  return { ok: true, value: { entries } };
+}
+
+export function validateBooksPayload(body: unknown): Result<BooksPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: BooksPayload["entries"] = [];
+  for (const e of input) {
+    const bookId = typeof e.bookId === "number" ? e.bookId : NaN;
+    if (!Number.isInteger(bookId)) {
+      return { ok: false, error: "Invalid book selection" };
+    }
+
+    const startPage = typeof e.startPage === "number" ? e.startPage : null;
+    const endPage = typeof e.endPage === "number" ? e.endPage : null;
+    if (startPage !== null && (!Number.isInteger(startPage) || startPage < 0)) {
+      return { ok: false, error: "Start page must be a whole number" };
+    }
+    if (endPage !== null && (!Number.isInteger(endPage) || endPage < 0)) {
+      return { ok: false, error: "End page must be a whole number" };
+    }
+
+    const completed = e.completed === true;
+    const locationType =
+      typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+
+    entries.push({ bookId, startPage, endPage, completed, locationType, durationMinutes });
+  }
+
+  return { ok: true, value: { entries } };
+}
+
 // Unlike people/places/entertainment's "+ New" modals, a new movie isn't
 // hand-typed — the client only ever sends a tmdbId (picked from a TMDB
 // search result); the rest of the catalog row is fetched server-side (see
@@ -847,16 +1141,32 @@ export function validateMovieCatalogRequest(body: unknown): Result<{ tmdbId: num
   return { ok: true, value: { tmdbId } };
 }
 
+// Same shape as validateMovieCatalogRequest — a new book is added by
+// googleBooksId only, never by hand-typed fields.
+export function validateBookCatalogRequest(body: unknown): Result<{ googleBooksId: string }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const googleBooksId = typeof b.googleBooksId === "string" ? b.googleBooksId.trim() : "";
+  if (!googleBooksId) {
+    return { ok: false, error: "Invalid googleBooksId" };
+  }
+  return { ok: true, value: { googleBooksId } };
+}
+
 type PersonCatalogInput = {
   name: string;
   nicknames: string[];
   birthdate: string | null;
   gender: string | null;
-  tag: string | null;
+  tagId: number | null;
 };
 
 // Only `name` is required — the legacy "New Person" modal treated
 // nicknames/birthdate/gender/tag as optional extras, not gatekeeping fields.
+// `tagId` replaces the old free-text `tag` string — see the `tags` table
+// comment in schema.ts for why (a real catalog now, not a scalar).
 export function validatePersonCatalogEntry(body: unknown): Result<PersonCatalogInput> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
@@ -872,9 +1182,16 @@ export function validatePersonCatalogEntry(body: unknown): Result<PersonCatalogI
     : [];
   const birthdate = typeof b.birthdate === "string" && b.birthdate.trim() ? b.birthdate.trim() : null;
   const gender = typeof b.gender === "string" && b.gender.trim() ? b.gender.trim() : null;
-  const tag = typeof b.tag === "string" && b.tag.trim() ? b.tag.trim() : null;
 
-  return { ok: true, value: { name, nicknames, birthdate, gender, tag } };
+  let tagId: number | null = null;
+  if (b.tagId !== null && b.tagId !== undefined) {
+    if (typeof b.tagId !== "number" || !Number.isInteger(b.tagId)) {
+      return { ok: false, error: "Invalid tagId" };
+    }
+    tagId = b.tagId;
+  }
+
+  return { ok: true, value: { name, nicknames, birthdate, gender, tagId } };
 }
 
 type PlaceCatalogInput = {
@@ -882,12 +1199,22 @@ type PlaceCatalogInput = {
   alias: string | null;
   address: string | null;
   category: string | null;
+  subcategory: string | null;
+  parentId: number | null;
+  subregionName: string | null;
+  color: string | null;
+  metroId: number | null;
 };
 
-// Same "only name is required" rule as people — alias/address/category are
-// the legacy "New Place" modal's optional extras (with its region hierarchy
-// and category/subcategory tree deliberately not carried over, see the
-// schema comment above the `places` table).
+// Same "only name is required" rule as people — everything else is the
+// legacy "New Place" modal's optional extras. `category`/`subcategory` stay
+// plain free-text (see the `places` table comment in schema.ts for why —
+// legacy itself never stored these as references either); `parentId`/
+// `subregionName`/`color`/`metroId` are the real hierarchy fields legacy's
+// `world` collection carried. `lat`/`lng` are deliberately NOT accepted
+// here — they're computed server-side via geocoding (see
+// createPlaceCatalogEntry/updatePlaceCatalogEntry below), never
+// client-supplied.
 export function validatePlaceCatalogEntry(body: unknown): Result<PlaceCatalogInput> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
@@ -899,8 +1226,28 @@ export function validatePlaceCatalogEntry(body: unknown): Result<PlaceCatalogInp
   const alias = typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null;
   const address = typeof b.address === "string" && b.address.trim() ? b.address.trim() : null;
   const category = typeof b.category === "string" && b.category.trim() ? b.category.trim() : null;
+  const subcategory = typeof b.subcategory === "string" && b.subcategory.trim() ? b.subcategory.trim() : null;
+  const subregionName =
+    typeof b.subregionName === "string" && b.subregionName.trim() ? b.subregionName.trim() : null;
+  const color = typeof b.color === "string" && b.color.trim() ? b.color.trim() : null;
 
-  return { ok: true, value: { name, alias, address, category } };
+  let parentId: number | null = null;
+  if (b.parentId !== null && b.parentId !== undefined) {
+    if (typeof b.parentId !== "number" || !Number.isInteger(b.parentId)) {
+      return { ok: false, error: "Invalid parentId" };
+    }
+    parentId = b.parentId;
+  }
+
+  let metroId: number | null = null;
+  if (b.metroId !== null && b.metroId !== undefined) {
+    if (typeof b.metroId !== "number" || !Number.isInteger(b.metroId)) {
+      return { ok: false, error: "Invalid metroId" };
+    }
+    metroId = b.metroId;
+  }
+
+  return { ok: true, value: { name, alias, address, category, subcategory, parentId, subregionName, color, metroId } };
 }
 
 export function validateExerciseCatalogEntry(
@@ -1306,6 +1653,57 @@ export async function saveMovies(date: string, value: MoviesPayload): Promise<Da
   return loadDay(date);
 }
 
+// Same replace-on-save shape as saveMovies above, against the
+// sports_watches satellite table.
+export async function saveSportsWatches(date: string, value: SportsPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(sportsWatches).where(eq(sportsWatches.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(sportsWatches).values(
+      value.entries.map((e) => ({
+        date,
+        sportId: e.sportId,
+        leagueId: e.leagueId,
+        season: e.season,
+        gameType: e.gameType,
+        homeTeamId: e.homeTeamId,
+        awayTeamId: e.awayTeamId,
+        watchedLive: e.watchedLive,
+        durationMinutes: e.durationMinutes,
+        locationType: e.locationType,
+      }))
+    );
+  }
+
+  return loadDay(date);
+}
+
+// Same replace-on-save shape as saveMovies/saveSportsWatches above, against
+// the book_reading_sessions satellite table.
+export async function saveBookReadingSessions(date: string, value: BooksPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(bookReadingSessions).where(eq(bookReadingSessions.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(bookReadingSessions).values(
+      value.entries.map((e) => ({
+        date,
+        bookId: e.bookId,
+        startPage: e.startPage,
+        endPage: e.endPage,
+        completed: e.completed,
+        locationType: e.locationType,
+        durationMinutes: e.durationMinutes,
+      }))
+    );
+  }
+
+  return loadDay(date);
+}
+
 // --- Catalogs --------------------------------------------------------------
 // People/places/exercises/exercise-locations/entertainment all follow the
 // same "pick from a maintained list, add new via a quick create" pattern
@@ -1322,12 +1720,23 @@ const PERSON_COLUMNS = {
   nicknames: people.nicknames,
   birthdate: people.birthdate,
   gender: people.gender,
-  tag: people.tag,
+  tagId: people.tagId,
 };
 
-export async function listPeopleCatalog(): Promise<PersonCatalogItem[]> {
+// Every person read resolves its tag via a left join against `tags` rather
+// than trusting a denormalized copy — legacy kept the tag *name* on the
+// person doc directly and had to rewrite every member's document whenever
+// a tag was renamed; a real FK means there's nothing to keep in sync.
+function selectPeopleWithTag() {
   const db = getDb();
-  return db.select(PERSON_COLUMNS).from(people).orderBy(asc(people.name));
+  return db
+    .select({ ...PERSON_COLUMNS, tagName: tags.name, tagColor: tags.color })
+    .from(people)
+    .leftJoin(tags, eq(people.tagId, tags.id));
+}
+
+export async function listPeopleCatalog(): Promise<PersonCatalogItem[]> {
+  return selectPeopleWithTag().orderBy(asc(people.name));
 }
 
 export async function createPersonCatalogEntry(input: PersonCatalogInput): Promise<PersonCatalogItem> {
@@ -1340,13 +1749,13 @@ export async function createPersonCatalogEntry(input: PersonCatalogInput): Promi
       nicknames: input.nicknames,
       birthdate: input.birthdate,
       gender: input.gender,
-      tag: input.tag,
+      tagId: input.tagId,
     })
     .onConflictDoNothing({ target: people.name })
-    .returning(PERSON_COLUMNS);
-  if (inserted) return inserted;
-  const [existing] = await db.select(PERSON_COLUMNS).from(people).where(eq(people.name, trimmed));
-  return existing;
+    .returning({ id: people.id });
+  const id = inserted?.id ?? (await db.select({ id: people.id }).from(people).where(eq(people.name, trimmed)))[0].id;
+  const item = await getPersonCatalogEntry(id);
+  return item as PersonCatalogItem; // just inserted or found by name above — always exists
 }
 
 // --- Catalog administration --------------------------------------------
@@ -1361,8 +1770,7 @@ export async function createPersonCatalogEntry(input: PersonCatalogInput): Promi
 // which just get nulled out (`set null`, e.g. a workout's location).
 
 export async function getPersonCatalogEntry(id: number): Promise<PersonCatalogItem | null> {
-  const db = getDb();
-  const [row] = await db.select(PERSON_COLUMNS).from(people).where(eq(people.id, id));
+  const [row] = await selectPeopleWithTag().where(eq(people.id, id));
   return row ?? null;
 }
 
@@ -1371,18 +1779,18 @@ export async function updatePersonCatalogEntry(
   input: PersonCatalogInput
 ): Promise<PersonCatalogItem> {
   const db = getDb();
-  const [updated] = await db
+  await db
     .update(people)
     .set({
       name: input.name.trim(),
       nicknames: input.nicknames,
       birthdate: input.birthdate,
       gender: input.gender,
-      tag: input.tag,
+      tagId: input.tagId,
     })
-    .where(eq(people.id, id))
-    .returning(PERSON_COLUMNS);
-  return updated;
+    .where(eq(people.id, id));
+  const item = await getPersonCatalogEntry(id);
+  return item as PersonCatalogItem;
 }
 
 export type PersonUsage = { dates: string[] };
@@ -1390,6 +1798,10 @@ export type PersonUsage = { dates: string[] };
 // A person is referenced by the 7 positive + 3 negative slot columns on
 // `days` (onDelete: "restrict" on every one — the DB itself would refuse
 // the delete too, this just lets the UI explain why and link to the days).
+// Note this is about a person being *mentioned on a day*, not about their
+// tag — a person's tagId is onDelete: "restrict" from the *tags* side (see
+// getTagUsage in src/lib/catalog-admin.ts), which blocks deleting a TAG
+// that still has members, not deleting a member itself.
 export async function getPersonUsage(id: number): Promise<PersonUsage> {
   const db = getDb();
   const rows = await db
@@ -1424,6 +1836,13 @@ const PLACE_COLUMNS = {
   alias: places.alias,
   address: places.address,
   category: places.category,
+  subcategory: places.subcategory,
+  parentId: places.parentId,
+  subregionName: places.subregionName,
+  color: places.color,
+  metroId: places.metroId,
+  lat: places.lat,
+  lng: places.lng,
 };
 
 export async function listPlacesCatalog(): Promise<PlaceCatalogItem[]> {
@@ -1431,9 +1850,26 @@ export async function listPlacesCatalog(): Promise<PlaceCatalogItem[]> {
   return db.select(PLACE_COLUMNS).from(places).orderBy(asc(places.name));
 }
 
+// Geocoding is a best-effort enhancement, not a gate on saving a place — a
+// missing GOOGLE_MAPS_API_KEY, an address that doesn't resolve, or a
+// network hiccup all just leave lat/lng unset rather than failing the
+// create/update. See src/lib/geocode.ts for the "only when address
+// actually changed" reasoning (fixing a real legacy bug, not carrying it
+// forward).
+async function geocodeOrNull(address: string | null): Promise<{ lat: number | null; lng: number | null }> {
+  if (!address) return { lat: null, lng: null };
+  try {
+    const result = await geocodeAddress(address);
+    return { lat: result?.lat ?? null, lng: result?.lng ?? null };
+  } catch {
+    return { lat: null, lng: null };
+  }
+}
+
 export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
   const db = getDb();
   const trimmed = input.name.trim();
+  const { lat, lng } = await geocodeOrNull(input.address);
   const [inserted] = await db
     .insert(places)
     .values({
@@ -1441,6 +1877,13 @@ export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise
       alias: input.alias,
       address: input.address,
       category: input.category,
+      subcategory: input.subcategory,
+      parentId: input.parentId,
+      subregionName: input.subregionName,
+      color: input.color,
+      metroId: input.metroId,
+      lat,
+      lng,
     })
     .onConflictDoNothing({ target: places.name })
     .returning(PLACE_COLUMNS);
@@ -1455,8 +1898,85 @@ export async function getPlaceCatalogEntry(id: number): Promise<PlaceCatalogItem
   return row ?? null;
 }
 
+// Recursive (iterative, BFS) walk down `parentId` — small dataset (low
+// thousands of places at most for a personal app), so a handful of batched
+// queries beats reaching for a raw recursive SQL CTE here. Used to guard
+// against moving a place into its own subtree (updatePlaceCatalogEntry
+// below) and to block deleting a place that still has descendants
+// (getPlaceUsage below) — both real behaviors legacy's world.js had
+// (its `submitWorldEdit`'s "can't move into your own subtree" guard, and
+// places.js's descendant check before delete), just computed on read here
+// instead of maintained on write.
+export async function getPlaceDescendantIds(id: number): Promise<number[]> {
+  const db = getDb();
+  const result: number[] = [];
+  let frontier = [id];
+  while (frontier.length > 0) {
+    const children = await db.select({ id: places.id }).from(places).where(inArray(places.parentId, frontier));
+    const childIds = children.map((c) => c.id);
+    result.push(...childIds);
+    frontier = childIds;
+  }
+  return result;
+}
+
+// Ancestor chain from root to `id` inclusive — replaces legacy's
+// maintained `path` array (denormalized on every place doc, recursively
+// rewritten on every move) with a walk-up-on-read; a guard against a
+// corrupted cycle (shouldn't happen given updatePlaceCatalogEntry's check
+// below, but this reads defensively regardless) stops it from looping
+// forever if one ever exists.
+type PlaceParentLookupRow = { id: number; name: string; parentId: number | null };
+
+async function fetchPlaceParentLookup(placeId: number): Promise<PlaceParentLookupRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: places.id, name: places.name, parentId: places.parentId })
+    .from(places)
+    .where(eq(places.id, placeId));
+  return row ?? null;
+}
+
+export async function getPlaceAncestry(id: number): Promise<{ id: number; name: string }[]> {
+  const chain: { id: number; name: string }[] = [];
+  const visited = new Set<number>();
+  let currentId: number | null = id;
+  while (currentId !== null) {
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+    const row: PlaceParentLookupRow | null = await fetchPlaceParentLookup(currentId);
+    if (!row) break;
+    chain.unshift({ id: row.id, name: row.name });
+    currentId = row.parentId;
+  }
+  return chain;
+}
+
+export async function getPlaceChildren(id: number): Promise<PlaceCatalogItem[]> {
+  const db = getDb();
+  return db.select(PLACE_COLUMNS).from(places).where(eq(places.parentId, id)).orderBy(asc(places.name));
+}
+
 export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
   const db = getDb();
+
+  if (input.parentId !== null) {
+    if (input.parentId === id) {
+      throw new Error("A place can't be its own parent");
+    }
+    const descendantIds = await getPlaceDescendantIds(id);
+    if (descendantIds.includes(input.parentId)) {
+      throw new Error("Can't move a place into its own subtree");
+    }
+  }
+
+  const [existing] = await db.select({ address: places.address }).from(places).where(eq(places.id, id));
+  // Only re-geocode when the address actually changed — the whole point of
+  // fixing legacy's "re-geocode on every save regardless" bug (see
+  // src/lib/geocode.ts).
+  const addressChanged = existing?.address !== input.address;
+  const geo = addressChanged ? await geocodeOrNull(input.address) : null;
+
   const [updated] = await db
     .update(places)
     .set({
@@ -1464,33 +1984,44 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
       alias: input.alias,
       address: input.address,
       category: input.category,
+      subcategory: input.subcategory,
+      parentId: input.parentId,
+      subregionName: input.subregionName,
+      color: input.color,
+      metroId: input.metroId,
+      ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
     })
     .where(eq(places.id, id))
     .returning(PLACE_COLUMNS);
   return updated;
 }
 
-// A place is referenced two ways: as one of a day's 2 place slots
-// (onDelete: "restrict" — blocks deletion, same as people above) and as a
-// workout's location (onDelete: "set null" — deleting the place just clears
-// that field on the workout rather than blocking, since a location is a
-// minor, forgettable detail of a workout in a way a day's actual place
-// isn't). `workoutDates` is reported as a warning, not a hard block.
-export type PlaceUsage = { dayDates: string[]; workoutDates: string[] };
+// A place is referenced three ways: as one of a day's 2 place slots
+// (onDelete: "restrict" — blocks deletion), as a workout's location
+// (onDelete: "set null" — deleting the place just clears that field on the
+// workout rather than blocking, since a location is a minor, forgettable
+// detail of a workout in a way a day's actual place isn't), and as another
+// place's parent (onDelete: "restrict" — a place with children can't be
+// deleted until they're moved or deleted first, same reasoning as legacy's
+// places.js descendant check before delete). `workoutDates` is reported as
+// a warning, not a hard block; `dayDates` and `childCount` both block.
+export type PlaceUsage = { dayDates: string[]; workoutDates: string[]; childCount: number };
 
 export async function getPlaceUsage(id: number): Promise<PlaceUsage> {
   const db = getDb();
-  const [dayRows, workoutRows] = await Promise.all([
+  const [dayRows, workoutRows, childRows] = await Promise.all([
     db
       .select({ date: days.date })
       .from(days)
       .where(or(eq(days.place1Id, id), eq(days.place2Id, id)))
       .orderBy(asc(days.date)),
     db.select({ date: workouts.date }).from(workouts).where(eq(workouts.locationId, id)).orderBy(asc(workouts.date)),
+    db.select({ id: places.id }).from(places).where(eq(places.parentId, id)),
   ]);
   return {
     dayDates: dayRows.map((r) => r.date),
     workoutDates: [...new Set(workoutRows.map((r) => r.date))],
+    childCount: childRows.length,
   };
 }
 
@@ -1713,4 +2244,555 @@ export async function getMovieUsage(id: number): Promise<MovieUsage> {
 export async function deleteMovieCatalogEntry(id: number): Promise<void> {
   const db = getDb();
   await db.delete(movies).where(eq(movies.id, id));
+}
+
+// --- TV shows ------------------------------------------------------------
+// Same TMDB-sourced-catalog shape as movies, plus two fields that are
+// genuinely user state rather than TMDB metadata: `interested` (still
+// tracking this show, or done with it — legacy's un/interested toggle) and
+// `lastRefreshed` (a show's status/next-episode date go stale in a way a
+// movie's fields never do, so there's a manual "Refresh from TMDB" action,
+// unlike movies). No episode-watch tracking here yet — that's a separate,
+// larger feature (see REBUILD_PLAN.md); this is catalog management only.
+
+const TV_SHOW_COLUMNS = {
+  id: tvShows.id,
+  tmdbId: tvShows.tmdbId,
+  title: tvShows.title,
+  posterPath: tvShows.posterPath,
+  genres: tvShows.genres,
+  status: tvShows.status,
+  interested: tvShows.interested,
+  uninterestedDate: tvShows.uninterestedDate,
+  lastRefreshed: tvShows.lastRefreshed,
+  nextEpisodeDate: tvShows.nextEpisodeDate,
+  nextEpisodeSeason: tvShows.nextEpisodeSeason,
+  nextEpisodeNumber: tvShows.nextEpisodeNumber,
+};
+
+export type TvShowCatalogItem = {
+  id: number;
+  tmdbId: number;
+  title: string;
+  posterPath: string | null;
+  genres: string[];
+  status: string | null;
+  interested: boolean;
+  uninterestedDate: string | null;
+  lastRefreshed: string | null;
+  nextEpisodeDate: string | null;
+  nextEpisodeSeason: number | null;
+  nextEpisodeNumber: number | null;
+};
+
+type TvShowTmdbFields = {
+  tmdbId: number;
+  title: string;
+  posterPath: string | null;
+  genres: string[];
+  status: string | null;
+  nextEpisodeDate: string | null;
+  nextEpisodeSeason: number | null;
+  nextEpisodeNumber: number | null;
+};
+
+function todayDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export async function listTvShowsCatalog(): Promise<TvShowCatalogItem[]> {
+  const db = getDb();
+  return db.select(TV_SHOW_COLUMNS).from(tvShows).orderBy(asc(tvShows.title));
+}
+
+// Upsert-by-tmdbId, same reasoning as movies — picking the same TMDB search
+// result twice just returns the existing row.
+export async function createTvShowCatalogEntry(input: TvShowTmdbFields): Promise<TvShowCatalogItem> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(tvShows)
+    .values({ ...input, interested: true, lastRefreshed: todayDateString() })
+    .onConflictDoNothing({ target: tvShows.tmdbId })
+    .returning(TV_SHOW_COLUMNS);
+  if (inserted) return inserted;
+  const [existing] = await db.select(TV_SHOW_COLUMNS).from(tvShows).where(eq(tvShows.tmdbId, input.tmdbId));
+  return existing;
+}
+
+export async function getTvShowCatalogEntry(id: number): Promise<TvShowCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(TV_SHOW_COLUMNS).from(tvShows).where(eq(tvShows.id, id));
+  return row ?? null;
+}
+
+// The one hand-editable field: are you still tracking this show. Marking
+// not-interested stamps today's date (matching the legacy app's
+// uninterested_date); marking interested again clears it.
+export async function updateTvShowInterested(id: number, interested: boolean): Promise<TvShowCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(tvShows)
+    .set({ interested, uninterestedDate: interested ? null : todayDateString() })
+    .where(eq(tvShows.id, id))
+    .returning(TV_SHOW_COLUMNS);
+  return updated;
+}
+
+// Re-fetches everything TMDB-sourced (status, next episode, poster, genres,
+// title) without touching `interested`/`uninterestedDate` — those are the
+// user's own state, a refresh shouldn't clobber them.
+export async function refreshTvShowCatalogEntry(id: number, input: TvShowTmdbFields): Promise<TvShowCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(tvShows)
+    .set({
+      title: input.title,
+      posterPath: input.posterPath,
+      genres: input.genres,
+      status: input.status,
+      nextEpisodeDate: input.nextEpisodeDate,
+      nextEpisodeSeason: input.nextEpisodeSeason,
+      nextEpisodeNumber: input.nextEpisodeNumber,
+      lastRefreshed: todayDateString(),
+    })
+    .where(eq(tvShows.id, id))
+    .returning(TV_SHOW_COLUMNS);
+  return updated;
+}
+
+export type TvShowUsage = { watchCount: number };
+
+// tv_episode_watches.episodeId is onDelete: "restrict", and tv_episodes.
+// showId is onDelete: "cascade" from tvShows — so deleting a show with any
+// watched episode is blocked transitively by the deeper restrict, exactly
+// like movies. No episode-tracking UI exists yet, so this can only ever be
+// 0 today, but the check (and the DB constraint it mirrors) is already
+// correct for when it lands.
+export async function getTvShowUsage(id: number): Promise<TvShowUsage> {
+  const db = getDb();
+  const [row] = await db
+    .select({ count: tvEpisodeWatches.id })
+    .from(tvEpisodeWatches)
+    .innerJoin(tvEpisodes, eq(tvEpisodeWatches.episodeId, tvEpisodes.id))
+    .where(eq(tvEpisodes.showId, id));
+  return { watchCount: row ? 1 : 0 };
+}
+
+export async function deleteTvShowCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(tvShows).where(eq(tvShows.id, id));
+}
+
+// Same shape as validateMovieCatalogRequest — a new show is added by tmdbId
+// only, never by hand-typed fields.
+export function validateTvShowCatalogRequest(body: unknown): Result<{ tmdbId: number }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const tmdbId = typeof b.tmdbId === "number" ? b.tmdbId : NaN;
+  if (!Number.isInteger(tmdbId) || tmdbId <= 0) {
+    return { ok: false, error: "Invalid tmdbId" };
+  }
+  return { ok: true, value: { tmdbId } };
+}
+
+// --- Sports ----------------------------------------------------------------
+// A fully manual sport -> league -> team hierarchy, no external API — the
+// legacy survey found this the one entertainment domain that was genuinely
+// complete and well-used, so it's ported closely rather than rebuilt (see
+// the schema.ts comment above `sports`). Delete behavior follows the real
+// FK policies rather than a single blanket rule: sportsLeagues.sportId and
+// sportsTeams.sportId are onDelete: "cascade" (deleting a sport quietly
+// takes its leagues/teams with it), while sportsTeams.leagueId and every FK
+// on sportsWatches except sportId itself are onDelete: "set null" —
+// sportsWatches.sportId is the only one that's "restrict". Usage checks
+// below distinguish real blocks from purely informational counts to match.
+
+const SPORT_COLUMNS = { id: sports.id, name: sports.name, isTeamSport: sports.isTeamSport };
+
+export function validateSportInput(body: unknown): Result<{ name: string; isTeamSport: boolean }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  const isTeamSport = b.isTeamSport !== false; // defaults true, matching the schema default
+  return { ok: true, value: { name, isTeamSport } };
+}
+
+// Each sport comes back with its leagues and teams nested — populates both
+// the manage hub and the entry form's sport -> league -> team picker
+// cascade in one round trip, same "nest the children" shape as
+// listPlaceCategories/listExerciseFocuses in catalog-admin.ts.
+export async function listSportsCatalog(): Promise<
+  (SportCatalogItem & { leagues: SportsLeagueItem[]; teams: SportsTeamItem[] })[]
+> {
+  const db = getDb();
+  const [sportRows, leagueRows, teamRows] = await Promise.all([
+    db.select(SPORT_COLUMNS).from(sports).orderBy(asc(sports.name)),
+    db.select().from(sportsLeagues).orderBy(asc(sportsLeagues.name)),
+    db.select().from(sportsTeams).orderBy(asc(sportsTeams.name)),
+  ]);
+  const leaguesBySport = new Map<number, SportsLeagueItem[]>();
+  for (const l of leagueRows) {
+    const list = leaguesBySport.get(l.sportId) ?? [];
+    list.push(l);
+    leaguesBySport.set(l.sportId, list);
+  }
+  const teamsBySport = new Map<number, SportsTeamItem[]>();
+  for (const t of teamRows) {
+    const list = teamsBySport.get(t.sportId) ?? [];
+    list.push(t);
+    teamsBySport.set(t.sportId, list);
+  }
+  return sportRows.map((s) => ({
+    ...s,
+    leagues: leaguesBySport.get(s.id) ?? [],
+    teams: teamsBySport.get(s.id) ?? [],
+  }));
+}
+
+export async function createSport(input: { name: string; isTeamSport: boolean }): Promise<SportCatalogItem> {
+  const db = getDb();
+  const trimmed = input.name.trim();
+  const [inserted] = await db
+    .insert(sports)
+    .values({ name: trimmed, isTeamSport: input.isTeamSport })
+    .onConflictDoNothing({ target: sports.name })
+    .returning(SPORT_COLUMNS);
+  if (inserted) return inserted;
+  const [existing] = await db.select(SPORT_COLUMNS).from(sports).where(eq(sports.name, trimmed));
+  return existing;
+}
+
+export async function getSport(id: number): Promise<SportCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(SPORT_COLUMNS).from(sports).where(eq(sports.id, id));
+  return row ?? null;
+}
+
+export async function updateSport(
+  id: number,
+  input: { name: string; isTeamSport: boolean }
+): Promise<SportCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sports)
+    .set({ name: input.name.trim(), isTeamSport: input.isTeamSport })
+    .where(eq(sports.id, id))
+    .returning(SPORT_COLUMNS);
+  return updated;
+}
+
+// Only watchCount is a real block — sportsWatches.sportId is onDelete:
+// "restrict". leagueCount/teamCount are informational only: both
+// sportsLeagues.sportId and sportsTeams.sportId are onDelete: "cascade", so
+// the DB would happily delete a sport along with everything under it —
+// surfaced here so a caller can warn "N leagues and M teams will also be
+// deleted" before that silently happens, not to block it.
+export type SportUsage = { watchCount: number; leagueCount: number; teamCount: number };
+
+export async function getSportUsage(id: number): Promise<SportUsage> {
+  const db = getDb();
+  const [watchRows, leagueRows, teamRows] = await Promise.all([
+    db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.sportId, id)),
+    db.select({ id: sportsLeagues.id }).from(sportsLeagues).where(eq(sportsLeagues.sportId, id)),
+    db.select({ id: sportsTeams.id }).from(sportsTeams).where(eq(sportsTeams.sportId, id)),
+  ]);
+  return { watchCount: watchRows.length, leagueCount: leagueRows.length, teamCount: teamRows.length };
+}
+
+export async function deleteSport(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sports).where(eq(sports.id, id));
+}
+
+export function validateSportsLeagueInput(body: unknown): Result<{ name: string; type: string | null }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  const type = typeof b.type === "string" && b.type.trim() ? b.type.trim() : null;
+  return { ok: true, value: { name, type } };
+}
+
+export async function createSportsLeague(
+  sportId: number,
+  input: { name: string; type: string | null }
+): Promise<SportsLeagueItem> {
+  const db = getDb();
+  const trimmed = input.name.trim();
+  const [inserted] = await db
+    .insert(sportsLeagues)
+    .values({ sportId, name: trimmed, type: input.type })
+    .onConflictDoNothing({ target: [sportsLeagues.sportId, sportsLeagues.name] })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select()
+    .from(sportsLeagues)
+    .where(and(eq(sportsLeagues.sportId, sportId), eq(sportsLeagues.name, trimmed)));
+  return existing;
+}
+
+export async function getSportsLeague(id: number): Promise<SportsLeagueItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sportsLeagues).where(eq(sportsLeagues.id, id));
+  return row ?? null;
+}
+
+export async function updateSportsLeague(
+  id: number,
+  input: { name: string; type: string | null }
+): Promise<SportsLeagueItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sportsLeagues)
+    .set({ name: input.name.trim(), type: input.type })
+    .where(eq(sportsLeagues.id, id))
+    .returning();
+  return updated;
+}
+
+// Neither count blocks — sportsTeams.leagueId and sportsWatches.leagueId
+// are both onDelete: "set null", so the DB lets a league delete through
+// regardless of either; purely informational, same "explain the fallout
+// first" reasoning as sport's leagueCount/teamCount above.
+export type SportsLeagueUsage = { teamCount: number; watchCount: number };
+
+export async function getSportsLeagueUsage(id: number): Promise<SportsLeagueUsage> {
+  const db = getDb();
+  const [teamRows, watchRows] = await Promise.all([
+    db.select({ id: sportsTeams.id }).from(sportsTeams).where(eq(sportsTeams.leagueId, id)),
+    db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.leagueId, id)),
+  ]);
+  return { teamCount: teamRows.length, watchCount: watchRows.length };
+}
+
+export async function deleteSportsLeague(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sportsLeagues).where(eq(sportsLeagues.id, id));
+}
+
+export type SportsTeamInput = {
+  leagueId: number | null;
+  name: string;
+  alias: string | null;
+  homeLocation: string | null;
+  color: string | null;
+  division: string | null;
+};
+
+export function validateSportsTeamInput(body: unknown): Result<SportsTeamInput> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  const leagueId = optionalIntId(b.leagueId);
+  if (leagueId === INVALID_ID) return { ok: false, error: "Invalid league selection" };
+  const alias = typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null;
+  const homeLocation = typeof b.homeLocation === "string" && b.homeLocation.trim() ? b.homeLocation.trim() : null;
+  const color = typeof b.color === "string" && b.color.trim() ? b.color.trim() : null;
+  const division = typeof b.division === "string" && b.division.trim() ? b.division.trim() : null;
+  return { ok: true, value: { leagueId, name, alias, homeLocation, color, division } };
+}
+
+export async function createSportsTeam(sportId: number, input: SportsTeamInput): Promise<SportsTeamItem> {
+  const db = getDb();
+  const trimmed = input.name.trim();
+  const [inserted] = await db
+    .insert(sportsTeams)
+    .values({
+      sportId,
+      leagueId: input.leagueId,
+      name: trimmed,
+      alias: input.alias,
+      homeLocation: input.homeLocation,
+      color: input.color,
+      division: input.division,
+    })
+    .onConflictDoNothing({ target: [sportsTeams.sportId, sportsTeams.name] })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select()
+    .from(sportsTeams)
+    .where(and(eq(sportsTeams.sportId, sportId), eq(sportsTeams.name, trimmed)));
+  return existing;
+}
+
+export async function getSportsTeam(id: number): Promise<SportsTeamItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sportsTeams).where(eq(sportsTeams.id, id));
+  return row ?? null;
+}
+
+export async function updateSportsTeam(id: number, input: SportsTeamInput): Promise<SportsTeamItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sportsTeams)
+    .set({
+      leagueId: input.leagueId,
+      name: input.name.trim(),
+      alias: input.alias,
+      homeLocation: input.homeLocation,
+      color: input.color,
+      division: input.division,
+    })
+    .where(eq(sportsTeams.id, id))
+    .returning();
+  return updated;
+}
+
+// Never blocks — sportsWatches.homeTeamId/awayTeamId are both onDelete:
+// "set null" — purely informational, same reasoning as league usage above.
+export type SportsTeamUsage = { watchCount: number };
+
+export async function getSportsTeamUsage(id: number): Promise<SportsTeamUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: sportsWatches.id })
+    .from(sportsWatches)
+    .where(or(eq(sportsWatches.homeTeamId, id), eq(sportsWatches.awayTeamId, id)));
+  return { watchCount: rows.length };
+}
+
+export async function deleteSportsTeam(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sportsTeams).where(eq(sportsTeams.id, id));
+}
+
+// --- Books -------------------------------------------------------------
+// Same TMDB-sourced-catalog shape as movies (upsert by external id, no
+// hand-editable fields), just sourced from Google Books instead — see
+// src/lib/google-books.ts. No "interested" toggle like tvShows (a book
+// isn't "ongoing" the way a show is); reading progress is computed on read
+// rather than stored, per the schema.ts comment above `books`.
+
+const BOOK_COLUMNS = {
+  id: books.id,
+  googleBooksId: books.googleBooksId,
+  title: books.title,
+  authors: books.authors,
+  publisher: books.publisher,
+  publishedDate: books.publishedDate,
+  description: books.description,
+  thumbnailUrl: books.thumbnailUrl,
+  pageCount: books.pageCount,
+  categories: books.categories,
+};
+
+export async function listBooksCatalog(): Promise<BookCatalogItem[]> {
+  const db = getDb();
+  return db.select(BOOK_COLUMNS).from(books).orderBy(asc(books.title));
+}
+
+// Upsert-by-googleBooksId, same reasoning as movies — picking the same
+// Google Books search result twice (e.g. starting a reread) just returns
+// the existing row.
+export async function createBookCatalogEntry(input: {
+  googleBooksId: string;
+  title: string;
+  authors: string[];
+  publisher: string | null;
+  publishedDate: string | null;
+  description: string | null;
+  thumbnailUrl: string | null;
+  pageCount: number | null;
+  categories: string[];
+}): Promise<BookCatalogItem> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(books)
+    .values(input)
+    .onConflictDoNothing({ target: books.googleBooksId })
+    .returning(BOOK_COLUMNS);
+  if (inserted) return inserted;
+  const [existing] = await db.select(BOOK_COLUMNS).from(books).where(eq(books.googleBooksId, input.googleBooksId));
+  return existing;
+}
+
+export async function getBookCatalogEntry(id: number): Promise<BookCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(BOOK_COLUMNS).from(books).where(eq(books.id, id));
+  return row ?? null;
+}
+
+// Books have no hand-editable fields — every field is Google Books
+// metadata, refreshed by re-adding rather than typed in (see
+// src/lib/google-books.ts) — so there's no updateBookCatalogEntry here,
+// same as movies.
+export type BookUsage = {
+  sessions: {
+    date: string;
+    startPage: number | null;
+    endPage: number | null;
+    completed: boolean;
+    locationType: string | null;
+  }[];
+};
+
+// book_reading_sessions.bookId is onDelete: "restrict" (book_watchlist/
+// book_rankings both cascade instead, but neither has any UI yet — same
+// "not worth surfacing" call as movie_watchlist/movie_rankings above — so
+// sessions are the only usage worth checking).
+export async function getBookUsage(id: number): Promise<BookUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: bookReadingSessions.date,
+      startPage: bookReadingSessions.startPage,
+      endPage: bookReadingSessions.endPage,
+      completed: bookReadingSessions.completed,
+      locationType: bookReadingSessions.locationType,
+    })
+    .from(bookReadingSessions)
+    .where(eq(bookReadingSessions.bookId, id))
+    .orderBy(asc(bookReadingSessions.date), asc(bookReadingSessions.id));
+  return { sessions: rows };
+}
+
+export async function deleteBookCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(books).where(eq(books.id, id));
+}
+
+export type BookProgress = { currentPage: number | null; completions: number };
+
+// Computed on read rather than stored — see the schema.ts comment above
+// `books`. `completions` is a plain count of completed sessions.
+// `currentPage` is the last logged `endPage` among sessions *since* the
+// most recent completion (so finishing a book and starting it over resets
+// the visible progress instead of showing the old ending page forever);
+// if the book has never been completed, every session counts.
+export async function getBookProgress(bookId: number): Promise<BookProgress> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      endPage: bookReadingSessions.endPage,
+      completed: bookReadingSessions.completed,
+    })
+    .from(bookReadingSessions)
+    .where(eq(bookReadingSessions.bookId, bookId))
+    .orderBy(asc(bookReadingSessions.date), asc(bookReadingSessions.id));
+
+  const completions = rows.filter((r) => r.completed).length;
+
+  let lastCompletedIndex = -1;
+  rows.forEach((r, i) => {
+    if (r.completed) lastCompletedIndex = i;
+  });
+
+  let currentPage: number | null = null;
+  for (const r of rows.slice(lastCompletedIndex + 1)) {
+    if (r.endPage !== null) currentPage = r.endPage;
+  }
+
+  return { currentPage, completions };
 }

@@ -5,19 +5,27 @@ import { Button } from "@/components/ui/button";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
 import { NewPersonModal } from "@/components/manage/new-person-modal";
 import type { PersonCatalogItem } from "@/lib/days";
+import type { TagCatalogItem } from "@/lib/catalog-admin";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 
 function toSearchItem(person: PersonCatalogItem): SearchItem {
   return {
     id: person.id,
     primary: person.name,
-    secondary: person.tag,
+    secondary: person.tagName,
     searchTerms: person.nicknames,
   };
 }
 
-export function PeopleManageList({ initial }: { initial: PersonCatalogItem[] }) {
+export function PeopleManageList({
+  initial,
+  initialTags,
+}: {
+  initial: PersonCatalogItem[];
+  initialTags: TagCatalogItem[];
+}) {
   const [items, setItems] = useState(initial);
+  const [tags, setTags] = useState(initialTags);
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
@@ -37,6 +45,8 @@ export function PeopleManageList({ initial }: { initial: PersonCatalogItem[] }) 
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onCreated={(item) => setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))}
+        tags={tags}
+        onTagCreated={(tag) => setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))}
       />
     </div>
   );
