@@ -268,29 +268,49 @@ async function main() {
       try {
         await client.query("BEGIN");
 
-        const { rows: insertedRows } = await client.query(
-          `INSERT INTO places (name, alias, address, category, subcategory, parent_id, subregion_name, color, metro_id, lat, lng)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           RETURNING id`,
-          [
-            newFields.name,
-            newFields.alias,
-            newFields.address,
-            newFields.category,
-            newFields.subcategory,
-            typeof newRowParentId === "number" ? newRowParentId : null,
-            newFields.subregionName,
-            newFields.color,
-            newFields.metroId,
-            newFields.lat,
-            newFields.lng,
-          ]
-        );
-        const newRowId = insertedRows[0].id;
-        report.newRows++;
+        const insertNewRow = async () => {
+          const { rows: insertedRows } = await client.query(
+            `INSERT INTO places (name, alias, address, category, subcategory, parent_id, subregion_name, color, metro_id, lat, lng)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             RETURNING id`,
+            [
+              newFields.name,
+              newFields.alias,
+              newFields.address,
+              newFields.category,
+              newFields.subcategory,
+              typeof newRowParentId === "number" ? newRowParentId : null,
+              newFields.subregionName,
+              newFields.color,
+              newFields.metroId,
+              newFields.lat,
+              newFields.lng,
+            ]
+          );
+          report.newRows++;
+          return insertedRows[0].id;
+        };
 
-        const finalKeptParentId = keptRowNewParentId === "NEW_ROW_ID" ? newRowId : keptRowNewParentId;
-        await client.query(`UPDATE places SET parent_id = $1 WHERE id = $2`, [finalKeptParentId, row.id]);
+        let newRowId;
+        let finalKeptParentId;
+        if (existingIsParent) {
+          // The new row's parent_id (= row.id) is already known, but row.id
+          // is STILL self-referencing right now — inserting the new child
+          // row first would momentarily collide with row.id's own (name,
+          // parent_id) tuple against the unique index. Break the self-loop
+          // on the kept row FIRST, then insert.
+          finalKeptParentId = keptRowNewParentId; // a real id or null, never "NEW_ROW_ID" on this branch
+          await client.query(`UPDATE places SET parent_id = $1 WHERE id = $2`, [finalKeptParentId, row.id]);
+          newRowId = await insertNewRow();
+        } else {
+          // Here the kept row's new parent IS the new row's id, so the
+          // insert has to happen first — but that's safe: the new row's
+          // parent_id (grandparentPgId) is never row.id, so no (name,
+          // parent_id) collision with the still-self-referencing kept row.
+          newRowId = await insertNewRow();
+          finalKeptParentId = newRowId;
+          await client.query(`UPDATE places SET parent_id = $1 WHERE id = $2`, [finalKeptParentId, row.id]);
+        }
 
         const parentSidePgId = existingIsParent ? row.id : newRowId;
         const childSidePgId = existingIsParent ? newRowId : row.id;
