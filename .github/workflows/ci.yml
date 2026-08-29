@@ -1,0 +1,39 @@
+name: CI
+
+# Runs on every PR into qa or main. Add this as a required status check in
+# each branch's protection rule (Settings -> Branches -> the rule -> Require
+# status checks to pass -> "build") so a PR with a broken build, failing
+# lint, or type error can't be merged in the first place.
+on:
+  pull_request:
+    branches: [qa, main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      # Every page in the app is `export const dynamic = "force-dynamic"`,
+      # so `next build` doesn't hit the database at build time to prerender
+      # anything — but a couple of modules read env vars at import time, so
+      # these still need to be set to something real for the build to not
+      # blow up. Safe to point at the QA database; nothing here writes data.
+      - run: npm run build
+        env:
+          DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}

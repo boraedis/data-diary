@@ -1,0 +1,39 @@
+name: Migrate production database
+
+# Runs once a PR merges into main (i.e. ships to prod). Gated behind the
+# "production" GitHub Environment — set that up once in this repo's
+# Settings -> Environments -> New environment -> name it exactly
+# "production" -> check "Required reviewers" and add yourself. That makes
+# this job pause and wait for a manual Approve click (in the Actions tab,
+# on the running workflow) before drizzle-kit push ever touches the real
+# database — `--force` is needed for this to run non-interactively at all,
+# but it also auto-approves any statement drizzle-kit thinks might drop
+# data (e.g. misreading a column rename as drop-and-add), so the approval
+# step is the actual safety check, not this workflow file.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The Required reviewers gate above pauses before this job starts, so
+      # there's no live SQL preview to check at approval time — you're
+      # really re-confirming "yes, ship the schema.ts change from the PR I
+      # already reviewed", not catching something new here. --verbose just
+      # logs the statements drizzle-kit ran, useful after the fact if
+      # something needs debugging.
+      - run: npx drizzle-kit push --force --verbose
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
