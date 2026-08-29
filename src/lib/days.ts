@@ -347,6 +347,11 @@ export type PlaceCatalogItem = {
   parentId: number | null;
   subregionName: string | null;
   color: string | null;
+  // "<id>/.../<id>/" and "<name>/.../<name>/" from root to self inclusive —
+  // see the `places` table comment in schema.ts. Null until backfilled or
+  // first saved through createPlaceCatalogEntry/updatePlaceCatalogEntry.
+  idPath: string | null;
+  namePath: string | null;
   metroId: number | null;
   lat: number | null;
   lng: number | null;
@@ -1840,6 +1845,8 @@ const PLACE_COLUMNS = {
   parentId: places.parentId,
   subregionName: places.subregionName,
   color: places.color,
+  idPath: places.idPath,
+  namePath: places.namePath,
   metroId: places.metroId,
   lat: places.lat,
   lng: places.lng,
@@ -1848,6 +1855,59 @@ const PLACE_COLUMNS = {
 export async function listPlacesCatalog(): Promise<PlaceCatalogItem[]> {
   const db = getDb();
   return db.select(PLACE_COLUMNS).from(places).orderBy(asc(places.name));
+}
+
+// --- place path (idPath/namePath) maintenance ------------------------------
+// See the `places` table comment in schema.ts for what these are and why
+// they're maintained here instead of computed on read.
+
+type PlacePathParts = { idPath: string; namePath: string };
+
+function buildPlacePath(parent: PlacePathParts | null, id: number, name: string): PlacePathParts {
+  return {
+    idPath: `${parent?.idPath ?? ""}${id}/`,
+    namePath: `${parent?.namePath ?? ""}${name}/`,
+  };
+}
+
+async function fetchPlacePathParts(id: number): Promise<PlacePathParts | null> {
+  const db = getDb();
+  const [row] = await db.select({ idPath: places.idPath, namePath: places.namePath }).from(places).where(eq(places.id, id));
+  if (!row) return null;
+  // Falls back to "" (not the parent's own path) if the parent hasn't been
+  // backfilled/re-saved yet — see scripts/backfill-place-paths.mjs. A path
+  // built on top of an un-backfilled ancestor will be wrong until that
+  // ancestor gets backfilled or re-saved; there's no way to detect that
+  // from here, so the backfill script is meant to run once, top-down,
+  // right after this column is added.
+  return { idPath: row.idPath ?? "", namePath: row.namePath ?? "" };
+}
+
+// Recomputes `root`'s own idPath/namePath (already reflected in `root`) down
+// through every descendant, level by level, so a rename or a re-parent
+// propagates all the way down the subtree. `root.idPath`/`root.namePath`
+// must already be the freshly-saved values for the root place itself.
+async function cascadePlacePaths(root: { id: number; idPath: string; namePath: string }): Promise<void> {
+  const db = getDb();
+  let frontier = [root];
+  while (frontier.length > 0) {
+    const parentIds = frontier.map((p) => p.id);
+    const children = await db
+      .select({ id: places.id, name: places.name, parentId: places.parentId })
+      .from(places)
+      .where(inArray(places.parentId, parentIds));
+    if (children.length === 0) break;
+    const parentById = new Map(frontier.map((p) => [p.id, p]));
+    const nextFrontier: typeof frontier = [];
+    for (const child of children) {
+      const parent = parentById.get(child.parentId as number);
+      if (!parent) continue;
+      const { idPath, namePath } = buildPlacePath(parent, child.id, child.name);
+      await db.update(places).set({ idPath, namePath }).where(eq(places.id, child.id));
+      nextFrontier.push({ id: child.id, idPath, namePath });
+    }
+    frontier = nextFrontier;
+  }
 }
 
 // Geocoding is a best-effort enhancement, not a gate on saving a place — a
@@ -1887,9 +1947,21 @@ export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise
     })
     .onConflictDoNothing({ target: places.name })
     .returning(PLACE_COLUMNS);
-  if (inserted) return inserted;
-  const [existing] = await db.select(PLACE_COLUMNS).from(places).where(eq(places.name, trimmed));
-  return existing;
+  if (!inserted) {
+    // Name collision — onConflictDoNothing left the existing row untouched,
+    // it already has a path (or will once backfilled).
+    const [existing] = await db.select(PLACE_COLUMNS).from(places).where(eq(places.name, trimmed));
+    return existing;
+  }
+
+  const parentPath = inserted.parentId !== null ? await fetchPlacePathParts(inserted.parentId) : null;
+  const { idPath, namePath } = buildPlacePath(parentPath, inserted.id, inserted.name);
+  const [withPath] = await db
+    .update(places)
+    .set({ idPath, namePath })
+    .where(eq(places.id, inserted.id))
+    .returning(PLACE_COLUMNS);
+  return withPath;
 }
 
 export async function getPlaceCatalogEntry(id: number): Promise<PlaceCatalogItem | null> {
@@ -1920,12 +1992,15 @@ export async function getPlaceDescendantIds(id: number): Promise<number[]> {
   return result;
 }
 
-// Ancestor chain from root to `id` inclusive — replaces legacy's
-// maintained `path` array (denormalized on every place doc, recursively
-// rewritten on every move) with a walk-up-on-read; a guard against a
-// corrupted cycle (shouldn't happen given updatePlaceCatalogEntry's check
-// below, but this reads defensively regardless) stops it from looping
-// forever if one ever exists.
+// Ancestor chain from root to `id` inclusive, walked up on read — used for
+// the interactive breadcrumb (src/components/manage/place-detail.tsx),
+// which needs each ancestor's own id to link to it, not just its name. The
+// maintained `namePath`/`idPath` columns (see the `places` table comment
+// in schema.ts) cover the flat-string path/search use case; this covers
+// the "clickable per-ancestor" one they can't. A guard against a corrupted
+// cycle (shouldn't happen given updatePlaceCatalogEntry's check below, but
+// this reads defensively regardless) stops it from looping forever if one
+// ever exists.
 type PlaceParentLookupRow = { id: number; name: string; parentId: number | null };
 
 async function fetchPlaceParentLookup(placeId: number): Promise<PlaceParentLookupRow | null> {
@@ -1970,17 +2045,26 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
     }
   }
 
-  const [existing] = await db.select({ address: places.address }).from(places).where(eq(places.id, id));
+  const [existing] = await db
+    .select({ address: places.address, name: places.name, parentId: places.parentId })
+    .from(places)
+    .where(eq(places.id, id));
   // Only re-geocode when the address actually changed — the whole point of
   // fixing legacy's "re-geocode on every save regardless" bug (see
   // src/lib/geocode.ts).
   const addressChanged = existing?.address !== input.address;
   const geo = addressChanged ? await geocodeOrNull(input.address) : null;
 
+  const trimmedName = input.name.trim();
+  // A rename or a re-parent both change this place's own idPath/namePath,
+  // and every descendant's too (cascaded below) — anything else about the
+  // place doesn't touch path at all.
+  const pathAffectingChange = existing?.name !== trimmedName || existing?.parentId !== input.parentId;
+
   const [updated] = await db
     .update(places)
     .set({
-      name: input.name.trim(),
+      name: trimmedName,
       alias: input.alias,
       address: input.address,
       category: input.category,
@@ -1993,7 +2077,18 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
     })
     .where(eq(places.id, id))
     .returning(PLACE_COLUMNS);
-  return updated;
+
+  if (!pathAffectingChange) return updated;
+
+  const parentPath = updated.parentId !== null ? await fetchPlacePathParts(updated.parentId) : null;
+  const { idPath, namePath } = buildPlacePath(parentPath, updated.id, updated.name);
+  const [withPath] = await db
+    .update(places)
+    .set({ idPath, namePath })
+    .where(eq(places.id, updated.id))
+    .returning(PLACE_COLUMNS);
+  await cascadePlacePaths({ id: withPath.id, idPath, namePath });
+  return withPath;
 }
 
 // A place is referenced three ways: as one of a day's 2 place slots

@@ -16,15 +16,15 @@ export default async function ManagePlacesPage() {
           Manage Home
         </Link>
       </div>
+      <PlacesManageList initial={places} />
       <div className="flex justify-end gap-2">
         <Link href="/manage/places/categories" className={buttonVariants({ variant: "outline", size: "xs" })}>
-          Categories
+          Manage Categories
         </Link>
         <Link href="/manage/places/metros" className={buttonVariants({ variant: "outline", size: "xs" })}>
-          Metros
+          Manage Metros
         </Link>
       </div>
-      <PlacesManageList initial={places} />
     </main>
   );
 }

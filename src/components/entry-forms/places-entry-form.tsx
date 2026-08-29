@@ -18,12 +18,21 @@ function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[
   return arr;
 }
 
+// namePath is "USA/Georgia/Atlanta/Midtown/" (root to self, trailing
+// slash) — trim the trailing slash and swap in a nicer separator for
+// display, but keep matching against the raw form too (so typing "/" or
+// the exact stored form still works, not just the display form).
+function displayPath(namePath: string): string {
+  return namePath.replace(/\/$/, "").split("/").join(" › ");
+}
+
 function toSearchItem(place: PlaceCatalogItem): SearchItem {
   return {
     id: place.id,
     primary: place.name,
     secondary: place.category ?? place.alias,
-    searchTerms: [place.alias, place.address].filter((v): v is string => Boolean(v)),
+    searchTerms: [place.alias, place.address, place.namePath].filter((v): v is string => Boolean(v)),
+    caption: place.namePath ? displayPath(place.namePath) : null,
   };
 }
 

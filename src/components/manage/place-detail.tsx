@@ -255,6 +255,10 @@ export function PlaceDetail({
           ) : (
             <>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                <dt className="text-muted-foreground">Path</dt>
+                <dd className="font-mono text-xs">
+                  {place.namePath ? place.namePath.replace(/\/$/, "").split("/").join(" / ") : "—"}
+                </dd>
                 <dt className="text-muted-foreground">Alias</dt>
                 <dd>{place.alias ?? "—"}</dd>
                 <dt className="text-muted-foreground">Address</dt>

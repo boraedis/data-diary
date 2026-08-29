@@ -455,19 +455,20 @@ export const people = pgTable("people", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Places' hierarchy is a real, arbitrary-depth self-referencing tree —
-// legacy's `world` collection was a second, hand-maintained nested-map
-// index over `places` (country -> region -> subregion -> ...) that stored
-// a denormalized `path` array on every place and recursively rewrote every
-// descendant's path/order on every move. Postgres doesn't need that
-// duplication: `parentId` is the single source of truth for where a place
-// sits in the tree, and ancestry/descendants are computed on read via a
-// recursive CTE (see getPlaceAncestry/getPlaceDescendantIds in
-// src/lib/catalog-admin.ts) instead of a maintained path column — so
-// moving a place in the new app is one UPDATE, not a cascading rewrite of
-// every child underneath it. `onDelete: "restrict"` on parentId means a
-// place with children can't be deleted until they're moved or deleted
-// first (mirrored in getPlaceUsage's usage check).
+// Places' hierarchy is a real, arbitrary-depth self-referencing tree.
+// `parentId` is still the single source of truth for where a place sits in
+// the tree (ancestry/descendants can always be re-derived from it — see
+// getPlaceAncestry/getPlaceDescendantIds in src/lib/days.ts) — but unlike
+// the original design here, `idPath`/`namePath` below ARE a maintained,
+// denormalized materialization of that ancestry, kept in sync on every
+// create/update (see buildPlacePath/cascadePlacePaths in src/lib/days.ts).
+// This reintroduces exactly the "recursively rewrite every descendant on
+// move" cost the original comment here argued against — deliberately, so
+// path search and display don't need a live recursive walk. Existing rows
+// need a one-time backfill (scripts/backfill-place-paths.mjs) before these
+// are populated. `onDelete: "restrict"` on parentId means a place with
+// children can't be deleted until they're moved or deleted first (mirrored
+// in getPlaceUsage's usage check).
 export const places = pgTable("places", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -483,6 +484,12 @@ export const places = pgTable("places", {
   // Hex color — legacy only ever set this on top-level ("country") places,
   // purely for UI color-coding; not enforced at this layer.
   color: text("color"),
+  // "<id>/<id>/.../<id>/" from root to self inclusive, e.g. "3/17/42/108/".
+  // "<name>/<name>/.../<name>/" from root to self inclusive, e.g.
+  // "USA/Georgia/Atlanta/Midtown/" — the human-readable form, used for
+  // search and display. Both null until backfilled/first saved.
+  idPath: text("id_path"),
+  namePath: text("name_path"),
   metroId: integer("metro_id").references(() => metros.id, { onDelete: "set null" }),
   // Geocoded once when `address` is first set, and only re-geocoded when
   // `address` actually changes (see geocodePlaceIfNeeded in

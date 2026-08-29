@@ -19,6 +19,11 @@ export type SearchItem = {
    * rendered as a left edge on the row — the same "colored border" language
    * as the manage hub's catalog cards. Omit (or null) for no edge. */
   accentColor?: string | null;
+  /** Optional third line, smaller and dimmer than `secondary`, shown below
+   * it — for something like a place's hierarchy path
+   * ("USA/Georgia/Atlanta/Midtown/"). Also matched against, same as
+   * `secondary`. */
+  caption?: string | null;
 };
 
 function matches(item: SearchItem, query: string): boolean {
@@ -26,6 +31,7 @@ function matches(item: SearchItem, query: string): boolean {
   const q = query.toLowerCase();
   if (item.primary.toLowerCase().includes(q)) return true;
   if (item.secondary?.toLowerCase().includes(q)) return true;
+  if (item.caption?.toLowerCase().includes(q)) return true;
   return (item.searchTerms ?? []).some((t) => t.toLowerCase().includes(q));
 }
 
@@ -103,6 +109,9 @@ export function SearchPanel({
                 <span className="text-base">{item.primary}</span>
                 {item.secondary ? (
                   <span className="text-sm text-muted-foreground">{item.secondary}</span>
+                ) : null}
+                {item.caption ? (
+                  <span className="text-xs text-muted-foreground/70">{item.caption}</span>
                 ) : null}
               </button>
               {secondaryAction ? (
