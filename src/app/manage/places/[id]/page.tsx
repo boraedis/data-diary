@@ -44,7 +44,7 @@ export default async function ManagePlacePage({ params }: { params: Promise<{ id
         place={place}
         usage={usage}
         ancestry={ancestry}
-        children={children}
+        childPlaces={children}
         metros={metros}
         parentOptions={parentOptions}
         categories={categories}

@@ -19,7 +19,7 @@ export function PlaceDetail({
   place: initial,
   usage,
   ancestry,
-  children,
+  childPlaces,
   metros,
   parentOptions,
   categories,
@@ -29,7 +29,7 @@ export function PlaceDetail({
   // Root-to-self chain (getPlaceAncestry) — the last entry is this place
   // itself, so the breadcrumb below renders everything but the last one.
   ancestry: Ancestor[];
-  children: PlaceCatalogItem[];
+  childPlaces: PlaceCatalogItem[];
   metros: MetroItem[];
   // All places except this one and its own descendants — moving a place
   // into its own subtree is rejected server-side too (see
@@ -134,7 +134,7 @@ export function PlaceDetail({
 
       <div
         className={
-          children.length > 0
+          childPlaces.length > 0
             ? "flex flex-col gap-4 md:grid md:grid-cols-[1fr_20rem] md:items-start md:gap-6"
             : undefined
         }
@@ -336,13 +336,13 @@ export function PlaceDetail({
         </CardContent>
       </Card>
 
-      {children.length > 0 ? (
+      {childPlaces.length > 0 ? (
         <Card size="sm">
           <CardHeader>
             <CardTitle>Sub-places</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
-            {children.map((c) => (
+            {childPlaces.map((c) => (
               <Link
                 key={c.id}
                 href={`/manage/places/${c.id}`}
