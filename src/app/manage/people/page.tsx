@@ -14,15 +14,15 @@ export default async function ManagePeoplePage() {
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">People</h1>
         <Link href="/manage" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Manage
+          Manage Home
         </Link>
       </div>
+      <PeopleManageList initial={people} initialTags={tags} />
       <div className="flex justify-end">
         <Link href="/manage/people/tags" className={buttonVariants({ variant: "outline", size: "xs" })}>
           Manage tags
         </Link>
       </div>
-      <PeopleManageList initial={people} initialTags={tags} />
     </main>
   );
 }

@@ -8,9 +8,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
-import type { TagCatalogItem, TagUsage } from "@/lib/catalog-admin";
+import type { RecommendedTagMember, TagCatalogItem, TagUsage } from "@/lib/catalog-admin";
 
-export function TagDetail({ tag: initial, usage }: { tag: TagCatalogItem; usage: TagUsage }) {
+export function TagDetail({
+  tag: initial,
+  usage,
+  recommended,
+}: {
+  tag: TagCatalogItem;
+  usage: TagUsage;
+  recommended: RecommendedTagMember[];
+}) {
   const router = useRouter();
   const [tag, setTag] = useState(initial);
   const [editing, setEditing] = useState(false);
@@ -136,6 +144,64 @@ export function TagDetail({ tag: initial, usage }: { tag: TagCatalogItem; usage:
           )}
         </CardContent>
       </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Members ({usage.members.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {usage.members.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nobody is tagged {tag.name} yet.</p>
+          ) : (
+            usage.members.map((person) => (
+              <Link
+                key={person.id}
+                href={`/manage/people/${person.id}`}
+                className="rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
+              >
+                {person.name}
+              </Link>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      {recommended.length > 0 ? (
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>Recommended members</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              People who frequently show up on the same day as {tag.name}, but aren&apos;t tagged that way — maybe
+              they belong here too.
+            </p>
+            {recommended.map((person) => (
+              <Link
+                key={person.id}
+                href={`/manage/people/${person.id}`}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
+              >
+                <span>{person.name}</span>
+                <span className="flex items-center gap-2 shrink-0">
+                  {person.tagName ? (
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground"
+                    >
+                      <span
+                        className="inline-block size-2 rounded-full"
+                        style={{ backgroundColor: person.tagColor ?? undefined }}
+                      />
+                      {person.tagName}
+                    </span>
+                  ) : null}
+                  <span className="font-mono text-xs text-muted-foreground">{person.score}</span>
+                </span>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
     </>
   );
 }

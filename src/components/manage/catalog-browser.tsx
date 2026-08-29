@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 
@@ -18,11 +19,14 @@ export function CatalogBrowser({
   basePath,
   placeholder,
   emptyMessage,
+  trailingAction,
 }: {
   items: SearchItem[];
   basePath: string;
   placeholder?: string;
   emptyMessage?: string;
+  /** e.g. a "+ New" button, rendered inline beside the search box. */
+  trailingAction?: ReactNode;
 }) {
   const router = useRouter();
   return (
@@ -31,6 +35,7 @@ export function CatalogBrowser({
       onSelect={(id) => router.push(`${basePath}/${id}`)}
       placeholder={placeholder ?? "Search…"}
       emptyMessage={emptyMessage ?? "No matches."}
+      trailingAction={trailingAction}
     />
   );
 }
