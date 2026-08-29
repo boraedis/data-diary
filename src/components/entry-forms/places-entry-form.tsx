@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
-import { Select } from "@/components/ui/select";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
 
 function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[] {
@@ -69,6 +69,17 @@ function NewPlaceModal({
   const [parentId, setParentId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sorted alphabetically, with the full hierarchy path as each option's
+  // caption — place names alone aren't unique (see displayPath above), so
+  // the path is what actually disambiguates same-named places.
+  const parentSearchItems: SearchItem[] = useMemo(
+    () =>
+      [...parentOptions]
+        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .map((p) => ({ id: p.id, primary: p.name, caption: p.namePath ? displayPath(p.namePath) : null })),
+    [parentOptions]
+  );
 
   function reset() {
     setName("");
@@ -147,18 +158,14 @@ function NewPlaceModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-place-parent">Parent place</Label>
-          <Select
+          <SearchCombobox
             id="new-place-parent"
-            value={parentId ?? ""}
-            onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">No parent</option>
-            {parentOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
+            items={parentSearchItems}
+            valueId={parentId}
+            onChange={setParentId}
+            placeholder="Search places…"
+            emptyLabel="No parent"
+          />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>

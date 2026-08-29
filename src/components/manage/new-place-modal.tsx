@@ -1,15 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import { Select } from "@/components/ui/select";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
+import type { SearchItem } from "@/components/entry-forms/search-panel";
 import type { PlaceCatalogItem } from "@/lib/days";
 import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 
 type ParentOption = { id: number; name: string; namePath: string | null };
+
+// namePath is "USA/Georgia/Atlanta/Midtown/" (root to self, trailing
+// slash) — trim it and swap in a nicer separator for display. Shown as
+// every option's caption so same-named places at different levels of the
+// hierarchy (place names aren't unique — "Dubai" the emirate vs "Dubai"
+// the city) are still distinguishable in the picker.
+function displayPath(namePath: string | null): string | null {
+  return namePath ? namePath.replace(/\/$/, "").split("/").join(" › ") : null;
+}
 
 /** Same fields/shape as the places entry form's own "+ New" modal — kept as
  * a separate copy rather than importing that one, since it's private to
@@ -46,6 +56,15 @@ export function NewPlaceModal({
 
   const categoryNames = categories.map((c) => c.name);
   const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
+  // Sorted alphabetically regardless of the order the caller happened to
+  // pass in (e.g. places-manage-list.tsx's own list is mention-sorted).
+  const parentSearchItems: SearchItem[] = useMemo(
+    () =>
+      [...parentOptions]
+        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .map((p) => ({ id: p.id, primary: p.name, caption: displayPath(p.namePath) })),
+    [parentOptions]
+  );
 
   function reset() {
     setName("");
@@ -146,18 +165,14 @@ export function NewPlaceModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="manage-new-place-parent">Parent place</Label>
-          <Select
+          <SearchCombobox
             id="manage-new-place-parent"
-            value={parentId ?? ""}
-            onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">No parent</option>
-            {parentOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
+            items={parentSearchItems}
+            valueId={parentId}
+            onChange={setParentId}
+            placeholder="Search places…"
+            emptyLabel="No parent"
+          />
           {parentId === null && category.trim() !== "Region" ? (
             <p className="text-xs text-muted-foreground">
               Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to

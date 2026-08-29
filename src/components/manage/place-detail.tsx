@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
+import type { SearchItem } from "@/components/entry-forms/search-panel";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type { PlaceAncestor, PlaceCatalogItem, PlaceMentionEntry, PlaceUsage } from "@/lib/days";
 import type { MetroItem, PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
@@ -80,6 +82,20 @@ export function PlaceDetail({
   const [error, setError] = useState<string | null>(null);
   const [confirmReparentOpen, setConfirmReparentOpen] = useState(false);
   const [showDescendants, setShowDescendants] = useState(false);
+
+  // Sorted alphabetically, with the full hierarchy path as each option's
+  // caption — place names alone aren't unique (two "Dubai"s, an emirate and
+  // a city), so the path is what actually disambiguates them in the picker.
+  const parentSearchItems: SearchItem[] = useMemo(
+    () =>
+      [...parentOptions]
+        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .map((p) => ({ id: p.id, primary: p.name, caption: p.namePath ? displayNamePath(p.namePath) : null })),
+    [parentOptions]
+  );
+
+  const mainCardRef = useRef<HTMLDivElement>(null);
+  const [relatedCardHeight, setRelatedCardHeight] = useState<number | null>(null);
 
   function cancelEdit() {
     setName(place.name);
@@ -162,6 +178,38 @@ export function PlaceDetail({
   const parent = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1] : null;
   const hasRelatedPlaces = parent !== null || childPlaces.length > 0;
 
+  // --- related-places card height, capped to match the edit card --------
+  // The two cards sit in a CSS grid side by side (md+), but the default
+  // align-items: stretch alone doesn't actually cap this card's height:
+  // an "auto" grid row sizes to the MAX of every item's natural content
+  // height, including this one's — so a long sub-places list still grows
+  // the row (and the whole page) to fit itself before overflow-y-auto
+  // ever gets a bounded box to scroll within. Measuring the edit card's
+  // real rendered height and applying it directly breaks that
+  // circularity: once this card has an explicit height, its CardContent's
+  // overflow-y-auto below has something concrete to scroll inside of
+  // instead of just expanding to match.
+  useEffect(() => {
+    const el = mainCardRef.current;
+    if (!el || !hasRelatedPlaces) return;
+    // Only pin the height side-by-side (md+) — below that the cards stack
+    // full-width, and forcing the second one to match the (often much
+    // taller, especially while editing) first one would just waste mobile
+    // screen space for no side-by-side alignment to gain from it.
+    const mql = window.matchMedia("(min-width: 768px)");
+    function sync() {
+      setRelatedCardHeight(mql.matches && el ? el.offsetHeight : null);
+    }
+    sync();
+    const resizeObserver = new ResizeObserver(sync);
+    resizeObserver.observe(el);
+    mql.addEventListener("change", sync);
+    return () => {
+      resizeObserver.disconnect();
+      mql.removeEventListener("change", sync);
+    };
+  }, [hasRelatedPlaces, editing]);
+
   // --- color inheritance (root-only field — see the `places` table
   // comment in schema.ts) ---------------------------------------------
   const rootAncestor = ancestry.length > 0 ? ancestry[0] : null; // ancestry[0] IS `place` itself when place is root
@@ -218,15 +266,11 @@ export function PlaceDetail({
       <div
         className={
           hasRelatedPlaces
-            ? // md:items-stretch (the grid default — no override needed) makes
-              // both columns match the row's height, which the sub-places
-              // card's own overflow-y-auto (below) keeps pinned to the main
-              // card's natural height rather than growing to fit every
-              // sub-place — see the comment on that card's CardContent.
-              "flex flex-col gap-4 md:grid md:grid-cols-[1fr_20rem] md:gap-6"
+            ? "flex flex-col gap-4 md:grid md:grid-cols-[1fr_20rem] md:gap-6"
             : undefined
         }
       >
+      <div ref={mainCardRef}>
       <Card size="sm">
         <CardHeader>
           <CardTitle>{editing ? "Edit place" : place.name}</CardTitle>
@@ -310,18 +354,14 @@ export function PlaceDetail({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="place-parent">Parent place</Label>
-                <Select
+                <SearchCombobox
                   id="place-parent"
-                  value={parentId ?? ""}
-                  onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
-                >
-                  <option value="">No parent</option>
-                  {parentOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
+                  items={parentSearchItems}
+                  valueId={parentId}
+                  onChange={setParentId}
+                  placeholder="Search places…"
+                  emptyLabel="No parent"
+                />
                 {parentId === null && category.trim() !== "Region" ? (
                   <p className="text-xs text-muted-foreground">
                     Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
@@ -457,22 +497,28 @@ export function PlaceDetail({
           )}
         </CardContent>
       </Card>
+      </div>
 
       {hasRelatedPlaces ? (
-        <Card size="sm" className="md:min-h-0">
+        <Card
+          size="sm"
+          className="md:min-h-0"
+          style={relatedCardHeight !== null ? { height: relatedCardHeight } : undefined}
+        >
           <CardHeader>
             <CardTitle>Related places</CardTitle>
           </CardHeader>
-          {/* flex-1 + min-h-0 (needed alongside overflow-y-auto so this
-              panel can actually shrink below its content size inside the
-              flex-col Card — without it, "min-height: auto" would just let
-              the content push the whole Card taller instead) is what keeps
-              this card capped to the main card's height (via the grid
-              stretch above) with sub-places scrolling internally instead of
-              growing the page. */}
-          <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+          {/* min-h-0 + flex-1 lets this panel shrink below its content size
+              inside the flex-col Card — needed so the Sub-places section
+              below can claim the remaining space instead of everything
+              just stacking to full content height. The Card itself is
+              capped to the edit card's measured height (see the effect
+              above), so this is what actually gives the Sub-places list
+              something concrete to scroll inside of. The Parent link
+              (if any) stays outside that scroll area, always visible. */}
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
             {parent ? (
-              <div className="flex flex-col gap-1.5">
+              <div className="flex shrink-0 flex-col gap-1.5">
                 <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Parent</p>
                 <Link
                   href={`/manage/places/${parent.id}`}
@@ -485,7 +531,7 @@ export function PlaceDetail({
             {childPlaces.length > 0 ? (
               <div className="flex min-h-0 flex-1 flex-col gap-1.5">
                 <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Sub-places</p>
-                <div className="flex flex-col gap-2 overflow-y-auto">
+                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
                   {childPlaces.map((c) => (
                     <Link
                       key={c.id}
