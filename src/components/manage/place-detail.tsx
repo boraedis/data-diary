@@ -332,7 +332,7 @@ export function PlaceDetail({
                   Color{" "}
                   {!editIsRoot ? (
                     <span className="font-normal text-muted-foreground">
-                      (inherited from {rootAncestor?.name ?? "root"} — only a root place has its own)
+                      (inherited from {rootAncestor?.name ?? "root"})
                     </span>
                   ) : null}
                 </Label>
