@@ -310,7 +310,7 @@ export function EntertainmentEntryForm({
           <CardTitle>Entertainment</CardTitle>
           <CardDescription>
             {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`} Search to pick something —
-            it'll ask for duration and notes.
+            it&apos;ll ask for duration and notes.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

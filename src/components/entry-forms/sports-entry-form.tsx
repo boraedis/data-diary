@@ -638,7 +638,7 @@ export function SportsEntryForm({
         <CardHeader>
           <CardTitle>Sports</CardTitle>
           <CardDescription>
-            {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`} Search a sport you've watched
+            {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`} Search a sport you&apos;ve watched
             before, or add a new one.
           </CardDescription>
         </CardHeader>

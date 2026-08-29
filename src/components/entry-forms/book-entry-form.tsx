@@ -50,13 +50,9 @@ export function GoogleBooksSearchModal({
   useEffect(() => {
     if (!open) return;
     const trimmed = query.trim();
-    if (!trimmed) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
+    if (!trimmed) return;
     const handle = setTimeout(async () => {
+      setSearching(true);
       try {
         const res = await fetch(`/api/google-books/search?q=${encodeURIComponent(trimmed)}`);
         const body = await res.json();
@@ -76,6 +72,13 @@ export function GoogleBooksSearchModal({
     }, 300);
     return () => clearTimeout(handle);
   }, [query, open]);
+
+  // Query was cleared (or a previous search's results are still sitting in
+  // state) — derive the "nothing to show" case at render time instead of
+  // resetting `results`/`searching` synchronously from the effect above.
+  const trimmedQuery = query.trim();
+  const displayResults = trimmedQuery ? results : [];
+  const isSearching = trimmedQuery ? searching : false;
 
   async function handlePick(result: GoogleBooksSearchResult) {
     setAddingId(result.googleBooksId);
@@ -121,14 +124,14 @@ export function GoogleBooksSearchModal({
         />
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <div className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
-          {searching ? (
+          {isSearching ? (
             <p className="p-4 text-sm text-muted-foreground">Searching…</p>
-          ) : results.length === 0 ? (
+          ) : displayResults.length === 0 ? (
             <p className="p-4 text-sm text-muted-foreground">
-              {query.trim() ? "No matches." : "Start typing a title or author."}
+              {trimmedQuery ? "No matches." : "Start typing a title or author."}
             </p>
           ) : (
-            results.map((r) => (
+            displayResults.map((r) => (
               <button
                 key={r.googleBooksId}
                 type="button"
@@ -376,7 +379,7 @@ export function BookEntryForm({
         <CardHeader>
           <CardTitle>Books</CardTitle>
           <CardDescription>
-            {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`} Search something you've read
+            {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`} Search something you&apos;ve read
             before, or add a new one from Google Books.
           </CardDescription>
         </CardHeader>

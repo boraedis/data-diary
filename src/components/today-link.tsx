@@ -16,6 +16,13 @@ export function TodayLink() {
   const [date, setDate] = useState<string | null>(null);
 
   useEffect(() => {
+    // Deliberately synchronous: this is the standard client-only hydration
+    // guard (compute after mount, from the browser's own clock, instead of
+    // whatever the server rendered) — not a value that can be derived
+    // during render without risking a hydration mismatch. Known false
+    // positive for this pattern, see facebook/react#35377 and
+    // pacocoursey/next-themes#374.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDate(todayDateString());
   }, []);
 
