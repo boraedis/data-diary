@@ -17,12 +17,12 @@ export default async function ManagePeoplePage() {
           Manage Home
         </Link>
       </div>
+      <PeopleManageList initial={people} initialTags={tags} />
       <div className="flex justify-end">
         <Link href="/manage/people/tags" className={buttonVariants({ variant: "outline", size: "xs" })}>
           Manage tags
         </Link>
       </div>
-      <PeopleManageList initial={people} initialTags={tags} />
     </main>
   );
 }

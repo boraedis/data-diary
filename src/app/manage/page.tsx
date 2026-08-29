@@ -50,7 +50,7 @@ export default async function ManagePage() {
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-8 md:py-12">
       <div className="flex items-center justify-between">
-        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Manage</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Manage Home</h1>
         <Link href="/" className={buttonVariants({ variant: "outline", size: "sm" })}>
           Home
         </Link>

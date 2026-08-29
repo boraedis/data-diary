@@ -15,6 +15,10 @@ export type SearchItem = {
    * aliases) — lets "typing a nickname finds the person" without cluttering
    * the row. */
   searchTerms?: string[];
+  /** Optional per-item accent color (a tag's color, a category's color, …)
+   * rendered as a left edge on the row — the same "colored border" language
+   * as the manage hub's catalog cards. Omit (or null) for no edge. */
+  accentColor?: string | null;
 };
 
 function matches(item: SearchItem, query: string): boolean {
@@ -45,6 +49,7 @@ export function SearchPanel({
   emptyMessage = "No matches.",
   className,
   autoFocus,
+  trailingAction,
 }: {
   items: SearchItem[];
   onSelect: (id: number) => void;
@@ -57,18 +62,26 @@ export function SearchPanel({
   emptyMessage?: string;
   className?: string;
   autoFocus?: boolean;
+  /** Rendered inline beside the search input, same row — e.g. a "+ New"
+   * button that wants to read as part of the same search ribbon rather than
+   * a separate control floating above or below it. */
+  trailingAction?: ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => items.filter((item) => matches(item, query)), [items, query]);
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      <Input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-      />
+      <div className="flex items-center gap-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          className="flex-1"
+        />
+        {trailingAction}
+      </div>
       <div className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
         {filtered.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">{emptyMessage}</p>
@@ -76,7 +89,8 @@ export function SearchPanel({
           filtered.map((item) => (
             <div
               key={item.id}
-              className="flex items-stretch border-b border-border last:border-b-0"
+              className="flex items-stretch border-b border-l-4 border-border last:border-b-0"
+              style={{ borderLeftColor: item.accentColor ?? "transparent" }}
             >
               <button
                 type="button"

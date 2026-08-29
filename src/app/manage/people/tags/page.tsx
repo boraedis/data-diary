@@ -13,7 +13,7 @@ export default async function ManageTagsPage() {
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Tags</h1>
         <Link href="/manage/people" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          People
+          Back to People
         </Link>
       </div>
       <TagsManageList initial={tags} />

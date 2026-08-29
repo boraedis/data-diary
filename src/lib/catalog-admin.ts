@@ -7,9 +7,10 @@
 // growing without bound — every function here follows the exact same
 // "upsert-by-unique-key on create, get/update/delete + usage check" shape
 // established there.
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
+  days,
   exerciseFocusLinks,
   exerciseFocuses,
   exerciseSubfocuses,
@@ -108,6 +109,95 @@ export async function getTagUsage(id: number): Promise<TagUsage> {
 export async function deleteTag(id: number): Promise<void> {
   const db = getDb();
   await db.delete(tags).where(eq(tags.id, id));
+}
+
+// Ported from the legacy app's functions/views/entry/database/tag.js
+// (loadRecommendedMembers): people who aren't tagged X but frequently show
+// up on the same day as people who are — a nudge toward "you keep logging
+// this person alongside your X people, maybe they belong here too" (or,
+// when they already carry a different tag, just an interesting overlap).
+//
+// For every day, count how many of that day's (up to 10) people slots are
+// filled by a member of this tag. Every *other* person present that day
+// gets that count added to a running score, and +1 to a running
+// appearance count — across every day, not just days a member showed up,
+// same as legacy. The final ranking score is score / sqrt(appearances):
+// dividing by the square root (not the raw count) rewards people who
+// consistently co-occur with a lot of this tag's members without letting
+// one big day, or one lonely appearance, dominate the ranking the way a
+// straight average or a straight total would.
+export type RecommendedTagMember = {
+  id: number;
+  name: string;
+  score: number;
+  tagName: string | null;
+  tagColor: string | null;
+};
+
+export async function getRecommendedTagMembers(tagId: number, limit = 25): Promise<RecommendedTagMember[]> {
+  const db = getDb();
+
+  const memberRows = await db.select({ id: people.id }).from(people).where(eq(people.tagId, tagId));
+  const memberIds = new Set(memberRows.map((r) => r.id));
+  if (memberIds.size === 0) return [];
+
+  const dayRows = await db
+    .select({
+      p1: days.positivePerson1Id,
+      p2: days.positivePerson2Id,
+      p3: days.positivePerson3Id,
+      p4: days.positivePerson4Id,
+      p5: days.positivePerson5Id,
+      p6: days.positivePerson6Id,
+      p7: days.positivePerson7Id,
+      n1: days.negativePerson1Id,
+      n2: days.negativePerson2Id,
+      n3: days.negativePerson3Id,
+    })
+    .from(days);
+
+  const tally = new Map<number, { score: number; appearances: number }>();
+  for (const row of dayRows) {
+    const ids = [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7, row.n1, row.n2, row.n3].filter(
+      (id): id is number => id !== null,
+    );
+    const unique = [...new Set(ids)];
+    const memberCountThisDay = unique.filter((id) => memberIds.has(id)).length;
+    for (const id of unique) {
+      if (memberIds.has(id)) continue;
+      const entry = tally.get(id) ?? { score: 0, appearances: 0 };
+      entry.score += memberCountThisDay;
+      entry.appearances += 1;
+      tally.set(id, entry);
+    }
+  }
+
+  const ranked = [...tally.entries()]
+    .map(([id, { score, appearances }]) => ({
+      id,
+      value: Math.round((score / Math.sqrt(appearances)) * 100) / 100,
+    }))
+    .filter((r) => r.value > 1)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+  if (ranked.length === 0) return [];
+
+  const candidateRows = await db
+    .select({ id: people.id, name: people.name, tagName: tags.name, tagColor: tags.color })
+    .from(people)
+    .leftJoin(tags, eq(people.tagId, tags.id))
+    .where(
+      inArray(
+        people.id,
+        ranked.map((r) => r.id),
+      ),
+    );
+  const byId = new Map(candidateRows.map((r) => [r.id, r]));
+
+  return ranked.map((r) => {
+    const p = byId.get(r.id);
+    return { id: r.id, name: p?.name ?? "?", score: r.value, tagName: p?.tagName ?? null, tagColor: p?.tagColor ?? null };
+  });
 }
 
 // --- Exercise subtypes (catalog, scoped per category) ----------------------

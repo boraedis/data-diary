@@ -14,6 +14,7 @@ function toSearchItem(person: PersonCatalogItem): SearchItem {
     primary: person.name,
     secondary: person.tagName,
     searchTerms: person.nicknames,
+    accentColor: person.tagColor,
   };
 }
 
@@ -30,16 +31,16 @@ export function PeopleManageList({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New person
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/people"
         placeholder="Search people…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New person
+          </Button>
+        }
       />
       <NewPersonModal
         open={modalOpen}

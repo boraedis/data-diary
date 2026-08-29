@@ -14,6 +14,7 @@ function toSearchItem(tag: TagWithCount): SearchItem {
     id: tag.id,
     primary: tag.name,
     secondary: `${tag.memberCount} ${tag.memberCount === 1 ? "person" : "people"}`,
+    accentColor: tag.color,
   };
 }
 
@@ -23,16 +24,16 @@ export function TagsManageList({ initial }: { initial: TagWithCount[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New tag
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/people/tags"
         placeholder="Search tags…"
         emptyMessage="No tags yet."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New tag
+          </Button>
+        }
       />
       <NewTagModal
         open={modalOpen}
