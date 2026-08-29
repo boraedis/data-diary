@@ -96,17 +96,7 @@ function summarize(day: DayPayload): CategorySummary[] {
       total: POSITIVE_PEOPLE_SLOTS + NEGATIVE_PEOPLE_SLOTS,
     },
     { key: "places", label: "Places", kind: "progress", filled: day.places.length, total: PLACE_SLOTS },
-    // Movies/Sports/Books have their own real forms now, but they're still
-    // entertainment kinds, not their own day-summary category — their
-    // counts fold into this tile, and the entertainment page itself links
-    // into each real form. See the "Movies, first pass" / this note in
-    // REBUILD_PLAN.md.
-    {
-      key: "entertainment",
-      label: "Entertainment",
-      kind: "count",
-      count: day.entertainment.length + day.movies.length + day.sportsWatches.length + day.bookSessions.length,
-    },
+    { key: "entertainment", label: "Entertainment", kind: "count", count: day.entertainment.length },
   ];
 }
 
@@ -124,12 +114,12 @@ export default async function DaySummaryPage({
   const categories = summarize(day);
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:py-12">
       <DayNav date={date} />
-      <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
         {categories.map((cat) => (
           <Link key={cat.key} href={`/day/${date}/${cat.key}`}>
-            <Card size="sm" className="transition-colors hover:bg-accent">
+            <Card size="sm" className="h-full transition-colors hover:bg-accent">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>{cat.label}</CardTitle>

@@ -39,7 +39,7 @@ export default async function ManagePlacePage({ params }: { params: Promise<{ id
   const parentOptions = allPlaces.filter((p) => !excluded.has(p.id)).map((p) => ({ id: p.id, name: p.name }));
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
       <PlaceDetail
         place={place}
         usage={usage}

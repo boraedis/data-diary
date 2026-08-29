@@ -69,9 +69,9 @@ export function SearchPanel({
         placeholder={placeholder}
         autoFocus={autoFocus}
       />
-      <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+      <div className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
         {filtered.length === 0 ? (
-          <p className="p-3 text-sm text-muted-foreground">{emptyMessage}</p>
+          <p className="p-4 text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
           filtered.map((item) => (
             <div
@@ -84,11 +84,11 @@ export function SearchPanel({
                   onSelect(item.id);
                   setQuery("");
                 }}
-                className="flex flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
+                className="flex flex-1 flex-col items-start gap-0.5 px-3.5 py-2.5 text-left hover:bg-accent"
               >
-                <span className="text-sm">{item.primary}</span>
+                <span className="text-base">{item.primary}</span>
                 {item.secondary ? (
-                  <span className="text-xs text-muted-foreground">{item.secondary}</span>
+                  <span className="text-sm text-muted-foreground">{item.secondary}</span>
                 ) : null}
               </button>
               {secondaryAction ? (
@@ -100,7 +100,7 @@ export function SearchPanel({
                     secondaryAction.onSelect(item.id);
                     setQuery("");
                   }}
-                  className="flex w-10 shrink-0 items-center justify-center border-l border-border text-muted-foreground hover:bg-accent hover:text-destructive"
+                  className="flex w-12 shrink-0 items-center justify-center border-l border-border text-muted-foreground hover:bg-accent hover:text-destructive"
                 >
                   {secondaryAction.icon}
                 </button>

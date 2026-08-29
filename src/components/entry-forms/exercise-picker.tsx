@@ -87,7 +87,7 @@ export function ExercisePicker({
           onChange={onChange}
           placeholder="Search exercises…"
         />
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
+        <Button type="button" variant="outline" size="sm" onClick={() => setModalOpen(true)}>
           + New
         </Button>
       </div>

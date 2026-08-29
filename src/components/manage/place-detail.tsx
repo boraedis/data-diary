@@ -132,6 +132,13 @@ export function PlaceDetail({
         </p>
       ) : null}
 
+      <div
+        className={
+          children.length > 0
+            ? "flex flex-col gap-4 md:grid md:grid-cols-[1fr_20rem] md:items-start md:gap-6"
+            : undefined
+        }
+      >
       <Card size="sm">
         <CardHeader>
           <CardTitle>{editing ? "Edit place" : place.name}</CardTitle>
@@ -347,6 +354,7 @@ export function PlaceDetail({
           </CardContent>
         </Card>
       ) : null}
+      </div>
     </>
   );
 }

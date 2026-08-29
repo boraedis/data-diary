@@ -17,10 +17,10 @@ export function DayNav({ date, category }: { date: string; category?: string }) 
         &larr; Prev
       </Link>
       <div className="flex flex-col items-center">
-        <h1 className="font-mono text-lg font-medium">{date}</h1>
+        <h1 className="font-mono text-xl font-medium text-primary md:text-2xl">{date}</h1>
         <Link
           href={category ? `/day/${date}` : "/"}
-          className="text-xs text-muted-foreground hover:text-foreground"
+          className="text-sm text-muted-foreground hover:text-foreground"
         >
           {category ? "Summary" : "Home"}
         </Link>

@@ -105,11 +105,11 @@ export function TmdbTvSearchModal({
           autoFocus
         />
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
-        <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
+        <div className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
           {searching ? (
-            <p className="p-3 text-sm text-muted-foreground">Searching…</p>
+            <p className="p-4 text-sm text-muted-foreground">Searching…</p>
           ) : results.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">
+            <p className="p-4 text-sm text-muted-foreground">
               {query.trim() ? "No matches." : "Start typing a title."}
             </p>
           ) : (
@@ -119,7 +119,7 @@ export function TmdbTvSearchModal({
                 type="button"
                 onClick={() => handlePick(r)}
                 disabled={addingTmdbId !== null}
-                className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-accent disabled:opacity-50"
+                className="flex w-full items-center gap-3 border-b border-border px-3.5 py-2.5 text-left last:border-b-0 hover:bg-accent disabled:opacity-50"
               >
                 {r.posterPath ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -132,9 +132,9 @@ export function TmdbTvSearchModal({
                   <div className="h-12 w-8 shrink-0 rounded bg-muted" />
                 )}
                 <div className="min-w-0">
-                  <p className="truncate text-sm">{r.title}</p>
+                  <p className="truncate text-base">{r.title}</p>
                   {r.firstAirDate ? (
-                    <p className="text-xs text-muted-foreground">{r.firstAirDate.slice(0, 4)}</p>
+                    <p className="text-sm text-muted-foreground">{r.firstAirDate.slice(0, 4)}</p>
                   ) : null}
                 </div>
                 {addingTmdbId === r.tmdbId ? (

@@ -9,9 +9,11 @@ export default async function PlacesChartPage() {
   const entries = await getPlaceLeaderboardData();
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium">Most-visited places</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">
+          Most-visited places
+        </h1>
         <Link href="/charts" className="text-xs text-muted-foreground hover:text-foreground">
           Charts
         </Link>

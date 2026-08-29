@@ -19,7 +19,7 @@ export default async function SportsEntryPage({
   const [day, catalog] = await Promise.all([loadDay(date), listSportsCatalog()]);
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
       <DayNav date={date} category="entertainment/sports" />
       <SportsEntryForm date={date} initial={day.sportsWatches} catalog={catalog} />
     </main>

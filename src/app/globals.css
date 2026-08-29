@@ -9,7 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-fraunces);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,82 +49,83 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  /* Slightly tighter corners for a denser, more dashboard-like feel — this
-     is the first visual-identity pass (Phase 2), applied globally since
-     the app is dark-by-default now (see .dark below and layout.tsx). */
-  --radius: 0.5rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: oklch(0.99 0.006 70);
+  --foreground: oklch(0.2 0.02 40);
+  --card: oklch(1 0.004 70);
+  --card-foreground: oklch(0.2 0.02 40);
+  --popover: oklch(1 0.004 70);
+  --popover-foreground: oklch(0.2 0.02 40);
+  --primary: oklch(0.58 0.15 40);
+  --primary-foreground: oklch(0.98 0.01 70);
+  --secondary: oklch(0.95 0.012 60);
+  --secondary-foreground: oklch(0.28 0.03 40);
+  --muted: oklch(0.95 0.012 60);
+  --muted-foreground: oklch(0.5 0.02 45);
+  --accent: oklch(0.92 0.03 65);
+  --accent-foreground: oklch(0.28 0.03 40);
+  --destructive: oklch(0.577 0.22 27);
+  --border: oklch(0.88 0.015 55);
+  --input: oklch(0.88 0.015 55);
+  --ring: oklch(0.58 0.15 40 / 50%);
+  --chart-1: oklch(0.62 0.15 40);
+  --chart-2: oklch(0.68 0.14 80);
+  --chart-3: oklch(0.55 0.1 150);
+  --chart-4: oklch(0.55 0.16 25);
+  --chart-5: oklch(0.5 0.07 230);
+  /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
+  --radius: 0.75rem;
+  --sidebar: oklch(0.97 0.01 65);
+  --sidebar-foreground: oklch(0.2 0.02 40);
+  --sidebar-primary: oklch(0.58 0.15 40);
+  --sidebar-primary-foreground: oklch(0.98 0.01 70);
+  --sidebar-accent: oklch(0.92 0.03 65);
+  --sidebar-accent-foreground: oklch(0.28 0.03 40);
+  --sidebar-border: oklch(0.88 0.015 55);
+  --sidebar-ring: oklch(0.58 0.15 40 / 50%);
 }
 
-/* Dark, data-dense — the app's default (and, for now, only real) theme; see
-   `dark` on <html> in layout.tsx. Near-black neutrals with a single teal
-   accent for interactive/primary elements, plus a small 5-color qualitative
-   palette on chart-1..5 seeded now so Phase 4's chart layer has a coherent
-   starting point instead of the legacy grayscale-only set. Full chart color
-   and interaction conventions are still a Phase 4 decision — this is just a
-   reasonable default, not a final answer. */
+/* Dark, data-dense, warm — the app's default (and, for now, only real)
+   theme; see `dark` on <html> in layout.tsx. The first pass here (Phase 2)
+   went near-black-and-teal, closer to a corporate dashboard than a personal
+   journal; this pass (visual refresh) keeps the dark-and-data-driven
+   foundation but warms the neutrals (a soft brown-black instead of
+   blue-black), swaps the single cool teal accent for a terracotta/amber
+   one, and gives chart-1..5 an earthy but still clearly-distinguishable
+   5-hue spread (terracotta, ochre, sage, rust, dusty teal) instead of the
+   old teal/gold/coral/violet/green set that leaned more "generic SaaS
+   palette" than "this app's own colors". */
 .dark {
-  --background: oklch(0.13 0.005 240);
-  --foreground: oklch(0.96 0 0);
-  --card: oklch(0.18 0.006 240);
-  --card-foreground: oklch(0.96 0 0);
-  --popover: oklch(0.18 0.006 240);
-  --popover-foreground: oklch(0.96 0 0);
-  --primary: oklch(0.78 0.14 195);
-  --primary-foreground: oklch(0.15 0.02 195);
-  --secondary: oklch(0.24 0.006 240);
-  --secondary-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.22 0.006 240);
-  --muted-foreground: oklch(0.65 0.01 240);
-  --accent: oklch(0.24 0.006 240);
-  --accent-foreground: oklch(0.96 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.78 0.14 195 / 60%);
-  --chart-1: oklch(0.78 0.14 195);
-  --chart-2: oklch(0.8 0.16 80);
-  --chart-3: oklch(0.72 0.19 20);
-  --chart-4: oklch(0.72 0.14 300);
-  --chart-5: oklch(0.82 0.18 130);
-  --sidebar: oklch(0.16 0.006 240);
-  --sidebar-foreground: oklch(0.96 0 0);
-  --sidebar-primary: oklch(0.78 0.14 195);
-  --sidebar-primary-foreground: oklch(0.15 0.02 195);
-  --sidebar-accent: oklch(0.24 0.006 240);
-  --sidebar-accent-foreground: oklch(0.96 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.78 0.14 195 / 60%);
+  --background: oklch(0.16 0.015 50);
+  --foreground: oklch(0.96 0.012 70);
+  --card: oklch(0.21 0.018 45);
+  --card-foreground: oklch(0.96 0.012 70);
+  --popover: oklch(0.21 0.018 45);
+  --popover-foreground: oklch(0.96 0.012 70);
+  --primary: oklch(0.72 0.16 40);
+  --primary-foreground: oklch(0.18 0.03 35);
+  --secondary: oklch(0.27 0.02 50);
+  --secondary-foreground: oklch(0.96 0.012 70);
+  --muted: oklch(0.25 0.018 50);
+  --muted-foreground: oklch(0.7 0.025 55);
+  --accent: oklch(0.29 0.03 55);
+  --accent-foreground: oklch(0.96 0.012 70);
+  --destructive: oklch(0.7 0.19 25);
+  --border: oklch(0.92 0.02 60 / 13%);
+  --input: oklch(0.92 0.02 60 / 17%);
+  --ring: oklch(0.72 0.16 40 / 55%);
+  --chart-1: oklch(0.72 0.15 40);
+  --chart-2: oklch(0.78 0.14 85);
+  --chart-3: oklch(0.72 0.11 145);
+  --chart-4: oklch(0.68 0.17 22);
+  --chart-5: oklch(0.68 0.07 225);
+  --sidebar: oklch(0.19 0.016 48);
+  --sidebar-foreground: oklch(0.96 0.012 70);
+  --sidebar-primary: oklch(0.72 0.16 40);
+  --sidebar-primary-foreground: oklch(0.18 0.03 35);
+  --sidebar-accent: oklch(0.29 0.03 55);
+  --sidebar-accent-foreground: oklch(0.96 0.012 70);
+  --sidebar-border: oklch(0.92 0.02 60 / 13%);
+  --sidebar-ring: oklch(0.72 0.16 40 / 55%);
 }
 
 @layer base {
@@ -136,5 +137,9 @@
   }
   html {
     @apply font-sans;
+    /* Bumped from the browser default 16px — the base UI text size felt
+       small everywhere at once, and this one change lifts every rem-sized
+       control (buttons, inputs, card padding) with it. */
+    font-size: 17px;
   }
 }

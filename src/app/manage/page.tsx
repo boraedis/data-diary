@@ -20,10 +20,10 @@ export const dynamic = "force-dynamic";
 // books, music) live one level down at /manage/entertainment, not here —
 // see that page.
 const CATALOGS = [
-  { key: "people", label: "People" },
-  { key: "places", label: "Places" },
-  { key: "exercises", label: "Exercises" },
-  { key: "entertainment", label: "Entertainment" },
+  { key: "people", label: "People", accent: "border-chart-1" },
+  { key: "places", label: "Places", accent: "border-chart-2" },
+  { key: "exercises", label: "Exercises", accent: "border-chart-3" },
+  { key: "entertainment", label: "Entertainment", accent: "border-chart-4" },
 ] as const;
 
 export default async function ManagePage() {
@@ -48,21 +48,21 @@ export default async function ManagePage() {
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-8 md:py-12">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium">Manage</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Manage</h1>
         <Link href="/" className={buttonVariants({ variant: "outline", size: "sm" })}>
           Home
         </Link>
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {CATALOGS.map((cat) => (
           <Link key={cat.key} href={`/manage/${cat.key}`}>
-            <Card size="sm" className="transition-colors hover:bg-accent">
+            <Card className={`h-full border-l-4 ${cat.accent} transition-colors hover:bg-accent`}>
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>{cat.label}</CardTitle>
-                  <span className="font-mono text-sm text-muted-foreground">{counts[cat.key]}</span>
+                  <span className="font-mono text-lg text-muted-foreground">{counts[cat.key]}</span>
                 </div>
               </CardHeader>
             </Card>

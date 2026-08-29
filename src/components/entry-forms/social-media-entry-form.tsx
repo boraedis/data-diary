@@ -70,7 +70,7 @@ export function SocialMediaEntryForm({
         <CardHeader>
           <CardTitle>Social media</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
+        <CardContent className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-6">
           <div className="space-y-1.5">
             <Label htmlFor="instagramFollowers">Instagram followers</Label>
             <Input
@@ -97,7 +97,7 @@ export function SocialMediaEntryForm({
       </Card>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>

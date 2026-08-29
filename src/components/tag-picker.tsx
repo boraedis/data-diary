@@ -83,7 +83,7 @@ function NewTagModal({
             type="color"
             value={color}
             onChange={(e) => setColor(e.target.value)}
-            className="h-8 w-16 cursor-pointer rounded border border-input bg-transparent"
+            className="h-10 w-20 cursor-pointer rounded-lg border border-input bg-transparent"
           />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
@@ -126,7 +126,7 @@ export function TagPicker({
           </option>
         ))}
       </Select>
-      <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
+      <Button type="button" variant="outline" size="sm" onClick={() => setModalOpen(true)}>
         + New
       </Button>
       <NewTagModal

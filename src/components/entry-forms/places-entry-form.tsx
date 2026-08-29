@@ -307,7 +307,7 @@ export function PlacesEntryForm({
       </Card>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>

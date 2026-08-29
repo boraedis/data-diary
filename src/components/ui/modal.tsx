@@ -26,16 +26,16 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-lg border border-border bg-background p-4 shadow-lg"
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium">{title}</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-heading text-lg font-medium">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-muted-foreground hover:text-foreground"
+            className="text-xl leading-none text-muted-foreground hover:text-foreground"
           >
             &times;
           </button>

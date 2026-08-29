@@ -36,7 +36,7 @@ export function DurationInput({
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2">
       <Input
         id={`${id}-hours`}
         type="number"
@@ -44,11 +44,11 @@ export function DurationInput({
         min="0"
         placeholder="0"
         aria-label="Hours"
-        className="w-16"
+        className="w-20"
         value={hours ?? ""}
         onChange={(e) => update(parseNonNegativeInt(e.target.value), minutes)}
       />
-      <span className="text-sm text-muted-foreground">h</span>
+      <span className="text-base text-muted-foreground">h</span>
       <Input
         id={`${id}-minutes`}
         type="number"
@@ -57,14 +57,14 @@ export function DurationInput({
         max="59"
         placeholder="0"
         aria-label="Minutes"
-        className="w-16"
+        className="w-20"
         value={minutes ?? ""}
         onChange={(e) => {
           const parsed = parseNonNegativeInt(e.target.value);
           update(hours, parsed !== null ? Math.min(parsed, 59) : null);
         }}
       />
-      <span className="text-sm text-muted-foreground">m</span>
+      <span className="text-base text-muted-foreground">m</span>
     </div>
   );
 }

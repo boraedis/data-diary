@@ -33,17 +33,17 @@ export default async function ManageEntertainmentPage() {
   ]);
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8 md:py-12">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium">Entertainment</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Entertainment</h1>
         <Link href="/manage" className={buttonVariants({ variant: "outline", size: "sm" })}>
           Manage
         </Link>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
         <Link href="/manage/entertainment/movies">
-          <Card size="sm" className="transition-colors hover:bg-accent">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Movies</CardTitle>
@@ -53,7 +53,7 @@ export default async function ManageEntertainmentPage() {
           </Card>
         </Link>
         <Link href="/manage/entertainment/tvshows">
-          <Card size="sm" className="transition-colors hover:bg-accent">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>TV shows</CardTitle>
@@ -63,7 +63,7 @@ export default async function ManageEntertainmentPage() {
           </Card>
         </Link>
         <Link href="/manage/entertainment/sports">
-          <Card size="sm" className="transition-colors hover:bg-accent">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Sports</CardTitle>
@@ -73,7 +73,7 @@ export default async function ManageEntertainmentPage() {
           </Card>
         </Link>
         <Link href="/manage/entertainment/books">
-          <Card size="sm" className="transition-colors hover:bg-accent">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Books</CardTitle>
@@ -83,7 +83,7 @@ export default async function ManageEntertainmentPage() {
           </Card>
         </Link>
         {COMING_SOON.map((label) => (
-          <Card key={label} size="sm" className="opacity-50">
+          <Card key={label} size="sm" className="h-full opacity-50">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>{label}</CardTitle>

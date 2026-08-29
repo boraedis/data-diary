@@ -50,7 +50,7 @@ export function SearchCombobox({
         id={id}
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
-          "flex h-8 w-full items-center justify-between rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors",
+          "flex h-10 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3.5 text-base outline-none transition-colors",
           "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
         )}
       >
@@ -60,7 +60,7 @@ export function SearchCombobox({
         <span className="ml-2 shrink-0 text-muted-foreground">▾</span>
       </button>
       {selected?.secondary ? (
-        <p className="mt-1 text-xs text-muted-foreground">{selected.secondary}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{selected.secondary}</p>
       ) : null}
 
       {open ? (

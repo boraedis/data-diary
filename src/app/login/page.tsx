@@ -44,9 +44,9 @@ function LoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card className="w-full max-w-sm md:max-w-md">
       <CardHeader>
-        <CardTitle>Data Diary</CardTitle>
+        <CardTitle className="font-heading text-3xl italic">Data Diary</CardTitle>
         <CardDescription>Sign in to continue.</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>

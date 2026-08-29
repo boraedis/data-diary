@@ -81,7 +81,7 @@ export function CatalogPicker<T extends CatalogItem>({
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5">
         <SearchCombobox
           id={id}
           items={searchItems}
@@ -95,8 +95,8 @@ export function CatalogPicker<T extends CatalogItem>({
       </div>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={addLabel}>
-        <div className="flex flex-col gap-3">
-          <div className="space-y-1.5">
+        <div className="flex flex-col gap-4">
+          <div className="space-y-2">
             <Label htmlFor={`${id}-new-name`}>{itemLabel} name</Label>
             <Input
               id={`${id}-new-name`}

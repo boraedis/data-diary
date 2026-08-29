@@ -120,11 +120,11 @@ export function GoogleBooksSearchModal({
           autoFocus
         />
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
-        <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
+        <div className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
           {searching ? (
-            <p className="p-3 text-sm text-muted-foreground">Searching…</p>
+            <p className="p-4 text-sm text-muted-foreground">Searching…</p>
           ) : results.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">
+            <p className="p-4 text-sm text-muted-foreground">
               {query.trim() ? "No matches." : "Start typing a title or author."}
             </p>
           ) : (
@@ -134,7 +134,7 @@ export function GoogleBooksSearchModal({
                 type="button"
                 onClick={() => handlePick(r)}
                 disabled={addingId !== null}
-                className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-accent disabled:opacity-50"
+                className="flex w-full items-center gap-3 border-b border-border px-3.5 py-2.5 text-left last:border-b-0 hover:bg-accent disabled:opacity-50"
               >
                 {r.thumbnailUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -143,9 +143,9 @@ export function GoogleBooksSearchModal({
                   <div className="h-12 w-8 shrink-0 rounded bg-muted" />
                 )}
                 <div className="min-w-0">
-                  <p className="truncate text-sm">{r.title}</p>
+                  <p className="truncate text-base">{r.title}</p>
                   {r.authors.length > 0 ? (
-                    <p className="truncate text-xs text-muted-foreground">{r.authors.join(", ")}</p>
+                    <p className="truncate text-sm text-muted-foreground">{r.authors.join(", ")}</p>
                   ) : null}
                 </div>
                 {addingId === r.googleBooksId ? (
@@ -438,7 +438,7 @@ export function BookEntryForm({
       />
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>

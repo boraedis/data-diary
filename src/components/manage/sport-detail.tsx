@@ -589,50 +589,52 @@ export function SportDetail({
         </CardContent>
       </Card>
 
-      <Card size="sm">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Leagues</CardTitle>
-            <Button type="button" variant="outline" size="xs" onClick={() => setAddLeagueOpen(true)}>
-              + New league
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {leagues.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
-          {leagues.map((l) => (
-            <LeagueRow
-              key={l.id}
-              league={l}
-              onUpdated={(updated) => setLeagues((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
-              onDeleted={(id) => setLeagues((prev) => prev.filter((x) => x.id !== id))}
-            />
-          ))}
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-5">
+        <Card size="sm" className="md:h-full">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Leagues</CardTitle>
+              <Button type="button" variant="outline" size="xs" onClick={() => setAddLeagueOpen(true)}>
+                + New league
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {leagues.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
+            {leagues.map((l) => (
+              <LeagueRow
+                key={l.id}
+                league={l}
+                onUpdated={(updated) => setLeagues((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
+                onDeleted={(id) => setLeagues((prev) => prev.filter((x) => x.id !== id))}
+              />
+            ))}
+          </CardContent>
+        </Card>
 
-      <Card size="sm">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Teams</CardTitle>
-            <Button type="button" variant="outline" size="xs" onClick={() => setAddTeamOpen(true)}>
-              + New team
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {teams.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
-          {teams.map((t) => (
-            <TeamRow
-              key={t.id}
-              team={t}
-              leagues={leagues}
-              onUpdated={(updated) => setTeams((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
-              onDeleted={(id) => setTeams((prev) => prev.filter((x) => x.id !== id))}
-            />
-          ))}
-        </CardContent>
-      </Card>
+        <Card size="sm" className="md:h-full">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Teams</CardTitle>
+              <Button type="button" variant="outline" size="xs" onClick={() => setAddTeamOpen(true)}>
+                + New team
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {teams.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
+            {teams.map((t) => (
+              <TeamRow
+                key={t.id}
+                team={t}
+                leagues={leagues}
+                onUpdated={(updated) => setTeams((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
+                onDeleted={(id) => setTeams((prev) => prev.filter((x) => x.id !== id))}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
 
       <AddLeagueModal
         sportId={sport.id}

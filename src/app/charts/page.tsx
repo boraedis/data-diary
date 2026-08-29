@@ -49,14 +49,14 @@ const CHARTS = [
 
 export default function ChartsIndexPage() {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:py-12">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium">Charts</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Charts</h1>
         <Link href="/" className="text-xs text-muted-foreground hover:text-foreground">
           Home
         </Link>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
         {CHARTS.map((chart) => (
           <Link key={chart.href} href={chart.href}>
             <Card className="h-full transition-colors hover:bg-accent">
