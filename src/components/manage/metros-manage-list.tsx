@@ -22,16 +22,16 @@ export function MetrosManageList({ initial }: { initial: MetroItem[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New metro
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/places/metros"
         placeholder="Search metros…"
         emptyMessage="No metros yet."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New metro
+          </Button>
+        }
       />
       <NewMetroModal
         open={modalOpen}

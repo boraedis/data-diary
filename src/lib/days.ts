@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { geocodeAddress } from "@/lib/geocode";
@@ -1926,7 +1926,23 @@ async function geocodeOrNull(address: string | null): Promise<{ lat: number | nu
   }
 }
 
+// Legacy's own root-creation flow only ever produced places with
+// category "Region" at the top of the tree (new_place_form.ejs's "Add New
+// Country" button opens a modal literally titled "New Region" — country
+// and top-level region are the same category, just different UI labels for
+// the same action; migrate-history.mjs's `category === "Region"` address
+// computation reflects the same convention). Unlike the color/metro
+// inheritance rules below (deliberately UI-only, per the `places`/`metros`
+// comments in schema.ts), this is enforced here so a stray venue or city
+// can't accidentally end up parentless.
+function assertValidRoot(category: string | null, parentId: number | null): void {
+  if (parentId === null && category !== "Region") {
+    throw new Error('Only a "Region" place can be top-level (no parent) — set a parent, or set category to "Region".');
+  }
+}
+
 export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
+  assertValidRoot(input.category, input.parentId);
   const db = getDb();
   const trimmed = input.name.trim();
   const { lat, lng } = await geocodeOrNull(input.address);
@@ -2013,19 +2029,50 @@ export async function getPlaceDescendantIds(id: number): Promise<number[]> {
 // cycle (shouldn't happen given updatePlaceCatalogEntry's check below, but
 // this reads defensively regardless) stops it from looping forever if one
 // ever exists.
-type PlaceParentLookupRow = { id: number; name: string; parentId: number | null };
+//
+// Also carries category/subcategory/color for every ancestor (not just
+// id/name) — place-detail.tsx uses these to find the two ancestors that
+// gate color and metro (root's color; nearest category=Region &&
+// subcategory=Municipality ancestor's metro — see the `places`/`metros`
+// table comments in schema.ts) without a second round-trip.
+type PlaceParentLookupRow = {
+  id: number;
+  name: string;
+  parentId: number | null;
+  category: string | null;
+  subcategory: string | null;
+  color: string | null;
+  metroId: number | null;
+};
 
 async function fetchPlaceParentLookup(placeId: number): Promise<PlaceParentLookupRow | null> {
   const db = getDb();
   const [row] = await db
-    .select({ id: places.id, name: places.name, parentId: places.parentId })
+    .select({
+      id: places.id,
+      name: places.name,
+      parentId: places.parentId,
+      category: places.category,
+      subcategory: places.subcategory,
+      color: places.color,
+      metroId: places.metroId,
+    })
     .from(places)
     .where(eq(places.id, placeId));
   return row ?? null;
 }
 
-export async function getPlaceAncestry(id: number): Promise<{ id: number; name: string }[]> {
-  const chain: { id: number; name: string }[] = [];
+export type PlaceAncestor = {
+  id: number;
+  name: string;
+  category: string | null;
+  subcategory: string | null;
+  color: string | null;
+  metroId: number | null;
+};
+
+export async function getPlaceAncestry(id: number): Promise<PlaceAncestor[]> {
+  const chain: PlaceAncestor[] = [];
   const visited = new Set<number>();
   let currentId: number | null = id;
   while (currentId !== null) {
@@ -2033,7 +2080,14 @@ export async function getPlaceAncestry(id: number): Promise<{ id: number; name: 
     visited.add(currentId);
     const row: PlaceParentLookupRow | null = await fetchPlaceParentLookup(currentId);
     if (!row) break;
-    chain.unshift({ id: row.id, name: row.name });
+    chain.unshift({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      subcategory: row.subcategory,
+      color: row.color,
+      metroId: row.metroId,
+    });
     currentId = row.parentId;
   }
   return chain;
@@ -2045,6 +2099,7 @@ export async function getPlaceChildren(id: number): Promise<PlaceCatalogItem[]> 
 }
 
 export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
+  assertValidRoot(input.category, input.parentId);
   const db = getDb();
 
   if (input.parentId !== null) {
@@ -2135,6 +2190,111 @@ export async function getPlaceUsage(id: number): Promise<PlaceUsage> {
 export async function deletePlaceCatalogEntry(id: number): Promise<void> {
   const db = getDb();
   await db.delete(places).where(eq(places.id, id));
+}
+
+// --- mention history --------------------------------------------------
+// Mirrors legacy's place.js `loadMentions` — a place's detail page lists
+// every day it was logged in either place slot, with a "Show Descendants"
+// toggle that widens the match to the whole subtree (legacy compared each
+// day's place against `place.pathStr` as a prefix of the mentioned place's
+// own path; this does the same thing via idPath/getPlaceDescendantIds,
+// which didn't exist yet when that code was written).
+
+export type PlaceMentionEntry = {
+  date: string;
+  // "1st & 2nd" only when the SAME place fills both of a day's slots —
+  // legacy bolded this case specifically (place.js's `endings[0]`) rather
+  // than just always showing both.
+  slot: "1st" | "2nd" | "1st & 2nd";
+  // The place that actually matched — usually `id` itself, but with
+  // includeDescendants it can be any descendant, so the list can show which
+  // one (legacy showed this place's own name + a bit of its path).
+  placeId: number;
+  placeName: string;
+};
+
+export async function getPlaceMentionHistory(
+  id: number,
+  options: { includeDescendants?: boolean } = {}
+): Promise<PlaceMentionEntry[]> {
+  const db = getDb();
+  const matchIds = options.includeDescendants ? [id, ...(await getPlaceDescendantIds(id))] : [id];
+  const rows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(inArray(days.place1Id, matchIds), inArray(days.place2Id, matchIds)))
+    .orderBy(desc(days.date));
+  if (rows.length === 0) return [];
+
+  const matchSet = new Set(matchIds);
+  const neededPlaceIds = new Set<number>();
+  for (const r of rows) {
+    if (r.place1Id !== null && matchSet.has(r.place1Id)) neededPlaceIds.add(r.place1Id);
+    if (r.place2Id !== null && matchSet.has(r.place2Id)) neededPlaceIds.add(r.place2Id);
+  }
+  const nameRows = await db
+    .select({ id: places.id, name: places.name })
+    .from(places)
+    .where(inArray(places.id, [...neededPlaceIds]));
+  const nameById = new Map(nameRows.map((r) => [r.id, r.name]));
+
+  const entries: PlaceMentionEntry[] = [];
+  for (const r of rows) {
+    const match1 = r.place1Id !== null && matchSet.has(r.place1Id);
+    const match2 = r.place2Id !== null && matchSet.has(r.place2Id);
+    if (match1 && match2 && r.place1Id === r.place2Id) {
+      entries.push({ date: r.date, slot: "1st & 2nd", placeId: r.place1Id!, placeName: nameById.get(r.place1Id!) ?? "?" });
+      continue;
+    }
+    if (match1) entries.push({ date: r.date, slot: "1st", placeId: r.place1Id!, placeName: nameById.get(r.place1Id!) ?? "?" });
+    if (match2) entries.push({ date: r.date, slot: "2nd", placeId: r.place2Id!, placeName: nameById.get(r.place2Id!) ?? "?" });
+  }
+  return entries;
+}
+
+/** Per-place mention count, own mentions plus every descendant's (a
+ * country's count includes every city and venue under it) — used to sort
+ * the places manage list by "most mentioned" instead of alphabetically.
+ * Reuses the exact 2x-for-1st-slot/1x-for-2nd-slot weighting
+ * getPlaceLeaderboardData (src/lib/charts.ts) already established from
+ * legacy's `location_leaderboard` chart, so "how mentioned" means the same
+ * thing everywhere in the app rather than two competing definitions. */
+export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: places.id,
+      parentId: places.parentId,
+      own: sql<number>`
+        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
+        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
+      `.as("own"),
+    })
+    .from(places)
+    .leftJoin(days, sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`)
+    .groupBy(places.id, places.parentId);
+
+  const own = new Map(rows.map((r) => [r.id, Number(r.own)]));
+  const childrenByParent = new Map<number, number[]>();
+  for (const r of rows) {
+    if (r.parentId === null) continue;
+    if (!childrenByParent.has(r.parentId)) childrenByParent.set(r.parentId, []);
+    childrenByParent.get(r.parentId)!.push(r.id);
+  }
+
+  const total = new Map<number, number>();
+  function computeTotal(placeId: number): number {
+    const cached = total.get(placeId);
+    if (cached !== undefined) return cached;
+    let sum = own.get(placeId) ?? 0;
+    for (const childId of childrenByParent.get(placeId) ?? []) {
+      sum += computeTotal(childId);
+    }
+    total.set(placeId, sum);
+    return sum;
+  }
+  for (const r of rows) computeTotal(r.id);
+  return total;
 }
 
 const ENTERTAINMENT_CATALOG_COLUMNS = {

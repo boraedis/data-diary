@@ -25,9 +25,12 @@ export async function POST(request: Request) {
     const created = await createPlaceCatalogEntry(parsed.value);
     return NextResponse.json(created);
   } catch (error) {
+    // createPlaceCatalogEntry throws a plain Error for the root-category
+    // guard (assertValidRoot in src/lib/days.ts) — a bad request, not a
+    // server fault, so 400 rather than 500 (mirrors the PATCH route below).
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 400 }
     );
   }
 }

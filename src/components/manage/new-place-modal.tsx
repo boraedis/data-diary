@@ -5,38 +5,64 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import type { PlaceCatalogItem } from "@/lib/days";
+import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+
+type ParentOption = { id: number; name: string; namePath: string | null };
 
 /** Same fields/shape as the places entry form's own "+ New" modal — kept as
  * a separate copy rather than importing that one, since it's private to
  * that file and the entry-form and manage contexts are reasonable to let
- * drift independently (same call already made for people/entertainment). */
+ * drift independently (same call already made for people/entertainment).
+ *
+ * Category/subcategory are sourced from the real DB catalogs (place_
+ * categories/place_subcategories, via the `categories` prop) rather than
+ * freely typed — matches the edit page's datalist. Parent is required
+ * unless category is "Region", mirroring assertValidRoot in
+ * src/lib/days.ts (only a Region place can be top-level) — checked here
+ * too so a bad combination shows inline instead of costing a round trip. */
 export function NewPlaceModal({
   open,
   onClose,
   onCreated,
+  categories,
+  parentOptions,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
+  categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
+  parentOptions: ParentOption[];
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
   const [address, setAddress] = useState("");
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
+  const [parentId, setParentId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const categoryNames = categories.map((c) => c.name);
+  const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
 
   function reset() {
     setName("");
     setAlias("");
     setAddress("");
     setCategory("");
+    setSubcategory("");
+    setParentId(null);
     setError(null);
   }
 
   async function handleCreate() {
     if (!name.trim()) return;
+    if (parentId === null && category.trim() !== "Region") {
+      setError('Only a "Region" place can be top-level — pick a parent, or set category to "Region".');
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
@@ -48,6 +74,8 @@ export function NewPlaceModal({
           alias: alias.trim() || null,
           address: address.trim() || null,
           category: category.trim() || null,
+          subcategory: subcategory.trim() || null,
+          parentId,
         }),
       });
       const body = await res.json();
@@ -91,10 +119,51 @@ export function NewPlaceModal({
           <Label htmlFor="manage-new-place-category">Category</Label>
           <Input
             id="manage-new-place-category"
+            list="manage-new-place-category-options"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="restaurant, gym, friend's place…"
           />
+          <datalist id="manage-new-place-category-options">
+            {categoryNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manage-new-place-subcategory">Subcategory</Label>
+          <Input
+            id="manage-new-place-subcategory"
+            list="manage-new-place-subcategory-options"
+            value={subcategory}
+            onChange={(e) => setSubcategory(e.target.value)}
+          />
+          <datalist id="manage-new-place-subcategory-options">
+            {subcategoryNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="manage-new-place-parent">Parent place</Label>
+          <Select
+            id="manage-new-place-parent"
+            value={parentId ?? ""}
+            onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">No parent</option>
+            {parentOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+          {parentId === null && category.trim() !== "Region" ? (
+            <p className="text-xs text-muted-foreground">
+              Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
+              &ldquo;Region&rdquo;.
+            </p>
+          ) : null}
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>

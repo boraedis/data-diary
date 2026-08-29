@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
 
@@ -40,23 +41,32 @@ function toSearchItem(place: PlaceCatalogItem): SearchItem {
  * (functions/views/entry/database/new_place_form.*): name, an optional
  * alias (matched during search, same as the legacy app), an optional
  * address, and an optional category shown as the search result's secondary
- * line. Deliberately NOT carried over: the legacy catalog's full country ->
- * region -> subregion hierarchy and category/subcategory taxonomy tree —
- * `category` here is just a free-text field standing in for that until it's
- * worth building for real (see the schema comment on the `places` table). */
+ * line. Deliberately NOT carried over: the legacy catalog's full category/
+ * subcategory taxonomy tree — `category` here is just a free-text field
+ * standing in for that until it's worth building for real (see the schema
+ * comment on the `places` table; src/components/manage/new-place-modal.tsx
+ * has the DB-backed version for the manage-catalog "+ New" flow).
+ *
+ * Parent IS a real picker here (not free text) — a place can only be
+ * top-level with category "Region" (assertValidRoot in src/lib/days.ts),
+ * and virtually everything logged from a day entry is a leaf venue, so
+ * defaulting to "no parent" would fail validation on almost every save. */
 function NewPlaceModal({
   open,
   onClose,
   onCreated,
+  parentOptions,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
+  parentOptions: { id: number; name: string; namePath: string | null }[];
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
   const [address, setAddress] = useState("");
   const [category, setCategory] = useState("");
+  const [parentId, setParentId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,11 +75,16 @@ function NewPlaceModal({
     setAlias("");
     setAddress("");
     setCategory("");
+    setParentId(null);
     setError(null);
   }
 
   async function handleCreate() {
     if (!name.trim()) return;
+    if (parentId === null && category.trim() !== "Region") {
+      setError('Only a "Region" place can be top-level — pick a parent, or set category to "Region".');
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
@@ -81,6 +96,7 @@ function NewPlaceModal({
           alias: alias.trim() || null,
           address: address.trim() || null,
           category: category.trim() || null,
+          parentId,
         }),
       });
       const body = await res.json();
@@ -128,6 +144,21 @@ function NewPlaceModal({
             onChange={(e) => setCategory(e.target.value)}
             placeholder="restaurant, gym, friend's place…"
           />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-place-parent">Parent place</Label>
+          <Select
+            id="new-place-parent"
+            value={parentId ?? ""}
+            onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">No parent</option>
+            {parentOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
@@ -306,6 +337,7 @@ export function PlacesEntryForm({
             <NewPlaceModal
               open={modalOpen}
               onClose={() => setModalOpen(false)}
+              parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
               onCreated={(item) => {
                 handleCreated(item);
                 addPlace(item.id);

@@ -17,16 +17,16 @@ export function ExercisesManageList({ initial }: { initial: ExerciseCatalogItem[
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New exercise
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/exercises"
         placeholder="Search exercises…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New exercise
+          </Button>
+        }
       />
       <NewExerciseModal
         open={modalOpen}

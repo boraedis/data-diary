@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
 import { NewPlaceModal } from "@/components/manage/new-place-modal";
 import type { PlaceCatalogItem } from "@/lib/days";
+import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 
 // namePath is "USA/Georgia/Atlanta/Midtown/" (root to self, trailing
@@ -25,27 +26,41 @@ function toSearchItem(place: PlaceCatalogItem): SearchItem {
   };
 }
 
-export function PlacesManageList({ initial }: { initial: PlaceCatalogItem[] }) {
+export function PlacesManageList({
+  initial,
+  categories,
+}: {
+  initial: PlaceCatalogItem[];
+  categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
+}) {
   const [items, setItems] = useState(initial);
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New place
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/places"
         placeholder="Search places…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New place
+          </Button>
+        }
       />
       <NewPlaceModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onCreated={(item) => setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))}
+        categories={categories}
+        // A brand-new place has no descendants yet, so every existing place
+        // is a valid parent option — no exclusion needed (unlike the edit
+        // page's parentOptions, which excludes self + descendants).
+        parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
+        // `initial` is already sorted most-mentioned-first (see
+        // ManagePlacesPage) — a brand-new place has zero mentions, so it
+        // belongs at the end, not re-sorted alphabetically into the middle.
+        onCreated={(item) => setItems((prev) => [...prev, item])}
       />
     </div>
   );
