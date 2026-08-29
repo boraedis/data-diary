@@ -37,7 +37,7 @@ export default async function ManageEntertainmentPage() {
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Entertainment</h1>
         <Link href="/manage" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Manage
+          Manage Home
         </Link>
       </div>
 

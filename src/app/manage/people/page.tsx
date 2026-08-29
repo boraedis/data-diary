@@ -14,7 +14,7 @@ export default async function ManagePeoplePage() {
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">People</h1>
         <Link href="/manage" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Manage
+          Manage Home
         </Link>
       </div>
       <div className="flex justify-end">
