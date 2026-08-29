@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { geocodeAddress } from "@/lib/geocode";
@@ -1945,12 +1945,24 @@ export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise
       lat,
       lng,
     })
-    .onConflictDoNothing({ target: places.name })
+    // Dedup target is (name, parentId), not name alone — a name can
+    // legitimately repeat at a different spot in the tree (see the `places`
+    // table comment in schema.ts), so only a same-name place at the exact
+    // same parent counts as "already exists".
+    .onConflictDoNothing({ target: [places.name, places.parentId] })
     .returning(PLACE_COLUMNS);
   if (!inserted) {
-    // Name collision — onConflictDoNothing left the existing row untouched,
-    // it already has a path (or will once backfilled).
-    const [existing] = await db.select(PLACE_COLUMNS).from(places).where(eq(places.name, trimmed));
+    // Name+parent collision — onConflictDoNothing left the existing row
+    // untouched, it already has a path (or will once backfilled).
+    const [existing] = await db
+      .select(PLACE_COLUMNS)
+      .from(places)
+      .where(
+        and(
+          eq(places.name, trimmed),
+          input.parentId === null ? isNull(places.parentId) : eq(places.parentId, input.parentId)
+        )
+      );
     return existing;
   }
 
