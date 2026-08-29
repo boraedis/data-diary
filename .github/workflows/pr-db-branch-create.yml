@@ -1,0 +1,88 @@
+name: PR database branch
+
+# Gives every PR into main its own disposable Neon Postgres branch, seeded
+# from the qa branch's current data, with this PR's schema changes already
+# applied. Point your local .env.local DATABASE_URL at the connection
+# string this posts as a PR comment to test against real, isolated data
+# without touching the shared qa database or prod.
+#
+# One-time setup: add a NEON_API_KEY secret and NEON_PROJECT_ID variable to
+# this repo (Settings -> Secrets and variables -> Actions). Neon's GitHub
+# integration (from your Neon project's Integrations tab) can set both of
+# these up for you automatically.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create/reuse Neon branch for this PR
+        id: neon-branch
+        uses: neondatabase/create-branch-action@v6
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          parent_branch: qa
+          branch_name: pr-${{ github.event.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Applies this PR's schema.ts against the fresh branch, so it reflects
+      # this feature's changes rather than just qa's current schema. Reruns
+      # on every new commit to the PR (types: synchronize), so the branch
+      # always matches the latest schema in the PR.
+      - run: npx drizzle-kit push --force
+        env:
+          DATABASE_URL: ${{ steps.neon-branch.outputs.db_url }}
+
+      - name: Comment connection string on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "Isolated test database ready for this PR.",
+              "",
+              "Point your local `.env.local` at it:",
+              "",
+              "```",
+              `DATABASE_URL=${{ steps.neon-branch.outputs.db_url }}`,
+              "```",
+              "",
+              "Seeded from `qa`, with this PR's schema already applied. Deleted automatically when the PR closes.",
+            ].join("\n");
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (c) => c.user?.type === "Bot" && c.body.includes("Isolated test database ready"),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
