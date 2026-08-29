@@ -23,6 +23,14 @@ jobs:
 
       - run: npm run lint
 
+      # `src/app/layout.tsx` (and any other typed-route usage, like
+      # LayoutProps/PageProps) relies on ambient types Next.js generates
+      # into .next/**/*.d.ts — they don't exist on a fresh checkout, so
+      # `tsc --noEmit` fails with "Cannot find name 'LayoutProps'" unless
+      # this runs first. `next typegen` only generates types, it's much
+      # cheaper than a full `next build`.
+      - run: npx next typegen
+
       - run: npx tsc --noEmit
 
       # Every page in the app is `export const dynamic = "force-dynamic"`,
