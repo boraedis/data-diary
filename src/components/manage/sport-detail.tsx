@@ -10,65 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
-import type {
-  SportCatalogItem,
-  SportsLeagueItem,
-  SportsLeagueUsage,
-  SportsTeamItem,
-  SportsTeamUsage,
-  SportsWatchHistoryEntry,
-  SportUsage,
-} from "@/lib/days";
-
-type LeagueWithUsage = SportsLeagueItem & { usage: SportsLeagueUsage };
-type TeamWithUsage = SportsTeamItem & { usage: SportsTeamUsage };
-
-// Shared "lower box" watch-history list — same bordered-row pattern as
-// PlaceDetail's Mentions card, just nested inside a league/team row instead
-// of standing as its own top-level Card (leagues/teams are compact list
-// rows, not full detail pages of their own). `perspectiveTeamName` lets a
-// team's own row omit itself from the "vs." line and show just the
-// opponent.
-function WatchHistoryList({
-  watches,
-  perspectiveTeamName,
-}: {
-  watches: SportsWatchHistoryEntry[];
-  perspectiveTeamName?: string;
-}) {
-  if (watches.length === 0) {
-    return <p className="text-xs text-muted-foreground">No watches logged.</p>;
-  }
-  return (
-    <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-      {watches.map((w, i) => {
-        let matchup: string | null;
-        if (perspectiveTeamName !== undefined) {
-          const isHome = w.homeTeamName === perspectiveTeamName;
-          const opponent = isHome ? w.awayTeamName : w.homeTeamName;
-          matchup = opponent ? `${isHome ? "vs" : "@"} ${opponent}` : null;
-        } else {
-          matchup = w.homeTeamName && w.awayTeamName ? `${w.homeTeamName} vs ${w.awayTeamName}` : null;
-        }
-        return (
-          <li key={i}>
-            <Link
-              href={`/day/${w.date}/entertainment/sports`}
-              className="flex items-center justify-between gap-3 rounded-lg border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
-            >
-              <span>{w.date}</span>
-              <span className="truncate text-muted-foreground">
-                {[matchup, w.season, w.gameType, w.watchedLive ? "live" : null, w.locationType]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+import { CatalogBrowser } from "@/components/manage/catalog-browser";
+import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem, SportUsage } from "@/lib/days";
 
 function AddLeagueModal({
   sportId,
@@ -264,269 +207,16 @@ function AddTeamModal({
   );
 }
 
-function LeagueRow({
-  league: initial,
-  onUpdated,
-  onDeleted,
-}: {
-  league: LeagueWithUsage;
-  onUpdated: (league: SportsLeagueItem) => void;
-  onDeleted: (id: number) => void;
-}) {
-  const [league, setLeague] = useState(initial);
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(initial.name);
-  const [type, setType] = useState(initial.type ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showWatches, setShowWatches] = useState(false);
-
-  async function handleSave() {
-    if (!name.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/sports-leagues/${league.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), type: type.trim() || null }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        setError(typeof body?.error === "string" ? body.error : "Failed to save");
-        return;
-      }
-      const updated = { ...league, ...(body as SportsLeagueItem) };
-      setLeague(updated);
-      onUpdated(updated);
-      setEditing(false);
-    } catch {
-      setError("Network error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (editing) {
-    return (
-      <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" autoFocus />
-        <Input value={type} onChange={(e) => setType(e.target.value)} placeholder="Type (college, pro…)" />
-        {error ? <span className="text-xs text-destructive">{error}</span> : null}
-        <div className="flex gap-2">
-          <Button type="button" size="xs" onClick={handleSave} disabled={saving || !name.trim()}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            onClick={() => {
-              setName(league.name);
-              setType(league.type ?? "");
-              setError(null);
-              setEditing(false);
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm">{league.name}</p>
-          {league.type ? <p className="truncate text-xs text-muted-foreground">{league.type}</p> : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button type="button" size="xs" variant="outline" onClick={() => setShowWatches((v) => !v)}>
-            {league.usage.watchCount} watch{league.usage.watchCount === 1 ? "" : "es"} {showWatches ? "▾" : "▸"}
-          </Button>
-          <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-          <DeleteCatalogItem
-            itemLabel={league.name}
-            isBlocked={false}
-            onDelete={async () => {
-              const res = await fetch(`/api/sports-leagues/${league.id}`, { method: "DELETE" });
-              if (!res.ok) throw new Error("Failed to delete");
-              onDeleted(league.id);
-            }}
-            blockedContent={null}
-            warningContent={
-              league.usage.teamCount > 0 || league.usage.watchCount > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {league.usage.teamCount} team{league.usage.teamCount === 1 ? "" : "s"} and{" "}
-                  {league.usage.watchCount} logged watch{league.usage.watchCount === 1 ? "" : "es"} will lose this
-                  league (kept, just unassigned).
-                </p>
-              ) : undefined
-            }
-          />
-        </div>
-      </div>
-      {showWatches ? (
-        <div className="border-t border-border pt-2">
-          <WatchHistoryList watches={league.usage.watches} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TeamRow({
-  team: initial,
-  leagues,
-  onUpdated,
-  onDeleted,
-}: {
-  team: TeamWithUsage;
-  leagues: SportsLeagueItem[];
-  onUpdated: (team: SportsTeamItem) => void;
-  onDeleted: (id: number) => void;
-}) {
-  const [team, setTeam] = useState(initial);
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(initial.name);
-  const [leagueId, setLeagueId] = useState<number | null>(initial.leagueId);
-  const [alias, setAlias] = useState(initial.alias ?? "");
-  const [homeLocation, setHomeLocation] = useState(initial.homeLocation ?? "");
-  const [color, setColor] = useState(initial.color ?? "");
-  const [division, setDivision] = useState(initial.division ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showWatches, setShowWatches] = useState(false);
-
-  async function handleSave() {
-    if (!name.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/sports-teams/${team.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          leagueId,
-          alias: alias.trim() || null,
-          homeLocation: homeLocation.trim() || null,
-          color: color.trim() || null,
-          division: division.trim() || null,
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        setError(typeof body?.error === "string" ? body.error : "Failed to save");
-        return;
-      }
-      const updated = { ...team, ...(body as SportsTeamItem) };
-      setTeam(updated);
-      onUpdated(updated);
-      setEditing(false);
-    } catch {
-      setError("Network error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const leagueName = leagues.find((l) => l.id === team.leagueId)?.name ?? null;
-
-  if (editing) {
-    return (
-      <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" autoFocus />
-        {leagues.length > 0 ? (
-          <Select value={leagueId ?? ""} onChange={(e) => setLeagueId(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">No league</option>
-            {leagues.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-        ) : null}
-        <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder="Alias" />
-        <Input value={homeLocation} onChange={(e) => setHomeLocation(e.target.value)} placeholder="Home location" />
-        <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="Color" />
-        <Input value={division} onChange={(e) => setDivision(e.target.value)} placeholder="Division" />
-        {error ? <span className="text-xs text-destructive">{error}</span> : null}
-        <div className="flex gap-2">
-          <Button type="button" size="xs" onClick={handleSave} disabled={saving || !name.trim()}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            onClick={() => {
-              setName(team.name);
-              setLeagueId(team.leagueId);
-              setAlias(team.alias ?? "");
-              setHomeLocation(team.homeLocation ?? "");
-              setColor(team.color ?? "");
-              setDivision(team.division ?? "");
-              setError(null);
-              setEditing(false);
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm">{team.name}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {[leagueName, team.homeLocation].filter(Boolean).join(" · ") || "—"}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button type="button" size="xs" variant="outline" onClick={() => setShowWatches((v) => !v)}>
-            {team.usage.watchCount} watch{team.usage.watchCount === 1 ? "" : "es"} {showWatches ? "▾" : "▸"}
-          </Button>
-          <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-          <DeleteCatalogItem
-            itemLabel={team.name}
-            isBlocked={false}
-            onDelete={async () => {
-              const res = await fetch(`/api/sports-teams/${team.id}`, { method: "DELETE" });
-              if (!res.ok) throw new Error("Failed to delete");
-              onDeleted(team.id);
-            }}
-            blockedContent={null}
-            warningContent={
-              team.usage.watchCount > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {team.usage.watchCount} logged watch{team.usage.watchCount === 1 ? "" : "es"} will lose this team
-                  (kept, just unassigned).
-                </p>
-              ) : undefined
-            }
-          />
-        </div>
-      </div>
-      {showWatches ? (
-        <div className="border-t border-border pt-2">
-          <WatchHistoryList watches={team.usage.watches} perspectiveTeamName={team.name} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
+// #9: leagues/teams used to be compact inline rows (LeagueRow/TeamRow) that
+// crammed a truncated name, a watch-count expand toggle, Edit, and Delete
+// into one line, then squeezed a height-capped watch-history list into the
+// same card when expanded. Now they're CatalogBrowser lists — the same
+// search-and-open pattern every other catalog in this app uses — and
+// clicking through takes you to a real detail page (sports-league-detail.tsx
+// / sports-team-detail.tsx) with room for the full edit form and an
+// uncapped watch-history card. Delete now lives on that detail page too,
+// matching where every other catalog puts it (e.g. MovieDetail), rather
+// than being a second action crammed into the list row.
 export function SportDetail({
   sport: initial,
   usage,
@@ -535,8 +225,8 @@ export function SportDetail({
 }: {
   sport: SportCatalogItem;
   usage: SportUsage;
-  leagues: LeagueWithUsage[];
-  teams: TeamWithUsage[];
+  leagues: SportsLeagueItem[];
+  teams: SportsTeamItem[];
 }) {
   const router = useRouter();
   const [sport, setSport] = useState(initial);
@@ -662,46 +352,43 @@ export function SportDetail({
       <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-5">
         <Card size="sm" className="md:h-full">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Leagues</CardTitle>
-              <Button type="button" variant="outline" size="xs" onClick={() => setAddLeagueOpen(true)}>
-                + New league
-              </Button>
-            </div>
+            <CardTitle>Leagues</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {leagues.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
-            {leagues.map((l) => (
-              <LeagueRow
-                key={l.id}
-                league={l}
-                onUpdated={(updated) => setLeagues((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
-                onDeleted={(id) => setLeagues((prev) => prev.filter((x) => x.id !== id))}
-              />
-            ))}
+          <CardContent>
+            <CatalogBrowser
+              items={leagues.map((l) => ({ id: l.id, primary: l.name, secondary: l.type }))}
+              basePath="/manage/entertainment/sports/leagues"
+              placeholder="Search leagues…"
+              emptyMessage="No leagues yet."
+              trailingAction={
+                <Button type="button" variant="outline" className="shrink-0" onClick={() => setAddLeagueOpen(true)}>
+                  + New league
+                </Button>
+              }
+            />
           </CardContent>
         </Card>
 
         <Card size="sm" className="md:h-full">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Teams</CardTitle>
-              <Button type="button" variant="outline" size="xs" onClick={() => setAddTeamOpen(true)}>
-                + New team
-              </Button>
-            </div>
+            <CardTitle>Teams</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {teams.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
-            {teams.map((t) => (
-              <TeamRow
-                key={t.id}
-                team={t}
-                leagues={leagues}
-                onUpdated={(updated) => setTeams((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
-                onDeleted={(id) => setTeams((prev) => prev.filter((x) => x.id !== id))}
-              />
-            ))}
+          <CardContent>
+            <CatalogBrowser
+              items={teams.map((t) => ({
+                id: t.id,
+                primary: t.name,
+                secondary: [leagues.find((l) => l.id === t.leagueId)?.name, t.homeLocation].filter(Boolean).join(" · ") || null,
+              }))}
+              basePath="/manage/entertainment/sports/teams"
+              placeholder="Search teams…"
+              emptyMessage="No teams yet."
+              trailingAction={
+                <Button type="button" variant="outline" className="shrink-0" onClick={() => setAddTeamOpen(true)}>
+                  + New team
+                </Button>
+              }
+            />
           </CardContent>
         </Card>
       </div>
@@ -710,16 +397,14 @@ export function SportDetail({
         sportId={sport.id}
         open={addLeagueOpen}
         onClose={() => setAddLeagueOpen(false)}
-        onCreated={(league) =>
-          setLeagues((prev) => [...prev, { ...league, usage: { teamCount: 0, watchCount: 0, watches: [] } }])
-        }
+        onCreated={(league) => setLeagues((prev) => [...prev, league])}
       />
       <AddTeamModal
         sportId={sport.id}
         leagues={leagues}
         open={addTeamOpen}
         onClose={() => setAddTeamOpen(false)}
-        onCreated={(team) => setTeams((prev) => [...prev, { ...team, usage: { watchCount: 0, watches: [] } }])}
+        onCreated={(team) => setTeams((prev) => [...prev, team])}
       />
     </>
   );

@@ -937,6 +937,130 @@ export const musicListens = pgTable(
   ]
 );
 
+// --- Profile: owner identity + timelines -----------------------------------
+// The legacy app's `searchs/profile` doc: three arrays (occupation,
+// residence, relationship) plus several personal facts (name, birthdate,
+// diary start date) that had no home at all in the old app — those were
+// hardcoded as literals scattered across 7+ files instead (see #11's scope-
+// expansion comment). Modeled as separate relational tables, one per
+// timeline type, rather than a single polymorphic `profile_entries` table
+// with a `type` discriminant — consistent with how every other multi-shape
+// domain in this schema (movies/tvShows/sports/books, not one shared
+// "entertainment" table) gets its own table rather than a shared one with
+// nullable per-type columns.
+//
+// All three timelines are optionally open-ended — a null `end` means
+// "ongoing" — matching how legacy and every consumer (charts, the
+// dashboard's Profile block) already treat a missing end date.
+
+// Single-row settings, not a real multi-row table — this app has exactly
+// one authenticated identity (the APP_PASSWORD session cookie), not
+// multiple users, so there's nothing to key rows by. `id` is pinned to 1
+// and every read/write targets that one row (see getProfileSettings/
+// upsertProfileSettings in src/lib/profile.ts); modeled as a table instead
+// of a single hardcoded row so it's still just a normal upsert, no
+// migration-time seed required. Timezone was explicitly cut from this
+// issue's scope (see the issue thread) — legacy's hardcoded
+// 'Europe/London' was a band-aid for date-display formatting, not a real
+// requirement, and doesn't belong on a single-value "primary timezone"
+// field for someone who moves around.
+export const profileSettings = pgTable("profile_settings", {
+  id: smallint("id").primaryKey().default(1),
+  name: text("name"),
+  birthdate: date("birthdate", { mode: "string" }),
+  diaryStartDate: date("diary_start_date", { mode: "string" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Legacy shape: {position, company, place, name, start, end?, alias?,
+// color?, roles?: [{position, start, end?}]}. `placeId` resolves against
+// the existing `places` catalog (legacy's own `place` field derived from
+// the same country/state/city hierarchy this table already models) rather
+// than free text. `roles` is its own child table below, not a jsonb array
+// — consistent with how this schema always reaches for a real child table
+// over a jsonb blob when the nested data has its own identity and date
+// range (see workoutSets, tvEpisodes, exerciseSubfocuses for the same
+// call). onDelete: "set null" on placeId — losing the place shouldn't take
+// the occupation entry down with it, same reasoning as workouts.locationId.
+export const profileOccupations = pgTable(
+  "profile_occupations",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    position: text("position"),
+    company: text("company"),
+    placeId: integer("place_id").references(() => places.id, { onDelete: "set null" }),
+    start: date("start", { mode: "string" }).notNull(),
+    end: date("end", { mode: "string" }),
+    alias: text("alias"),
+    color: text("color"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("profile_occupations_start_idx").on(table.start)]
+);
+
+// One row per promotion/title-change within a single occupation entry —
+// e.g. "Software Engineer" -> "Senior Software Engineer" at the same
+// company, without treating that as two separate occupation entries.
+export const profileOccupationRoles = pgTable(
+  "profile_occupation_roles",
+  {
+    id: serial("id").primaryKey(),
+    occupationId: integer("occupation_id")
+      .notNull()
+      .references(() => profileOccupations.id, { onDelete: "cascade" }),
+    position: text("position").notNull(),
+    start: date("start", { mode: "string" }).notNull(),
+    end: date("end", { mode: "string" }),
+  },
+  (table) => [index("profile_occupation_roles_occupation_id_idx").on(table.occupationId)]
+);
+
+// Legacy shape: {place, name, start, end?, alias?, color?}. `placeId` is
+// notNull + onDelete: "restrict" (unlike occupation's optional/set-null
+// place) — a residence entry without a place isn't really a residence
+// entry, matching how legacy's residence.js always required one.
+export const profileResidences = pgTable(
+  "profile_residences",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    placeId: integer("place_id")
+      .notNull()
+      .references(() => places.id, { onDelete: "restrict" }),
+    start: date("start", { mode: "string" }).notNull(),
+    end: date("end", { mode: "string" }),
+    alias: text("alias"),
+    color: text("color"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("profile_residences_start_idx").on(table.start)]
+);
+
+// Legacy shape: {id (person), name, start, end?, alias?, color?} — no
+// status/type field (no "dating" vs "married" distinction), just a person
+// and a date range. `personId` restricts on delete (same as every other
+// people.id reference in this schema — days.positivePersonNId, etc.) so a
+// person can't be removed from the catalog while a relationship entry
+// still points at them.
+export const profileRelationships = pgTable(
+  "profile_relationships",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "restrict" }),
+    start: date("start", { mode: "string" }).notNull(),
+    end: date("end", { mode: "string" }),
+    alias: text("alias"),
+    color: text("color"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("profile_relationships_start_idx").on(table.start)]
+);
+
+
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
