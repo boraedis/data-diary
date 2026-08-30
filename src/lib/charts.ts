@@ -130,21 +130,20 @@ export async function getGymWeightComboData(): Promise<GymWeightComboData> {
 export type PlaceLeaderboardEntry = { name: string; value: number };
 
 /** Ranks places by how often they were logged in a day's two place slots,
- * weighting slot 1 double slot 2 (1 point for place 1, 0.5 for place 2) —
- * reused as-is by getPlaceMentionCounts (src/lib/days.ts) so "how
- * mentioned" means the same thing everywhere in the app. The legacy chart
- * then grouped results into a metro/category hierarchy for a nested table;
- * that enrichment isn't in this schema yet (see REBUILD_PLAN.md), so this
- * is the flat top-15 ranking underneath it — still the real, meaningful
- * part. */
+ * weighting slot 1 double slot 2 — the exact scheme the legacy
+ * `location_leaderboard` chart used (`places[mens.place1].value += 2`,
+ * `+= 1` for place2). The legacy chart then grouped results into a
+ * metro/category hierarchy for a nested table; that enrichment isn't in
+ * this schema yet (see REBUILD_PLAN.md), so this is the flat top-15
+ * ranking underneath it — still the real, meaningful part. */
 export async function getPlaceLeaderboardData(limit = 15): Promise<PlaceLeaderboardEntry[]> {
   const db = getDb();
   const rows = await db
     .select({
       name: places.name,
       value: sql<number>`
-        coalesce(sum(case when ${days.place1Id} = ${places.id} then 1 else 0 end), 0)
-        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 0.5 else 0 end), 0)
+        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
+        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
       `.as("value"),
     })
     .from(places)

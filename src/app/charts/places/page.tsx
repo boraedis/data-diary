@@ -20,7 +20,7 @@ export default async function PlacesChartPage() {
       </div>
       <ChartCard
         title="Most-visited places"
-        description="Top 15, weighted 1 point for a day's first place slot and 0.5 for the second."
+        description="Top 15, weighted 2x for a day's first place slot and 1x for the second."
         empty={entries.length === 0}
       >
         <PlaceLeaderboard entries={entries} />
