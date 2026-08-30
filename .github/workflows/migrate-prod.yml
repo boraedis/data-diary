@@ -11,13 +11,31 @@ name: Migrate production database
 # rename as drop-and-add), so the approval step is the actual safety
 # check, not this workflow file.
 #
+# IMPORTANT LIMITATION (found 2026-08-30): `--force` only auto-approves
+# data-loss confirmations — it does NOT cover the separate "is this a
+# rename or a drop+add?" prompt drizzle-kit shows when a push looks
+# ambiguous (e.g. a column dropped and a similarly-shaped one added on the
+# same table in one push). That prompt requires a real TTY; in CI it
+# throws "Interactive prompts require a TTY terminal" and the step fails
+# outright, with nothing applied. There is currently no drizzle-kit flag
+# that suppresses it (open upstream issue:
+# https://github.com/drizzle-team/drizzle-orm/issues/4921). If a future
+# schema change hits this, hand-write a one-off script under scripts/
+# (see scripts/migrate-entertainment-kinds.mjs for the pattern — explicit
+# SQL, prod-guarded, idempotent) rather than relying on push for that
+# change, or ship the drop and the add as two separate merges so
+# drizzle-kit never sees them as one ambiguous diff.
+#
 # The `notify` job exists because that approval pause only shows up in the
 # Actions tab — a different place to check than every other approval in
 # this repo (PR reviews), easy to miss entirely. It opens a plain GitHub
 # issue instead, which lands in the same notifications you already watch
 # for PRs/issues, and `migrate` closes it automatically once approved and
 # applied. `migrate` depends on `notify` so the issue always exists before
-# (or right as) the approval wait begins, not sometime after.
+# (or right as) the approval wait begins, not sometime after. It's also
+# assigned directly to you so a failed run — including the TTY/rename
+# failure above — shows up under "Assigned to me", not just as an
+# unread notification.
 on:
   push:
     branches: [main]
@@ -40,6 +58,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Production DB migration waiting for approval (run #${context.runNumber})`,
+              assignees: [context.repo.owner],
               body: [
                 `A push to \`main\` (${context.sha.slice(0, 7)}) triggered a production schema migration.`,
                 "",
@@ -47,7 +66,7 @@ jobs:
                 "",
                 `Approve or reject it here: ${runUrl}`,
                 "",
-                "This closes automatically once the migration is approved and finishes. If it's rejected or the run fails, it stays open as a reminder to go look.",
+                "This closes automatically once the migration is approved and finishes. If it's rejected or the run fails, it stays open (and assigned to you) as a reminder to go look — check the comment below for the actual error once it lands.",
               ].join("\n"),
             });
             core.setOutput("issue_number", issue.number);
@@ -74,24 +93,51 @@ jobs:
       # the schema.ts change from the PR I already reviewed", not catching
       # something new here. --verbose just logs the statements drizzle-kit
       # ran, useful after the fact if something needs debugging.
-      - run: npx drizzle-kit push --force --verbose
+      #
+      # Output is teed to a file (not just stdout) so the failure-comment
+      # step below can quote it directly on the tracking issue — see the
+      # TTY/rename limitation noted at the top of this file.
+      - name: Apply schema changes
+        id: push
+        run: npx drizzle-kit push --force --verbose 2>&1 | tee push-output.log
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
 
-      - name: Close the pending-approval issue
+      - name: Close (or report failure on) the pending-approval issue
         if: always() && needs.notify.outputs.issue_number
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require('fs');
             const issueNumber = Number('${{ needs.notify.outputs.issue_number }}');
-            const succeeded = '${{ job.status }}' === 'success';
+            const succeeded = '${{ steps.push.outcome }}' === 'success';
+
+            let body;
+            if (succeeded) {
+              body = "Migration approved and applied successfully — closing.";
+            } else {
+              let log = "(no output captured)";
+              try {
+                log = fs.readFileSync('push-output.log', 'utf8').slice(-3500);
+              } catch {}
+              body = [
+                "`drizzle-kit push` did not complete successfully — leaving this open, nothing was confirmed applied.",
+                "",
+                "If the error below mentions \"Interactive prompts require a TTY\", this is the known rename-ambiguity limitation (see the comment at the top of migrate-prod.yml) — `--force` doesn't cover it. You'll need a hand-written migration script for this change instead of relying on this workflow.",
+                "",
+                "```",
+                log,
+                "```",
+                "",
+                `Full run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ].join("\n");
+            }
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: succeeded
-                ? "Migration approved and applied successfully — closing."
-                : `This run ended without a successful migration (status: \`${{ job.status }}\`) — leaving this open, check the Actions run for details.`,
+              body,
             });
             if (succeeded) {
               await github.rest.issues.update({
