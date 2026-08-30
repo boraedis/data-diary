@@ -192,7 +192,14 @@ function AddTeamModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="add-team-color">Color</Label>
-          <Input id="add-team-color" value={color} onChange={(e) => setColor(e.target.value)} />
+          <Input
+            id="add-team-color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            placeholder="#xxxxxx"
+            pattern="^#[0-9a-fA-F]{6}$"
+            title="Use format #xxxxxx"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="add-team-division">Division</Label>

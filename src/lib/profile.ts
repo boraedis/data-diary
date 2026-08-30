@@ -8,6 +8,7 @@
 // file. Every function here follows the same "validate -> query -> return"
 // shape established in those two files.
 import { asc, eq, inArray } from "drizzle-orm";
+import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
 import {
   people,
@@ -151,6 +152,9 @@ export function validateProfileOccupationInput(body: unknown): Result<ProfileOcc
     placeId = b.placeId;
   }
 
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
+
   return {
     ok: true,
     value: {
@@ -161,7 +165,7 @@ export function validateProfileOccupationInput(body: unknown): Result<ProfileOcc
       start: dates.value.start,
       end: dates.value.end,
       alias: typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null,
-      color: typeof b.color === "string" && b.color.trim() ? b.color.trim() : null,
+      color: color.value,
     },
   };
 }
@@ -340,6 +344,8 @@ export function validateProfileResidenceInput(body: unknown): Result<ProfileResi
   }
   const dates = validateTimelineDates(b);
   if (!dates.ok) return dates;
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
   return {
     ok: true,
     value: {
@@ -348,7 +354,7 @@ export function validateProfileResidenceInput(body: unknown): Result<ProfileResi
       start: dates.value.start,
       end: dates.value.end,
       alias: typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null,
-      color: typeof b.color === "string" && b.color.trim() ? b.color.trim() : null,
+      color: color.value,
     },
   };
 }
@@ -441,6 +447,8 @@ export function validateProfileRelationshipInput(body: unknown): Result<ProfileR
   }
   const dates = validateTimelineDates(b);
   if (!dates.ok) return dates;
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
   return {
     ok: true,
     value: {
@@ -449,7 +457,7 @@ export function validateProfileRelationshipInput(body: unknown): Result<ProfileR
       start: dates.value.start,
       end: dates.value.end,
       alias: typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null,
-      color: typeof b.color === "string" && b.color.trim() ? b.color.trim() : null,
+      color: color.value,
     },
   };
 }
