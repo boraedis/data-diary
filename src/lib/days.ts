@@ -2673,27 +2673,165 @@ export async function refreshTvShowCatalogEntry(id: number, input: TvShowTmdbFie
   return updated;
 }
 
-export type TvShowUsage = { watchCount: number };
+export type TvShowEpisodeWatchEntry = {
+  id: number;
+  date: string | null;
+  season: number;
+  episode: number;
+  episodeName: string | null;
+  locationType: string | null;
+};
+export type TvShowUsage = { watches: TvShowEpisodeWatchEntry[] };
 
 // tv_episode_watches.episodeId is onDelete: "restrict", and tv_episodes.
 // showId is onDelete: "cascade" from tvShows — so deleting a show with any
 // watched episode is blocked transitively by the deeper restrict, exactly
-// like movies. No episode-tracking UI exists yet, so this can only ever be
-// 0 today, but the check (and the DB constraint it mirrors) is already
-// correct for when it lands.
+// like movies. Same "list, not just a count" shape as getMovieUsage — this
+// doubles as the "Watch history" lower box's data source.
 export async function getTvShowUsage(id: number): Promise<TvShowUsage> {
   const db = getDb();
-  const [row] = await db
-    .select({ count: tvEpisodeWatches.id })
+  const rows = await db
+    .select({
+      id: tvEpisodeWatches.id,
+      date: tvEpisodeWatches.date,
+      season: tvEpisodes.season,
+      episode: tvEpisodes.episode,
+      episodeName: tvEpisodes.name,
+      locationType: tvEpisodeWatches.locationType,
+    })
     .from(tvEpisodeWatches)
     .innerJoin(tvEpisodes, eq(tvEpisodeWatches.episodeId, tvEpisodes.id))
-    .where(eq(tvEpisodes.showId, id));
-  return { watchCount: row ? 1 : 0 };
+    .where(eq(tvEpisodes.showId, id))
+    .orderBy(desc(tvEpisodeWatches.date), asc(tvEpisodes.season), asc(tvEpisodes.episode));
+  return { watches: rows };
 }
 
 export async function deleteTvShowCatalogEntry(id: number): Promise<void> {
   const db = getDb();
   await db.delete(tvShows).where(eq(tvShows.id, id));
+}
+
+// --- TV episodes & episode watches ---------------------------------------
+// Episodes are fetched from TMDB lazily, per season, the moment someone
+// opens "log an episode" for a show (see src/lib/tmdb.ts's
+// getTvShowSeasons/getSeasonEpisodes) — these functions are pure DB, no
+// TMDB awareness, same split as every other catalog here; the API route
+// calls tmdb.ts first and passes the result in.
+
+export type TvEpisodeItem = {
+  id: number;
+  showId: number;
+  season: number;
+  episode: number;
+  name: string | null;
+  airDate: string | null;
+  runtimeMinutes: number | null;
+};
+
+const TV_EPISODE_COLUMNS = {
+  id: tvEpisodes.id,
+  showId: tvEpisodes.showId,
+  season: tvEpisodes.season,
+  episode: tvEpisodes.episode,
+  name: tvEpisodes.name,
+  airDate: tvEpisodes.airDate,
+  runtimeMinutes: tvEpisodes.runtimeMinutes,
+};
+
+export type TvEpisodeWatchItem = { id: number; date: string | null; locationType: string | null };
+
+// Upserts one season's worth of episode metadata (by tmdbEpisodeId, which
+// never changes for a given episode) and returns every episode in that
+// show/season alongside its own logged watches, if any — one round trip
+// covers both refreshing stale metadata (a name/air date TMDB corrected)
+// and rendering the season list's "already watched" state.
+export async function syncTvShowSeasonEpisodes(
+  showId: number,
+  episodes: {
+    tmdbEpisodeId: number;
+    season: number;
+    episode: number;
+    name: string | null;
+    airDate: string | null;
+    runtimeMinutes: number | null;
+  }[]
+): Promise<(TvEpisodeItem & { watches: TvEpisodeWatchItem[] })[]> {
+  const db = getDb();
+  if (episodes.length === 0) return [];
+  for (const ep of episodes) {
+    await db
+      .insert(tvEpisodes)
+      .values({ showId, ...ep })
+      .onConflictDoUpdate({
+        target: tvEpisodes.tmdbEpisodeId,
+        set: { name: ep.name, airDate: ep.airDate, runtimeMinutes: ep.runtimeMinutes },
+      });
+  }
+  const season = episodes[0].season;
+  const episodeRows = await db
+    .select(TV_EPISODE_COLUMNS)
+    .from(tvEpisodes)
+    .where(and(eq(tvEpisodes.showId, showId), eq(tvEpisodes.season, season)))
+    .orderBy(asc(tvEpisodes.episode));
+  const watchRows = await db
+    .select({
+      id: tvEpisodeWatches.id,
+      episodeId: tvEpisodeWatches.episodeId,
+      date: tvEpisodeWatches.date,
+      locationType: tvEpisodeWatches.locationType,
+    })
+    .from(tvEpisodeWatches)
+    .where(
+      inArray(
+        tvEpisodeWatches.episodeId,
+        episodeRows.map((e) => e.id)
+      )
+    );
+  const watchesByEpisode = new Map<number, TvEpisodeWatchItem[]>();
+  for (const w of watchRows) {
+    const list = watchesByEpisode.get(w.episodeId) ?? [];
+    list.push({ id: w.id, date: w.date, locationType: w.locationType });
+    watchesByEpisode.set(w.episodeId, list);
+  }
+  return episodeRows.map((e) => ({ ...e, watches: watchesByEpisode.get(e.id) ?? [] }));
+}
+
+export function validateTvEpisodeWatchInput(
+  body: unknown
+): Result<{ date: string | null; locationType: string | null }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const date = typeof b.date === "string" && b.date.trim() ? b.date.trim() : null;
+  const locationType = typeof b.locationType === "string" && b.locationType.trim() ? b.locationType.trim() : null;
+  return { ok: true, value: { date, locationType } };
+}
+
+// tvEpisodeWatches.date is nullable ("watched, exact date unknown" — see
+// the table comment in schema.ts) but IS a real FK to days.date when set,
+// so a date needs its days row to exist first — same upsert every saveX
+// function in this file does before writing its own section's table, just
+// inline here since logging one episode watch isn't a whole-day save.
+export async function createTvEpisodeWatch(
+  episodeId: number,
+  date: string | null,
+  locationType: string | null
+): Promise<TvEpisodeWatchItem> {
+  const db = getDb();
+  if (date) {
+    await db.insert(days).values({ date }).onConflictDoNothing({ target: days.date });
+  }
+  const [inserted] = await db
+    .insert(tvEpisodeWatches)
+    .values({ episodeId, date, locationType })
+    .returning({ id: tvEpisodeWatches.id, date: tvEpisodeWatches.date, locationType: tvEpisodeWatches.locationType });
+  return inserted;
+}
+
+export async function deleteTvEpisodeWatch(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(tvEpisodeWatches).where(eq(tvEpisodeWatches.id, id));
 }
 
 // Same shape as validateMovieCatalogRequest — a new show is added by tmdbId
