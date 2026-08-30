@@ -166,18 +166,10 @@ async function main() {
         }
       }
 
-      // kind_id is only actually queryable at this point if it already
-      // existed before this run, or --commit just added it above. In a
-      // dry run against a database that doesn't have it yet, it's still
-      // absent — "WHERE kind_id IS NULL" would itself error — so fall
-      // back to a plain row count for the preview (every row would need
-      // backfilling in that case, since kind_id doesn't exist at all).
-      const kindIdQueryable = hasKindIdColumn || COMMIT;
-      const { rows: toBackfill } = kindIdQueryable
-        ? await client.query(`SELECT count(*) FROM entertainment_catalog WHERE kind_id IS NULL`)
-        : await client.query(`SELECT count(*) FROM entertainment_catalog`);
+      const { rows: toBackfill } = await client.query(
+        `SELECT count(*) FROM entertainment_catalog WHERE kind_id IS NULL`
+      );
       console.log(`Would backfill kind_id for ${toBackfill[0].count} row(s) from the old kind column.`);
-
       if (COMMIT) {
         for (const { enumValue, name } of SYSTEM_KINDS) {
           await client.query(
@@ -186,26 +178,22 @@ async function main() {
             [name, enumValue]
           );
         }
+      }
 
-        // --- 5: verify before making anything irreversible ------------------
-        // Only meaningful once a backfill has actually run in this
-        // transaction — in a dry run there's nothing written yet to check,
-        // and kind_id may not even exist to query (see above).
-        const { rows: stillNull } = await client.query(
-          `SELECT id, kind::text AS kind FROM entertainment_catalog WHERE kind_id IS NULL`
+      // --- 5: verify before making anything irreversible --------------------
+      const { rows: stillNull } = await client.query(
+        `SELECT id, kind::text AS kind FROM entertainment_catalog WHERE kind_id IS NULL`
+      );
+      if (stillNull.length > 0) {
+        console.error(
+          `\n${stillNull.length} row(s) still have kind_id NULL after backfill — unexpected kind value(s): ` +
+            `${[...new Set(stillNull.map((r) => r.kind))].join(", ")}. Aborting` +
+            (COMMIT ? " and rolling back" : "") +
+            " rather than leaving a NOT NULL constraint half-satisfied. Needs manual review."
         );
-        if (stillNull.length > 0) {
-          console.error(
-            `\n${stillNull.length} row(s) still have kind_id NULL after backfill — unexpected kind value(s): ` +
-              `${[...new Set(stillNull.map((r) => r.kind))].join(", ")}. Aborting and rolling back rather than ` +
-              "leaving a NOT NULL constraint half-satisfied. Needs manual review."
-          );
-          await client.query("ROLLBACK");
-          process.exitCode = 1;
-          return;
-        }
-      } else {
-        console.log("Would then verify no row was left with kind_id NULL before proceeding (skipped in a dry run — nothing's been written yet to check).");
+        if (COMMIT) await client.query("ROLLBACK");
+        process.exitCode = 1;
+        return;
       }
 
       // --- 6: contract — NOT NULL, swap the unique index, drop the old column/enum
