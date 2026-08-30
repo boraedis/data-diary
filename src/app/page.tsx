@@ -39,8 +39,8 @@ export default async function HomePage() {
         <p className="text-muted-foreground">A little corner for tracking the shape of your days.</p>
       </div>
 
-      <div className="grid w-full max-w-4xl grid-cols-1 gap-4 md:grid-cols-3">
-        <Card className="md:col-span-3">
+      <div className="grid w-full max-w-4xl grid-cols-1 gap-4 md:grid-cols-4">
+        <Card className="md:col-span-4">
           <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3 text-sm">
               <span
@@ -73,6 +73,17 @@ export default async function HomePage() {
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
               People, places, exercises, entertainment — the catalog behind every entry.
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/profile">
+          <Card className="h-full transition-colors hover:bg-accent">
+            <CardHeader>
+              <CardTitle>Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Who you are — occupation, residence, and relationship history.
             </CardContent>
           </Card>
         </Link>
