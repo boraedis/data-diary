@@ -50,6 +50,18 @@
  * no reason to risk landing half-migrated (kind_id added and backfilled,
  * but the old column still there, or vice versa) if something fails
  * partway through. Either the whole thing lands, or none of it does.
+ *
+ * 2026-08-30 fix: the dry-run preview used to unconditionally query
+ * `WHERE kind_id IS NULL` for the backfill-count and NULL-check previews.
+ * That's fine once kind_id exists, but a dry run against a database that
+ * doesn't have kind_id yet (kind_id only actually gets added when
+ * --commit runs the ALTER TABLE) crashed with "column kind_id does not
+ * exist" — i.e. dry-run mode couldn't even preview a from-scratch
+ * migration, only a re-run of one already in progress. Fixed by only
+ * querying kind_id when it's actually queryable (already existed, or
+ * --commit just added it in this same transaction), and skipping the
+ * post-backfill NULL verification entirely in dry-run mode, since nothing
+ * was written to verify.
  */
 import pg from "pg";
 import { guardAgainstProd } from "./lib/prod-guard.mjs";

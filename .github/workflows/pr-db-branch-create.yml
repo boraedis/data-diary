@@ -10,6 +10,15 @@ name: PR database branch
 # this repo (Settings -> Secrets and variables -> Actions). Neon's GitHub
 # integration (from your Neon project's Integrations tab) can set both of
 # these up for you automatically.
+#
+# LIMITATION (found 2026-08-30, see migrate-prod.yml for the full writeup):
+# `drizzle-kit push --force` below can't always apply a schema change
+# non-interactively — an ambiguous rename-looking diff throws a TTY error
+# instead of prompting. Before this was caught, that failure was silent:
+# the job just failed with a red X and the PR got no comment at all, so a
+# schema-changing PR would quietly fall back to querying qa's stale schema
+# with no indication why. The "schema push failed" step below exists so
+# that can't happen unnoticed again.
 on:
   pull_request:
     branches: [main]
@@ -44,11 +53,18 @@ jobs:
       # this feature's changes rather than just qa's current schema. Reruns
       # on every new commit to the PR (types: synchronize), so the branch
       # always matches the latest schema in the PR.
-      - run: npx drizzle-kit push --force
+      #
+      # Output is teed to a file so the failure-comment step below can
+      # quote it directly on the PR if this doesn't succeed — see the
+      # limitation noted at the top of this file.
+      - name: Apply this PR's schema to its branch
+        id: push
+        run: npx drizzle-kit push --force 2>&1 | tee push-output.log
         env:
           DATABASE_URL: ${{ steps.neon-branch.outputs.db_url }}
 
       - name: Comment connection string on PR
+        if: success()
         uses: actions/github-script@v7
         with:
           script: |
@@ -69,7 +85,58 @@ jobs:
               issue_number: context.issue.number,
             });
             const existing = comments.find(
-              (c) => c.user?.type === "Bot" && c.body.includes("Isolated test database ready"),
+              (c) => c.user?.type === "Bot" && (c.body.includes("Isolated test database ready") || c.body.includes("this PR's database branch")),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # Without this, a failed push above just left the PR with a red X on
+      # the Actions tab and no comment at all — easy to miss, and
+      # instrumentation.ts silently falls back to qa's schema with no clue
+      # why. This makes that failure land somewhere you'll actually see it.
+      - name: Comment schema-push failure on PR
+        if: failure() && steps.push.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let log = "(no output captured)";
+            try {
+              log = fs.readFileSync('push-output.log', 'utf8').slice(-3500);
+            } catch {}
+            const body = [
+              "**This PR's database branch was created, but applying its schema changes to it failed.**",
+              "",
+              "`drizzle-kit push --force` couldn't apply this PR's `schema.ts` changes non-interactively — if the log below mentions \"Interactive prompts require a TTY\", this is a known limitation (see the comment at the top of `pr-db-branch-create.yml`): an ambiguous rename-looking diff needs interactive confirmation that CI can't provide.",
+              "",
+              "```",
+              log,
+              "```",
+              "",
+              "Until this is resolved, this PR's Preview Deployment and `npm run dev:pr` will fall back to the shared `qa` database, which does **not** have this PR's schema changes — expect \"relation/column does not exist\" errors that look unrelated to this.",
+              "",
+              `Full run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join("\n");
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (c) => c.user?.type === "Bot" && (c.body.includes("Isolated test database ready") || c.body.includes("this PR's database branch")),
             );
             if (existing) {
               await github.rest.issues.updateComment({
