@@ -2270,10 +2270,10 @@ export async function getPlaceMentionHistory(
 /** Per-place mention count, own mentions plus every descendant's (a
  * country's count includes every city and venue under it) — used to sort
  * the places manage list by "most mentioned" instead of alphabetically.
- * Reuses the exact 2x-for-1st-slot/1x-for-2nd-slot weighting
- * getPlaceLeaderboardData (src/lib/charts.ts) already established from
- * legacy's `location_leaderboard` chart, so "how mentioned" means the same
- * thing everywhere in the app rather than two competing definitions. */
+ * Reuses the exact 1x-for-1st-slot/0.5x-for-2nd-slot weighting
+ * getPlaceLeaderboardData (src/lib/charts.ts) already established, so "how
+ * mentioned" means the same thing everywhere in the app rather than two
+ * competing definitions. */
 export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
   const db = getDb();
   const rows = await db
@@ -2281,8 +2281,8 @@ export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
       id: places.id,
       parentId: places.parentId,
       own: sql<number>`
-        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
-        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
+        coalesce(sum(case when ${days.place1Id} = ${places.id} then 1 else 0 end), 0)
+        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 0.5 else 0 end), 0)
       `.as("own"),
     })
     .from(places)

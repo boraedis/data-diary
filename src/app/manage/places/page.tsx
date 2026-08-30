@@ -3,6 +3,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { PlacesManageList } from "@/components/manage/places-manage-list";
 import { getPlaceMentionCounts, listPlacesCatalog } from "@/lib/days";
 import { listPlaceCategories } from "@/lib/catalog-admin";
+import { comparePlacesByMentions } from "@/lib/place-sort";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,11 @@ export default async function ManagePlacesPage() {
   ]);
 
   // Most-mentioned first (own + every descendant's, see getPlaceMentionCounts
-  // in src/lib/days.ts) rather than alphabetical — a name tiebreak keeps
-  // unmentioned places in a stable, scannable order rather than DB order.
-  const sortedPlaces = [...places].sort((a, b) => {
-    const diff = (mentionCounts.get(b.id) ?? 0) - (mentionCounts.get(a.id) ?? 0);
-    return diff !== 0 ? diff : a.name.localeCompare(b.name);
-  });
+  // in src/lib/days.ts) rather than alphabetical, then shallower before
+  // deeper so a parent/grandparent/etc. always sorts above its own
+  // descendants when tied on mentions, with name as the final tiebreak — see
+  // src/lib/place-sort.ts.
+  const sortedPlaces = [...places].sort(comparePlacesByMentions(mentionCounts));
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
@@ -29,7 +29,7 @@ export default async function ManagePlacesPage() {
           Manage Home
         </Link>
       </div>
-      <PlacesManageList initial={sortedPlaces} categories={categories} />
+      <PlacesManageList initial={sortedPlaces} categories={categories} mentionCounts={mentionCounts} />
       <div className="flex justify-end gap-2">
         <Link href="/manage/places/categories" className={buttonVariants({ variant: "outline", size: "xs" })}>
           Manage Categories

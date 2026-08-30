@@ -29,9 +29,11 @@ function toSearchItem(place: PlaceCatalogItem): SearchItem {
 export function PlacesManageList({
   initial,
   categories,
+  mentionCounts,
 }: {
   initial: PlaceCatalogItem[];
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
+  mentionCounts: Map<number, number>;
 }) {
   const [items, setItems] = useState(initial);
   const [modalOpen, setModalOpen] = useState(false);
@@ -57,6 +59,7 @@ export function PlacesManageList({
         // is a valid parent option — no exclusion needed (unlike the edit
         // page's parentOptions, which excludes self + descendants).
         parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
+        mentionCounts={mentionCounts}
         // `initial` is already sorted most-mentioned-first (see
         // ManagePlacesPage) — a brand-new place has zero mentions, so it
         // belongs at the end, not re-sorted alphabetically into the middle.

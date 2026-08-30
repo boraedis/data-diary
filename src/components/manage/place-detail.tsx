@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { comparePlacesByMentions } from "@/lib/place-sort";
 import type { PlaceAncestor, PlaceCatalogItem, PlaceMentionEntry, PlaceUsage } from "@/lib/days";
 import type { MetroItem, PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 
@@ -40,6 +41,7 @@ export function PlaceDetail({
   categories,
   mentionsOwn,
   mentionsWithDescendants,
+  mentionCounts,
 }: {
   place: PlaceCatalogItem;
   usage: PlaceUsage;
@@ -61,6 +63,9 @@ export function PlaceDetail({
   // between them client-side instead of round-tripping.
   mentionsOwn: PlaceMentionEntry[];
   mentionsWithDescendants: PlaceMentionEntry[];
+  // For sorting the parent picker below — most-mentioned first, see
+  // src/lib/place-sort.ts.
+  mentionCounts: Map<number, number>;
 }) {
   const router = useRouter();
   const [place, setPlace] = useState(initial);
@@ -83,15 +88,16 @@ export function PlaceDetail({
   const [confirmReparentOpen, setConfirmReparentOpen] = useState(false);
   const [showDescendants, setShowDescendants] = useState(false);
 
-  // Sorted alphabetically, with the full hierarchy path as each option's
-  // caption — place names alone aren't unique (two "Dubai"s, an emirate and
-  // a city), so the path is what actually disambiguates them in the picker.
+  // Most-mentioned first, then shallower before deeper, then name (see
+  // src/lib/place-sort.ts) — with the full hierarchy path as each option's
+  // caption, since place names alone aren't unique (two "Dubai"s, an
+  // emirate and a city) and the path is what actually disambiguates them.
   const parentSearchItems: SearchItem[] = useMemo(
     () =>
       [...parentOptions]
-        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .sort(comparePlacesByMentions(mentionCounts))
         .map((p) => ({ id: p.id, primary: p.name, caption: p.namePath ? displayNamePath(p.namePath) : null })),
-    [parentOptions]
+    [parentOptions, mentionCounts]
   );
 
   const mainCardRef = useRef<HTMLDivElement>(null);
@@ -270,7 +276,14 @@ export function PlaceDetail({
             : undefined
         }
       >
-      <div ref={mainCardRef}>
+      {/* md:self-start is the actual fix: without it, this wrapper is a
+          grid item too and the default align-items: stretch inflates ITS
+          height to match the row — which is exactly the tall value we're
+          trying to measure and cap the other column to, so the
+          measurement below was circular (always just echoing whatever
+          the sub-places list's natural height already was). Pinning this
+          one to its own natural content height breaks that. */}
+      <div ref={mainCardRef} className="md:self-start">
       <Card size="sm">
         <CardHeader>
           <CardTitle>{editing ? "Edit place" : place.name}</CardTitle>

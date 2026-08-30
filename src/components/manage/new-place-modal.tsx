@@ -9,6 +9,7 @@ import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 import type { PlaceCatalogItem } from "@/lib/days";
 import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+import { comparePlacesByMentions } from "@/lib/place-sort";
 
 type ParentOption = { id: number; name: string; namePath: string | null };
 
@@ -38,12 +39,14 @@ export function NewPlaceModal({
   onCreated,
   categories,
   parentOptions,
+  mentionCounts,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
   parentOptions: ParentOption[];
+  mentionCounts: Map<number, number>;
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
@@ -56,14 +59,16 @@ export function NewPlaceModal({
 
   const categoryNames = categories.map((c) => c.name);
   const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
-  // Sorted alphabetically regardless of the order the caller happened to
-  // pass in (e.g. places-manage-list.tsx's own list is mention-sorted).
+  // Most-mentioned first, then shallower before deeper, then name — same
+  // ordering as everywhere else the app sorts places (see
+  // src/lib/place-sort.ts) — regardless of the order the caller happened to
+  // pass parentOptions in.
   const parentSearchItems: SearchItem[] = useMemo(
     () =>
       [...parentOptions]
-        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .sort(comparePlacesByMentions(mentionCounts))
         .map((p) => ({ id: p.id, primary: p.name, caption: displayPath(p.namePath) })),
-    [parentOptions]
+    [parentOptions, mentionCounts]
   );
 
   function reset() {

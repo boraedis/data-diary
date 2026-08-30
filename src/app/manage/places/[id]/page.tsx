@@ -5,6 +5,7 @@ import {
   getPlaceCatalogEntry,
   getPlaceChildren,
   getPlaceDescendantIds,
+  getPlaceMentionCounts,
   getPlaceMentionHistory,
   getPlaceUsage,
   listPlacesCatalog,
@@ -26,18 +27,29 @@ export default async function ManagePlacePage({ params }: { params: Promise<{ id
     return;
   }
 
-  const [usage, ancestry, children, metros, categories, allPlaces, descendantIds, mentionsOwn, mentionsWithDescendants] =
-    await Promise.all([
-      getPlaceUsage(id),
-      getPlaceAncestry(id),
-      getPlaceChildren(id),
-      listMetros(),
-      listPlaceCategories(),
-      listPlacesCatalog(),
-      getPlaceDescendantIds(id),
-      getPlaceMentionHistory(id),
-      getPlaceMentionHistory(id, { includeDescendants: true }),
-    ]);
+  const [
+    usage,
+    ancestry,
+    children,
+    metros,
+    categories,
+    allPlaces,
+    descendantIds,
+    mentionsOwn,
+    mentionsWithDescendants,
+    mentionCounts,
+  ] = await Promise.all([
+    getPlaceUsage(id),
+    getPlaceAncestry(id),
+    getPlaceChildren(id),
+    listMetros(),
+    listPlaceCategories(),
+    listPlacesCatalog(),
+    getPlaceDescendantIds(id),
+    getPlaceMentionHistory(id),
+    getPlaceMentionHistory(id, { includeDescendants: true }),
+    getPlaceMentionCounts(),
+  ]);
 
   const excluded = new Set([id, ...descendantIds]);
   const parentOptions = allPlaces
@@ -56,6 +68,7 @@ export default async function ManagePlacePage({ params }: { params: Promise<{ id
         categories={categories}
         mentionsOwn={mentionsOwn}
         mentionsWithDescendants={mentionsWithDescendants}
+        mentionCounts={mentionCounts}
       />
     </main>
   );
