@@ -32,26 +32,36 @@ export function BookDetail({
           <CardTitle>{book.title}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">Authors</dt>
-            <dd>{book.authors.length > 0 ? book.authors.join(", ") : "—"}</dd>
-            <dt className="text-muted-foreground">Publisher</dt>
-            <dd>{book.publisher ?? "—"}</dd>
-            <dt className="text-muted-foreground">Published</dt>
-            <dd>{book.publishedDate ?? "—"}</dd>
-            <dt className="text-muted-foreground">Pages</dt>
-            <dd>{book.pageCount ?? "—"}</dd>
-            <dt className="text-muted-foreground">Categories</dt>
-            <dd>{book.categories.length > 0 ? book.categories.join(", ") : "—"}</dd>
-            <dt className="text-muted-foreground">Progress</dt>
-            <dd>
-              {progress.currentPage !== null
-                ? `p. ${progress.currentPage}${book.pageCount ? ` / ${book.pageCount}` : ""}`
-                : "Not started"}
-            </dd>
-            <dt className="text-muted-foreground">Completions</dt>
-            <dd>{progress.completions}</dd>
-          </dl>
+          <div className="flex gap-4">
+            {book.thumbnailUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- external Google Books CDN image, not worth next/image's config for a personal app
+              <img
+                src={book.thumbnailUrl}
+                alt=""
+                className="h-36 w-24 shrink-0 rounded object-cover"
+              />
+            ) : null}
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              <dt className="text-muted-foreground">Authors</dt>
+              <dd>{book.authors.length > 0 ? book.authors.join(", ") : "—"}</dd>
+              <dt className="text-muted-foreground">Publisher</dt>
+              <dd>{book.publisher ?? "—"}</dd>
+              <dt className="text-muted-foreground">Published</dt>
+              <dd>{book.publishedDate ?? "—"}</dd>
+              <dt className="text-muted-foreground">Pages</dt>
+              <dd>{book.pageCount ?? "—"}</dd>
+              <dt className="text-muted-foreground">Categories</dt>
+              <dd>{book.categories.length > 0 ? book.categories.join(", ") : "—"}</dd>
+              <dt className="text-muted-foreground">Progress</dt>
+              <dd>
+                {progress.currentPage !== null
+                  ? `p. ${progress.currentPage}${book.pageCount ? ` / ${book.pageCount}` : ""}`
+                  : "Not started"}
+              </dd>
+              <dt className="text-muted-foreground">Completions</dt>
+              <dd>{progress.completions}</dd>
+            </dl>
+          </div>
 
           <div>
             <p className="mb-1 text-xs font-medium text-muted-foreground">

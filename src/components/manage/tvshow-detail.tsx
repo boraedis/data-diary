@@ -7,6 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type { TvShowCatalogItem, TvShowUsage } from "@/lib/days";
 
+// Same convention as MovieDetail's local POSTER_BASE — see that file's
+// comment for why this isn't imported from src/lib/tmdb.ts.
+const POSTER_BASE = "https://image.tmdb.org/t/p/w185";
+
 // Unlike MovieDetail (fully read-only), a TV show has two things you can
 // actually do here beyond delete: toggle whether you're still tracking it,
 // and pull fresh status/next-episode info from TMDB — see the comment above
@@ -63,26 +67,38 @@ export function TvShowDetail({ show: initial, usage }: { show: TvShowCatalogItem
           <CardTitle>{show.title}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">Status</dt>
-            <dd>{show.status ?? "—"}</dd>
-            <dt className="text-muted-foreground">Genres</dt>
-            <dd>{show.genres.length > 0 ? show.genres.join(", ") : "—"}</dd>
-            <dt className="text-muted-foreground">Next episode</dt>
-            <dd>
-              {show.nextEpisodeDate
-                ? `${show.nextEpisodeDate}${
-                    show.nextEpisodeSeason !== null && show.nextEpisodeNumber !== null
-                      ? ` (S${show.nextEpisodeSeason}E${show.nextEpisodeNumber})`
-                      : ""
-                  }`
-                : "—"}
-            </dd>
-            <dt className="text-muted-foreground">Interested</dt>
-            <dd>{show.interested ? "Yes" : `No${show.uninterestedDate ? ` (since ${show.uninterestedDate})` : ""}`}</dd>
-            <dt className="text-muted-foreground">Last refreshed</dt>
-            <dd>{show.lastRefreshed ?? "—"}</dd>
-          </dl>
+          <div className="flex gap-4">
+            {show.posterPath ? (
+              // eslint-disable-next-line @next/next/no-img-element -- external TMDB CDN image, not worth next/image's config for a personal app
+              <img
+                src={`${POSTER_BASE}${show.posterPath}`}
+                alt=""
+                className="h-36 w-24 shrink-0 rounded object-cover"
+              />
+            ) : null}
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              <dt className="text-muted-foreground">Status</dt>
+              <dd>{show.status ?? "—"}</dd>
+              <dt className="text-muted-foreground">Genres</dt>
+              <dd>{show.genres.length > 0 ? show.genres.join(", ") : "—"}</dd>
+              <dt className="text-muted-foreground">Next episode</dt>
+              <dd>
+                {show.nextEpisodeDate
+                  ? `${show.nextEpisodeDate}${
+                      show.nextEpisodeSeason !== null && show.nextEpisodeNumber !== null
+                        ? ` (S${show.nextEpisodeSeason}E${show.nextEpisodeNumber})`
+                        : ""
+                    }`
+                  : "—"}
+              </dd>
+              <dt className="text-muted-foreground">Interested</dt>
+              <dd>
+                {show.interested ? "Yes" : `No${show.uninterestedDate ? ` (since ${show.uninterestedDate})` : ""}`}
+              </dd>
+              <dt className="text-muted-foreground">Last refreshed</dt>
+              <dd>{show.lastRefreshed ?? "—"}</dd>
+            </dl>
+          </div>
 
           {error ? <span className="text-sm text-destructive">{error}</span> : null}
 

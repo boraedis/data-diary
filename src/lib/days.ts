@@ -2850,19 +2850,53 @@ export async function updateSportsLeague(
   return updated;
 }
 
+// One row per logged watch, shared shape for both the league- and
+// team-level watch history lists below — same fields loadDay's sports
+// section already resolves for a single day (see the sportsWatches select
+// above), just scoped to one league/team across all dates instead of one
+// date across everything. Named distinctly from SportsWatchEntry above
+// (that one is the single-day edit-form row shape, keyed by id with no
+// date field of its own — this one is a cross-day history list, keyed by
+// date with no id).
+export type SportsWatchHistoryEntry = {
+  date: string;
+  season: string | null;
+  gameType: string | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+  watchedLive: boolean;
+  durationMinutes: number | null;
+  locationType: string | null;
+};
+
 // Neither count blocks — sportsTeams.leagueId and sportsWatches.leagueId
 // are both onDelete: "set null", so the DB lets a league delete through
 // regardless of either; purely informational, same "explain the fallout
 // first" reasoning as sport's leagueCount/teamCount above.
-export type SportsLeagueUsage = { teamCount: number; watchCount: number };
+export type SportsLeagueUsage = { teamCount: number; watchCount: number; watches: SportsWatchHistoryEntry[] };
 
 export async function getSportsLeagueUsage(id: number): Promise<SportsLeagueUsage> {
   const db = getDb();
   const [teamRows, watchRows] = await Promise.all([
     db.select({ id: sportsTeams.id }).from(sportsTeams).where(eq(sportsTeams.leagueId, id)),
-    db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.leagueId, id)),
+    db
+      .select({
+        date: sportsWatches.date,
+        season: sportsWatches.season,
+        gameType: sportsWatches.gameType,
+        homeTeamName: homeSportsTeams.name,
+        awayTeamName: awaySportsTeams.name,
+        watchedLive: sportsWatches.watchedLive,
+        durationMinutes: sportsWatches.durationMinutes,
+        locationType: sportsWatches.locationType,
+      })
+      .from(sportsWatches)
+      .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+      .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+      .where(eq(sportsWatches.leagueId, id))
+      .orderBy(desc(sportsWatches.date)),
   ]);
-  return { teamCount: teamRows.length, watchCount: watchRows.length };
+  return { teamCount: teamRows.length, watchCount: watchRows.length, watches: watchRows };
 }
 
 export async function deleteSportsLeague(id: number): Promise<void> {
@@ -2944,15 +2978,27 @@ export async function updateSportsTeam(id: number, input: SportsTeamInput): Prom
 
 // Never blocks — sportsWatches.homeTeamId/awayTeamId are both onDelete:
 // "set null" — purely informational, same reasoning as league usage above.
-export type SportsTeamUsage = { watchCount: number };
+export type SportsTeamUsage = { watchCount: number; watches: SportsWatchHistoryEntry[] };
 
 export async function getSportsTeamUsage(id: number): Promise<SportsTeamUsage> {
   const db = getDb();
   const rows = await db
-    .select({ id: sportsWatches.id })
+    .select({
+      date: sportsWatches.date,
+      season: sportsWatches.season,
+      gameType: sportsWatches.gameType,
+      homeTeamName: homeSportsTeams.name,
+      awayTeamName: awaySportsTeams.name,
+      watchedLive: sportsWatches.watchedLive,
+      durationMinutes: sportsWatches.durationMinutes,
+      locationType: sportsWatches.locationType,
+    })
     .from(sportsWatches)
-    .where(or(eq(sportsWatches.homeTeamId, id), eq(sportsWatches.awayTeamId, id)));
-  return { watchCount: rows.length };
+    .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+    .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+    .where(or(eq(sportsWatches.homeTeamId, id), eq(sportsWatches.awayTeamId, id)))
+    .orderBy(desc(sportsWatches.date));
+  return { watchCount: rows.length, watches: rows };
 }
 
 export async function deleteSportsTeam(id: number): Promise<void> {

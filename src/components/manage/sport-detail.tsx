@@ -16,11 +16,59 @@ import type {
   SportsLeagueUsage,
   SportsTeamItem,
   SportsTeamUsage,
+  SportsWatchHistoryEntry,
   SportUsage,
 } from "@/lib/days";
 
 type LeagueWithUsage = SportsLeagueItem & { usage: SportsLeagueUsage };
 type TeamWithUsage = SportsTeamItem & { usage: SportsTeamUsage };
+
+// Shared "lower box" watch-history list — same bordered-row pattern as
+// PlaceDetail's Mentions card, just nested inside a league/team row instead
+// of standing as its own top-level Card (leagues/teams are compact list
+// rows, not full detail pages of their own). `perspectiveTeamName` lets a
+// team's own row omit itself from the "vs." line and show just the
+// opponent.
+function WatchHistoryList({
+  watches,
+  perspectiveTeamName,
+}: {
+  watches: SportsWatchHistoryEntry[];
+  perspectiveTeamName?: string;
+}) {
+  if (watches.length === 0) {
+    return <p className="text-xs text-muted-foreground">No watches logged.</p>;
+  }
+  return (
+    <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+      {watches.map((w, i) => {
+        let matchup: string | null;
+        if (perspectiveTeamName !== undefined) {
+          const isHome = w.homeTeamName === perspectiveTeamName;
+          const opponent = isHome ? w.awayTeamName : w.homeTeamName;
+          matchup = opponent ? `${isHome ? "vs" : "@"} ${opponent}` : null;
+        } else {
+          matchup = w.homeTeamName && w.awayTeamName ? `${w.homeTeamName} vs ${w.awayTeamName}` : null;
+        }
+        return (
+          <li key={i}>
+            <Link
+              href={`/day/${w.date}/entertainment/sports`}
+              className="flex items-center justify-between gap-3 rounded-lg border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
+            >
+              <span>{w.date}</span>
+              <span className="truncate text-muted-foreground">
+                {[matchup, w.season, w.gameType, w.watchedLive ? "live" : null, w.locationType]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function AddLeagueModal({
   sportId,
@@ -231,6 +279,7 @@ function LeagueRow({
   const [type, setType] = useState(initial.type ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showWatches, setShowWatches] = useState(false);
 
   async function handleSave() {
     if (!name.trim()) return;
@@ -287,35 +336,45 @@ function LeagueRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm">{league.name}</p>
-        {league.type ? <p className="truncate text-xs text-muted-foreground">{league.type}</p> : null}
+    <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm">{league.name}</p>
+          {league.type ? <p className="truncate text-xs text-muted-foreground">{league.type}</p> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button type="button" size="xs" variant="outline" onClick={() => setShowWatches((v) => !v)}>
+            {league.usage.watchCount} watch{league.usage.watchCount === 1 ? "" : "es"} {showWatches ? "▾" : "▸"}
+          </Button>
+          <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+          <DeleteCatalogItem
+            itemLabel={league.name}
+            isBlocked={false}
+            onDelete={async () => {
+              const res = await fetch(`/api/sports-leagues/${league.id}`, { method: "DELETE" });
+              if (!res.ok) throw new Error("Failed to delete");
+              onDeleted(league.id);
+            }}
+            blockedContent={null}
+            warningContent={
+              league.usage.teamCount > 0 || league.usage.watchCount > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {league.usage.teamCount} team{league.usage.teamCount === 1 ? "" : "s"} and{" "}
+                  {league.usage.watchCount} logged watch{league.usage.watchCount === 1 ? "" : "es"} will lose this
+                  league (kept, just unassigned).
+                </p>
+              ) : undefined
+            }
+          />
+        </div>
       </div>
-      <div className="flex shrink-0 gap-1">
-        <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-        <DeleteCatalogItem
-          itemLabel={league.name}
-          isBlocked={false}
-          onDelete={async () => {
-            const res = await fetch(`/api/sports-leagues/${league.id}`, { method: "DELETE" });
-            if (!res.ok) throw new Error("Failed to delete");
-            onDeleted(league.id);
-          }}
-          blockedContent={null}
-          warningContent={
-            league.usage.teamCount > 0 || league.usage.watchCount > 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {league.usage.teamCount} team{league.usage.teamCount === 1 ? "" : "s"} and {league.usage.watchCount}{" "}
-                logged watch{league.usage.watchCount === 1 ? "" : "es"} will lose this league (kept, just
-                unassigned).
-              </p>
-            ) : undefined
-          }
-        />
-      </div>
+      {showWatches ? (
+        <div className="border-t border-border pt-2">
+          <WatchHistoryList watches={league.usage.watches} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -341,6 +400,7 @@ function TeamRow({
   const [division, setDivision] = useState(initial.division ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showWatches, setShowWatches] = useState(false);
 
   async function handleSave() {
     if (!name.trim()) return;
@@ -423,36 +483,46 @@ function TeamRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm">{team.name}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {[leagueName, team.homeLocation].filter(Boolean).join(" · ") || "—"}
-        </p>
+    <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm">{team.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {[leagueName, team.homeLocation].filter(Boolean).join(" · ") || "—"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button type="button" size="xs" variant="outline" onClick={() => setShowWatches((v) => !v)}>
+            {team.usage.watchCount} watch{team.usage.watchCount === 1 ? "" : "es"} {showWatches ? "▾" : "▸"}
+          </Button>
+          <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+          <DeleteCatalogItem
+            itemLabel={team.name}
+            isBlocked={false}
+            onDelete={async () => {
+              const res = await fetch(`/api/sports-teams/${team.id}`, { method: "DELETE" });
+              if (!res.ok) throw new Error("Failed to delete");
+              onDeleted(team.id);
+            }}
+            blockedContent={null}
+            warningContent={
+              team.usage.watchCount > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {team.usage.watchCount} logged watch{team.usage.watchCount === 1 ? "" : "es"} will lose this team
+                  (kept, just unassigned).
+                </p>
+              ) : undefined
+            }
+          />
+        </div>
       </div>
-      <div className="flex shrink-0 gap-1">
-        <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-        <DeleteCatalogItem
-          itemLabel={team.name}
-          isBlocked={false}
-          onDelete={async () => {
-            const res = await fetch(`/api/sports-teams/${team.id}`, { method: "DELETE" });
-            if (!res.ok) throw new Error("Failed to delete");
-            onDeleted(team.id);
-          }}
-          blockedContent={null}
-          warningContent={
-            team.usage.watchCount > 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {team.usage.watchCount} logged watch{team.usage.watchCount === 1 ? "" : "es"} will lose this team
-                (kept, just unassigned).
-              </p>
-            ) : undefined
-          }
-        />
-      </div>
+      {showWatches ? (
+        <div className="border-t border-border pt-2">
+          <WatchHistoryList watches={team.usage.watches} perspectiveTeamName={team.name} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -640,14 +710,16 @@ export function SportDetail({
         sportId={sport.id}
         open={addLeagueOpen}
         onClose={() => setAddLeagueOpen(false)}
-        onCreated={(league) => setLeagues((prev) => [...prev, { ...league, usage: { teamCount: 0, watchCount: 0 } }])}
+        onCreated={(league) =>
+          setLeagues((prev) => [...prev, { ...league, usage: { teamCount: 0, watchCount: 0, watches: [] } }])
+        }
       />
       <AddTeamModal
         sportId={sport.id}
         leagues={leagues}
         open={addTeamOpen}
         onClose={() => setAddTeamOpen(false)}
-        onCreated={(team) => setTeams((prev) => [...prev, { ...team, usage: { watchCount: 0 } }])}
+        onCreated={(team) => setTeams((prev) => [...prev, { ...team, usage: { watchCount: 0, watches: [] } }])}
       />
     </>
   );
