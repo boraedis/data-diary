@@ -151,15 +151,6 @@ function NewPlaceModal({
           <Input id="new-place-address" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="new-place-category">Category</Label>
-          <Input
-            id="new-place-category"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="restaurant, gym, friend's place…"
-          />
-        </div>
-        <div className="space-y-1.5">
           <Label htmlFor="new-place-parent">Parent place</Label>
           <SearchCombobox
             id="new-place-parent"
@@ -168,6 +159,15 @@ function NewPlaceModal({
             onChange={setParentId}
             placeholder="Search places…"
             emptyLabel="No parent"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-place-category">Category</Label>
+          <Input
+            id="new-place-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="restaurant, gym, friend's place…"
           />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}

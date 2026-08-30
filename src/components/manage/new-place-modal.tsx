@@ -140,6 +140,23 @@ export function NewPlaceModal({
           <Input id="manage-new-place-address" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
         <div className="space-y-1.5">
+          <Label htmlFor="manage-new-place-parent">Parent place</Label>
+          <SearchCombobox
+            id="manage-new-place-parent"
+            items={parentSearchItems}
+            valueId={parentId}
+            onChange={setParentId}
+            placeholder="Search places…"
+            emptyLabel="No parent"
+          />
+          {parentId === null && category.trim() !== "Region" ? (
+            <p className="text-xs text-muted-foreground">
+              Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
+              &ldquo;Region&rdquo;.
+            </p>
+          ) : null}
+        </div>
+        <div className="space-y-1.5">
           <Label htmlFor="manage-new-place-category">Category</Label>
           <Input
             id="manage-new-place-category"
@@ -167,23 +184,6 @@ export function NewPlaceModal({
               <option key={n} value={n} />
             ))}
           </datalist>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="manage-new-place-parent">Parent place</Label>
-          <SearchCombobox
-            id="manage-new-place-parent"
-            items={parentSearchItems}
-            valueId={parentId}
-            onChange={setParentId}
-            placeholder="Search places…"
-            emptyLabel="No parent"
-          />
-          {parentId === null && category.trim() !== "Region" ? (
-            <p className="text-xs text-muted-foreground">
-              Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
-              &ldquo;Region&rdquo;.
-            </p>
-          ) : null}
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>

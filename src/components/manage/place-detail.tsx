@@ -304,6 +304,23 @@ export function PlaceDetail({
                 <Input id="place-address" value={address} onChange={(e) => setAddress(e.target.value)} />
               </div>
               <div className="space-y-1.5">
+                <Label htmlFor="place-parent">Parent place</Label>
+                <SearchCombobox
+                  id="place-parent"
+                  items={parentSearchItems}
+                  valueId={parentId}
+                  onChange={setParentId}
+                  placeholder="Search places…"
+                  emptyLabel="No parent"
+                />
+                {parentId === null && category.trim() !== "Region" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
+                    &ldquo;Region&rdquo;.
+                  </p>
+                ) : null}
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="place-category">Category</Label>
                 <Input
                   id="place-category"
@@ -364,23 +381,6 @@ export function PlaceDetail({
                     </Button>
                   ) : null}
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="place-parent">Parent place</Label>
-                <SearchCombobox
-                  id="place-parent"
-                  items={parentSearchItems}
-                  valueId={parentId}
-                  onChange={setParentId}
-                  placeholder="Search places…"
-                  emptyLabel="No parent"
-                />
-                {parentId === null && category.trim() !== "Region" ? (
-                  <p className="text-xs text-muted-foreground">
-                    Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
-                    &ldquo;Region&rdquo;.
-                  </p>
-                ) : null}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="place-metro">
