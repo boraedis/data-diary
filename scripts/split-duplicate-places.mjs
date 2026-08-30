@@ -47,6 +47,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import admin from "firebase-admin";
 import pg from "pg";
+import { guardAgainstProd } from "./lib/prod-guard.mjs";
 
 const COMMIT = process.argv.slice(2).includes("--commit");
 
@@ -129,6 +130,10 @@ async function fetchWorldParentMap() {
 }
 
 async function main() {
+  // Dry runs are safe against any database, so only gate the run that can
+  // actually write — see scripts/lib/prod-guard.mjs for why this exists.
+  if (COMMIT) await guardAgainstProd({ scriptName: "split-duplicate-places.mjs --commit" });
+
   console.log("Reading Firestore places, world hierarchy, and coordinates...");
   const [placesSnap, worldParentMap, coordDoc, metrosRes, pgPlacesRes] = await Promise.all([
     fs.collection("places").get(),

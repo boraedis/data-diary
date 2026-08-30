@@ -19,6 +19,7 @@
  * everything (equivalent to, but cheaper than, re-saving every place).
  */
 import pg from "pg";
+import { guardAgainstProd } from "./lib/prod-guard.mjs";
 
 if (!process.env.DATABASE_URL) {
   console.error("Set DATABASE_URL to the Postgres connection string to backfill.");
@@ -28,6 +29,11 @@ if (!process.env.DATABASE_URL) {
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
 async function main() {
+  // This script writes unconditionally (no --commit flag to gate on), so
+  // the prod check has to run before anything else — see
+  // scripts/lib/prod-guard.mjs for why this exists.
+  await guardAgainstProd({ scriptName: "backfill-place-paths.mjs" });
+
   const { rows } = await pool.query("SELECT id, name, parent_id FROM places");
   const byId = new Map(rows.map((r) => [r.id, r]));
   const childrenByParent = new Map();
