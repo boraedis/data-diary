@@ -10,7 +10,7 @@ import {
   dayTypeEnum,
   entertainmentCatalog,
   entertainmentEntries,
-  entertainmentKindEnum,
+  entertainmentKinds,
   exerciseCategoryEnum,
   exercises,
   movies,
@@ -31,7 +31,6 @@ import {
   workoutSets,
   type CommuteOption,
   type DayType,
-  type EntertainmentKind,
   type ExerciseCategory,
   type PersonValence,
   type WorkLocationOption,
@@ -223,7 +222,7 @@ export type PlacesPayload = { entries: { slot: number; placeId: number }[] };
 
 export type EntertainmentEntry = {
   entertainmentId: number;
-  kind: EntertainmentKind;
+  kindName: string;
   title: string;
   durationMinutes: number | null;
   notes: string | null;
@@ -359,7 +358,8 @@ export type PlaceCatalogItem = {
 export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
 export type EntertainmentCatalogItem = {
   id: number;
-  kind: EntertainmentKind;
+  kindId: number;
+  kindName: string;
   title: string;
   detail: string | null;
 };
@@ -485,11 +485,12 @@ export async function loadDay(date: string): Promise<DayPayload> {
         durationMinutes: entertainmentEntries.durationMinutes,
         notes: entertainmentEntries.notes,
         sortOrder: entertainmentEntries.sortOrder,
-        kind: entertainmentCatalog.kind,
+        kindName: entertainmentKinds.name,
         title: entertainmentCatalog.title,
       })
       .from(entertainmentEntries)
       .innerJoin(entertainmentCatalog, eq(entertainmentEntries.entertainmentId, entertainmentCatalog.id))
+      .innerJoin(entertainmentKinds, eq(entertainmentCatalog.kindId, entertainmentKinds.id))
       .where(eq(entertainmentEntries.date, date))
       .orderBy(asc(entertainmentEntries.sortOrder)),
     db
@@ -632,7 +633,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
     places: placeEntries,
     entertainment: entertainmentRows.map((e) => ({
       entertainmentId: e.entertainmentId,
-      kind: e.kind,
+      kindName: e.kindName,
       title: e.title,
       durationMinutes: e.durationMinutes,
       notes: e.notes,
@@ -684,7 +685,6 @@ const WORK_LOCATIONS = new Set<string>(workLocationEnum.enumValues);
 const COMMUTES = new Set<string>(commuteEnum.enumValues);
 const DATA_SOURCES = new Set<string>(workoutDataSourceEnum.enumValues);
 const PERSON_VALENCES = new Set<string>(["positive", "negative"] satisfies PersonValence[]);
-const ENTERTAINMENT_KINDS = new Set<string>(entertainmentKindEnum.enumValues);
 const EXERCISE_CATEGORIES = new Set<string>(exerciseCategoryEnum.enumValues);
 
 function isPercent(value: unknown): value is number {
@@ -1272,18 +1272,17 @@ export function validateExerciseCatalogEntry(
 
 export function validateEntertainmentCatalogEntry(
   body: unknown
-): Result<{ kind: EntertainmentKind; title: string; detail: string | null }> {
+): Result<{ kindId: number; title: string; detail: string | null }> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
   const b = body as Record<string, unknown>;
   const title = typeof b.title === "string" ? b.title.trim() : "";
   if (!title) return { ok: false, error: "Title is required" };
-  if (!ENTERTAINMENT_KINDS.has(b.kind as string)) {
-    return { ok: false, error: "Invalid kind" };
-  }
+  const kindId = typeof b.kindId === "number" ? b.kindId : NaN;
+  if (!Number.isInteger(kindId)) return { ok: false, error: "Invalid kind" };
   const detail = typeof b.detail === "string" && b.detail.trim() ? b.detail.trim() : null;
-  return { ok: true, value: { kind: b.kind as EntertainmentKind, title, detail } };
+  return { ok: true, value: { kindId, title, detail } };
 }
 
 /**
@@ -2324,61 +2323,83 @@ export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
 
 const ENTERTAINMENT_CATALOG_COLUMNS = {
   id: entertainmentCatalog.id,
-  kind: entertainmentCatalog.kind,
+  kindId: entertainmentCatalog.kindId,
+  kindName: entertainmentKinds.name,
   title: entertainmentCatalog.title,
   detail: entertainmentCatalog.detail,
 };
 
-export async function listEntertainmentCatalog(): Promise<EntertainmentCatalogItem[]> {
+// Every read below joins entertainmentKinds for kindName — entertainmentCatalog
+// itself only stores kindId, but every consumer wants a display name (see
+// EntertainmentCatalogItem in this file), so the join lives here once
+// instead of every caller re-deriving it from a separately-fetched kinds
+// list.
+function entertainmentCatalogSelect() {
   const db = getDb();
   return db
     .select(ENTERTAINMENT_CATALOG_COLUMNS)
     .from(entertainmentCatalog)
-    .orderBy(asc(entertainmentCatalog.kind), asc(entertainmentCatalog.title));
+    .innerJoin(entertainmentKinds, eq(entertainmentCatalog.kindId, entertainmentKinds.id));
 }
 
+export async function listEntertainmentCatalog(): Promise<EntertainmentCatalogItem[]> {
+  return entertainmentCatalogSelect().orderBy(asc(entertainmentKinds.name), asc(entertainmentCatalog.title));
+}
+
+// Blocks creating a NEW catalog entry against a system kind (Movie/TV
+// show/Sport/Book/Game) — those already have their own dedicated catalogs
+// and entry flows (TMDB, Google Books, the sport/league/team hierarchy);
+// see the entertainmentKinds table comment in schema.ts. Existing
+// historical rows under a system kind (predating those dedicated tables)
+// are untouched — this only guards the create path, not read/update/delete
+// of what's already there.
 export async function createEntertainmentCatalogEntry(
-  kind: EntertainmentKind,
+  kindId: number,
   title: string,
   detail: string | null = null
 ): Promise<EntertainmentCatalogItem> {
   const db = getDb();
+  const [kindRow] = await db.select({ isSystem: entertainmentKinds.isSystem }).from(entertainmentKinds).where(eq(entertainmentKinds.id, kindId));
+  if (!kindRow) throw new Error("Unknown kind");
+  if (kindRow.isSystem) {
+    throw new Error(
+      "Movie/TV show/Sport/Book/Game each have their own page with a real search — add it from there, or add a custom kind instead."
+    );
+  }
   const trimmed = title.trim();
   const [inserted] = await db
     .insert(entertainmentCatalog)
-    .values({ kind, title: trimmed, detail })
-    .onConflictDoNothing({ target: [entertainmentCatalog.kind, entertainmentCatalog.title] })
-    .returning(ENTERTAINMENT_CATALOG_COLUMNS);
-  if (inserted) return inserted;
-  const [existing] = await db
-    .select(ENTERTAINMENT_CATALOG_COLUMNS)
-    .from(entertainmentCatalog)
-    .where(and(eq(entertainmentCatalog.kind, kind), eq(entertainmentCatalog.title, trimmed)));
-  return existing;
+    .values({ kindId, title: trimmed, detail })
+    .onConflictDoNothing({ target: [entertainmentCatalog.kindId, entertainmentCatalog.title] })
+    .returning({ id: entertainmentCatalog.id });
+  const id = inserted
+    ? inserted.id
+    : (
+        await db
+          .select({ id: entertainmentCatalog.id })
+          .from(entertainmentCatalog)
+          .where(and(eq(entertainmentCatalog.kindId, kindId), eq(entertainmentCatalog.title, trimmed)))
+      )[0].id;
+  return (await getEntertainmentCatalogEntry(id))!;
 }
 
 export async function getEntertainmentCatalogEntry(id: number): Promise<EntertainmentCatalogItem | null> {
-  const db = getDb();
-  const [row] = await db
-    .select(ENTERTAINMENT_CATALOG_COLUMNS)
-    .from(entertainmentCatalog)
-    .where(eq(entertainmentCatalog.id, id));
+  const [row] = await entertainmentCatalogSelect().where(eq(entertainmentCatalog.id, id));
   return row ?? null;
 }
 
 export async function updateEntertainmentCatalogEntry(
   id: number,
-  kind: EntertainmentKind,
+  kindId: number,
   title: string,
   detail: string | null
 ): Promise<EntertainmentCatalogItem> {
   const db = getDb();
-  const [updated] = await db
+  await db
     .update(entertainmentCatalog)
-    .set({ kind, title: title.trim(), detail })
-    .where(eq(entertainmentCatalog.id, id))
-    .returning(ENTERTAINMENT_CATALOG_COLUMNS);
-  return updated;
+    .set({ kindId, title: title.trim(), detail })
+    .where(eq(entertainmentCatalog.id, id));
+  return (await getEntertainmentCatalogEntry(id))!;
 }
 
 export type EntertainmentUsage = { dates: string[] };
@@ -2652,27 +2673,165 @@ export async function refreshTvShowCatalogEntry(id: number, input: TvShowTmdbFie
   return updated;
 }
 
-export type TvShowUsage = { watchCount: number };
+export type TvShowEpisodeWatchEntry = {
+  id: number;
+  date: string | null;
+  season: number;
+  episode: number;
+  episodeName: string | null;
+  locationType: string | null;
+};
+export type TvShowUsage = { watches: TvShowEpisodeWatchEntry[] };
 
 // tv_episode_watches.episodeId is onDelete: "restrict", and tv_episodes.
 // showId is onDelete: "cascade" from tvShows — so deleting a show with any
 // watched episode is blocked transitively by the deeper restrict, exactly
-// like movies. No episode-tracking UI exists yet, so this can only ever be
-// 0 today, but the check (and the DB constraint it mirrors) is already
-// correct for when it lands.
+// like movies. Same "list, not just a count" shape as getMovieUsage — this
+// doubles as the "Watch history" lower box's data source.
 export async function getTvShowUsage(id: number): Promise<TvShowUsage> {
   const db = getDb();
-  const [row] = await db
-    .select({ count: tvEpisodeWatches.id })
+  const rows = await db
+    .select({
+      id: tvEpisodeWatches.id,
+      date: tvEpisodeWatches.date,
+      season: tvEpisodes.season,
+      episode: tvEpisodes.episode,
+      episodeName: tvEpisodes.name,
+      locationType: tvEpisodeWatches.locationType,
+    })
     .from(tvEpisodeWatches)
     .innerJoin(tvEpisodes, eq(tvEpisodeWatches.episodeId, tvEpisodes.id))
-    .where(eq(tvEpisodes.showId, id));
-  return { watchCount: row ? 1 : 0 };
+    .where(eq(tvEpisodes.showId, id))
+    .orderBy(desc(tvEpisodeWatches.date), asc(tvEpisodes.season), asc(tvEpisodes.episode));
+  return { watches: rows };
 }
 
 export async function deleteTvShowCatalogEntry(id: number): Promise<void> {
   const db = getDb();
   await db.delete(tvShows).where(eq(tvShows.id, id));
+}
+
+// --- TV episodes & episode watches ---------------------------------------
+// Episodes are fetched from TMDB lazily, per season, the moment someone
+// opens "log an episode" for a show (see src/lib/tmdb.ts's
+// getTvShowSeasons/getSeasonEpisodes) — these functions are pure DB, no
+// TMDB awareness, same split as every other catalog here; the API route
+// calls tmdb.ts first and passes the result in.
+
+export type TvEpisodeItem = {
+  id: number;
+  showId: number;
+  season: number;
+  episode: number;
+  name: string | null;
+  airDate: string | null;
+  runtimeMinutes: number | null;
+};
+
+const TV_EPISODE_COLUMNS = {
+  id: tvEpisodes.id,
+  showId: tvEpisodes.showId,
+  season: tvEpisodes.season,
+  episode: tvEpisodes.episode,
+  name: tvEpisodes.name,
+  airDate: tvEpisodes.airDate,
+  runtimeMinutes: tvEpisodes.runtimeMinutes,
+};
+
+export type TvEpisodeWatchItem = { id: number; date: string | null; locationType: string | null };
+
+// Upserts one season's worth of episode metadata (by tmdbEpisodeId, which
+// never changes for a given episode) and returns every episode in that
+// show/season alongside its own logged watches, if any — one round trip
+// covers both refreshing stale metadata (a name/air date TMDB corrected)
+// and rendering the season list's "already watched" state.
+export async function syncTvShowSeasonEpisodes(
+  showId: number,
+  episodes: {
+    tmdbEpisodeId: number;
+    season: number;
+    episode: number;
+    name: string | null;
+    airDate: string | null;
+    runtimeMinutes: number | null;
+  }[]
+): Promise<(TvEpisodeItem & { watches: TvEpisodeWatchItem[] })[]> {
+  const db = getDb();
+  if (episodes.length === 0) return [];
+  for (const ep of episodes) {
+    await db
+      .insert(tvEpisodes)
+      .values({ showId, ...ep })
+      .onConflictDoUpdate({
+        target: tvEpisodes.tmdbEpisodeId,
+        set: { name: ep.name, airDate: ep.airDate, runtimeMinutes: ep.runtimeMinutes },
+      });
+  }
+  const season = episodes[0].season;
+  const episodeRows = await db
+    .select(TV_EPISODE_COLUMNS)
+    .from(tvEpisodes)
+    .where(and(eq(tvEpisodes.showId, showId), eq(tvEpisodes.season, season)))
+    .orderBy(asc(tvEpisodes.episode));
+  const watchRows = await db
+    .select({
+      id: tvEpisodeWatches.id,
+      episodeId: tvEpisodeWatches.episodeId,
+      date: tvEpisodeWatches.date,
+      locationType: tvEpisodeWatches.locationType,
+    })
+    .from(tvEpisodeWatches)
+    .where(
+      inArray(
+        tvEpisodeWatches.episodeId,
+        episodeRows.map((e) => e.id)
+      )
+    );
+  const watchesByEpisode = new Map<number, TvEpisodeWatchItem[]>();
+  for (const w of watchRows) {
+    const list = watchesByEpisode.get(w.episodeId) ?? [];
+    list.push({ id: w.id, date: w.date, locationType: w.locationType });
+    watchesByEpisode.set(w.episodeId, list);
+  }
+  return episodeRows.map((e) => ({ ...e, watches: watchesByEpisode.get(e.id) ?? [] }));
+}
+
+export function validateTvEpisodeWatchInput(
+  body: unknown
+): Result<{ date: string | null; locationType: string | null }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const date = typeof b.date === "string" && b.date.trim() ? b.date.trim() : null;
+  const locationType = typeof b.locationType === "string" && b.locationType.trim() ? b.locationType.trim() : null;
+  return { ok: true, value: { date, locationType } };
+}
+
+// tvEpisodeWatches.date is nullable ("watched, exact date unknown" — see
+// the table comment in schema.ts) but IS a real FK to days.date when set,
+// so a date needs its days row to exist first — same upsert every saveX
+// function in this file does before writing its own section's table, just
+// inline here since logging one episode watch isn't a whole-day save.
+export async function createTvEpisodeWatch(
+  episodeId: number,
+  date: string | null,
+  locationType: string | null
+): Promise<TvEpisodeWatchItem> {
+  const db = getDb();
+  if (date) {
+    await db.insert(days).values({ date }).onConflictDoNothing({ target: days.date });
+  }
+  const [inserted] = await db
+    .insert(tvEpisodeWatches)
+    .values({ episodeId, date, locationType })
+    .returning({ id: tvEpisodeWatches.id, date: tvEpisodeWatches.date, locationType: tvEpisodeWatches.locationType });
+  return inserted;
+}
+
+export async function deleteTvEpisodeWatch(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(tvEpisodeWatches).where(eq(tvEpisodeWatches.id, id));
 }
 
 // Same shape as validateMovieCatalogRequest — a new show is added by tmdbId
@@ -2850,19 +3009,53 @@ export async function updateSportsLeague(
   return updated;
 }
 
+// One row per logged watch, shared shape for both the league- and
+// team-level watch history lists below — same fields loadDay's sports
+// section already resolves for a single day (see the sportsWatches select
+// above), just scoped to one league/team across all dates instead of one
+// date across everything. Named distinctly from SportsWatchEntry above
+// (that one is the single-day edit-form row shape, keyed by id with no
+// date field of its own — this one is a cross-day history list, keyed by
+// date with no id).
+export type SportsWatchHistoryEntry = {
+  date: string;
+  season: string | null;
+  gameType: string | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+  watchedLive: boolean;
+  durationMinutes: number | null;
+  locationType: string | null;
+};
+
 // Neither count blocks — sportsTeams.leagueId and sportsWatches.leagueId
 // are both onDelete: "set null", so the DB lets a league delete through
 // regardless of either; purely informational, same "explain the fallout
 // first" reasoning as sport's leagueCount/teamCount above.
-export type SportsLeagueUsage = { teamCount: number; watchCount: number };
+export type SportsLeagueUsage = { teamCount: number; watchCount: number; watches: SportsWatchHistoryEntry[] };
 
 export async function getSportsLeagueUsage(id: number): Promise<SportsLeagueUsage> {
   const db = getDb();
   const [teamRows, watchRows] = await Promise.all([
     db.select({ id: sportsTeams.id }).from(sportsTeams).where(eq(sportsTeams.leagueId, id)),
-    db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.leagueId, id)),
+    db
+      .select({
+        date: sportsWatches.date,
+        season: sportsWatches.season,
+        gameType: sportsWatches.gameType,
+        homeTeamName: homeSportsTeams.name,
+        awayTeamName: awaySportsTeams.name,
+        watchedLive: sportsWatches.watchedLive,
+        durationMinutes: sportsWatches.durationMinutes,
+        locationType: sportsWatches.locationType,
+      })
+      .from(sportsWatches)
+      .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+      .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+      .where(eq(sportsWatches.leagueId, id))
+      .orderBy(desc(sportsWatches.date)),
   ]);
-  return { teamCount: teamRows.length, watchCount: watchRows.length };
+  return { teamCount: teamRows.length, watchCount: watchRows.length, watches: watchRows };
 }
 
 export async function deleteSportsLeague(id: number): Promise<void> {
@@ -2944,15 +3137,27 @@ export async function updateSportsTeam(id: number, input: SportsTeamInput): Prom
 
 // Never blocks — sportsWatches.homeTeamId/awayTeamId are both onDelete:
 // "set null" — purely informational, same reasoning as league usage above.
-export type SportsTeamUsage = { watchCount: number };
+export type SportsTeamUsage = { watchCount: number; watches: SportsWatchHistoryEntry[] };
 
 export async function getSportsTeamUsage(id: number): Promise<SportsTeamUsage> {
   const db = getDb();
   const rows = await db
-    .select({ id: sportsWatches.id })
+    .select({
+      date: sportsWatches.date,
+      season: sportsWatches.season,
+      gameType: sportsWatches.gameType,
+      homeTeamName: homeSportsTeams.name,
+      awayTeamName: awaySportsTeams.name,
+      watchedLive: sportsWatches.watchedLive,
+      durationMinutes: sportsWatches.durationMinutes,
+      locationType: sportsWatches.locationType,
+    })
     .from(sportsWatches)
-    .where(or(eq(sportsWatches.homeTeamId, id), eq(sportsWatches.awayTeamId, id)));
-  return { watchCount: rows.length };
+    .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+    .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+    .where(or(eq(sportsWatches.homeTeamId, id), eq(sportsWatches.awayTeamId, id)))
+    .orderBy(desc(sportsWatches.date));
+  return { watchCount: rows.length, watches: rows };
 }
 
 export async function deleteSportsTeam(id: number): Promise<void> {

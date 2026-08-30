@@ -7,10 +7,12 @@
 // growing without bound — every function here follows the exact same
 // "upsert-by-unique-key on create, get/update/delete + usage check" shape
 // established there.
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   days,
+  entertainmentCatalog,
+  entertainmentKinds,
   exerciseFocusLinks,
   exerciseFocuses,
   exerciseSubfocuses,
@@ -109,6 +111,78 @@ export async function getTagUsage(id: number): Promise<TagUsage> {
 export async function deleteTag(id: number): Promise<void> {
   const db = getDb();
   await db.delete(tags).where(eq(tags.id, id));
+}
+
+// --- Entertainment kinds -------------------------------------------------
+// See the `entertainmentKinds` table comment in schema.ts. System rows
+// (Movie/TV show/Sport/Book/Game) are seeded once and can't be created,
+// renamed, or deleted here — everything below is scoped to the
+// user-added "neutral" kinds.
+
+export type EntertainmentKindItem = { id: number; name: string; isSystem: boolean };
+
+const ENTERTAINMENT_KIND_COLUMNS = {
+  id: entertainmentKinds.id,
+  name: entertainmentKinds.name,
+  isSystem: entertainmentKinds.isSystem,
+};
+
+export function validateEntertainmentKindInput(body: unknown): Result<{ name: string }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  return { ok: true, value: { name } };
+}
+
+// System kinds first (in their seeded id order — Movie/TV show/Sport/Book/
+// Game), then custom kinds alphabetically.
+export async function listEntertainmentKinds(): Promise<EntertainmentKindItem[]> {
+  const db = getDb();
+  return db
+    .select(ENTERTAINMENT_KIND_COLUMNS)
+    .from(entertainmentKinds)
+    .orderBy(desc(entertainmentKinds.isSystem), asc(entertainmentKinds.id), asc(entertainmentKinds.name));
+}
+
+// Always a custom kind — there's no flow that creates a new system kind
+// after the one-time seed (see scripts/migrate-entertainment-kinds.mjs).
+export async function createEntertainmentKindEntry(name: string): Promise<EntertainmentKindItem> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(entertainmentKinds)
+    .values({ name: name.trim(), isSystem: false })
+    .returning(ENTERTAINMENT_KIND_COLUMNS);
+  return inserted;
+}
+
+export type EntertainmentKindUsage = { catalogCount: number };
+
+export async function getEntertainmentKindUsage(id: number): Promise<EntertainmentKindUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: entertainmentCatalog.id })
+    .from(entertainmentCatalog)
+    .where(eq(entertainmentCatalog.kindId, id));
+  return { catalogCount: rows.length };
+}
+
+// entertainmentCatalog.kindId is onDelete: "restrict", so the DB would
+// refuse this anyway once anything's catalogued under it — the isSystem
+// check here just gives a clearer error than a raw FK violation for the
+// case that's actually reachable through the UI (there's no "delete kind"
+// button next to a system row, but the API route itself only calls this
+// for a custom kind's own detail page, so this is defense in depth, not
+// the primary guard).
+export async function deleteEntertainmentKindEntry(id: number): Promise<void> {
+  const db = getDb();
+  const [row] = await db.select({ isSystem: entertainmentKinds.isSystem }).from(entertainmentKinds).where(eq(entertainmentKinds.id, id));
+  if (row?.isSystem) {
+    throw new Error("Movie/TV show/Sport/Book/Game are built in and can't be deleted.");
+  }
+  await db.delete(entertainmentKinds).where(eq(entertainmentKinds.id, id));
 }
 
 // Ported from the legacy app's functions/views/entry/database/tag.js

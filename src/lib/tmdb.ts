@@ -160,9 +160,10 @@ type TmdbTvShowResponse = {
  * the moment something is picked" pattern as getMovieDetails, plus reused
  * later for the "Refresh from TMDB" action on an already-added show (status
  * and next-episode info go stale in a way a movie's fields never do). Does
- * NOT fetch episodes — those are fetched per-season, lazily, once the
- * episode-watch-tracking feature lands (see REBUILD_PLAN.md); a show can be
- * added to the catalog long before any of its episodes are. */
+ * NOT fetch episodes — those are fetched per-season, lazily, via
+ * getTvShowSeasons/getSeasonEpisodes below, only once you actually open the
+ * "log an episode" flow for a show; a show can be added to the catalog long
+ * before any of its episodes are looked up. */
 export async function getTvShowDetails(tmdbId: number): Promise<TmdbTvShowDetails> {
   const data = await tmdbFetch<TmdbTvShowResponse>(`/tv/${tmdbId}`);
   return {
@@ -175,4 +176,60 @@ export async function getTvShowDetails(tmdbId: number): Promise<TmdbTvShowDetail
     nextEpisodeSeason: data.next_episode_to_air?.season_number ?? null,
     nextEpisodeNumber: data.next_episode_to_air?.episode_number ?? null,
   };
+}
+
+// --- Episodes -----------------------------------------------------------
+// The episode-watch-tracking feature this file's getTvShowDetails comment
+// used to say was still pending — fetched lazily per season (not stored on
+// the show row) since a show can have dozens of seasons and hundreds of
+// episodes nobody will ever look up.
+
+export type TmdbSeasonSummary = { seasonNumber: number; name: string; episodeCount: number };
+
+type TmdbTvSeasonsResponse = {
+  seasons: { season_number: number; name: string; episode_count: number }[];
+};
+
+/** Just enough to populate a season picker before fetching any one season's
+ * full episode list — a second, cheap call to the same /tv/{id} endpoint
+ * getTvShowDetails already hits, kept separate so callers that only need
+ * metadata (add/refresh) don't pay for parsing a seasons array they'd
+ * throw away. */
+export async function getTvShowSeasons(tmdbId: number): Promise<TmdbSeasonSummary[]> {
+  const data = await tmdbFetch<TmdbTvSeasonsResponse>(`/tv/${tmdbId}`);
+  return data.seasons
+    .filter((s) => s.season_number > 0) // skip "Specials" (season 0) — same call legacy's UI made
+    .map((s) => ({ seasonNumber: s.season_number, name: s.name, episodeCount: s.episode_count }));
+}
+
+export type TmdbEpisodeSummary = {
+  tmdbEpisodeId: number;
+  season: number;
+  episode: number;
+  name: string | null;
+  airDate: string | null;
+  runtimeMinutes: number | null;
+};
+
+type TmdbSeasonResponse = {
+  episodes: {
+    id: number;
+    season_number: number;
+    episode_number: number;
+    name: string | null;
+    air_date: string | null;
+    runtime: number | null;
+  }[];
+};
+
+export async function getSeasonEpisodes(tmdbId: number, seasonNumber: number): Promise<TmdbEpisodeSummary[]> {
+  const data = await tmdbFetch<TmdbSeasonResponse>(`/tv/${tmdbId}/season/${seasonNumber}`);
+  return data.episodes.map((e) => ({
+    tmdbEpisodeId: e.id,
+    season: e.season_number,
+    episode: e.episode_number,
+    name: e.name,
+    airDate: e.air_date || null,
+    runtimeMinutes: e.runtime ?? null,
+  }));
 }

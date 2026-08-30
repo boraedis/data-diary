@@ -9,28 +9,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
-import { ENTERTAINMENT_KIND_LABELS } from "@/components/entry-forms/entertainment-entry-form";
 import type { EntertainmentCatalogItem, EntertainmentUsage } from "@/lib/days";
-import type { EntertainmentKind } from "@/db/schema";
+import type { EntertainmentKindItem } from "@/lib/catalog-admin";
 
+// Unlike the two "+ New entertainment" modals, editing an EXISTING catalog
+// item offers every kind, system ones included — this is managing
+// something that's already here (often a historical row predating the
+// dedicated movie/tvshow/sport/book tables, see the entertainmentKinds
+// table comment in schema.ts), not creating a new bypass of those tables.
 export function EntertainmentDetail({
   item: initial,
   usage,
+  kinds,
 }: {
   item: EntertainmentCatalogItem;
   usage: EntertainmentUsage;
+  kinds: EntertainmentKindItem[];
 }) {
   const router = useRouter();
   const [item, setItem] = useState(initial);
   const [editing, setEditing] = useState(false);
-  const [kind, setKind] = useState<EntertainmentKind>(initial.kind);
+  const [kindId, setKindId] = useState(initial.kindId);
   const [title, setTitle] = useState(initial.title);
   const [detail, setDetail] = useState(initial.detail ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function cancelEdit() {
-    setKind(item.kind);
+    setKindId(item.kindId);
     setTitle(item.title);
     setDetail(item.detail ?? "");
     setError(null);
@@ -48,7 +54,7 @@ export function EntertainmentDetail({
       const res = await fetch(`/api/entertainment-catalog/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, title: title.trim(), detail: detail.trim() || null }),
+        body: JSON.stringify({ kindId, title: title.trim(), detail: detail.trim() || null }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -84,12 +90,12 @@ export function EntertainmentDetail({
                 <Label htmlFor="entertainment-kind">Kind</Label>
                 <Select
                   id="entertainment-kind"
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value as EntertainmentKind)}
+                  value={kindId}
+                  onChange={(e) => setKindId(Number(e.target.value))}
                 >
-                  {Object.entries(ENTERTAINMENT_KIND_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
+                  {kinds.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.name}
                     </option>
                   ))}
                 </Select>
@@ -116,7 +122,7 @@ export function EntertainmentDetail({
             <>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                 <dt className="text-muted-foreground">Kind</dt>
-                <dd>{ENTERTAINMENT_KIND_LABELS[item.kind]}</dd>
+                <dd>{item.kindName}</dd>
                 <dt className="text-muted-foreground">Detail</dt>
                 <dd>{item.detail ?? "—"}</dd>
               </dl>

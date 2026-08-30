@@ -49,7 +49,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const updated = await updateEntertainmentCatalogEntry(
       id,
-      parsed.value.kind,
+      parsed.value.kindId,
       parsed.value.title,
       parsed.value.detail
     );

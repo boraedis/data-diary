@@ -80,13 +80,11 @@ export const exerciseCategoryEnum = pgEnum("exercise_category", [
   "strength",
 ]);
 
-export const entertainmentKindEnum = pgEnum("entertainment_kind", [
-  "movie",
-  "tvshow",
-  "sport",
-  "book",
-  "game",
-]);
+// entertainment_kind used to be a fixed pgEnum here (movie/tvshow/sport/
+// book/game) — replaced by the entertainmentKinds table below so a user can
+// add their own "neutral" kinds (see that table's comment) without a schema
+// migration for every one. The five original enum values still exist, just
+// as seeded rows with isSystem = true.
 
 // --- days ----------------------------------------------------------------
 // One row per calendar day. "date" is a plain, timezone-free calendar date —
@@ -531,11 +529,36 @@ export const places = pgTable(
 // shapes (movies/tvshows/sports/books/games each had their own schema and
 // external catalogs) — that's real catalog-domain work already scoped as
 // Phase 5. This just needs "what, and for how long" until then.
+// The five kinds this app has a real, dedicated domain for (movies,
+// tvShows, sports, books, games below) — plus whatever "neutral" kinds a
+// user adds through the manage-entertainment "+ New kind" flow for
+// everything else (name only, no dedicated table). System rows are seeded
+// once (see scripts/migrate-entertainment-kinds.mjs) and marked isSystem so
+// the generic entertainmentCatalog below can refuse to let a NEW entry be
+// created against one — those five already have their own catalogs and
+// entry flows (TMDB, Google Books, the sport/league/team hierarchy); a
+// second, disconnected "movie" row here would just fragment the data. Existing
+// historical entertainmentCatalog rows that predate those dedicated
+// tables (back when this generic catalog was the only place any
+// entertainment got logged) keep referencing a system kind row here — only
+// creating new ones against a system kind is blocked (see
+// createEntertainmentCatalogEntry in src/lib/days.ts). isSystem also means
+// "not user-deletable" — see deleteEntertainmentKindEntry in
+// src/lib/catalog-admin.ts.
+export const entertainmentKinds = pgTable("entertainment_kinds", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  isSystem: boolean("is_system").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const entertainmentCatalog = pgTable(
   "entertainment_catalog",
   {
     id: serial("id").primaryKey(),
-    kind: entertainmentKindEnum("kind").notNull(),
+    kindId: integer("kind_id")
+      .notNull()
+      .references(() => entertainmentKinds.id, { onDelete: "restrict" }),
     title: text("title").notNull(),
     // Free-text disambiguator (a year, an author, a platform, whatever tells
     // two same-titled entries apart) — the legacy app got this for free from
@@ -545,7 +568,7 @@ export const entertainmentCatalog = pgTable(
     detail: text("detail"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("entertainment_catalog_kind_title_idx").on(table.kind, table.title)]
+  (table) => [uniqueIndex("entertainment_catalog_kind_title_idx").on(table.kindId, table.title)]
 );
 
 export const entertainmentEntries = pgTable(
@@ -920,8 +943,11 @@ export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
+// EntertainmentKind (used to be derived from entertainmentKindEnum here)
+// is gone along with the enum — see the entertainmentKinds table comment
+// above `entertainmentCatalog`. A kind is now just a row (id, name), read
+// via catalog-admin.ts's EntertainmentKindItem.
 // Not a DB enum — "positive"/"negative" is which fixed column group on
 // `days` a person slot belongs to (positivePersonNId vs negativePersonNId),
 // not a stored value, now that day_people is gone in favor of those columns.
 export type PersonValence = "positive" | "negative";
-export type EntertainmentKind = (typeof entertainmentKindEnum.enumValues)[number];

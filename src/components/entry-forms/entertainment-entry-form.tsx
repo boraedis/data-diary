@@ -17,15 +17,7 @@ import {
 } from "@/components/ui/card";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import type { DayPayload, EntertainmentCatalogItem } from "@/lib/days";
-import type { EntertainmentKind } from "@/db/schema";
-
-export const ENTERTAINMENT_KIND_LABELS: Record<EntertainmentKind, string> = {
-  movie: "Movie",
-  tvshow: "TV show",
-  sport: "Sport",
-  book: "Book",
-  game: "Game",
-};
+import type { EntertainmentKindItem } from "@/lib/catalog-admin";
 
 type Row = { entertainmentId: number; durationMinutes: number | null; notes: string | null };
 
@@ -33,48 +25,56 @@ function toSearchItem(item: EntertainmentCatalogItem): SearchItem {
   return {
     id: item.id,
     primary: item.title,
-    secondary: item.detail
-      ? `${ENTERTAINMENT_KIND_LABELS[item.kind]} · ${item.detail}`
-      : ENTERTAINMENT_KIND_LABELS[item.kind],
+    secondary: item.detail ? `${item.kindName} · ${item.detail}` : item.kindName,
   };
 }
 
 /** "+ New entertainment" catalog-creation modal — a new entry needs a kind
- * picked alongside its title, since the catalog's identity is (kind, title)
- * not title alone ("Dune" the book and "Dune" the movie are different
- * rows). `detail` (year/author/platform) is a free-text disambiguator
- * standing in for what a TMDB/book-catalog lookup would give for free. */
+ * picked alongside its title, since the catalog's identity is (kindId,
+ * title) not title alone ("Dune" the book and "Dune" the movie are
+ * different rows). `detail` (year/author/platform) is a free-text
+ * disambiguator standing in for what a TMDB/book-catalog lookup would give
+ * for free. Kind choices are restricted to custom (non-system) kinds —
+ * Movie/TV show/Sport/Book/Game each have their own dedicated page with a
+ * real search (TMDB, Google Books, the sport/league/team hierarchy);
+ * creating one here instead would fragment the data (see the
+ * entertainmentKinds table comment in schema.ts, and
+ * createEntertainmentCatalogEntry in src/lib/days.ts, which enforces this
+ * server-side too). */
 function NewEntertainmentModal({
   open,
   onClose,
   onCreated,
+  kinds,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: EntertainmentCatalogItem) => void;
+  kinds: EntertainmentKindItem[];
 }) {
-  const [kind, setKind] = useState<EntertainmentKind>("movie");
+  const customKinds = kinds.filter((k) => !k.isSystem);
+  const [kindId, setKindId] = useState<number | null>(customKinds[0]?.id ?? null);
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
-    setKind("movie");
+    setKindId(customKinds[0]?.id ?? null);
     setTitle("");
     setDetail("");
     setError(null);
   }
 
   async function handleCreate() {
-    if (!title.trim()) return;
+    if (!title.trim() || kindId === null) return;
     setCreating(true);
     setError(null);
     try {
       const res = await fetch("/api/entertainment-catalog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, title: title.trim(), detail: detail.trim() || null }),
+        body: JSON.stringify({ kindId, title: title.trim(), detail: detail.trim() || null }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -100,44 +100,51 @@ function NewEntertainmentModal({
       }}
       title="New entertainment"
     >
-      <div className="flex flex-col gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="new-entertainment-kind">Kind</Label>
-          <Select
-            id="new-entertainment-kind"
-            value={kind}
-            onChange={(e) => setKind(e.target.value as EntertainmentKind)}
-          >
-            {Object.entries(ENTERTAINMENT_KIND_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
+      {customKinds.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Movie/TV show/Sport/Book/Game each have their own page — add it from there instead. To log something
+          else, add a custom kind first from the Entertainment manage page.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-entertainment-kind">Kind</Label>
+            <Select
+              id="new-entertainment-kind"
+              value={kindId ?? ""}
+              onChange={(e) => setKindId(e.target.value ? Number(e.target.value) : null)}
+            >
+              {customKinds.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-entertainment-title">Title</Label>
+            <Input
+              id="new-entertainment-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-entertainment-detail">Detail</Label>
+            <Input
+              id="new-entertainment-detail"
+              value={detail}
+              onChange={(e) => setDetail(e.target.value)}
+              placeholder="year, author, platform…"
+            />
+          </div>
+          {error ? <span className="text-sm text-destructive">{error}</span> : null}
+          <Button type="button" onClick={handleCreate} disabled={creating || !title.trim() || kindId === null}>
+            {creating ? "Adding…" : "Add"}
+          </Button>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="new-entertainment-title">Title</Label>
-          <Input
-            id="new-entertainment-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            autoFocus
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="new-entertainment-detail">Detail</Label>
-          <Input
-            id="new-entertainment-detail"
-            value={detail}
-            onChange={(e) => setDetail(e.target.value)}
-            placeholder="year, author, platform…"
-          />
-        </div>
-        {error ? <span className="text-sm text-destructive">{error}</span> : null}
-        <Button type="button" onClick={handleCreate} disabled={creating || !title.trim()}>
-          {creating ? "Adding…" : "Add"}
-        </Button>
-      </div>
+      )}
     </Modal>
   );
 }
@@ -173,11 +180,7 @@ function EntertainmentDetailModal({
     <Modal open={open} onClose={onClose} title={item?.title ?? ""}>
       {item ? (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-muted-foreground">
-            {item.detail
-              ? `${ENTERTAINMENT_KIND_LABELS[item.kind]} · ${item.detail}`
-              : ENTERTAINMENT_KIND_LABELS[item.kind]}
-          </p>
+          <p className="text-xs text-muted-foreground">{item.detail ? `${item.kindName} · ${item.detail}` : item.kindName}</p>
           <div className="space-y-1.5">
             <Label htmlFor="entertainment-detail-duration-hours">Duration</Label>
             <DurationInput
@@ -207,10 +210,12 @@ export function EntertainmentEntryForm({
   date,
   initial,
   catalog,
+  kinds,
 }: {
   date: string;
   initial: DayPayload["entertainment"];
   catalog: EntertainmentCatalogItem[];
+  kinds: EntertainmentKindItem[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<EntertainmentCatalogItem[]>(catalog);
@@ -330,7 +335,7 @@ export function EntertainmentEntryForm({
                     >
                       <p className="truncate text-sm">{item?.title ?? "Unknown"}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {item ? ENTERTAINMENT_KIND_LABELS[item.kind] : null}
+                        {item ? item.kindName : null}
                         {row.durationMinutes ? ` · ${row.durationMinutes} min` : ""}
                         {row.notes ? ` · ${row.notes}` : ""}
                       </p>
@@ -371,6 +376,7 @@ export function EntertainmentEntryForm({
         open={newModalOpen}
         onClose={() => setNewModalOpen(false)}
         onCreated={handleCreated}
+        kinds={kinds}
       />
 
       <EntertainmentDetailModal

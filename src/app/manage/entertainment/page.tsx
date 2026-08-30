@@ -9,6 +9,7 @@ import {
   listSportsCatalog,
   listTvShowsCatalog,
 } from "@/lib/days";
+import { listEntertainmentKinds } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +25,13 @@ export const dynamic = "force-dynamic";
 const COMING_SOON = ["Music"] as const;
 
 export default async function ManageEntertainmentPage() {
-  const [items, movies, tvShows, sports, books] = await Promise.all([
+  const [items, movies, tvShows, sports, books, kinds] = await Promise.all([
     listEntertainmentCatalog(),
     listMoviesCatalog(),
     listTvShowsCatalog(),
     listSportsCatalog(),
     listBooksCatalog(),
+    listEntertainmentKinds(),
   ]);
 
   return (
@@ -98,7 +100,7 @@ export default async function ManageEntertainmentPage() {
         <p className="text-xs text-muted-foreground">
           Everything else — entertainment not yet migrated to its own kind above.
         </p>
-        <EntertainmentManageList initial={items} />
+        <EntertainmentManageList initial={items} initialKinds={kinds} />
       </div>
     </main>
   );

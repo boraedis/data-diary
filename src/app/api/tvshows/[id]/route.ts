@@ -62,7 +62,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   }
 
   const usage = await getTvShowUsage(id);
-  if (usage.watchCount > 0) {
+  if (usage.watches.length > 0) {
     return NextResponse.json({ error: "Still in use", usage }, { status: 409 });
   }
 

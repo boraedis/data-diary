@@ -11,7 +11,8 @@
     "migrate:history": "node scripts/migrate-history.mjs",
     "backfill:place-paths": "node scripts/backfill-place-paths.mjs",
     "diagnose:place-cycles": "node scripts/diagnose-place-cycles.mjs",
-    "split:duplicate-places": "node scripts/split-duplicate-places.mjs"
+    "split:duplicate-places": "node scripts/split-duplicate-places.mjs",
+    "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
