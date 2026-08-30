@@ -135,7 +135,14 @@ export function SportsTeamDetail({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="team-color">Color</Label>
-                <Input id="team-color" value={color} onChange={(e) => setColor(e.target.value)} />
+                <Input
+                  id="team-color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  placeholder="#xxxxxx"
+                  pattern="^#[0-9a-fA-F]{6}$"
+                  title="Use format #xxxxxx"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="team-division">Division</Label>

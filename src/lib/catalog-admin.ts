@@ -9,6 +9,7 @@
 // established there.
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { parseOptionalHexColor } from "@/lib/color";
 import {
   days,
   entertainmentCatalog,
@@ -45,8 +46,9 @@ export function validateTagInput(body: unknown): Result<{ name: string; color: s
   const b = body as Record<string, unknown>;
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) return { ok: false, error: "Name is required" };
-  const color = typeof b.color === "string" && b.color.trim() ? b.color.trim() : null;
-  return { ok: true, value: { name, color } };
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
+  return { ok: true, value: { name, color: color.value } };
 }
 
 // Member counts via a left join + count/group-by — legacy computed this by

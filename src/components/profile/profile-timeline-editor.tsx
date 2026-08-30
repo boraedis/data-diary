@@ -343,7 +343,14 @@ export function ProfileTimelineEditor({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="pte-color">Color</Label>
-              <Input id="pte-color" value={color} onChange={(e) => setColor(e.target.value)} placeholder="#AFAFAF" />
+              <Input
+                id="pte-color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                placeholder="#xxxxxx"
+                pattern="^#[0-9a-fA-F]{6}$"
+                title="Use format #xxxxxx"
+              />
             </div>
           </div>
 

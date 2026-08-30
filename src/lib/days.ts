@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
 import { geocodeAddress } from "@/lib/geocode";
 import {
@@ -1234,7 +1235,8 @@ export function validatePlaceCatalogEntry(body: unknown): Result<PlaceCatalogInp
   const subcategory = typeof b.subcategory === "string" && b.subcategory.trim() ? b.subcategory.trim() : null;
   const subregionName =
     typeof b.subregionName === "string" && b.subregionName.trim() ? b.subregionName.trim() : null;
-  const color = typeof b.color === "string" && b.color.trim() ? b.color.trim() : null;
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
 
   let parentId: number | null = null;
   if (b.parentId !== null && b.parentId !== undefined) {
@@ -1252,7 +1254,10 @@ export function validatePlaceCatalogEntry(body: unknown): Result<PlaceCatalogInp
     metroId = b.metroId;
   }
 
-  return { ok: true, value: { name, alias, address, category, subcategory, parentId, subregionName, color, metroId } };
+  return {
+    ok: true,
+    value: { name, alias, address, category, subcategory, parentId, subregionName, color: color.value, metroId },
+  };
 }
 
 export function validateExerciseCatalogEntry(
@@ -3083,9 +3088,10 @@ export function validateSportsTeamInput(body: unknown): Result<SportsTeamInput> 
   if (leagueId === INVALID_ID) return { ok: false, error: "Invalid league selection" };
   const alias = typeof b.alias === "string" && b.alias.trim() ? b.alias.trim() : null;
   const homeLocation = typeof b.homeLocation === "string" && b.homeLocation.trim() ? b.homeLocation.trim() : null;
-  const color = typeof b.color === "string" && b.color.trim() ? b.color.trim() : null;
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
   const division = typeof b.division === "string" && b.division.trim() ? b.division.trim() : null;
-  return { ok: true, value: { leagueId, name, alias, homeLocation, color, division } };
+  return { ok: true, value: { leagueId, name, alias, homeLocation, color: color.value, division } };
 }
 
 export async function createSportsTeam(sportId: number, input: SportsTeamInput): Promise<SportsTeamItem> {
