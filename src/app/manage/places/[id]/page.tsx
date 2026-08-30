@@ -5,6 +5,7 @@ import {
   getPlaceCatalogEntry,
   getPlaceChildren,
   getPlaceDescendantIds,
+  getPlaceMentionHistory,
   getPlaceUsage,
   listPlacesCatalog,
 } from "@/lib/days";
@@ -25,18 +26,23 @@ export default async function ManagePlacePage({ params }: { params: Promise<{ id
     return;
   }
 
-  const [usage, ancestry, children, metros, categories, allPlaces, descendantIds] = await Promise.all([
-    getPlaceUsage(id),
-    getPlaceAncestry(id),
-    getPlaceChildren(id),
-    listMetros(),
-    listPlaceCategories(),
-    listPlacesCatalog(),
-    getPlaceDescendantIds(id),
-  ]);
+  const [usage, ancestry, children, metros, categories, allPlaces, descendantIds, mentionsOwn, mentionsWithDescendants] =
+    await Promise.all([
+      getPlaceUsage(id),
+      getPlaceAncestry(id),
+      getPlaceChildren(id),
+      listMetros(),
+      listPlaceCategories(),
+      listPlacesCatalog(),
+      getPlaceDescendantIds(id),
+      getPlaceMentionHistory(id),
+      getPlaceMentionHistory(id, { includeDescendants: true }),
+    ]);
 
   const excluded = new Set([id, ...descendantIds]);
-  const parentOptions = allPlaces.filter((p) => !excluded.has(p.id)).map((p) => ({ id: p.id, name: p.name }));
+  const parentOptions = allPlaces
+    .filter((p) => !excluded.has(p.id))
+    .map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }));
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
@@ -48,6 +54,8 @@ export default async function ManagePlacePage({ params }: { params: Promise<{ id
         metros={metros}
         parentOptions={parentOptions}
         categories={categories}
+        mentionsOwn={mentionsOwn}
+        mentionsWithDescendants={mentionsWithDescendants}
       />
     </main>
   );

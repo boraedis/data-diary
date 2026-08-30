@@ -27,16 +27,16 @@ export function SportsManageList({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New sport
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/entertainment/sports"
         placeholder="Search sports…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New sport
+          </Button>
+        }
       />
       <NewSportModal
         open={modalOpen}

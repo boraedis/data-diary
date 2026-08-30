@@ -21,16 +21,16 @@ export function BooksManageList({ initial }: { initial: BookCatalogItem[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + Add from Google Books
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/entertainment/books"
         placeholder="Search books…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + Add from Google Books
+          </Button>
+        }
       />
       <GoogleBooksSearchModal
         open={modalOpen}

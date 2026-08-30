@@ -4,10 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:pr": "node scripts/dev-pr.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migrate:history": "node scripts/migrate-history.mjs"
+    "migrate:history": "node scripts/migrate-history.mjs",
+    "backfill:place-paths": "node scripts/backfill-place-paths.mjs",
+    "diagnose:place-cycles": "node scripts/diagnose-place-cycles.mjs",
+    "split:duplicate-places": "node scripts/split-duplicate-places.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

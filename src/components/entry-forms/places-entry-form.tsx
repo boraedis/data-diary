@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
 
 function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[] {
@@ -18,12 +19,21 @@ function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[
   return arr;
 }
 
+// namePath is "USA/Georgia/Atlanta/Midtown/" (root to self, trailing
+// slash) — trim the trailing slash and swap in a nicer separator for
+// display, but keep matching against the raw form too (so typing "/" or
+// the exact stored form still works, not just the display form).
+function displayPath(namePath: string): string {
+  return namePath.replace(/\/$/, "").split("/").join(" › ");
+}
+
 function toSearchItem(place: PlaceCatalogItem): SearchItem {
   return {
     id: place.id,
     primary: place.name,
     secondary: place.category ?? place.alias,
-    searchTerms: [place.alias, place.address].filter((v): v is string => Boolean(v)),
+    searchTerms: [place.alias, place.address, place.namePath].filter((v): v is string => Boolean(v)),
+    caption: place.namePath ? displayPath(place.namePath) : null,
   };
 }
 
@@ -31,36 +41,61 @@ function toSearchItem(place: PlaceCatalogItem): SearchItem {
  * (functions/views/entry/database/new_place_form.*): name, an optional
  * alias (matched during search, same as the legacy app), an optional
  * address, and an optional category shown as the search result's secondary
- * line. Deliberately NOT carried over: the legacy catalog's full country ->
- * region -> subregion hierarchy and category/subcategory taxonomy tree —
- * `category` here is just a free-text field standing in for that until it's
- * worth building for real (see the schema comment on the `places` table). */
+ * line. Deliberately NOT carried over: the legacy catalog's full category/
+ * subcategory taxonomy tree — `category` here is just a free-text field
+ * standing in for that until it's worth building for real (see the schema
+ * comment on the `places` table; src/components/manage/new-place-modal.tsx
+ * has the DB-backed version for the manage-catalog "+ New" flow).
+ *
+ * Parent IS a real picker here (not free text) — a place can only be
+ * top-level with category "Region" (assertValidRoot in src/lib/days.ts),
+ * and virtually everything logged from a day entry is a leaf venue, so
+ * defaulting to "no parent" would fail validation on almost every save. */
 function NewPlaceModal({
   open,
   onClose,
   onCreated,
+  parentOptions,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
+  parentOptions: { id: number; name: string; namePath: string | null }[];
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
   const [address, setAddress] = useState("");
   const [category, setCategory] = useState("");
+  const [parentId, setParentId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sorted alphabetically, with the full hierarchy path as each option's
+  // caption — place names alone aren't unique (see displayPath above), so
+  // the path is what actually disambiguates same-named places.
+  const parentSearchItems: SearchItem[] = useMemo(
+    () =>
+      [...parentOptions]
+        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .map((p) => ({ id: p.id, primary: p.name, caption: p.namePath ? displayPath(p.namePath) : null })),
+    [parentOptions]
+  );
 
   function reset() {
     setName("");
     setAlias("");
     setAddress("");
     setCategory("");
+    setParentId(null);
     setError(null);
   }
 
   async function handleCreate() {
     if (!name.trim()) return;
+    if (parentId === null && category.trim() !== "Region") {
+      setError('Only a "Region" place can be top-level — pick a parent, or set category to "Region".');
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
@@ -72,6 +107,7 @@ function NewPlaceModal({
           alias: alias.trim() || null,
           address: address.trim() || null,
           category: category.trim() || null,
+          parentId,
         }),
       });
       const body = await res.json();
@@ -118,6 +154,17 @@ function NewPlaceModal({
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="restaurant, gym, friend's place…"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-place-parent">Parent place</Label>
+          <SearchCombobox
+            id="new-place-parent"
+            items={parentSearchItems}
+            valueId={parentId}
+            onChange={setParentId}
+            placeholder="Search places…"
+            emptyLabel="No parent"
           />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
@@ -297,6 +344,7 @@ export function PlacesEntryForm({
             <NewPlaceModal
               open={modalOpen}
               onClose={() => setModalOpen(false)}
+              parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
               onCreated={(item) => {
                 handleCreated(item);
                 addPlace(item.id);

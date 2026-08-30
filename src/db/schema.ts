@@ -455,44 +455,73 @@ export const people = pgTable("people", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Places' hierarchy is a real, arbitrary-depth self-referencing tree —
-// legacy's `world` collection was a second, hand-maintained nested-map
-// index over `places` (country -> region -> subregion -> ...) that stored
-// a denormalized `path` array on every place and recursively rewrote every
-// descendant's path/order on every move. Postgres doesn't need that
-// duplication: `parentId` is the single source of truth for where a place
-// sits in the tree, and ancestry/descendants are computed on read via a
-// recursive CTE (see getPlaceAncestry/getPlaceDescendantIds in
-// src/lib/catalog-admin.ts) instead of a maintained path column — so
-// moving a place in the new app is one UPDATE, not a cascading rewrite of
-// every child underneath it. `onDelete: "restrict"` on parentId means a
-// place with children can't be deleted until they're moved or deleted
-// first (mirrored in getPlaceUsage's usage check).
-export const places = pgTable("places", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull().unique(),
-  alias: text("alias"),
-  address: text("address"),
-  category: text("category"),
-  subcategory: text("subcategory"),
-  parentId: integer("parent_id").references((): AnyPgColumn => places.id, { onDelete: "restrict" }),
-  // Free-text label for what this place's children are called, e.g.
-  // "State", "Neighborhood" — legacy's per-node `subregion_name`, only
-  // meaningful on a place that actually has descendants.
-  subregionName: text("subregion_name"),
-  // Hex color — legacy only ever set this on top-level ("country") places,
-  // purely for UI color-coding; not enforced at this layer.
-  color: text("color"),
-  metroId: integer("metro_id").references(() => metros.id, { onDelete: "set null" }),
-  // Geocoded once when `address` is first set, and only re-geocoded when
-  // `address` actually changes (see geocodePlaceIfNeeded in
-  // src/lib/catalog-admin.ts) — legacy re-geocoded on every single edit
-  // regardless of what changed, burning a Maps API call every save; fixed
-  // here rather than carried forward.
-  lat: doublePrecision("lat"),
-  lng: doublePrecision("lng"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// Places' hierarchy is a real, arbitrary-depth self-referencing tree.
+// `parentId` is still the single source of truth for where a place sits in
+// the tree (ancestry/descendants can always be re-derived from it — see
+// getPlaceAncestry/getPlaceDescendantIds in src/lib/days.ts) — but unlike
+// the original design here, `idPath`/`namePath` below ARE a maintained,
+// denormalized materialization of that ancestry, kept in sync on every
+// create/update (see buildPlacePath/cascadePlacePaths in src/lib/days.ts).
+// This reintroduces exactly the "recursively rewrite every descendant on
+// move" cost the original comment here argued against — deliberately, so
+// path search and display don't need a live recursive walk. Existing rows
+// need a one-time backfill (scripts/backfill-place-paths.mjs) before these
+// are populated. `onDelete: "restrict"` on parentId means a place with
+// children can't be deleted until they're moved or deleted first (mirrored
+// in getPlaceUsage's usage check).
+//
+// `name` is deliberately NOT globally unique (2026-08-29 change) — real
+// geography routinely reuses a name at two different hierarchy levels (an
+// Emirate "Dubai" containing a City "Dubai"; a state and its capital city
+// sharing a name; etc.), and a plain `unique(name)` made that unrepresentable:
+// migrate-history.mjs's `on conflict (name)` upsert silently collapsed every
+// such pair into one row, which then corrupted parentId into a
+// self-reference the moment the hierarchy pass tried to link parent and
+// child through what was now the same row (see scripts/split-duplicate-
+// places.mjs, written to detect and repair exactly that). What IS still
+// guarded against is the same name appearing twice at the *same* spot in
+// the tree — createPlaceCatalogEntry's own dedup-on-create now targets
+// (name, parentId) instead of name alone (see places_name_parent_id_idx
+// below). Two different root-level (parentId IS NULL) places sharing a name
+// aren't caught by this index — Postgres treats every NULL parentId as
+// distinct for uniqueness purposes — but that's an intentionally rare edge
+// case (two countries with the same name), not the common Region/City
+// pattern this change exists for.
+export const places = pgTable(
+  "places",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    alias: text("alias"),
+    address: text("address"),
+    category: text("category"),
+    subcategory: text("subcategory"),
+    parentId: integer("parent_id").references((): AnyPgColumn => places.id, { onDelete: "restrict" }),
+    // Free-text label for what this place's children are called, e.g.
+    // "State", "Neighborhood" — legacy's per-node `subregion_name`, only
+    // meaningful on a place that actually has descendants.
+    subregionName: text("subregion_name"),
+    // Hex color — legacy only ever set this on top-level ("country") places,
+    // purely for UI color-coding; not enforced at this layer.
+    color: text("color"),
+    // "<id>/<id>/.../<id>/" from root to self inclusive, e.g. "3/17/42/108/".
+    // "<name>/<name>/.../<name>/" from root to self inclusive, e.g.
+    // "USA/Georgia/Atlanta/Midtown/" — the human-readable form, used for
+    // search and display. Both null until backfilled/first saved.
+    idPath: text("id_path"),
+    namePath: text("name_path"),
+    metroId: integer("metro_id").references(() => metros.id, { onDelete: "set null" }),
+    // Geocoded once when `address` is first set, and only re-geocoded when
+    // `address` actually changes (see geocodePlaceIfNeeded in
+    // src/lib/catalog-admin.ts) — legacy re-geocoded on every single edit
+    // regardless of what changed, burning a Maps API call every save; fixed
+    // here rather than carried forward.
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("places_name_parent_id_idx").on(table.name, table.parentId)]
+);
 
 // --- entertainment_catalog / entertainment_entries ------------------------
 // Same catalog-not-free-text shape as people/places/exercises: what you

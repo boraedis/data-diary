@@ -22,16 +22,16 @@ export function EntertainmentManageList({ initial }: { initial: EntertainmentCat
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New entertainment
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/entertainment"
         placeholder="Search entertainment…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New entertainment
+          </Button>
+        }
       />
       <NewEntertainmentModal
         open={modalOpen}

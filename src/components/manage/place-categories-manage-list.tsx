@@ -23,16 +23,16 @@ export function PlaceCategoriesManageList({ initial }: { initial: CategoryWithSu
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New category
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/places/categories"
         placeholder="Search categories…"
         emptyMessage="No categories yet."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New category
+          </Button>
+        }
       />
       <NewPlaceCategoryModal
         open={modalOpen}

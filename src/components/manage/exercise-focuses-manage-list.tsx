@@ -23,16 +23,16 @@ export function ExerciseFocusesManageList({ initial }: { initial: FocusWithSubs[
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + New focus
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/exercises/focuses"
         placeholder="Search focuses…"
         emptyMessage="No focuses yet."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + New focus
+          </Button>
+        }
       />
       <NewExerciseFocusModal
         open={modalOpen}

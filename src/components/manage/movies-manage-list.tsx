@@ -22,16 +22,16 @@ export function MoviesManageList({ initial }: { initial: MovieCatalogItem[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
-          + Add from TMDB
-        </Button>
-      </div>
       <CatalogBrowser
         items={items.map(toSearchItem)}
         basePath="/manage/entertainment/movies"
         placeholder="Search movies…"
         emptyMessage="No matches."
+        trailingAction={
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setModalOpen(true)}>
+            + Add from TMDB
+          </Button>
+        }
       />
       <TmdbSearchModal
         open={modalOpen}
