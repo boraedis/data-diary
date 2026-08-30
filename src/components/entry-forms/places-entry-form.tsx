@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
+import { comparePlacesByMentions } from "@/lib/place-sort";
 
 function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[] {
   const arr: (number | null)[] = Array(PLACE_SLOTS).fill(null);
@@ -56,11 +57,13 @@ function NewPlaceModal({
   onClose,
   onCreated,
   parentOptions,
+  mentionCounts,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
   parentOptions: { id: number; name: string; namePath: string | null }[];
+  mentionCounts: Map<number, number>;
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
@@ -70,15 +73,15 @@ function NewPlaceModal({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sorted alphabetically, with the full hierarchy path as each option's
-  // caption — place names alone aren't unique (see displayPath above), so
-  // the path is what actually disambiguates same-named places.
+  // Most-mentioned first, then shallower before deeper, then name (see
+  // src/lib/place-sort.ts) — with the full hierarchy path as each option's
+  // caption, since place names alone aren't unique (see displayPath above).
   const parentSearchItems: SearchItem[] = useMemo(
     () =>
       [...parentOptions]
-        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .sort(comparePlacesByMentions(mentionCounts))
         .map((p) => ({ id: p.id, primary: p.name, caption: p.namePath ? displayPath(p.namePath) : null })),
-    [parentOptions]
+    [parentOptions, mentionCounts]
   );
 
   function reset() {
@@ -148,15 +151,6 @@ function NewPlaceModal({
           <Input id="new-place-address" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="new-place-category">Category</Label>
-          <Input
-            id="new-place-category"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="restaurant, gym, friend's place…"
-          />
-        </div>
-        <div className="space-y-1.5">
           <Label htmlFor="new-place-parent">Parent place</Label>
           <SearchCombobox
             id="new-place-parent"
@@ -165,6 +159,15 @@ function NewPlaceModal({
             onChange={setParentId}
             placeholder="Search places…"
             emptyLabel="No parent"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-place-category">Category</Label>
+          <Input
+            id="new-place-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="restaurant, gym, friend's place…"
           />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
@@ -226,10 +229,12 @@ export function PlacesEntryForm({
   date,
   initial,
   catalog,
+  mentionCounts,
 }: {
   date: string;
   initial: PlacesPayload;
   catalog: PlaceCatalogItem[];
+  mentionCounts: Map<number, number>;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<PlaceCatalogItem[]>(catalog);
@@ -345,6 +350,7 @@ export function PlacesEntryForm({
               open={modalOpen}
               onClose={() => setModalOpen(false)}
               parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
+              mentionCounts={mentionCounts}
               onCreated={(item) => {
                 handleCreated(item);
                 addPlace(item.id);

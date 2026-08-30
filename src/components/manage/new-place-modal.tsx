@@ -9,6 +9,7 @@ import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 import type { PlaceCatalogItem } from "@/lib/days";
 import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+import { comparePlacesByMentions } from "@/lib/place-sort";
 
 type ParentOption = { id: number; name: string; namePath: string | null };
 
@@ -38,32 +39,45 @@ export function NewPlaceModal({
   onCreated,
   categories,
   parentOptions,
+  mentionCounts,
+  initialParentId = null,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
   parentOptions: ParentOption[];
+  mentionCounts: Map<number, number>;
+  // Preset when opened from a specific spot in the world tree (see
+  // place-world-tree.tsx's "+ Add child" action) rather than the flat
+  // places list's own "+ New place", which always starts blank. Read once
+  // on mount only — the caller is expected to remount this component (e.g.
+  // via a `key` tied to the target place) when the target changes, rather
+  // than this component reacting to a changed prop on an already-open
+  // instance.
+  initialParentId?: number | null;
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
   const [address, setAddress] = useState("");
   const [category, setCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
-  const [parentId, setParentId] = useState<number | null>(null);
+  const [parentId, setParentId] = useState<number | null>(initialParentId);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const categoryNames = categories.map((c) => c.name);
   const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
-  // Sorted alphabetically regardless of the order the caller happened to
-  // pass in (e.g. places-manage-list.tsx's own list is mention-sorted).
+  // Most-mentioned first, then shallower before deeper, then name — same
+  // ordering as everywhere else the app sorts places (see
+  // src/lib/place-sort.ts) — regardless of the order the caller happened to
+  // pass parentOptions in.
   const parentSearchItems: SearchItem[] = useMemo(
     () =>
       [...parentOptions]
-        .sort((a, b) => a.name.localeCompare(b.name) || (a.namePath ?? "").localeCompare(b.namePath ?? ""))
+        .sort(comparePlacesByMentions(mentionCounts))
         .map((p) => ({ id: p.id, primary: p.name, caption: displayPath(p.namePath) })),
-    [parentOptions]
+    [parentOptions, mentionCounts]
   );
 
   function reset() {
@@ -72,7 +86,7 @@ export function NewPlaceModal({
     setAddress("");
     setCategory("");
     setSubcategory("");
-    setParentId(null);
+    setParentId(initialParentId);
     setError(null);
   }
 
@@ -135,6 +149,23 @@ export function NewPlaceModal({
           <Input id="manage-new-place-address" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
         <div className="space-y-1.5">
+          <Label htmlFor="manage-new-place-parent">Parent place</Label>
+          <SearchCombobox
+            id="manage-new-place-parent"
+            items={parentSearchItems}
+            valueId={parentId}
+            onChange={setParentId}
+            placeholder="Search places…"
+            emptyLabel="No parent"
+          />
+          {parentId === null && category.trim() !== "Region" ? (
+            <p className="text-xs text-muted-foreground">
+              Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
+              &ldquo;Region&rdquo;.
+            </p>
+          ) : null}
+        </div>
+        <div className="space-y-1.5">
           <Label htmlFor="manage-new-place-category">Category</Label>
           <Input
             id="manage-new-place-category"
@@ -162,23 +193,6 @@ export function NewPlaceModal({
               <option key={n} value={n} />
             ))}
           </datalist>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="manage-new-place-parent">Parent place</Label>
-          <SearchCombobox
-            id="manage-new-place-parent"
-            items={parentSearchItems}
-            valueId={parentId}
-            onChange={setParentId}
-            placeholder="Search places…"
-            emptyLabel="No parent"
-          />
-          {parentId === null && category.trim() !== "Region" ? (
-            <p className="text-xs text-muted-foreground">
-              Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
-              &ldquo;Region&rdquo;.
-            </p>
-          ) : null}
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
