@@ -40,6 +40,7 @@ export function NewPlaceModal({
   categories,
   parentOptions,
   mentionCounts,
+  initialParentId = null,
 }: {
   open: boolean;
   onClose: () => void;
@@ -47,13 +48,21 @@ export function NewPlaceModal({
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
   parentOptions: ParentOption[];
   mentionCounts: Map<number, number>;
+  // Preset when opened from a specific spot in the world tree (see
+  // place-world-tree.tsx's "+ Add child" action) rather than the flat
+  // places list's own "+ New place", which always starts blank. Read once
+  // on mount only — the caller is expected to remount this component (e.g.
+  // via a `key` tied to the target place) when the target changes, rather
+  // than this component reacting to a changed prop on an already-open
+  // instance.
+  initialParentId?: number | null;
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
   const [address, setAddress] = useState("");
   const [category, setCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
-  const [parentId, setParentId] = useState<number | null>(null);
+  const [parentId, setParentId] = useState<number | null>(initialParentId);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,7 +86,7 @@ export function NewPlaceModal({
     setAddress("");
     setCategory("");
     setSubcategory("");
-    setParentId(null);
+    setParentId(initialParentId);
     setError(null);
   }
 

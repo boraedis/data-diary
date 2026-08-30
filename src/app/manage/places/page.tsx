@@ -31,6 +31,9 @@ export default async function ManagePlacesPage() {
       </div>
       <PlacesManageList initial={sortedPlaces} categories={categories} mentionCounts={mentionCounts} />
       <div className="flex justify-end gap-2">
+        <Link href="/manage/places/world" className={buttonVariants({ variant: "outline", size: "xs" })}>
+          World View
+        </Link>
         <Link href="/manage/places/categories" className={buttonVariants({ variant: "outline", size: "xs" })}>
           Manage Categories
         </Link>
