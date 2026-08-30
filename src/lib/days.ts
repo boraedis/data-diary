@@ -1889,6 +1889,11 @@ async function fetchPlacePathParts(id: number): Promise<PlacePathParts | null> {
 // must already be the freshly-saved values for the root place itself.
 async function cascadePlacePaths(root: { id: number; idPath: string; namePath: string }): Promise<void> {
   const db = getDb();
+  // Same cycle guard as getPlaceDescendantIds above, for the same reason —
+  // without it a corrupted parent_id ring below `root` would keep
+  // re-visiting itself (and re-writing the same rows) forever instead of
+  // this function ever returning.
+  const visited = new Set<number>([root.id]);
   let frontier = [root];
   while (frontier.length > 0) {
     const parentIds = frontier.map((p) => p.id);
@@ -1900,6 +1905,8 @@ async function cascadePlacePaths(root: { id: number; idPath: string; namePath: s
     const parentById = new Map(frontier.map((p) => [p.id, p]));
     const nextFrontier: typeof frontier = [];
     for (const child of children) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
       const parent = parentById.get(child.parentId as number);
       if (!parent) continue;
       const { idPath, namePath } = buildPlacePath(parent, child.id, child.name);
@@ -2010,10 +2017,18 @@ export async function getPlaceCatalogEntry(id: number): Promise<PlaceCatalogItem
 export async function getPlaceDescendantIds(id: number): Promise<number[]> {
   const db = getDb();
   const result: number[] = [];
+  // A corrupted parent_id cycle (shouldn't happen given
+  // updatePlaceCatalogEntry's check below, but see
+  // scripts/diagnose-place-cycles.mjs for how one has slipped in before)
+  // would otherwise make this loop forever, re-discovering the same ring
+  // of places every pass — `visited` guarantees each place is only ever
+  // queued once, so a cycle just gets silently skipped past instead.
+  const visited = new Set<number>([id]);
   let frontier = [id];
   while (frontier.length > 0) {
     const children = await db.select({ id: places.id }).from(places).where(inArray(places.parentId, frontier));
-    const childIds = children.map((c) => c.id);
+    const childIds = children.map((c) => c.id).filter((childId) => !visited.has(childId));
+    for (const childId of childIds) visited.add(childId);
     result.push(...childIds);
     frontier = childIds;
   }
@@ -2283,13 +2298,23 @@ export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
   }
 
   const total = new Map<number, number>();
+  // `visiting` catches a corrupted parent_id cycle (shouldn't happen given
+  // updatePlaceCatalogEntry's guard, but see scripts/diagnose-place-cycles.mjs
+  // for how one has slipped in before) — without it, a place in a cycle
+  // recurses into itself before ever getting cached, overflowing the call
+  // stack and 500ing this entire page instead of just under-counting the
+  // places actually in the loop.
+  const visiting = new Set<number>();
   function computeTotal(placeId: number): number {
     const cached = total.get(placeId);
     if (cached !== undefined) return cached;
+    if (visiting.has(placeId)) return 0;
+    visiting.add(placeId);
     let sum = own.get(placeId) ?? 0;
     for (const childId of childrenByParent.get(placeId) ?? []) {
       sum += computeTotal(childId);
     }
+    visiting.delete(placeId);
     total.set(placeId, sum);
     return sum;
   }
