@@ -10,7 +10,7 @@ import {
   dayTypeEnum,
   entertainmentCatalog,
   entertainmentEntries,
-  entertainmentKindEnum,
+  entertainmentKinds,
   exerciseCategoryEnum,
   exercises,
   movies,
@@ -31,7 +31,6 @@ import {
   workoutSets,
   type CommuteOption,
   type DayType,
-  type EntertainmentKind,
   type ExerciseCategory,
   type PersonValence,
   type WorkLocationOption,
@@ -223,7 +222,7 @@ export type PlacesPayload = { entries: { slot: number; placeId: number }[] };
 
 export type EntertainmentEntry = {
   entertainmentId: number;
-  kind: EntertainmentKind;
+  kindName: string;
   title: string;
   durationMinutes: number | null;
   notes: string | null;
@@ -359,7 +358,8 @@ export type PlaceCatalogItem = {
 export type ExerciseCatalogItem = { id: number; name: string; category: ExerciseCategory };
 export type EntertainmentCatalogItem = {
   id: number;
-  kind: EntertainmentKind;
+  kindId: number;
+  kindName: string;
   title: string;
   detail: string | null;
 };
@@ -485,11 +485,12 @@ export async function loadDay(date: string): Promise<DayPayload> {
         durationMinutes: entertainmentEntries.durationMinutes,
         notes: entertainmentEntries.notes,
         sortOrder: entertainmentEntries.sortOrder,
-        kind: entertainmentCatalog.kind,
+        kindName: entertainmentKinds.name,
         title: entertainmentCatalog.title,
       })
       .from(entertainmentEntries)
       .innerJoin(entertainmentCatalog, eq(entertainmentEntries.entertainmentId, entertainmentCatalog.id))
+      .innerJoin(entertainmentKinds, eq(entertainmentCatalog.kindId, entertainmentKinds.id))
       .where(eq(entertainmentEntries.date, date))
       .orderBy(asc(entertainmentEntries.sortOrder)),
     db
@@ -632,7 +633,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
     places: placeEntries,
     entertainment: entertainmentRows.map((e) => ({
       entertainmentId: e.entertainmentId,
-      kind: e.kind,
+      kindName: e.kindName,
       title: e.title,
       durationMinutes: e.durationMinutes,
       notes: e.notes,
@@ -684,7 +685,6 @@ const WORK_LOCATIONS = new Set<string>(workLocationEnum.enumValues);
 const COMMUTES = new Set<string>(commuteEnum.enumValues);
 const DATA_SOURCES = new Set<string>(workoutDataSourceEnum.enumValues);
 const PERSON_VALENCES = new Set<string>(["positive", "negative"] satisfies PersonValence[]);
-const ENTERTAINMENT_KINDS = new Set<string>(entertainmentKindEnum.enumValues);
 const EXERCISE_CATEGORIES = new Set<string>(exerciseCategoryEnum.enumValues);
 
 function isPercent(value: unknown): value is number {
@@ -1272,18 +1272,17 @@ export function validateExerciseCatalogEntry(
 
 export function validateEntertainmentCatalogEntry(
   body: unknown
-): Result<{ kind: EntertainmentKind; title: string; detail: string | null }> {
+): Result<{ kindId: number; title: string; detail: string | null }> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
   const b = body as Record<string, unknown>;
   const title = typeof b.title === "string" ? b.title.trim() : "";
   if (!title) return { ok: false, error: "Title is required" };
-  if (!ENTERTAINMENT_KINDS.has(b.kind as string)) {
-    return { ok: false, error: "Invalid kind" };
-  }
+  const kindId = typeof b.kindId === "number" ? b.kindId : NaN;
+  if (!Number.isInteger(kindId)) return { ok: false, error: "Invalid kind" };
   const detail = typeof b.detail === "string" && b.detail.trim() ? b.detail.trim() : null;
-  return { ok: true, value: { kind: b.kind as EntertainmentKind, title, detail } };
+  return { ok: true, value: { kindId, title, detail } };
 }
 
 /**
@@ -2324,61 +2323,83 @@ export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
 
 const ENTERTAINMENT_CATALOG_COLUMNS = {
   id: entertainmentCatalog.id,
-  kind: entertainmentCatalog.kind,
+  kindId: entertainmentCatalog.kindId,
+  kindName: entertainmentKinds.name,
   title: entertainmentCatalog.title,
   detail: entertainmentCatalog.detail,
 };
 
-export async function listEntertainmentCatalog(): Promise<EntertainmentCatalogItem[]> {
+// Every read below joins entertainmentKinds for kindName — entertainmentCatalog
+// itself only stores kindId, but every consumer wants a display name (see
+// EntertainmentCatalogItem in this file), so the join lives here once
+// instead of every caller re-deriving it from a separately-fetched kinds
+// list.
+function entertainmentCatalogSelect() {
   const db = getDb();
   return db
     .select(ENTERTAINMENT_CATALOG_COLUMNS)
     .from(entertainmentCatalog)
-    .orderBy(asc(entertainmentCatalog.kind), asc(entertainmentCatalog.title));
+    .innerJoin(entertainmentKinds, eq(entertainmentCatalog.kindId, entertainmentKinds.id));
 }
 
+export async function listEntertainmentCatalog(): Promise<EntertainmentCatalogItem[]> {
+  return entertainmentCatalogSelect().orderBy(asc(entertainmentKinds.name), asc(entertainmentCatalog.title));
+}
+
+// Blocks creating a NEW catalog entry against a system kind (Movie/TV
+// show/Sport/Book/Game) — those already have their own dedicated catalogs
+// and entry flows (TMDB, Google Books, the sport/league/team hierarchy);
+// see the entertainmentKinds table comment in schema.ts. Existing
+// historical rows under a system kind (predating those dedicated tables)
+// are untouched — this only guards the create path, not read/update/delete
+// of what's already there.
 export async function createEntertainmentCatalogEntry(
-  kind: EntertainmentKind,
+  kindId: number,
   title: string,
   detail: string | null = null
 ): Promise<EntertainmentCatalogItem> {
   const db = getDb();
+  const [kindRow] = await db.select({ isSystem: entertainmentKinds.isSystem }).from(entertainmentKinds).where(eq(entertainmentKinds.id, kindId));
+  if (!kindRow) throw new Error("Unknown kind");
+  if (kindRow.isSystem) {
+    throw new Error(
+      "Movie/TV show/Sport/Book/Game each have their own page with a real search — add it from there, or add a custom kind instead."
+    );
+  }
   const trimmed = title.trim();
   const [inserted] = await db
     .insert(entertainmentCatalog)
-    .values({ kind, title: trimmed, detail })
-    .onConflictDoNothing({ target: [entertainmentCatalog.kind, entertainmentCatalog.title] })
-    .returning(ENTERTAINMENT_CATALOG_COLUMNS);
-  if (inserted) return inserted;
-  const [existing] = await db
-    .select(ENTERTAINMENT_CATALOG_COLUMNS)
-    .from(entertainmentCatalog)
-    .where(and(eq(entertainmentCatalog.kind, kind), eq(entertainmentCatalog.title, trimmed)));
-  return existing;
+    .values({ kindId, title: trimmed, detail })
+    .onConflictDoNothing({ target: [entertainmentCatalog.kindId, entertainmentCatalog.title] })
+    .returning({ id: entertainmentCatalog.id });
+  const id = inserted
+    ? inserted.id
+    : (
+        await db
+          .select({ id: entertainmentCatalog.id })
+          .from(entertainmentCatalog)
+          .where(and(eq(entertainmentCatalog.kindId, kindId), eq(entertainmentCatalog.title, trimmed)))
+      )[0].id;
+  return (await getEntertainmentCatalogEntry(id))!;
 }
 
 export async function getEntertainmentCatalogEntry(id: number): Promise<EntertainmentCatalogItem | null> {
-  const db = getDb();
-  const [row] = await db
-    .select(ENTERTAINMENT_CATALOG_COLUMNS)
-    .from(entertainmentCatalog)
-    .where(eq(entertainmentCatalog.id, id));
+  const [row] = await entertainmentCatalogSelect().where(eq(entertainmentCatalog.id, id));
   return row ?? null;
 }
 
 export async function updateEntertainmentCatalogEntry(
   id: number,
-  kind: EntertainmentKind,
+  kindId: number,
   title: string,
   detail: string | null
 ): Promise<EntertainmentCatalogItem> {
   const db = getDb();
-  const [updated] = await db
+  await db
     .update(entertainmentCatalog)
-    .set({ kind, title: title.trim(), detail })
-    .where(eq(entertainmentCatalog.id, id))
-    .returning(ENTERTAINMENT_CATALOG_COLUMNS);
-  return updated;
+    .set({ kindId, title: title.trim(), detail })
+    .where(eq(entertainmentCatalog.id, id));
+  return (await getEntertainmentCatalogEntry(id))!;
 }
 
 export type EntertainmentUsage = { dates: string[] };
