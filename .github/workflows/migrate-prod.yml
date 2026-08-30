@@ -4,20 +4,60 @@ name: Migrate production database
 # "production" GitHub Environment — set that up once in this repo's
 # Settings -> Environments -> New environment -> name it exactly
 # "production" -> check "Required reviewers" and add yourself. That makes
-# this job pause and wait for a manual Approve click (in the Actions tab,
-# on the running workflow) before drizzle-kit push ever touches the real
-# database — `--force` is needed for this to run non-interactively at all,
-# but it also auto-approves any statement drizzle-kit thinks might drop
-# data (e.g. misreading a column rename as drop-and-add), so the approval
-# step is the actual safety check, not this workflow file.
+# the `migrate` job below pause and wait for a manual Approve click before
+# drizzle-kit push ever touches the real database — `--force` is needed
+# for this to run non-interactively at all, but it also auto-approves any
+# statement drizzle-kit thinks might drop data (e.g. misreading a column
+# rename as drop-and-add), so the approval step is the actual safety
+# check, not this workflow file.
+#
+# The `notify` job exists because that approval pause only shows up in the
+# Actions tab — a different place to check than every other approval in
+# this repo (PR reviews), easy to miss entirely. It opens a plain GitHub
+# issue instead, which lands in the same notifications you already watch
+# for PRs/issues, and `migrate` closes it automatically once approved and
+# applied. `migrate` depends on `notify` so the issue always exists before
+# (or right as) the approval wait begins, not sometime after.
 on:
   push:
     branches: [main]
 
 jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    outputs:
+      issue_number: ${{ steps.open.outputs.issue_number }}
+    steps:
+      - name: Open a "prod migration pending approval" issue
+        id: open
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Production DB migration waiting for approval (run #${context.runNumber})`,
+              body: [
+                `A push to \`main\` (${context.sha.slice(0, 7)}) triggered a production schema migration.`,
+                "",
+                'It\'s paused waiting on the "production" environment\'s required-reviewer approval — that gate only shows up in the Actions tab, not here, so this issue exists to put it somewhere you\'ll actually see it.',
+                "",
+                `Approve or reject it here: ${runUrl}`,
+                "",
+                "This closes automatically once the migration is approved and finishes. If it's rejected or the run fails, it stays open as a reminder to go look.",
+              ].join("\n"),
+            });
+            core.setOutput("issue_number", issue.number);
+
   migrate:
+    needs: notify
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -28,12 +68,36 @@ jobs:
 
       - run: npm ci
 
-      # The Required reviewers gate above pauses before this job starts, so
-      # there's no live SQL preview to check at approval time — you're
-      # really re-confirming "yes, ship the schema.ts change from the PR I
-      # already reviewed", not catching something new here. --verbose just
-      # logs the statements drizzle-kit ran, useful after the fact if
-      # something needs debugging.
+      # The Required reviewers gate above pauses before this step (and
+      # every step in this job) runs, so there's no live SQL preview to
+      # check at approval time — you're really re-confirming "yes, ship
+      # the schema.ts change from the PR I already reviewed", not catching
+      # something new here. --verbose just logs the statements drizzle-kit
+      # ran, useful after the fact if something needs debugging.
       - run: npx drizzle-kit push --force --verbose
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+
+      - name: Close the pending-approval issue
+        if: always() && needs.notify.outputs.issue_number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = Number('${{ needs.notify.outputs.issue_number }}');
+            const succeeded = '${{ job.status }}' === 'success';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: succeeded
+                ? "Migration approved and applied successfully — closing."
+                : `This run ended without a successful migration (status: \`${{ job.status }}\`) — leaving this open, check the Actions run for details.`,
+            });
+            if (succeeded) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: "closed",
+              });
+            }
