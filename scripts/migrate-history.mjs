@@ -113,6 +113,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import admin from "firebase-admin";
 import pg from "pg";
+import { guardAgainstProd } from "./lib/prod-guard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1656,6 +1657,10 @@ async function writeGameSessions(client, date, sessions) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // Dry runs are safe against any database, so only gate the run that can
+  // actually write — see scripts/lib/prod-guard.mjs for why this exists.
+  if (COMMIT) await guardAgainstProd({ scriptName: "migrate-history.mjs --commit" });
+
   const client = await pool.connect();
   try {
     if (COMMIT && WIPE) {
