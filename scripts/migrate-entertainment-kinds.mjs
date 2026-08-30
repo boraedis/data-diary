@@ -50,6 +50,18 @@
  * no reason to risk landing half-migrated (kind_id added and backfilled,
  * but the old column still there, or vice versa) if something fails
  * partway through. Either the whole thing lands, or none of it does.
+ *
+ * 2026-08-30 fix: the dry-run preview used to unconditionally query
+ * `WHERE kind_id IS NULL` for the backfill-count and NULL-check previews.
+ * That's fine once kind_id exists, but a dry run against a database that
+ * doesn't have kind_id yet (kind_id only actually gets added when
+ * --commit runs the ALTER TABLE) crashed with "column kind_id does not
+ * exist" — i.e. dry-run mode couldn't even preview a from-scratch
+ * migration, only a re-run of one already in progress. Fixed by only
+ * querying kind_id when it's actually queryable (already existed, or
+ * --commit just added it in this same transaction), and skipping the
+ * post-backfill NULL verification entirely in dry-run mode, since nothing
+ * was written to verify.
  */
 import pg from "pg";
 import { guardAgainstProd } from "./lib/prod-guard.mjs";
@@ -154,10 +166,18 @@ async function main() {
         }
       }
 
-      const { rows: toBackfill } = await client.query(
-        `SELECT count(*) FROM entertainment_catalog WHERE kind_id IS NULL`
-      );
+      // kind_id is only actually queryable at this point if it already
+      // existed before this run, or --commit just added it above. In a
+      // dry run against a database that doesn't have it yet, it's still
+      // absent — "WHERE kind_id IS NULL" would itself error — so fall
+      // back to a plain row count for the preview (every row would need
+      // backfilling in that case, since kind_id doesn't exist at all).
+      const kindIdQueryable = hasKindIdColumn || COMMIT;
+      const { rows: toBackfill } = kindIdQueryable
+        ? await client.query(`SELECT count(*) FROM entertainment_catalog WHERE kind_id IS NULL`)
+        : await client.query(`SELECT count(*) FROM entertainment_catalog`);
       console.log(`Would backfill kind_id for ${toBackfill[0].count} row(s) from the old kind column.`);
+
       if (COMMIT) {
         for (const { enumValue, name } of SYSTEM_KINDS) {
           await client.query(
@@ -166,22 +186,26 @@ async function main() {
             [name, enumValue]
           );
         }
-      }
 
-      // --- 5: verify before making anything irreversible --------------------
-      const { rows: stillNull } = await client.query(
-        `SELECT id, kind::text AS kind FROM entertainment_catalog WHERE kind_id IS NULL`
-      );
-      if (stillNull.length > 0) {
-        console.error(
-          `\n${stillNull.length} row(s) still have kind_id NULL after backfill — unexpected kind value(s): ` +
-            `${[...new Set(stillNull.map((r) => r.kind))].join(", ")}. Aborting` +
-            (COMMIT ? " and rolling back" : "") +
-            " rather than leaving a NOT NULL constraint half-satisfied. Needs manual review."
+        // --- 5: verify before making anything irreversible ------------------
+        // Only meaningful once a backfill has actually run in this
+        // transaction — in a dry run there's nothing written yet to check,
+        // and kind_id may not even exist to query (see above).
+        const { rows: stillNull } = await client.query(
+          `SELECT id, kind::text AS kind FROM entertainment_catalog WHERE kind_id IS NULL`
         );
-        if (COMMIT) await client.query("ROLLBACK");
-        process.exitCode = 1;
-        return;
+        if (stillNull.length > 0) {
+          console.error(
+            `\n${stillNull.length} row(s) still have kind_id NULL after backfill — unexpected kind value(s): ` +
+              `${[...new Set(stillNull.map((r) => r.kind))].join(", ")}. Aborting and rolling back rather than ` +
+              "leaving a NOT NULL constraint half-satisfied. Needs manual review."
+          );
+          await client.query("ROLLBACK");
+          process.exitCode = 1;
+          return;
+        }
+      } else {
+        console.log("Would then verify no row was left with kind_id NULL before proceeding (skipped in a dry run — nothing's been written yet to check).");
       }
 
       // --- 6: contract — NOT NULL, swap the unique index, drop the old column/enum
