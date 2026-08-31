@@ -17,6 +17,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // / will become the public landing page (issue #12); for now, send
+  // authenticated users straight to the dashboard.
+  if (pathname === "/") {
+    return NextResponse.redirect(new URL("/home", request.url));
+  }
+
   return NextResponse.next();
 }
 
