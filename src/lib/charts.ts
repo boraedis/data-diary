@@ -160,12 +160,25 @@ export async function getPlaceLeaderboardData(limit = 15): Promise<PlaceLeaderbo
 
 // --- Happiness averager ---------------------------------------------------
 
-export type MonthlyAverage = { month: string; avg: number; count: number }; // month = "YYYY-MM"
+export type MonthlyAverage = {
+  month: string; // "YYYY-MM"
+  avg: number;
+  count: number;
+  /** Lowest/highest single day within the month — the legacy "Averager"
+   * pattern's min/max band (functions/views/vis/vis_functions.js's
+   * Averager), showing how much a month's days actually varied around its
+   * average rather than just the average alone. Wired into a shaded band
+   * behind the line by HappinessAveragerChart (#18); see
+   * interactive-line.tsx's `band` series option. */
+  min: number;
+  max: number;
+};
 
 /** Monthly average happiness (plus the sample size behind each point, so the
  * chart can size markers by how many days actually fed each average — a
  * month with 2 entries and a month with 30 shouldn't look equally
- * confident). The legacy "Averager" pattern (functions/views/vis/charts/
+ * confident — and the month's min/max, for the band described above). The
+ * legacy "Averager" pattern (functions/views/vis/charts/
  * happiness_averager.js) bins by day-type too; that's left out here since
  * it'd need a second grouping dimension this first pass doesn't have a UI
  * for yet. */
@@ -180,13 +193,22 @@ export async function getHappinessAveragerData(): Promise<MonthlyAverage[]> {
   // Monthly bucketing via the shared groupByPeriod/summarizePeriods helper
   // (#16) — this used to be its own hand-rolled `Map<string, {sum,count}>`
   // here, duplicating the same "bucket by month" logic
-  // getGymWeightComboData had above.
+  // getGymWeightComboData had above. min/max are computed straight off
+  // each bucket's own items rather than through summarizePeriods (which
+  // only ever returns avg/count) — no need to generalize that shared
+  // helper for a min/max case only this one call site uses so far.
   const buckets = groupByPeriod(rows, "month", (r) => r.date);
-  return summarizePeriods(buckets, (r) => r.happiness as number).map(({ key, avg, count }) => ({
-    month: key,
-    avg,
-    count,
-  }));
+  const summaries = summarizePeriods(buckets, (r) => r.happiness as number);
+  return buckets.map((bucket, i) => {
+    const values = bucket.items.map((r) => r.happiness as number);
+    return {
+      month: bucket.key,
+      avg: summaries[i].avg,
+      count: summaries[i].count,
+      min: Math.min(...values),
+      max: Math.max(...values),
+    };
+  });
 }
 
 // --- Subs small multiples ---------------------------------------------------
