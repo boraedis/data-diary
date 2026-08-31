@@ -42,6 +42,21 @@ export type InteractiveHistProps = {
    * `sequentialScale`, for a caller that wants magnitude read through
    * color as well as height). */
   color?: string | ((bin: Bin, index: number) => string);
+  /** Gap between adjacent bars, px — defaults to the toolkit's
+   * `MARK_SPECS.bar.surfaceGap` (2px), the right amount for a chart with
+   * few, wide bars. A histogram with many narrow buckets usually wants
+   * this smaller (or the same, tight buckets already read as touching)
+   * rather than inheriting a gap sized for a handful of category bars. */
+  barGap?: number;
+  /** Cap on individual bar thickness, px — defaults to the toolkit's
+   * `MARK_SPECS.bar.maxThickness` (24px), which exists so a *category* bar
+   * chart with few, wide slots doesn't turn into solid blocks. A
+   * distribution histogram with many buckets is the opposite case: its
+   * slots are usually already narrower than that cap, and when they
+   * aren't (few buckets over a wide chart), letting bars run wider often
+   * reads better than an arbitrary 24px ceiling. Pass `Infinity` (or omit
+   * the cap's effect entirely) to let bars fill their slot minus `barGap`. */
+  maxBarThickness?: number;
   xTicks?: number;
   yTicks?: number;
   /** Formats a bucket's `[x0, x1)` range for the tooltip row label —
@@ -58,6 +73,8 @@ export function InteractiveHist({
   thresholds,
   domain,
   color,
+  barGap = MARK_SPECS.bar.surfaceGap,
+  maxBarThickness = MARK_SPECS.bar.maxThickness,
   xTicks,
   yTicks = 5,
   formatRange = (x0, x1) => `${x0}–${x1}`,
@@ -120,9 +137,11 @@ export function InteractiveHist({
           const slotX0 = x(d.x0 ?? 0);
           const slotX1 = x(d.x1 ?? 0);
           // Cap thickness rather than filling the slot — the leftover
-          // width becomes air on both sides, not a wider bar.
-          const slotWidth = Math.max(0, slotX1 - slotX0 - MARK_SPECS.bar.surfaceGap);
-          const barWidth = Math.min(slotWidth, MARK_SPECS.bar.maxThickness);
+          // width becomes air on both sides, not a wider bar (see
+          // `maxBarThickness`'s own doc comment on when a caller should
+          // raise or drop this cap instead of taking the toolkit default).
+          const slotWidth = Math.max(0, slotX1 - slotX0 - barGap);
+          const barWidth = Math.min(slotWidth, maxBarThickness);
           const barX = slotX0 + (slotX1 - slotX0 - barWidth) / 2;
           const barHeight = innerHeight - y(d.length);
           return roundedBarPath(barX, y(d.length), barWidth, barHeight, "up");
@@ -134,7 +153,7 @@ export function InteractiveHist({
         onLeave: () => setHovered(null),
       });
     },
-    [bins, xDomain, width, height, innerWidth, innerHeight, xTicks, yTicks, color],
+    [bins, xDomain, width, height, innerWidth, innerHeight, xTicks, yTicks, color, barGap, maxBarThickness],
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
