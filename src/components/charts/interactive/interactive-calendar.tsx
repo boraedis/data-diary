@@ -31,10 +31,12 @@ const CELL_GAP = 2;
 const YEAR_LABEL_HEIGHT = 18;
 const YEAR_GAP = 14;
 // Single-letter day labels ("M"/"T"/"W"/...) need much less horizontal
-// room than the old 3-letter abbreviations did, so this is narrower than
-// the first version — every px reclaimed here goes straight to the grid,
-// which is also part of the "doesn't fill the whole width" fix.
-const LEFT_LABEL_WIDTH = 20;
+// room than 3-letter abbreviations would, so most of this column's width
+// is unused by them — it's sized instead for the year number, which is
+// right-anchored against the grid's edge (see the `g.append("text")` call
+// below) and needs enough room for 4 digits without bleeding into
+// January's month label just to its right.
+const LEFT_LABEL_WIDTH = 30;
 // Monday-first — see the module comment above. Index 0 = Monday, matching
 // the `dow` remap below ((getDay() + 6) % 7).
 const DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -164,13 +166,18 @@ export function InteractiveCalendar({
             `translate(${gridLeft},${yi * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP) + YEAR_LABEL_HEIGHT})`,
           );
 
-        // Year number and day-of-week labels both sit a fixed distance to
-        // the left of the grid's local origin (x=0) — since they're inside
-        // this same translated `g`, they move together with the grid as one
-        // connected unit no matter where `gridLeft` centers it.
+        // Year number and day-of-week labels both live inside this same
+        // translated `g`, so they move together with the grid as one
+        // connected unit no matter where `gridLeft` centers it. The year
+        // number is right-anchored a fixed gap before the grid's local
+        // origin (x=0, where January's month label starts) instead of
+        // left-anchored at a fixed x — a left anchor let a 4-digit year
+        // overflow rightward into January's label; right-anchoring
+        // guarantees clearance regardless of how wide the year text is.
         g.append("text")
-          .attr("x", -LEFT_LABEL_WIDTH + 2)
+          .attr("x", -6)
           .attr("y", -6)
+          .attr("text-anchor", "end")
           .attr("fill", "var(--foreground)")
           .style("font-size", "12px")
           .style("font-weight", 500)
@@ -314,25 +321,27 @@ export function InteractiveCalendar({
 
           `position: fixed` takes an element out of flow entirely, so it
           no longer inherits the calendar's own width/position for free
-          the way a normal or sticky sibling would — "as wide as the
-          calendar, not the window" has to be computed explicitly from
-          the measured container, via the same `containerRect` the
-          tooltip above already uses. Gated on `containerRect` so it
-          doesn't flash at (0,0) full-width for one frame before the
-          first measurement lands. `left`/`width` only need to be
-          recomputed when the calendar's own box actually moves or
-          resizes (ResponsiveChart's ResizeObserver already forces a
-          re-render — and a fresh getBoundingClientRect() read — whenever
-          that happens); a vertical-only scroll doesn't change a block's
-          horizontal position, so this doesn't need to track scroll
-          events itself. The hover indicator (a small tick riding the
-          gradient) answers "where does this cell's value sit on the
+          the way a normal or sticky sibling would — its `left`/`width`
+          are computed explicitly from `containerRect` (the same
+          measured-container rect the tooltip above already uses) offset
+          by `gridLeft`/sized to `gridWidth`, so it lines up with the
+          *grid* itself (where the cells are), not the wider outer box
+          that also includes the day-label column and any centering
+          margin. Gated on `containerRect` so it doesn't flash at (0,0)
+          for one frame before the first measurement lands. This only
+          needs to be recomputed when the calendar's own box actually
+          moves or resizes (ResponsiveChart's ResizeObserver already
+          forces a re-render — and a fresh getBoundingClientRect() read —
+          whenever that happens); a vertical-only scroll doesn't change a
+          block's horizontal position, so this doesn't need to track
+          scroll events itself. The hover indicator (a small tick riding
+          the gradient) answers "where does this cell's value sit on the
           scale" directly, rather than making the reader eyeball a color
           match against the swatch. */}
       {containerRect ? (
         <div
           className="fixed bottom-0 z-10 flex items-center gap-3 border-t border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground backdrop-blur"
-          style={{ left: containerRect.left, width: containerRect.width }}
+          style={{ left: containerRect.left + gridLeft, width: gridWidth }}
         >
           <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
           <span className="relative h-2 min-w-0 flex-1">
