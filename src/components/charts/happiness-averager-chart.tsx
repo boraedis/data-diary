@@ -157,7 +157,7 @@ export function HappinessAveragerChart({ data }: { data: MonthlyAverage[] }) {
   );
 
   return (
-    <ResponsiveChart height={240}>
+    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
       {({ width, height }) => <Averager points={points} width={width} height={height} />}
     </ResponsiveChart>
   );

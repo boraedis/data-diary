@@ -90,7 +90,7 @@ export function HistogramChart({ values }: { values: number[] }) {
   const containerRect = containerEl?.getBoundingClientRect();
 
   return (
-    <ResponsiveChart height={260} wrapperRef={setContainerEl}>
+    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" wrapperRef={setContainerEl}>
       {({ width, height }) => (
         <>
           <Histogram

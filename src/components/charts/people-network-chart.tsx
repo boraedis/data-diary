@@ -147,7 +147,7 @@ function Network({
  * thickness = how many days two people were logged together. */
 export function PeopleNetworkChart({ data }: { data: PeopleNetworkData }) {
   return (
-    <ResponsiveChart height={420} minWidth={360}>
+    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
       {({ width, height }) => (
         <Network nodes={data.nodes} edges={data.edges} width={width} height={height} />
       )}
