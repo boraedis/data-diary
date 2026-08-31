@@ -47,12 +47,22 @@ duplicates, or retire an old entry:
   - **Sports** — leagues, teams, and watches
 
 **Charts** (`/charts`) — D3-driven visualizations over your logged history:
-happiness distribution, happiness trend, a zoomable weight-over-time line,
-a yearly sleep-duration calendar heatmap, weight vs. training volume, small
-multiples of each sub over time, a most-visited-places ranking, and a
-draggable people-network graph of who gets logged together. (This area is
-mid-overhaul — see the open GitHub issues under the visualization epic for
-the shared toolkit and chart primitives it's being rebuilt around.)
+
+- Happiness distribution (histogram) and happiness trend (monthly average, with a min/max band)
+- A zoomable weight-over-time line (brush-to-zoom)
+- A yearly sleep-duration calendar heatmap
+- Body weight vs. monthly training volume
+- Exercise mix — workout count by category/exercise/subtype, with a real date-range slider, period bucketing (week/month/quarter/year), and stacked or proportional (% share) view
+- Small multiples of each daily "sub" score over time
+- A most-visited-places ranking
+- A draggable people-network graph of who gets logged together
+
+This area is being rebuilt incrementally onto a shared D3 toolkit (one
+`useD3` hook, a common tooltip/legend/axis/color layer, and a growing family
+of reusable `Interactive*` chart primitives) rather than each chart staying
+its own one-off component — see `AGENTS.md` for the toolkit's architecture
+and the GitHub issues under the visualization epic (#14) for what's shipped
+and what's still in progress.
 
 **Auth** — single-user password gate, not a multi-account system. One shared
 password (`APP_PASSWORD`) exchanges for a signed session cookie
@@ -65,7 +75,7 @@ session on every route except `/login` and `/api/auth/*`.
 - **[Drizzle ORM](https://orm.drizzle.team)** over **[Neon](https://neon.tech)** serverless Postgres (`@neondatabase/serverless`)
 - **Tailwind CSS v4** (CSS-first config — no `tailwind.config.js`; theme tokens live in `src/app/globals.css`)
 - **shadcn/ui** components on **Base UI** primitives (`components.json`, `style: "base-nova"`), icons from **lucide-react**
-- **D3.js** for the chart layer (`src/hooks/use-d3.ts` + `src/components/charts/*`)
+- **D3.js** for the chart layer — a shared `useD3` hook, common tooltip/legend/axis/color/formatting utilities, and reusable `Interactive*` chart primitives (`src/hooks/use-d3.ts`, `src/lib/viz/`, `src/components/charts/`) — see `AGENTS.md` for how this toolkit is put together
 - Metadata sourced from **TMDB** (movies/TV) and **Google Books** (books) at add-time
 
 ## Getting started
@@ -186,15 +196,25 @@ src/
     login/              Password login page
   components/
     ui/                 shadcn/ui primitives
-    charts/             D3 chart components (use-d3 hook + ResponsiveChart wrapper)
+    charts/             D3 chart components and pages
+      interactive/       Shared Interactive* chart primitives, axis/mark/tooltip/
+                          legend helpers, and reusable filter controls
     manage/              Catalog detail/edit UI
   db/
     schema.ts            Full Drizzle schema — the source of truth for the DB shape
-  lib/                    Data-access helpers, auth, date utilities
+  hooks/
+    use-d3.ts             The D3-in-React render hook every chart uses
+  lib/
+    viz/                  Chart-agnostic formatting/color/binning helpers
+    ...                   Data-access helpers, auth, date utilities
   instrumentation.ts      Vercel Preview Deployment DB-branch resolution (see above)
   proxy.ts                Auth gate (Next.js middleware)
 scripts/                  Standalone maintenance/migration scripts (see Scripts above)
 ```
+
+See `AGENTS.md` for a fuller walkthrough of the chart toolkit's architecture
+and the conventions this codebase follows (issue/PR workflow, color rules,
+verification expectations) — worth reading before picking up any chart work.
 
 ## Deployment
 
