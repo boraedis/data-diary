@@ -4,13 +4,18 @@ import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { drawStandardAxes } from "@/components/charts/interactive/axis";
+import { MARK_SPECS } from "@/components/charts/interactive/marks";
+import { ChartTooltip, useCrosshair } from "@/components/charts/interactive/tooltip";
+import { categoricalColor } from "@/lib/viz/color";
+import { formatDate } from "@/lib/viz/format";
 import type { WeightPoint } from "@/lib/charts";
 
 const MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
 const MAIN_HEIGHT = 220;
 const OVERVIEW_HEIGHT = 64;
 
-type Point = { date: Date; weightKg: number };
+type Point = { date: Date; dateStr: string; weightKg: number };
 
 function MainLine({
   points,
@@ -21,42 +26,48 @@ function MainLine({
   width: number;
   domain: [Date, Date];
 }) {
+  const innerWidth = width - MARGIN.left - MARGIN.right;
+  const innerHeight = MAIN_HEIGHT - MARGIN.top - MARGIN.bottom;
+
+  const visible = useMemo(
+    () => points.filter((p) => p.date >= domain[0] && p.date <= domain[1]),
+    [points, domain],
+  );
+  const forExtent = visible.length ? visible : points;
+
+  // Recomputed here (not just inside useD3 below) for the same reason as
+  // happiness-averager-chart.tsx: the crosshair needs each point's pixel X
+  // in React state, outside the useD3-controlled <svg>.
+  const x = useMemo(() => d3.scaleTime().domain(domain).range([0, innerWidth]), [domain, innerWidth]);
+  const y = useMemo(() => {
+    const yExtent = d3.extent(forExtent, (p) => p.weightKg) as [number, number];
+    const pad = (yExtent[1] - yExtent[0]) * 0.1 || 1;
+    return d3
+      .scaleLinear()
+      .domain([yExtent[0] - pad, yExtent[1] + pad])
+      .range([innerHeight, 0]);
+  }, [forExtent, innerHeight]);
+
+  const xPositions = useMemo(() => visible.map((p) => x(p.date)), [visible, x]);
+  const crosshair = useCrosshair(visible, xPositions);
+
   const ref = useD3<SVGSVGElement>(
     (svg) => {
-      const innerWidth = width - MARGIN.left - MARGIN.right;
-      const innerHeight = MAIN_HEIGHT - MARGIN.top - MARGIN.bottom;
-
-      const visible = points.filter((p) => p.date >= domain[0] && p.date <= domain[1]);
-      const forExtent = visible.length ? visible : points;
-
-      const x = d3.scaleTime().domain(domain).range([0, innerWidth]);
-      const yExtent = d3.extent(forExtent, (p) => p.weightKg) as [number, number];
-      const pad = (yExtent[1] - yExtent[0]) * 0.1 || 1;
-      const y = d3
-        .scaleLinear()
-        .domain([yExtent[0] - pad, yExtent[1] + pad])
-        .range([innerHeight, 0]);
-
       const g = svg
         .attr("width", width)
         .attr("height", MAIN_HEIGHT)
         .append("g")
         .attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
 
-      g.append("g")
-        .attr("transform", `translate(0,${innerHeight})`)
-        .call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(innerWidth / 90))))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--muted-foreground)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
-
-      g.append("g")
-        .call(d3.axisLeft(y).ticks(5).tickFormat((d) => `${d} kg`))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--muted-foreground)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
+      drawStandardAxes({
+        g,
+        x,
+        y,
+        innerWidth,
+        innerHeight,
+        yTicks: 5,
+        yTickFormat: (d) => `${d} kg`,
+      });
 
       const line = d3
         .line<Point>()
@@ -68,7 +79,7 @@ function MainLine({
         .datum(visible)
         .attr("fill", "none")
         .attr("stroke", "var(--chart-1)")
-        .attr("stroke-width", 2)
+        .attr("stroke-width", MARK_SPECS.line.strokeWidth)
         .attr("d", line);
 
       // Only draw point markers when there aren't too many to read cleanly.
@@ -78,14 +89,44 @@ function MainLine({
           .join("circle")
           .attr("cx", (d) => x(d.date))
           .attr("cy", (d) => y(d.weightKg))
-          .attr("r", 2.5)
+          .attr("r", MARK_SPECS.marker.radius - 1.5)
           .attr("fill", "var(--chart-1)");
       }
     },
-    [points, width, domain[0].getTime(), domain[1].getTime()],
+    [visible, width, x, y],
   );
 
-  return <svg ref={ref} />;
+  const hovered = crosshair.point;
+
+  return (
+    <>
+      <svg ref={ref} />
+      <div
+        className="absolute"
+        style={{ left: MARGIN.left, top: MARGIN.top, width: innerWidth, height: innerHeight }}
+        role="img"
+        aria-label="Body weight over time. Use arrow keys to inspect individual entries, or hover a point."
+        {...crosshair.handlers}
+      >
+        {crosshair.pixelX !== null ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
+            style={{ left: crosshair.pixelX }}
+          />
+        ) : null}
+      </div>
+      {hovered ? (
+        <ChartTooltip
+          x={MARGIN.left + (crosshair.pixelX ?? 0)}
+          y={MARGIN.top + y(hovered.weightKg)}
+          title={formatDate(hovered.dateStr, "weekday")}
+          rows={[{ label: "weight", value: `${hovered.weightKg} kg`, color: categoricalColor(0) }]}
+          containerWidth={width}
+        />
+      ) : null}
+    </>
+  );
 }
 
 function Overview({
@@ -169,7 +210,7 @@ function Overview({
  * slider. */
 export function WeightScrollerChart({ data }: { data: WeightPoint[] }) {
   const points = useMemo<Point[]>(
-    () => data.map((d) => ({ date: new Date(d.date), weightKg: d.weightKg })),
+    () => data.map((d) => ({ date: new Date(d.date), dateStr: d.date, weightKg: d.weightKg })),
     [data],
   );
   const fullExtent = useMemo<[Date, Date]>(() => {

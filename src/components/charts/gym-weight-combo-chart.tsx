@@ -1,9 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { styleAxis } from "@/components/charts/interactive/axis";
+import { MARK_SPECS, attachMarkHover, roundedBarPath } from "@/components/charts/interactive/marks";
+import { ChartTooltip } from "@/components/charts/interactive/tooltip";
+import { Legend } from "@/components/charts/interactive/legend";
+import { categoricalColor } from "@/lib/viz/color";
 import type { GymWeightComboData } from "@/lib/charts";
 
 const MARGIN = { top: 12, right: 48, bottom: 28, left: 48 };
@@ -15,17 +20,22 @@ function parseMonth(month: string): Date {
 
 type WeightPt = { date: Date; weightKg: number };
 type MonthBar = { start: Date; end: Date; count: number };
+type Hovered = { label: string; value: string; color: string; clientPos: { x: number; y: number } };
 
 function Combo({
   weight,
   months,
   width,
   height,
+  onHover,
+  onLeave,
 }: {
   weight: WeightPt[];
   months: MonthBar[];
   width: number;
   height: number;
+  onHover: (hovered: Hovered) => void;
+  onLeave: () => void;
 }) {
   const ref = useD3<SVGSVGElement>(
     (svg) => {
@@ -33,7 +43,7 @@ function Combo({
       const innerHeight = height - MARGIN.top - MARGIN.bottom;
 
       const allDates = [...weight.map((w) => w.date), ...months.flatMap((m) => [m.start, m.end])];
-      const domain = (d3.extent(allDates) as [Date | undefined, Date | undefined]);
+      const domain = d3.extent(allDates) as [Date | undefined, Date | undefined];
       const x = d3
         .scaleTime()
         .domain([domain[0] ?? new Date(), domain[1] ?? new Date()])
@@ -60,41 +70,54 @@ function Combo({
         .append("g")
         .attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
 
-      g.append("g")
-        .attr("transform", `translate(0,${innerHeight})`)
-        .call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(innerWidth / 90))))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--muted-foreground)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
+      // Dual-axis on purpose here (weight/kg vs. workouts/month, two
+      // unrelated units) — NOT a pattern to extend to new charts; the
+      // dataviz skill's #1 non-negotiable is never a dual-axis chart, and
+      // this pre-existing one is why drawStandardAxes (axis.ts) only
+      // covers the single-axis case and this file calls styleAxis
+      // per-axis instead. Left as-is: restructuring it (e.g. into two
+      // indexed-to-a-common-base series, or small multiples) is outside
+      // #17's scope.
+      const xAxisG = g.append("g").attr("transform", `translate(0,${innerHeight})`);
+      styleAxis(xAxisG, d3.axisBottom(x).ticks(Math.max(2, Math.floor(innerWidth / 90))));
 
-      g.append("g")
-        .call(d3.axisLeft(yWeight).ticks(5).tickFormat((d) => `${d} kg`))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--chart-1)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
+      const yWeightAxisG = g.append("g");
+      styleAxis(yWeightAxisG, d3.axisLeft(yWeight).ticks(5).tickFormat((d) => `${d} kg`), {
+        textColor: "var(--chart-1)",
+      });
 
-      g.append("g")
-        .attr("transform", `translate(${innerWidth},0)`)
-        .call(d3.axisRight(yCount).ticks(5))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--chart-2)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
+      const yCountAxisG = g.append("g").attr("transform", `translate(${innerWidth},0)`);
+      styleAxis(yCountAxisG, d3.axisRight(yCount).ticks(5), { textColor: "var(--chart-2)" });
 
-      // Bars: workouts logged per calendar month.
-      g.selectAll("rect")
+      // Bars: workouts logged per calendar month. Each bar is its own hit
+      // target (no crosshair on a bar chart) — attachMarkHover wires the
+      // lift-on-hover + pointermove/focus callback.
+      const bars = g
+        .selectAll("path")
         .data(months)
-        .join("rect")
-        .attr("x", (d) => x(d.start) + 1)
-        .attr("width", (d) => Math.max(0, x(d.end) - x(d.start) - 2))
-        .attr("y", (d) => yCount(d.count))
-        .attr("height", (d) => innerHeight - yCount(d.count))
-        .attr("fill", "var(--chart-2)")
-        .attr("fill-opacity", 0.55)
-        .append("title")
-        .text((d) => `${d.count} workout${d.count === 1 ? "" : "s"}`);
+        .join("path")
+        .attr("d", (d) => {
+          const slotX0 = x(d.start);
+          const slotX1 = x(d.end);
+          const slotWidth = Math.max(0, slotX1 - slotX0 - MARK_SPECS.bar.surfaceGap);
+          const barWidth = Math.min(slotWidth, MARK_SPECS.bar.maxThickness);
+          const barX = slotX0 + (slotX1 - slotX0 - barWidth) / 2;
+          const barHeight = innerHeight - yCount(d.count);
+          return roundedBarPath(barX, yCount(d.count), barWidth, barHeight, "up");
+        })
+        .attr("fill", categoricalColor(1))
+        .attr("fill-opacity", 0.55);
+
+      attachMarkHover<MonthBar>(bars, {
+        onHover: (d, clientPos) =>
+          onHover({
+            label: `${d.count} workout${d.count === 1 ? "" : "s"}`,
+            value: `${d.count}`,
+            color: categoricalColor(1),
+            clientPos,
+          }),
+        onLeave,
+      });
 
       // Line: weight.
       if (weight.length) {
@@ -108,11 +131,11 @@ function Combo({
           .datum(weight)
           .attr("fill", "none")
           .attr("stroke", "var(--chart-1)")
-          .attr("stroke-width", 2)
+          .attr("stroke-width", MARK_SPECS.line.strokeWidth)
           .attr("d", line);
       }
     },
-    [weight, months, width, height],
+    [weight, months, width, height, onHover, onLeave],
   );
 
   return <svg ref={ref} />;
@@ -137,11 +160,40 @@ export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
     [data.workoutsByMonth],
   );
 
+  const [hovered, setHovered] = useState<Hovered | null>(null);
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  const containerRect = containerEl?.getBoundingClientRect();
+
   return (
-    <ResponsiveChart height={260}>
-      {({ width, height }) => (
-        <Combo weight={weight} months={months} width={width} height={height} />
-      )}
-    </ResponsiveChart>
+    <div className="flex flex-col gap-2">
+      <ResponsiveChart height={260} wrapperRef={setContainerEl}>
+        {({ width, height }) => (
+          <>
+            <Combo
+              weight={weight}
+              months={months}
+              width={width}
+              height={height}
+              onHover={setHovered}
+              onLeave={() => setHovered(null)}
+            />
+            {hovered && containerRect ? (
+              <ChartTooltip
+                x={hovered.clientPos.x - containerRect.left}
+                y={hovered.clientPos.y - containerRect.top}
+                rows={[{ label: hovered.label, value: hovered.value, color: hovered.color }]}
+                containerWidth={width}
+              />
+            ) : null}
+          </>
+        )}
+      </ResponsiveChart>
+      <Legend
+        series={[
+          { label: "weight", color: categoricalColor(0) },
+          { label: "workouts", color: categoricalColor(1) },
+        ]}
+      />
+    </div>
   );
 }
