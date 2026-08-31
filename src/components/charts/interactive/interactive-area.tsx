@@ -15,9 +15,17 @@ import { Legend } from "./legend";
 // replacing legacy's Area/AreaAverager constructors (18 legacy call sites:
 // exercise-by-category, entertainment-by-kind, spending-by-category, etc.
 // — see the issue for the full list). No app chart in this repo used this
-// shape before #19; ExerciseAreaChart (this same PR) is the first real
+// shape before #19; ExerciseMixExplorer (this same PR) is the first real
 // consumer, picked because workouts/exercise-category data is already
 // fully migrated (Phases 1-3) and already backs the gym page.
+//
+// Revised after first-round feedback: fills render much more solid than a
+// typical translucent wash (STACK_FILL_OPACITY below, not the shared
+// MARK_SPECS.area.fillOpacity used by InteractiveLine's confidence bands)
+// so this reads as an actual filled area chart, not "a line chart with
+// shading under it" — and each band gets its own in-shape label at its
+// widest point when there's room, rather than relying on the legend +
+// tooltip alone to say what a band is.
 //
 // Data shape is deliberately transposed from InteractiveLine's "N series,
 // each with its own points": here every point already carries every
@@ -48,6 +56,28 @@ const MIN_MAIN_HEIGHT = 160;
 // neighbors — see the per-layer render loop below for why one-sided is
 // simpler here (and avoids a second clamp for the layer above).
 const GAP_INSET = MARK_SPECS.bar.surfaceGap;
+// Deliberately NOT MARK_SPECS.area.fillOpacity (0.1) — that constant is
+// calibrated for a translucent confidence band drawn *behind* a solid
+// line (InteractiveLine's `band` series), where staying faint matters
+// because multiple bands can visually overlap. Stacked segments never
+// overlap each other by construction, so there's no muddying risk, and
+// per user feedback the first version (still using the shared 0.1) read
+// as "a line chart with shading under it" rather than a filled area
+// chart — this is a separate, area-stack-specific constant so bumping it
+// doesn't also change InteractiveLine's bands.
+const STACK_FILL_OPACITY = 0.7;
+
+// In-band label placement (per-layer, inside the render loop below): find
+// the band's single widest point, then confirm a real measured label
+// actually fits in a contiguous run of sufficiently-thick points around
+// it before committing to drawing it there.
+const LABEL_FONT_SIZE = 12;
+// Minimum band thickness, px, for a label to be considered at all —
+// font size plus a little breathing room above/below the text.
+const LABEL_MIN_THICKNESS = LABEL_FONT_SIZE + 6;
+// Horizontal breathing room required on either side of the measured
+// label width, within the qualifying run, before it counts as "fits."
+const LABEL_PADDING_X = 8;
 
 export type InteractiveAreaCategory = {
   id: string;
@@ -95,6 +125,11 @@ export type InteractiveAreaProps = {
    * d3's own default in "stacked" mode. */
   yTickFormat?: (value: d3.NumberValue) => string;
   dateFormat?: DateFormatPreset;
+  /** Overrides `dateFormat` entirely for the tooltip's title — for a
+   * caller bucketing by something `DateFormatPreset` has no shape for
+   * (a quarter, a bare year), where formatDate's preset table can't help.
+   * Receives the hovered point's raw `x`. */
+  titleFormat?: (x: Date) => string;
   margin?: Partial<typeof DEFAULT_MARGIN>;
   ariaLabel?: string;
 };
@@ -116,6 +151,7 @@ export function InteractiveArea({
   valueFormat = String,
   yTickFormat,
   dateFormat = "weekday",
+  titleFormat,
   margin,
   ariaLabel,
 }: InteractiveAreaProps) {
@@ -189,10 +225,10 @@ export function InteractiveArea({
 
       drawStandardAxes({ g, x, y, innerWidth, innerHeight, yTicks: 5, yTickFormat: resolvedYTickFormat });
 
-      // Per layer: a translucent fill (the wash) plus a solid line tracing
-      // its own top edge (the fill alone, at ~10% opacity, doesn't read as
-      // a defined band on its own — the line is what a reader's eye
-      // actually follows). The fill's *bottom* edge is inset up by
+      // Per layer: a solid-reading fill (STACK_FILL_OPACITY, not the
+      // faint shared area wash — see that constant's own comment) plus a
+      // solid line tracing the layer's own top edge for a crisp boundary
+      // against its neighbor. The fill's *bottom* edge is inset up by
       // GAP_INSET px for every layer except the bottom-most (which sits on
       // the real baseline, not a neighbor) — that's the "surface-color gap
       // between segments" from marks-and-anatomy.md, adapted from bars'
@@ -203,6 +239,19 @@ export function InteractiveArea({
       // the true boundary. Only one side of each boundary is inset (not
       // split 1px+1px) — simpler, and avoids a separate clamp for the
       // layer above's already-uninset top.
+      //
+      // `bandPixelBounds` is shared between the fill/line generators and
+      // the label-placement pass below it, so "how tall is this band at
+      // this point" is computed exactly once, the same way, for both —
+      // a label algorithm working off different numbers than what's
+      // actually painted would place labels that don't match the shape.
+      function bandPixelBounds(d: d3.SeriesPoint<InteractiveAreaPoint>, isBottom: boolean): [number, number] {
+        const rawBottom = y(d[0]);
+        const topPx = y(d[1]);
+        const bottomPx = isBottom ? rawBottom : Math.max(rawBottom - GAP_INSET, topPx);
+        return [bottomPx, topPx];
+      }
+
       visibleCategories.forEach((cat, i) => {
         const layer = stacked[i];
         if (!layer) return;
@@ -211,19 +260,14 @@ export function InteractiveArea({
         const areaGen = d3
           .area<d3.SeriesPoint<InteractiveAreaPoint>>()
           .x((d) => x(d.data.x))
-          .y0((d) => {
-            const raw = y(d[0]);
-            const inset = isBottom ? raw : raw - GAP_INSET;
-            const top = y(d[1]);
-            return Math.max(inset, top); // never invert on a near-zero band
-          })
-          .y1((d) => y(d[1]))
+          .y0((d) => bandPixelBounds(d, isBottom)[0])
+          .y1((d) => bandPixelBounds(d, isBottom)[1])
           .curve(d3.curveMonotoneX);
 
         g.append("path")
           .datum(layer)
           .attr("fill", cat.color)
-          .attr("fill-opacity", MARK_SPECS.area.fillOpacity)
+          .attr("fill-opacity", STACK_FILL_OPACITY)
           .attr("stroke", "none")
           .attr("d", areaGen);
 
@@ -239,6 +283,67 @@ export function InteractiveArea({
           .attr("stroke", cat.color)
           .attr("stroke-width", MARK_SPECS.line.strokeWidth)
           .attr("d", lineGen);
+
+        // In-shape label: find this band's single widest point (by pixel
+        // thickness), then walk outward from it while thickness stays
+        // above the legibility floor to find the full contiguous run it
+        // sits inside — the run's pixel width is what actually has to fit
+        // the label, not just the one (possibly needle-thin between two
+        // wide neighbors) peak point. Placed and measured for real via
+        // getComputedTextLength() rather than a guessed chars-per-px
+        // ratio, then removed if it genuinely doesn't fit anywhere on
+        // this band — a label overlapping its neighbor is worse than no
+        // label, and the legend + tooltip both still say what this band
+        // is either way.
+        if (layer.length === 0) return;
+        const xs = layer.map((d) => x(d.data.x));
+        const bounds = layer.map((d) => bandPixelBounds(d, isBottom));
+        const thickness = bounds.map(([bottomPx, topPx]) => bottomPx - topPx);
+
+        let peakIndex = 0;
+        for (let j = 1; j < thickness.length; j++) {
+          if (thickness[j] > thickness[peakIndex]) peakIndex = j;
+        }
+        if (thickness[peakIndex] < LABEL_MIN_THICKNESS) return;
+
+        const [peakBottom, peakTop] = bounds[peakIndex];
+        const label = g
+          .append("text")
+          .attr("x", xs[peakIndex])
+          .attr("y", (peakBottom + peakTop) / 2)
+          .attr("text-anchor", "middle")
+          .attr("dominant-baseline", "central")
+          .style("font-size", `${LABEL_FONT_SIZE}px`)
+          .style("font-weight", 600)
+          // A stroked halo behind the fill, not a plain fill color — the
+          // label sits on whatever hue this category's color happens to
+          // be (any of the fixed 5 categorical slots, or the muted
+          // "Other" gray), so a single fixed fill color can't guarantee
+          // contrast on its own the way it could against one known
+          // surface color.
+          .attr("paint-order", "stroke")
+          .attr("stroke", "var(--card)")
+          .attr("stroke-width", 3)
+          .attr("stroke-linejoin", "round")
+          .attr("fill", "var(--foreground)")
+          .text(cat.label);
+
+        const labelWidth = (label.node() as SVGTextElement).getComputedTextLength();
+
+        let lo = peakIndex;
+        let hi = peakIndex;
+        while (lo > 0 && thickness[lo - 1] >= LABEL_MIN_THICKNESS) lo--;
+        while (hi < thickness.length - 1 && thickness[hi + 1] >= LABEL_MIN_THICKNESS) hi++;
+        const availableWidth = xs[hi] - xs[lo];
+
+        if (availableWidth < labelWidth + LABEL_PADDING_X) {
+          label.remove();
+        } else {
+          // Center within the whole qualifying run, not pinned to the
+          // single peak point — reads better when the peak sits near one
+          // edge of an otherwise-wide-enough stretch.
+          label.attr("x", (xs[lo] + xs[hi]) / 2);
+        }
       });
     },
     [visibleCategories, stacked, width, mainHeight, x, y, innerWidth, innerHeight, resolvedYTickFormat],
@@ -287,7 +392,9 @@ export function InteractiveArea({
           <ChartTooltip
             x={MARGIN.left + crosshair.pixelX}
             y={MARGIN.top + innerHeight / 2}
-            title={formatDate(toDateString(crosshair.point.x), dateFormat)}
+            title={
+              titleFormat ? titleFormat(crosshair.point.x) : formatDate(toDateString(crosshair.point.x), dateFormat)
+            }
             rows={tooltipRows}
             containerWidth={width}
           />

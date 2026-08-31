@@ -1,22 +1,16 @@
-import { ChartCard } from "@/components/charts/chart-card";
-import { ChartPage } from "@/components/charts/chart-page";
-import { ExerciseAreaChart } from "@/components/charts/exercise-area-chart";
-import { getExerciseAreaData } from "@/lib/charts";
+import { ExerciseMixExplorer } from "@/components/charts/exercise-mix-explorer";
+import { getExerciseWorkoutRows } from "@/lib/charts";
 
 export const dynamic = "force-dynamic";
 
+// The interactive page body (title, filters row, and chart card) is one
+// client component (ExerciseMixExplorer) rather than split between this
+// server page and a chart component the way earlier chart pages are —
+// its period/range/group-by state has to be shared between the filters
+// row (ChartPage's dedicated slot, rendered above the card) and the chart
+// itself, and both need to come from the same component tree to share
+// that state. See that file's own header comment.
 export default async function ExerciseMixChartPage() {
-  const data = await getExerciseAreaData();
-
-  return (
-    <ChartPage title="Exercise mix">
-      <ChartCard
-        title="Exercise mix"
-        description="Monthly workout count by category — distance, sport, or strength. Toggle Count/% share, click a legend entry to hide a category."
-        empty={data.points.length === 0}
-      >
-        <ExerciseAreaChart data={data} />
-      </ChartCard>
-    </ChartPage>
-  );
+  const rows = await getExerciseWorkoutRows();
+  return <ExerciseMixExplorer rows={rows} />;
 }

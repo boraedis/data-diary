@@ -33,7 +33,7 @@ const CHARTS = [
   {
     href: "/charts/exercise-mix",
     title: "Exercise mix",
-    description: "Monthly workout count by category — distance, sport, or strength.",
+    description: "Workout count by category, exercise, or subtype, over any time range.",
   },
   {
     href: "/charts/subs",
