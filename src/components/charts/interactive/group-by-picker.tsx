@@ -12,10 +12,13 @@ import { Button } from "@/components/ui/button";
 // chart's own drill-down levels, without this file changing.
 //
 // The actual re-grouping logic (re-tallying already-fetched rows by
-// whichever dimension is selected, folding a long tail into "Other" past
-// the categorical palette's fixed slot count) lives with the caller's own
-// data, the same way TimeRangePicker leaves date-range resolution to its
-// caller — this component only reports *which* dimension is picked.
+// whichever dimension is selected) lives with the caller's own data, the
+// same way TimeRangePicker leaves date-range resolution to its caller —
+// this component only reports *which* dimension is picked.
+//
+// `label` now also renders as a visible section heading above the button
+// row, not just an aria-label — per feedback that several of these next
+// to each other in a filters row read as one undifferentiated block.
 export type GroupByOption<T extends string> = { id: T; label: string };
 
 export function GroupByPicker<T extends string>({
@@ -35,19 +38,22 @@ export function GroupByPicker<T extends string>({
 
   return (
     <div role="group" aria-label={label} className={className}>
-      <div className="flex items-center gap-1">
-        {options.map((opt) => (
-          <Button
-            key={opt.id}
-            type="button"
-            size="xs"
-            variant={value === opt.id ? "secondary" : "ghost"}
-            aria-pressed={value === opt.id}
-            onClick={() => onChange(opt.id)}
-          >
-            {opt.label}
-          </Button>
-        ))}
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+        <div className="flex items-center gap-1">
+          {options.map((opt) => (
+            <Button
+              key={opt.id}
+              type="button"
+              size="xs"
+              variant={value === opt.id ? "secondary" : "ghost"}
+              aria-pressed={value === opt.id}
+              onClick={() => onChange(opt.id)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
       </div>
     </div>
   );
