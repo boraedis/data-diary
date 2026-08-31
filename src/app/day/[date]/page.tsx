@@ -34,13 +34,6 @@ function summarize(day: DayPayload): CategorySummary[] {
 
   return [
     {
-      key: "health",
-      label: "Health",
-      kind: "progress",
-      filled: present([day.distanceWalkedKm, day.coffees, day.sick, day.workouts.length > 0 ? true : null]),
-      total: 4,
-    },
-    {
       key: "sleep",
       label: "Sleep",
       kind: "progress",
@@ -67,6 +60,13 @@ function summarize(day: DayPayload): CategorySummary[] {
       kind: "progress",
       filled: present([day.phoneUsageMinutes, day.laptopUsageMinutes, day.instagramUsageMinutes]),
       total: 3,
+    },
+    {
+      key: "health",
+      label: "Health",
+      kind: "progress",
+      filled: present([day.distanceWalkedKm, day.coffees, day.sick, day.workouts.length > 0 ? true : null]),
+      total: 4,
     },
     {
       key: "happiness",
