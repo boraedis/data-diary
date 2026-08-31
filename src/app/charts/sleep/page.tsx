@@ -12,7 +12,7 @@ export default async function SleepChartPage() {
     <ChartPage title="Sleep calendar">
       <ChartCard
         title="Sleep calendar"
-        description="Nightly sleep duration, darker = less sleep, brighter teal = more."
+        description="Nightly sleep duration, darker = less sleep, brighter = more."
         empty={data.length === 0}
       >
         <SleepCalendarChart data={data} />
