@@ -283,11 +283,8 @@ export function InteractiveCalendar({
     // has. Rather than shrinking cells past legibility to force a fit,
     // this lets that rare case scroll horizontally (same tradeoff
     // GitHub's own contribution graph makes on mobile) instead of
-    // visually breaking out of the container. `position: relative` makes
-    // this the containing block the sticky legend below sticks within
-    // (see that section's own comment) — it stays pinned only while this
-    // block, years of cells and all, is still in view.
-    <div style={{ width, position: "relative" }} className="overflow-x-auto">
+    // visually breaking out of the container.
+    <div style={{ width }} className="overflow-x-auto">
       <div ref={setContainerEl} style={{ position: "relative", width }} role="img" aria-label={ariaLabel}>
         <svg ref={ref} />
         {hovered && containerRect ? (
@@ -302,46 +299,59 @@ export function InteractiveCalendar({
       </div>
       {/* The legend/scale swatch — low -> high, so the color ramp's
           meaning doesn't rely on the reader guessing from the cells alone
-          (marks-and-anatomy.md: never make color the only channel). Full
-          calendar width (not a small fixed swatch) so it stays legible
-          from any cell, and `sticky bottom-0` keeps it in view as a
-          footer while scrolling through a tall multi-year grid — it
-          un-sticks once the whole calendar (its containing block, the
-          `relative` wrapper above) scrolls out of frame, rather than
-          floating forever. The hover indicator (a small tick riding the
+          (marks-and-anatomy.md: never make color the only channel).
+          `position: fixed` pinned to the bottom of the *viewport*, not
+          `sticky` within the calendar's own block — per feedback, the
+          legend should stay visible on screen at all times the page is
+          open, not just while the grid itself is in frame. `fixed` also
+          sidesteps the risk `sticky` had here: ChartCard (ui/card.tsx)
+          sets `overflow-hidden` on its wrapper, which in some browsers
+          can break a `sticky` descendant's ability to track page scroll,
+          but has no effect on `fixed` (it escapes every ancestor's
+          overflow/containing-block, short of one with its own
+          transform/filter — none of this app's chart-page ancestors set
+          those).
+
+          `position: fixed` takes an element out of flow entirely, so it
+          no longer inherits the calendar's own width/position for free
+          the way a normal or sticky sibling would — "as wide as the
+          calendar, not the window" has to be computed explicitly from
+          the measured container, via the same `containerRect` the
+          tooltip above already uses. Gated on `containerRect` so it
+          doesn't flash at (0,0) full-width for one frame before the
+          first measurement lands. `left`/`width` only need to be
+          recomputed when the calendar's own box actually moves or
+          resizes (ResponsiveChart's ResizeObserver already forces a
+          re-render — and a fresh getBoundingClientRect() read — whenever
+          that happens); a vertical-only scroll doesn't change a block's
+          horizontal position, so this doesn't need to track scroll
+          events itself. The hover indicator (a small tick riding the
           gradient) answers "where does this cell's value sit on the
           scale" directly, rather than making the reader eyeball a color
-          match against the swatch.
-
-          Note: the surrounding ChartCard (ui/card.tsx) sets
-          `overflow-hidden` on its own wrapper, which in some browsers
-          establishes a non-scrolling containing block that can prevent a
-          sticky descendant from tracking the *page's* scroll at all —
-          unverified here (no browser in this sandbox). If this doesn't
-          visibly stick, that's the first thing to check; swapping that
-          one class for `overflow-clip` (same visual clipping, but it
-          doesn't hijack sticky/scroll-snap) would be the fix. */}
-      <div
-        className="sticky bottom-0 z-10 flex items-center gap-3 border-t border-border bg-background/95 px-1 py-2 text-xs text-muted-foreground backdrop-blur"
-        style={{ width }}
-      >
-        <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
-        <span className="relative h-2 min-w-0 flex-1">
-          <span
-            aria-hidden
-            className="block h-2 w-full rounded-full"
-            style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
-          />
-          {legendT !== null ? (
+          match against the swatch. */}
+      {containerRect ? (
+        <div
+          className="fixed bottom-0 z-10 flex items-center gap-3 border-t border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground backdrop-blur"
+          style={{ left: containerRect.left, width: containerRect.width }}
+        >
+          <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
+          <span className="relative h-2 min-w-0 flex-1">
             <span
               aria-hidden
-              className="absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
-              style={{ left: `${legendT * 100}%` }}
+              className="block h-2 w-full rounded-full"
+              style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
             />
-          ) : null}
-        </span>
-        <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
-      </div>
+            {legendT !== null ? (
+              <span
+                aria-hidden
+                className="absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
+                style={{ left: `${legendT * 100}%` }}
+              />
+            ) : null}
+          </span>
+          <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
