@@ -1,6 +1,6 @@
-import { asc, desc, inArray, isNotNull, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { days, people, places, workouts } from "@/db/schema";
+import { days, exercises, people, places, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
@@ -123,6 +123,53 @@ export async function getGymWeightComboData(): Promise<GymWeightComboData> {
     weight: weightRows.map((r) => ({ date: r.date, weightKg: r.weightKg as number })),
     workoutsByMonth,
   };
+}
+
+// --- Exercise mix (#19's InteractiveArea proving case) -------------------
+
+// Fixed order matching exerciseCategoryEnum's own declared order
+// (src/db/schema.ts) — color-follows-the-entity depends on every consumer
+// (this data-fetcher, InteractiveArea's default categoricalColor(i))
+// agreeing on one order, not each re-deriving it from whatever order rows
+// happen to come back from the DB in.
+const EXERCISE_CATEGORY_LABELS: Record<string, string> = {
+  distance: "Distance",
+  sport: "Sport",
+  strength: "Strength",
+};
+const EXERCISE_CATEGORY_ORDER = ["distance", "sport", "strength"] as const;
+
+export type ExerciseAreaCategory = { id: string; label: string };
+export type ExerciseAreaPoint = { month: string; values: Record<string, number> };
+export type ExerciseAreaData = { categories: ExerciseAreaCategory[]; points: ExerciseAreaPoint[] };
+
+/** Workout count per exercise category (distance/sport/strength) per
+ * calendar month — the exercise-by-category proving case #19 asked for
+ * (legacy's `exercise_area.js`). Monthly, matching getGymWeightComboData's
+ * own resolution choice just above (daily would be too sparse/spiky for
+ * an area chart's shape to read). Count, not duration, since strength
+ * workouts don't reliably carry a durationMinutes value (see workouts'
+ * own schema comment: strength relies on workout_sets instead) — count is
+ * the one measure that means the same thing across all three categories. */
+export async function getExerciseAreaData(): Promise<ExerciseAreaData> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: workouts.date, category: exercises.category })
+    .from(workouts)
+    .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+    .orderBy(asc(workouts.date));
+
+  const points = groupByPeriod(rows, "month", (r) => r.date).map(({ key, items }) => {
+    const values: Record<string, number> = {};
+    for (const item of items) {
+      values[item.category] = (values[item.category] ?? 0) + 1;
+    }
+    return { month: key, values };
+  });
+
+  const categories = EXERCISE_CATEGORY_ORDER.map((id) => ({ id, label: EXERCISE_CATEGORY_LABELS[id] }));
+
+  return { categories, points };
 }
 
 // --- Place leaderboard ---------------------------------------------------
