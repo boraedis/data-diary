@@ -51,6 +51,7 @@ export function HistogramChart({ values }: { values: number[] }) {
           // bars, not a dense per-point distribution).
           maxBarThickness={Infinity}
           barGap={1}
+          countLabel={(n) => `day${n === 1 ? "" : "s"}`}
           ariaLabel="Happiness distribution histogram. Hover a bar to see its range and count."
         />
       )}

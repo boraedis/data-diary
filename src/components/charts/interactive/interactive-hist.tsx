@@ -59,12 +59,17 @@ export type InteractiveHistProps = {
   maxBarThickness?: number;
   xTicks?: number;
   yTicks?: number;
-  /** Formats a bucket's `[x0, x1)` range for the tooltip row label —
-   * defaults to `"x0–x1"`, collapsing to a single `"x0"` when the bucket
-   * is exactly 1 wide (e.g. width-1 buckets over a discrete/integer value
-   * like happiness — "88–89" reads as a range when the bucket really just
-   * means "the days someone logged 88," a single value, not a range). */
+  /** Formats a bucket's `[x0, x1)` range for the tooltip's title (the
+   * "key" the count below belongs to) — defaults to `"x0–x1"`, collapsing
+   * to a single `"x0"` when the bucket is exactly 1 wide (e.g. width-1
+   * buckets over a discrete/integer value like happiness — "88–89" reads
+   * as a range when the bucket really just means "the days someone
+   * logged 88," a single value, not a range). */
   formatRange?: (x0: number, x1: number) => string;
+  /** Label for the tooltip's count row, given the bucket's count — e.g.
+   * `(n) => `day${n === 1 ? "" : "s"}`` for a per-day histogram like
+   * happiness's. Defaults to the generic `"count"`. */
+  countLabel?: (count: number) => string;
   ariaLabel?: string;
   margin?: Partial<typeof DEFAULT_MARGIN>;
 };
@@ -81,6 +86,7 @@ export function InteractiveHist({
   xTicks,
   yTicks = 5,
   formatRange = (x0, x1) => (x1 - x0 === 1 ? `${x0}` : `${x0}–${x1}`),
+  countLabel = () => "count",
   ariaLabel = "Distribution histogram. Hover a bar to see its range and count.",
   margin,
 }: InteractiveHistProps) {
@@ -170,12 +176,18 @@ export function InteractiveHist({
     <div ref={setContainerEl} style={{ position: "relative", width, height }} role="img" aria-label={ariaLabel}>
       <svg ref={ref} />
       {hovered && containerRect ? (
+        // The bucket itself is the tooltip's title (the "key" — e.g. "88"
+        // or "80–90"), bold via ChartTooltip's own title styling; the row
+        // below is just the count, so hover reads unambiguously as
+        // "bucket -> count" rather than two same-weight numbers side by
+        // side with no clear key/value relationship between them.
         <ChartTooltip
           x={hovered.clientPos.x - containerRect.left}
           y={hovered.clientPos.y - containerRect.top}
+          title={formatRange(hovered.bin.x0 ?? 0, hovered.bin.x1 ?? 0)}
           rows={[
             {
-              label: formatRange(hovered.bin.x0 ?? 0, hovered.bin.x1 ?? 0),
+              label: countLabel(hovered.bin.length),
               value: `${hovered.bin.length}`,
               color: hoveredColor ?? categoricalColor(0),
             },

@@ -72,7 +72,11 @@ export function ChartTooltip({
           : `translate(calc(${x}px + 12px), calc(${y}px - 50%))`,
       }}
     >
-      {title ? <div className="mb-1 font-medium text-popover-foreground">{title}</div> : null}
+      {/* font-semibold to match row.value's weight below — a tooltip
+          title is always the "key" a row's value belongs to (a date, a
+          histogram bucket), so it should read at least as prominently as
+          the value itself, not softer than it. */}
+      {title ? <div className="mb-1 font-semibold text-popover-foreground">{title}</div> : null}
       <div className="flex flex-col gap-1">
         {rows.map((row) => (
           <div key={row.label} className="flex items-center gap-1.5">
