@@ -60,7 +60,10 @@ export type InteractiveHistProps = {
   xTicks?: number;
   yTicks?: number;
   /** Formats a bucket's `[x0, x1)` range for the tooltip row label —
-   * defaults to `"x0–x1"`. */
+   * defaults to `"x0–x1"`, collapsing to a single `"x0"` when the bucket
+   * is exactly 1 wide (e.g. width-1 buckets over a discrete/integer value
+   * like happiness — "88–89" reads as a range when the bucket really just
+   * means "the days someone logged 88," a single value, not a range). */
   formatRange?: (x0: number, x1: number) => string;
   ariaLabel?: string;
   margin?: Partial<typeof DEFAULT_MARGIN>;
@@ -77,7 +80,7 @@ export function InteractiveHist({
   maxBarThickness = MARK_SPECS.bar.maxThickness,
   xTicks,
   yTicks = 5,
-  formatRange = (x0, x1) => `${x0}–${x1}`,
+  formatRange = (x0, x1) => (x1 - x0 === 1 ? `${x0}` : `${x0}–${x1}`),
   ariaLabel = "Distribution histogram. Hover a bar to see its range and count.",
   margin,
 }: InteractiveHistProps) {
