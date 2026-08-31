@@ -32,13 +32,14 @@ export function formatDuration(hours: number): string {
 
 // --- Date ---------------------------------------------------------------
 
-export type DateFormatPreset = "short" | "month" | "monthYear" | "weekday";
+export type DateFormatPreset = "short" | "month" | "monthYear" | "weekday" | "weekdayYear";
 
 const DATE_FORMAT_OPTIONS: Record<DateFormatPreset, Intl.DateTimeFormatOptions> = {
   short: { month: "short", day: "numeric" }, // "Feb 14" — axis ticks, day-level tooltips
   month: { month: "long" }, // "February" — calendar-view headers
   monthYear: { month: "short", year: "numeric" }, // "Feb 2026" — monthly-bucketed axis ticks
   weekday: { weekday: "short", month: "short", day: "numeric" }, // "Sat, Feb 14" — tooltip headline
+  weekdayYear: { weekday: "short", month: "short", day: "numeric", year: "numeric" }, // "Sat, Feb 14, 2026" — tooltip headline for a multi-year view (calendar heatmap), where the bare "weekday" preset is ambiguous about which year a cell belongs to
 };
 
 /**

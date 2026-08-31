@@ -4,28 +4,35 @@ import { useMemo } from "react";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveCalendar,
-  estimateCalendarHeight,
   type InteractiveCalendarPoint,
 } from "@/components/charts/interactive/interactive-calendar";
 import type { SleepDay } from "@/lib/charts";
 
 /** GitHub-style calendar heatmap of sleep duration, one strip per year —
  * the legacy app's `Calendar`/`MultiCalendar` pattern (functions/views/vis/
- * charts/sleep_calendar.js). Now a thin wrapper around the shared
- * InteractiveCalendar primitive (#21) instead of its own bespoke
- * implementation; cell size still scales down as more years' worth of
- * data comes in, so a multi-decade history stays a fixed width instead of
- * scrolling horizontally forever. */
+ * charts/sleep_calendar.js). A thin wrapper around the shared
+ * InteractiveCalendar primitive (#21); cell size still scales down as more
+ * years' worth of data comes in, so a multi-decade history stays a fixed
+ * width instead of scrolling horizontally forever.
+ *
+ * Uses ResponsiveChart's auto-height mode (no `height` prop) rather than a
+ * pre-measurement height guess: a calendar's real rendered height depends
+ * on the cell size InteractiveCalendar picks from the *measured* width,
+ * which isn't known until after first render, so any height guessed ahead
+ * of that measurement can disagree with what actually gets painted —
+ * which is exactly what caused the previous version to overflow its
+ * container's height on desktop. `min-h-[160px]` just gives the very
+ * first (pre-measurement) layout pass a non-zero starting height for
+ * ResizeObserver to report on; InteractiveCalendar's own content is what
+ * determines the real height from there. */
 export function SleepCalendarChart({ data }: { data: SleepDay[] }) {
   const points = useMemo<InteractiveCalendarPoint[]>(
     () => data.map((d) => ({ date: d.date, value: d.durationMinutes })),
     [data],
   );
 
-  const yearCount = useMemo(() => new Set(data.map((d) => d.date.slice(0, 4))).size, [data]);
-
   return (
-    <ResponsiveChart height={estimateCalendarHeight(yearCount)} minWidth={320}>
+    <ResponsiveChart minWidth={240} className="min-h-[160px]">
       {({ width }) => (
         <InteractiveCalendar
           points={points}

@@ -17,21 +17,50 @@ import { parseDate } from "@/lib/date";
 // an array of raw DOM nodes the caller had to re-append by hand —
 // deliberately not preserved; this renders itself like any other React
 // component.
+//
+// Layout is Monday-first throughout (week columns *and* month-label
+// alignment both key off d3.timeMonday), per user feedback on the first
+// version — GitHub's own calendar (and ISO 8601) start the week on
+// Monday, and the requested day-of-week labels ("m,t,w,t,f,s,s") only
+// make sense read top-to-bottom against a Monday-first grid.
 
 const CELL_GAP = 2;
+// A single top strip per year houses both the year number (far left, in
+// LEFT_LABEL_WIDTH's column) and the month abbreviations (spanning the
+// grid) at the same y position — see the `g.append("text")` calls below.
 const YEAR_LABEL_HEIGHT = 18;
 const YEAR_GAP = 14;
-const LEFT_LABEL_WIDTH = 30;
-const DAY_LABELS = ["Sun", "", "Tue", "", "Thu", "", "Sat"];
+// Single-letter day labels ("M"/"T"/"W"/...) need much less horizontal
+// room than the old 3-letter abbreviations did, so this is narrower than
+// the first version — every px reclaimed here goes straight to the grid,
+// which is also part of the "doesn't fill the whole width" fix.
+const LEFT_LABEL_WIDTH = 20;
+// Monday-first — see the module comment above. Index 0 = Monday, matching
+// the `dow` remap below ((getDay() + 6) % 7).
+const DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
 // A fixed row height purely for the legend swatch below the grid — not a
 // layout constant the SVG rendering itself depends on.
 const LEGEND_ROW_HEIGHT = 24;
-// Used only for the pre-measurement height guess a caller's ResponsiveChart
-// needs before InteractiveCalendar has actually rendered and picked its
-// real cell size from the container's *measured* width (see `cellSize`'s
-// computation below, which depends on `width` — not known until after
-// first render) — not a rendering constant itself.
-const HEIGHT_GUESS_CELL_SIZE = 12;
+// GitHub's own contribution graph uses 53 week-columns as a safe upper
+// bound for any year regardless of which weekday Jan 1 falls on (a year
+// can span 53 distinct Monday-starting weeks; using a fixed column count
+// keeps every year's grid the same width instead of jittering by one
+// column year to year).
+const WEEKS_PER_YEAR = 53;
+// cellSize is purely a function of the *measured* container width (see
+// below) — no separate pre-measurement "guess" constant. The previous
+// version had a HEIGHT_GUESS_CELL_SIZE (12) baked into a caller-facing
+// estimateCalendarHeight() that could disagree with the real computed
+// cellSize (up to 14) once actually measured, and that mismatch — a
+// shorter *guessed* height than the SVG the real cellSize went on to
+// paint — was the direct cause of the reported desktop height overflow.
+// The fix is structural, not a closer guess: this component no longer
+// exports a height estimate at all, and callers size it with
+// ResponsiveChart's auto-height mode (height prop omitted), which
+// measures the container's own rendered height instead of predicting it
+// up front. See sleep-calendar-chart.tsx.
+const MIN_CELL_SIZE = 8;
+const MAX_CELL_SIZE = 18;
 
 export type InteractiveCalendarPoint = {
   date: string; // "YYYY-MM-DD"
@@ -55,26 +84,10 @@ export type InteractiveCalendarProps = {
   ariaLabel?: string;
 };
 
-/** Pre-measurement height estimate for a caller's `ResponsiveChart` — the
- * real height depends on the cell size InteractiveCalendar picks from its
- * *measured* width, which isn't known until after the first render, so a
- * caller needs a reasonable guess to give ResponsiveChart a starting
- * height (ResponsiveChart's fixed-height mode, not its viewport-filling
- * mode — a calendar's height is content-derived from year count, not
- * something that should stretch to fill the screen). Exported so that
- * guess always matches this file's own layout constants instead of a
- * second, hand-copied formula drifting out of sync with them in whatever
- * wraps this component. */
-export function estimateCalendarHeight(yearCount: number): number {
-  if (yearCount === 0) return 200;
-  return (
-    yearCount * (7 * (HEIGHT_GUESS_CELL_SIZE + CELL_GAP) + YEAR_LABEL_HEIGHT + YEAR_GAP) + LEGEND_ROW_HEIGHT
-  );
-}
-
 type YearGroup = { year: number; days: Map<string, number> };
 type CellDatum = { dateStr: string; value: number; week: number; dow: number };
 type Hovered = { dateStr: string; value: number; clientPos: { x: number; y: number } };
+type MonthTick = { label: string; week: number };
 
 export function InteractiveCalendar({
   points,
@@ -91,15 +104,39 @@ export function InteractiveCalendar({
       if (!byYear.has(year)) byYear.set(year, new Map());
       byYear.get(year)!.set(p.date, p.value);
     }
+    // Most recent year first (top of the stack) — per user feedback; a
+    // reader scanning down wants "now" first, not the oldest year on file.
     return [...byYear.entries()]
-      .sort(([a], [b]) => a - b)
+      .sort(([a], [b]) => b - a)
       .map(([year, days]) => ({ year, days }));
   }, [points]);
 
-  const cellSize = Math.min(14, Math.max(6, Math.floor((width - LEFT_LABEL_WIDTH) / 54) - CELL_GAP));
+  // Purely width-driven: floor(available / WEEKS_PER_YEAR) minus the
+  // inter-cell gap, clamped to a legible-but-not-huge range. No disconnected
+  // "guess" constant feeding this (see MIN/MAX_CELL_SIZE's comment above) —
+  // this is the one and only place cellSize is computed, from the real
+  // measured `width`.
+  const availableForGrid = width - LEFT_LABEL_WIDTH;
+  const cellSize = Math.min(
+    MAX_CELL_SIZE,
+    Math.max(MIN_CELL_SIZE, Math.floor(availableForGrid / WEEKS_PER_YEAR) - CELL_GAP),
+  );
   const rowHeight = cellSize + CELL_GAP;
   const yearBlockHeight = 7 * rowHeight;
   const totalHeight = years.length * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP);
+
+  // The grid's own pixel width almost never divides evenly into
+  // `availableForGrid` (flooring cellSize leaves a remainder). Rather than
+  // dumping that leftover as blank space on the right — which is what
+  // read as "doesn't fill the whole width" — split it evenly on both
+  // sides of the grid so the whole component reads as centered and full
+  // rather than left-packed with a gap. Clamped at 0 so a narrow
+  // container (grid wider than available, at the MIN_CELL_SIZE floor)
+  // never gets a *negative* offset; see the overflow-x-auto safety net
+  // on the outer wrapper below for that case.
+  const gridWidth = WEEKS_PER_YEAR * rowHeight;
+  const centerOffset = Math.max(0, (availableForGrid - gridWidth) / 2);
+  const gridLeft = LEFT_LABEL_WIDTH + centerOffset;
 
   const domain = useMemo<[number, number]>(() => {
     const [lo, hi] = d3.extent(points, (p) => p.value);
@@ -123,40 +160,67 @@ export function InteractiveCalendar({
 
       years.forEach((yearGroup, yi) => {
         const yearStart = new Date(yearGroup.year, 0, 1);
+        const yearEnd = new Date(yearGroup.year + 1, 0, 1);
         const g = svg
           .append("g")
           .attr(
             "transform",
-            `translate(${LEFT_LABEL_WIDTH},${yi * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP) + YEAR_LABEL_HEIGHT})`,
+            `translate(${gridLeft},${yi * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP) + YEAR_LABEL_HEIGHT})`,
           );
 
         g.append("text")
-          .attr("x", -LEFT_LABEL_WIDTH + 2)
+          .attr("x", -LEFT_LABEL_WIDTH - centerOffset + 2)
           .attr("y", -6)
           .attr("fill", "var(--foreground)")
           .style("font-size", "12px")
           .style("font-weight", 500)
           .text(String(yearGroup.year));
 
+        // Month labels along the top of the strip, aligned to the same
+        // Monday-keyed week columns the day cells use below. Declutters
+        // by simply dropping a label that would land too close to the
+        // previously-placed one (narrow container -> narrow week columns
+        // -> adjacent month labels would otherwise overlap).
+        const monthTicks: MonthTick[] = d3.timeMonths(yearStart, yearEnd).map((monthStart) => ({
+          label: monthStart.toLocaleDateString(undefined, { month: "short" }),
+          week: d3.timeMonday.count(yearStart, monthStart),
+        }));
+        const MIN_LABEL_GAP = 24;
+        let lastLabelX = -Infinity;
+        for (const tick of monthTicks) {
+          const x = tick.week * rowHeight;
+          if (x - lastLabelX < MIN_LABEL_GAP) continue;
+          lastLabelX = x;
+          g.append("text")
+            .attr("x", x)
+            .attr("y", -6)
+            .attr("fill", "var(--muted-foreground)")
+            .style("font-size", "10px")
+            .text(tick.label);
+        }
+
         g.selectAll(".daylabel")
           .data(DAY_LABELS)
           .join("text")
           .attr("class", "daylabel")
-          .attr("x", -LEFT_LABEL_WIDTH + 2)
+          .attr("x", -LEFT_LABEL_WIDTH - centerOffset + 2)
           .attr("y", (_, i) => i * rowHeight + cellSize - 1)
           .attr("fill", "var(--muted-foreground)")
-          .style("font-size", "8px")
+          .style("font-size", "9px")
           .text((d) => d);
 
         const cells: CellDatum[] = [...yearGroup.days.entries()].map(([dateStr, value]) => {
           const date = parseDate(dateStr);
-          const week = d3.timeSunday.count(yearStart, date);
-          const dow = date.getDay();
+          const week = d3.timeMonday.count(yearStart, date);
+          // Monday-first row order: getDay() is Sunday=0..Saturday=6, so
+          // shift by 6 mod 7 to land Monday=0..Sunday=6, matching
+          // DAY_LABELS's top-to-bottom "M,T,W,T,F,S,S" order.
+          const dow = (date.getDay() + 6) % 7;
           return { dateStr, value, week, dow };
         });
 
         // Two rects per cell, not one: the small visible one (cellSize can
-        // be as little as 6px) and a separate, larger invisible hit
+        // be as little as 8px) and a separate, larger invisible hit
         // target — exactly the case marks.ts's own MARK_SPECS.hover doc
         // comment calls out by name ("calendar cells, scatter points")
         // for sizing the hit area yourself rather than the painted mark.
@@ -189,7 +253,7 @@ export function InteractiveCalendar({
         });
       });
     },
-    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, colorScale],
+    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, gridLeft, centerOffset, colorScale],
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
@@ -204,15 +268,30 @@ export function InteractiveCalendar({
     return d3.range(0, 1.0001, 0.1).map((t) => interpolate(t));
   }, [colorScale]);
 
+  // Where the hovered cell's value falls on the low->high legend, as a
+  // 0-1 fraction — drives the hover indicator line below. Clamped in case
+  // of floating-point edges right at the domain endpoints.
+  const legendT =
+    hovered !== null
+      ? Math.min(1, Math.max(0, (hovered.value - domain[0]) / ((domain[1] - domain[0]) || 1)))
+      : null;
+
   return (
-    <div style={{ width }}>
+    // overflow-x-auto is a safety net, not the primary width fix: at the
+    // MIN_CELL_SIZE floor on a very narrow viewport, WEEKS_PER_YEAR fixed
+    // columns can still add up to more px than the container actually
+    // has. Rather than shrinking cells past legibility to force a fit,
+    // this lets that rare case scroll horizontally (same tradeoff
+    // GitHub's own contribution graph makes on mobile) instead of
+    // visually breaking out of the container.
+    <div style={{ width }} className="overflow-x-auto">
       <div ref={setContainerEl} style={{ position: "relative", width }} role="img" aria-label={ariaLabel}>
         <svg ref={ref} />
         {hovered && containerRect ? (
           <ChartTooltip
             x={hovered.clientPos.x - containerRect.left}
             y={hovered.clientPos.y - containerRect.top}
-            title={formatDate(hovered.dateStr, "weekday")}
+            title={formatDate(hovered.dateStr, "weekdayYear")}
             rows={[{ label: valueLabel, value: formatValue(hovered.value), color: hoveredColor ?? "" }]}
             containerWidth={width}
           />
@@ -220,17 +299,29 @@ export function InteractiveCalendar({
       </div>
       {/* The legend/scale swatch — low -> high, so the color ramp's
           meaning doesn't rely on the reader guessing from the cells alone
-          (marks-and-anatomy.md: never make color the only channel). */}
+          (marks-and-anatomy.md: never make color the only channel). The
+          hover indicator (a small tick riding the gradient) answers "where
+          does this cell's value sit on the scale" directly, rather than
+          making the reader eyeball a color match against the swatch. */}
       <div
         className="flex items-center gap-2 text-xs text-muted-foreground"
-        style={{ height: LEGEND_ROW_HEIGHT, marginLeft: LEFT_LABEL_WIDTH }}
+        style={{ height: LEGEND_ROW_HEIGHT, marginLeft: LEFT_LABEL_WIDTH + centerOffset }}
       >
         <span className="tabular-nums">{formatValue(domain[0])}</span>
-        <span
-          aria-hidden
-          className="h-2 w-20 rounded-full"
-          style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
-        />
+        <span className="relative h-2 w-20 shrink-0">
+          <span
+            aria-hidden
+            className="block h-2 w-20 rounded-full"
+            style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
+          />
+          {legendT !== null ? (
+            <span
+              aria-hidden
+              className="absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
+              style={{ left: `${legendT * 100}%` }}
+            />
+          ) : null}
+        </span>
         <span className="tabular-nums">{formatValue(domain[1])}</span>
       </div>
     </div>
