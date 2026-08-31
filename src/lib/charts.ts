@@ -1,6 +1,6 @@
-import { asc, desc, inArray, isNotNull, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { days, people, places, workouts } from "@/db/schema";
+import { days, exercises, people, places, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
@@ -123,6 +123,60 @@ export async function getGymWeightComboData(): Promise<GymWeightComboData> {
     weight: weightRows.map((r) => ({ date: r.date, weightKg: r.weightKg as number })),
     workoutsByMonth,
   };
+}
+
+// --- Exercise mix (#19's InteractiveArea proving case) -------------------
+
+// Fixed order matching exerciseCategoryEnum's own declared order
+// (src/db/schema.ts) — color-follows-the-entity depends on every consumer
+// (InteractiveArea's default categoricalColor(i)) agreeing on one order,
+// not each re-deriving it from whatever order rows happen to come back
+// from the DB in.
+export const EXERCISE_CATEGORY_LABELS: Record<string, string> = {
+  distance: "Distance",
+  sport: "Sport",
+  strength: "Strength",
+};
+export const EXERCISE_CATEGORY_ORDER = ["distance", "sport", "strength"] as const;
+
+export type ExerciseWorkoutRow = {
+  date: string;
+  category: string;
+  exerciseId: number;
+  exerciseName: string;
+  /** Equipment/variant free text (workouts.subtype — see that column's
+   * own schema comment); null when never filled in. NOT the same thing
+   * as the exerciseSubtypes catalog table, which workouts.subtype isn't
+   * actually linked to yet (also see that comment). */
+  subtype: string | null;
+};
+
+/** Every workout on record, oldest first, with its exercise's category and
+ * name joined in. Deliberately raw/unaggregated rather than pre-bucketed
+ * by month the way this used to be shaped: #19's period/range/group-by
+ * controls all need to re-derive the chart's points reactively (a
+ * different bucket width, a narrower date range, a different grouping
+ * dimension), and viz/bin.ts's own architecture note is exactly this case
+ * — client-side re-bucketing of a series that's cheap to hold raw, not a
+ * server round-trip per control change. This app's workout volume is
+ * small enough (personal habit tracking, not a firehose) that shipping
+ * every row to the client is the right tradeoff over a query per filter
+ * change. Chart components re-derive whatever bucketed/grouped shape they
+ * need (see exercise-mix-explorer.tsx) rather than this function doing it
+ * for them. */
+export async function getExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {
+  const db = getDb();
+  return db
+    .select({
+      date: workouts.date,
+      category: exercises.category,
+      exerciseId: exercises.id,
+      exerciseName: exercises.name,
+      subtype: workouts.subtype,
+    })
+    .from(workouts)
+    .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+    .orderBy(asc(workouts.date));
 }
 
 // --- Place leaderboard ---------------------------------------------------

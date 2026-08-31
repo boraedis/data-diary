@@ -25,14 +25,15 @@ import { addDays } from "@/lib/date";
 // src/lib/date.ts's addDays — no epoch-day math (see format.ts's header
 // note for why that legacy pattern doesn't port).
 
-export type Period = "week" | "month" | "quarter";
+export type Period = "week" | "month" | "quarter" | "year";
 
 export type PeriodBucket<T> = {
   /** Sortable, human-meaningful bucket id: the ISO Monday for "week"
    * ("2026-02-09"), "YYYY-MM" for "month" (matches the shape existing
    * chart data already used before this helper existed, e.g.
-   * MonthlyAverage.month/WorkoutMonth.month in src/lib/charts.ts), or
-   * "YYYY-Qn" for "quarter". */
+   * MonthlyAverage.month/WorkoutMonth.month in src/lib/charts.ts),
+   * "YYYY-Qn" for "quarter", or plain "YYYY" for "year" (added for #19's
+   * PeriodPicker — the first caller to need yearly bucketing). */
   key: string;
   /** The bucket's first calendar day, always "YYYY-MM-DD" regardless of
    * `period` — for callers that want to sort/format buckets uniformly
@@ -63,6 +64,10 @@ function bucketFor(period: Period, dateStr: string): { key: string; start: strin
       const quarter = Math.floor((Number(monthStr) - 1) / 3) + 1;
       const startMonth = (quarter - 1) * 3 + 1;
       return { key: `${year}-Q${quarter}`, start: `${year}-${String(startMonth).padStart(2, "0")}-01` };
+    }
+    case "year": {
+      const key = dateStr.slice(0, 4);
+      return { key, start: `${key}-01-01` };
     }
   }
 }

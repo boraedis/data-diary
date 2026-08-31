@@ -39,6 +39,37 @@ export function styleAxis<Domain extends d3.AxisDomain>(
 }
 
 /**
+ * Draws faint horizontal gridlines across the plot, one per y-axis tick —
+ * the standard idiomatic d3 technique (a left axis whose ticks are drawn
+ * as full-width lines via `tickSize(-innerWidth)` instead of a few px,
+ * with its own tick text and domain path hidden) rather than hand-
+ * computing tick positions again from the same scale. Shared/reusable —
+ * any chart with a linear y-axis can call this, not just InteractiveArea
+ * (its first caller, #19 follow-up feedback: "add horizontal grid line").
+ *
+ * Call this BEFORE the real axis/data (append order is paint order in
+ * SVG) so gridlines sit visually behind everything else.
+ */
+export function drawYGridlines({
+  g,
+  y,
+  innerWidth,
+  ticks,
+}: {
+  g: d3.Selection<SVGGElement, unknown, null, undefined>;
+  y: d3.AxisScale<d3.NumberValue>;
+  innerWidth: number;
+  ticks?: number;
+}): d3.Selection<SVGGElement, unknown, null, undefined> {
+  const gridG = g.append("g").attr("aria-hidden", "true");
+  gridG
+    .call(d3.axisLeft(y).ticks(ticks ?? 5).tickSize(-innerWidth).tickFormat(() => ""))
+    .call((sel) => sel.select(".domain").remove())
+    .call((sel) => sel.selectAll("line").attr("stroke", "var(--border)").attr("stroke-opacity", 0.6));
+  return gridG;
+}
+
+/**
  * Draws a standard bottom + left axis pair inside `g` (already translated
  * to the chart's inner origin) — the common single-axis case every chart
  * in this codebase except gym-weight-combo-chart.tsx needs. A dual-axis

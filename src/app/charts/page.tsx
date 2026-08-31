@@ -31,6 +31,11 @@ const CHARTS = [
     description: "Body weight against how many workouts you logged each month.",
   },
   {
+    href: "/charts/exercise-mix",
+    title: "Exercise mix",
+    description: "Workout count by category, exercise, or subtype, over any time range.",
+  },
+  {
     href: "/charts/subs",
     title: "Subs over time",
     description: "A mini trend chart per sub, side by side.",
