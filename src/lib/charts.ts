@@ -1,6 +1,7 @@
 import { asc, desc, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days, people, places, workouts } from "@/db/schema";
+import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
 // domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
@@ -110,14 +111,13 @@ export async function getGymWeightComboData(): Promise<GymWeightComboData> {
     db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)),
   ]);
 
-  const monthCounts = new Map<string, number>();
-  for (const { date } of workoutDates) {
-    const month = date.slice(0, 7); // "YYYY-MM-DD" -> "YYYY-MM"
-    monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
-  }
-  const workoutsByMonth = [...monthCounts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, count]) => ({ month, count }));
+  // Monthly bucketing via the shared groupByPeriod helper (#16) — this
+  // used to be its own hand-rolled `Map<string, number>` here, duplicating
+  // the same "bucket by month" logic getHappinessAveragerData had below.
+  const workoutsByMonth = groupByPeriod(workoutDates, "month", (r) => r.date).map(({ key, items }) => ({
+    month: key,
+    count: items.length,
+  }));
 
   return {
     weight: weightRows.map((r) => ({ date: r.date, weightKg: r.weightKg as number })),
@@ -177,17 +177,16 @@ export async function getHappinessAveragerData(): Promise<MonthlyAverage[]> {
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
 
-  const byMonth = new Map<string, { sum: number; count: number }>();
-  for (const r of rows) {
-    const month = r.date.slice(0, 7);
-    const cur = byMonth.get(month) ?? { sum: 0, count: 0 };
-    cur.sum += r.happiness as number;
-    cur.count += 1;
-    byMonth.set(month, cur);
-  }
-  return [...byMonth.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, { sum, count }]) => ({ month, avg: sum / count, count }));
+  // Monthly bucketing via the shared groupByPeriod/summarizePeriods helper
+  // (#16) — this used to be its own hand-rolled `Map<string, {sum,count}>`
+  // here, duplicating the same "bucket by month" logic
+  // getGymWeightComboData had above.
+  const buckets = groupByPeriod(rows, "month", (r) => r.date);
+  return summarizePeriods(buckets, (r) => r.happiness as number).map(({ key, avg, count }) => ({
+    month: key,
+    avg,
+    count,
+  }));
 }
 
 // --- Subs small multiples ---------------------------------------------------

@@ -67,11 +67,17 @@
   --border: oklch(0.88 0.015 55);
   --input: oklch(0.88 0.015 55);
   --ring: oklch(0.58 0.15 40 / 50%);
-  --chart-1: oklch(0.62 0.15 40);
-  --chart-2: oklch(0.68 0.14 80);
-  --chart-3: oklch(0.55 0.1 150);
-  --chart-4: oklch(0.55 0.16 25);
-  --chart-5: oklch(0.5 0.07 230);
+  /* Categorical chart palette, tuned + validated for colorblind-safety
+     (issue #16, dataviz skill's validate_palette.js — CVD adjacent ΔE,
+     normal-vision floor, and contrast vs the card surface all pass in
+     both modes). Same 5 earthy hue families as before (terracotta,
+     ochre, sage, rust, dusty teal, per the .dark block's comment
+     below) — only lightness/chroma were re-stepped. */
+  --chart-1: oklch(0.68 0.18 40);
+  --chart-2: oklch(0.45 0.17 80);
+  --chart-3: oklch(0.64 0.14 150);
+  --chart-4: oklch(0.43 0.18 20);
+  --chart-5: oklch(0.47 0.14 225);
   /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
   --radius: 0.75rem;
   --sidebar: oklch(0.97 0.01 65);
@@ -113,11 +119,11 @@
   --border: oklch(0.92 0.02 60 / 13%);
   --input: oklch(0.92 0.02 60 / 17%);
   --ring: oklch(0.72 0.16 40 / 55%);
-  --chart-1: oklch(0.72 0.15 40);
-  --chart-2: oklch(0.78 0.14 85);
-  --chart-3: oklch(0.72 0.11 145);
-  --chart-4: oklch(0.68 0.17 22);
-  --chart-5: oklch(0.68 0.07 225);
+  --chart-1: oklch(0.52 0.17 40);
+  --chart-2: oklch(0.64 0.16 80);
+  --chart-3: oklch(0.49 0.13 150);
+  --chart-4: oklch(0.65 0.11 20);
+  --chart-5: oklch(0.52 0.14 225);
   --sidebar: oklch(0.19 0.016 48);
   --sidebar-foreground: oklch(0.96 0.012 70);
   --sidebar-primary: oklch(0.72 0.16 40);
