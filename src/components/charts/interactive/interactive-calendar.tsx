@@ -38,9 +38,6 @@ const LEFT_LABEL_WIDTH = 20;
 // Monday-first — see the module comment above. Index 0 = Monday, matching
 // the `dow` remap below ((getDay() + 6) % 7).
 const DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
-// A fixed row height purely for the legend swatch below the grid — not a
-// layout constant the SVG rendering itself depends on.
-const LEGEND_ROW_HEIGHT = 24;
 // GitHub's own contribution graph uses 53 week-columns as a safe upper
 // bound for any year regardless of which weekday Jan 1 falls on (a year
 // can span 53 distinct Monday-starting weeks; using a fixed column count
@@ -48,17 +45,17 @@ const LEGEND_ROW_HEIGHT = 24;
 // column year to year).
 const WEEKS_PER_YEAR = 53;
 // cellSize is purely a function of the *measured* container width (see
-// below) — no separate pre-measurement "guess" constant. The previous
-// version had a HEIGHT_GUESS_CELL_SIZE (12) baked into a caller-facing
+// below) — no separate pre-measurement "guess" constant. An earlier
+// version had a HEIGHT_GUESS_CELL_SIZE baked into a caller-facing
 // estimateCalendarHeight() that could disagree with the real computed
-// cellSize (up to 14) once actually measured, and that mismatch — a
-// shorter *guessed* height than the SVG the real cellSize went on to
-// paint — was the direct cause of the reported desktop height overflow.
-// The fix is structural, not a closer guess: this component no longer
-// exports a height estimate at all, and callers size it with
-// ResponsiveChart's auto-height mode (height prop omitted), which
-// measures the container's own rendered height instead of predicting it
-// up front. See sleep-calendar-chart.tsx.
+// cellSize once actually measured, and that mismatch — a shorter
+// *guessed* height than the SVG the real cellSize went on to paint — was
+// the direct cause of a reported desktop height overflow. The fix is
+// structural, not a closer guess: this component doesn't export a height
+// estimate at all, and callers size it with ResponsiveChart's auto-height
+// mode (height prop omitted), which measures the container's own
+// rendered height instead of predicting it up front. See
+// sleep-calendar-chart.tsx.
 const MIN_CELL_SIZE = 8;
 const MAX_CELL_SIZE = 18;
 
@@ -116,27 +113,26 @@ export function InteractiveCalendar({
   // "guess" constant feeding this (see MIN/MAX_CELL_SIZE's comment above) —
   // this is the one and only place cellSize is computed, from the real
   // measured `width`.
-  const availableForGrid = width - LEFT_LABEL_WIDTH;
   const cellSize = Math.min(
     MAX_CELL_SIZE,
-    Math.max(MIN_CELL_SIZE, Math.floor(availableForGrid / WEEKS_PER_YEAR) - CELL_GAP),
+    Math.max(MIN_CELL_SIZE, Math.floor((width - LEFT_LABEL_WIDTH) / WEEKS_PER_YEAR) - CELL_GAP),
   );
   const rowHeight = cellSize + CELL_GAP;
   const yearBlockHeight = 7 * rowHeight;
   const totalHeight = years.length * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP);
 
-  // The grid's own pixel width almost never divides evenly into
-  // `availableForGrid` (flooring cellSize leaves a remainder). Rather than
-  // dumping that leftover as blank space on the right — which is what
-  // read as "doesn't fill the whole width" — split it evenly on both
-  // sides of the grid so the whole component reads as centered and full
-  // rather than left-packed with a gap. Clamped at 0 so a narrow
-  // container (grid wider than available, at the MIN_CELL_SIZE floor)
-  // never gets a *negative* offset; see the overflow-x-auto safety net
-  // on the outer wrapper below for that case.
+  // The day-of-week label column and the day grid are ONE visual unit —
+  // center that whole unit in the available width, rather than centering
+  // the grid alone and leaving the labels pinned to the container's edge
+  // (which is what the previous version did, and what read as the labels
+  // being "detached" from the grid: as the grid shifted to center itself,
+  // the label column stayed put and a gap opened up between them). Both
+  // the label column and the grid live inside the same translated `g`
+  // below, so they now move together by construction.
   const gridWidth = WEEKS_PER_YEAR * rowHeight;
-  const centerOffset = Math.max(0, (availableForGrid - gridWidth) / 2);
-  const gridLeft = LEFT_LABEL_WIDTH + centerOffset;
+  const totalContentWidth = LEFT_LABEL_WIDTH + gridWidth;
+  const outerOffset = Math.max(0, (width - totalContentWidth) / 2);
+  const gridLeft = outerOffset + LEFT_LABEL_WIDTH;
 
   const domain = useMemo<[number, number]>(() => {
     const [lo, hi] = d3.extent(points, (p) => p.value);
@@ -168,8 +164,12 @@ export function InteractiveCalendar({
             `translate(${gridLeft},${yi * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP) + YEAR_LABEL_HEIGHT})`,
           );
 
+        // Year number and day-of-week labels both sit a fixed distance to
+        // the left of the grid's local origin (x=0) — since they're inside
+        // this same translated `g`, they move together with the grid as one
+        // connected unit no matter where `gridLeft` centers it.
         g.append("text")
-          .attr("x", -LEFT_LABEL_WIDTH - centerOffset + 2)
+          .attr("x", -LEFT_LABEL_WIDTH + 2)
           .attr("y", -6)
           .attr("fill", "var(--foreground)")
           .style("font-size", "12px")
@@ -203,7 +203,7 @@ export function InteractiveCalendar({
           .data(DAY_LABELS)
           .join("text")
           .attr("class", "daylabel")
-          .attr("x", -LEFT_LABEL_WIDTH - centerOffset + 2)
+          .attr("x", -LEFT_LABEL_WIDTH + 2)
           .attr("y", (_, i) => i * rowHeight + cellSize - 1)
           .attr("fill", "var(--muted-foreground)")
           .style("font-size", "9px")
@@ -253,7 +253,7 @@ export function InteractiveCalendar({
         });
       });
     },
-    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, gridLeft, centerOffset, colorScale],
+    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, gridLeft, colorScale],
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
@@ -283,8 +283,11 @@ export function InteractiveCalendar({
     // has. Rather than shrinking cells past legibility to force a fit,
     // this lets that rare case scroll horizontally (same tradeoff
     // GitHub's own contribution graph makes on mobile) instead of
-    // visually breaking out of the container.
-    <div style={{ width }} className="overflow-x-auto">
+    // visually breaking out of the container. `position: relative` makes
+    // this the containing block the sticky legend below sticks within
+    // (see that section's own comment) — it stays pinned only while this
+    // block, years of cells and all, is still in view.
+    <div style={{ width, position: "relative" }} className="overflow-x-auto">
       <div ref={setContainerEl} style={{ position: "relative", width }} role="img" aria-label={ariaLabel}>
         <svg ref={ref} />
         {hovered && containerRect ? (
@@ -299,19 +302,34 @@ export function InteractiveCalendar({
       </div>
       {/* The legend/scale swatch — low -> high, so the color ramp's
           meaning doesn't rely on the reader guessing from the cells alone
-          (marks-and-anatomy.md: never make color the only channel). The
-          hover indicator (a small tick riding the gradient) answers "where
-          does this cell's value sit on the scale" directly, rather than
-          making the reader eyeball a color match against the swatch. */}
+          (marks-and-anatomy.md: never make color the only channel). Full
+          calendar width (not a small fixed swatch) so it stays legible
+          from any cell, and `sticky bottom-0` keeps it in view as a
+          footer while scrolling through a tall multi-year grid — it
+          un-sticks once the whole calendar (its containing block, the
+          `relative` wrapper above) scrolls out of frame, rather than
+          floating forever. The hover indicator (a small tick riding the
+          gradient) answers "where does this cell's value sit on the
+          scale" directly, rather than making the reader eyeball a color
+          match against the swatch.
+
+          Note: the surrounding ChartCard (ui/card.tsx) sets
+          `overflow-hidden` on its own wrapper, which in some browsers
+          establishes a non-scrolling containing block that can prevent a
+          sticky descendant from tracking the *page's* scroll at all —
+          unverified here (no browser in this sandbox). If this doesn't
+          visibly stick, that's the first thing to check; swapping that
+          one class for `overflow-clip` (same visual clipping, but it
+          doesn't hijack sticky/scroll-snap) would be the fix. */}
       <div
-        className="flex items-center gap-2 text-xs text-muted-foreground"
-        style={{ height: LEGEND_ROW_HEIGHT, marginLeft: LEFT_LABEL_WIDTH + centerOffset }}
+        className="sticky bottom-0 z-10 flex items-center gap-3 border-t border-border bg-background/95 px-1 py-2 text-xs text-muted-foreground backdrop-blur"
+        style={{ width }}
       >
-        <span className="tabular-nums">{formatValue(domain[0])}</span>
-        <span className="relative h-2 w-20 shrink-0">
+        <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
+        <span className="relative h-2 min-w-0 flex-1">
           <span
             aria-hidden
-            className="block h-2 w-20 rounded-full"
+            className="block h-2 w-full rounded-full"
             style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
           />
           {legendT !== null ? (
@@ -322,7 +340,7 @@ export function InteractiveCalendar({
             />
           ) : null}
         </span>
-        <span className="tabular-nums">{formatValue(domain[1])}</span>
+        <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
       </div>
     </div>
   );
