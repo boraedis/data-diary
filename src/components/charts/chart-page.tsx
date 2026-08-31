@@ -1,41 +1,41 @@
 import Link from "next/link";
 import { SlidersHorizontal } from "lucide-react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 
 // Shared page shell for every /charts/* page (user feedback on PR #40's
 // preview: charts should use as much of the desktop viewport as
-// possible, and there should be a persistent side console for future
-// filter/sort/tool controls — "like legacy"). Before this, all 8 chart
-// pages hand-rolled the identical
+// possible, and there should be a place for future filter/sort/tool
+// controls). Before this, all 8 chart pages hand-rolled the identical
 // `mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-{2xl..5xl}
 // md:gap-6 md:py-12` wrapper + header row, differing only in which max-w
 // step they capped out at (max-w-2xl through max-w-5xl, no principled
 // reason for which page got which) — real duplication, and the thing
-// actually capping chart width, per ChartCard itself (`w-full`, no cap of
-// its own). This replaces all of that with one wide, uncapped container
-// (padding only) plus a two-column layout on desktop.
+// actually capping chart width, since ChartCard itself is `w-full` with
+// no cap of its own. This replaces all of that with one wide, uncapped
+// container (padding only) plus a filters row above the chart.
 //
-// Note: the dataviz skill's own interaction.md recommends filters as a
-// single row *above* the charts, not a sidebar — but this was an explicit,
-// specific ask ("like legacy... side console"), and "sort or other kinds
-// of tools" is broader than the date-range filters that guidance is about,
-// so this builds what was asked for rather than the skill's default.
+// The filters row (not a sidebar) follows the dataviz skill's own
+// interaction.md: "One row, above the charts. Filters sit in a single
+// left-aligned row above the content they scope — never inside a chart
+// card, never per-chart." An earlier version of this shell used a side
+// console instead (a specific, explicit ask at the time); revisited and
+// switched to match the skill's guidance once the tradeoff was flagged.
 
 export function ChartPage({
   title,
   backHref = "/charts",
   backLabel = "Charts",
-  sidebar,
+  filters,
   children,
 }: {
   title: string;
   backHref?: string;
   backLabel?: string;
-  /** Filter/sort/tool console for this chart. Omit for the default empty-
-   * state skeleton below — a labeled placeholder future issues build real
-   * controls into — or pass `null` to hide the console entirely for a
-   * chart that genuinely has nothing to filter. */
-  sidebar?: React.ReactNode;
+  /** Filter/sort/tool row for this chart — a single left-aligned row
+   * rendered above the chart content. Omit for the default empty-state
+   * skeleton below (a labeled placeholder future issues build real
+   * controls into), or pass `null` to omit the row entirely for a chart
+   * that genuinely has nothing to filter. */
+  filters?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -46,31 +46,23 @@ export function ChartPage({
           {backLabel}
         </Link>
       </div>
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1">{children}</div>
-        {sidebar === null ? null : (
-          <aside className="w-full shrink-0 lg:sticky lg:top-6 lg:w-72">
-            {sidebar ?? <ChartConsolePlaceholder />}
-          </aside>
-        )}
-      </div>
+      {filters === null ? null : (
+        <div className="flex flex-wrap items-center gap-2">{filters ?? <ChartFiltersPlaceholder />}</div>
+      )}
+      {children}
     </main>
   );
 }
 
-/** Default side-console content: an honest empty state, not fake disabled
+/** Default filters-row content: an honest empty state, not fake disabled
  * controls — this is scaffolding for future filter/sort/tool work (see
  * #14's epic plan), not a finished feature. A page with real controls
- * passes its own `sidebar` to `<ChartPage>` instead of this. */
-function ChartConsolePlaceholder() {
+ * passes its own `filters` to `<ChartPage>` instead of this. */
+function ChartFiltersPlaceholder() {
   return (
-    <Card size="sm" className="border-dashed shadow-none ring-foreground/5">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm text-muted-foreground">
-          <SlidersHorizontal aria-hidden className="size-4" />
-          Filters &amp; tools
-        </CardTitle>
-      </CardHeader>
-    </Card>
+    <div className="flex items-center gap-2 rounded-lg border border-dashed border-foreground/15 px-3 py-1.5 text-sm text-muted-foreground">
+      <SlidersHorizontal aria-hidden className="size-4" />
+      Filters &amp; tools
+    </div>
   );
 }
