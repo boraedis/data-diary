@@ -4,11 +4,21 @@ import { useMemo } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { drawStandardAxes } from "@/components/charts/interactive/axis";
+import { MARK_SPECS } from "@/components/charts/interactive/marks";
+import { ChartTooltip, useCrosshair } from "@/components/charts/interactive/tooltip";
+import { categoricalColor } from "@/lib/viz/color";
+import { formatDate } from "@/lib/viz/format";
 import type { MonthlyAverage } from "@/lib/charts";
 
 const MARGIN = { top: 12, right: 16, bottom: 28, left: 32 };
 
-type Point = { date: Date; avg: number; count: number };
+// `monthStr` ("YYYY-MM-01") rides alongside `date` so the tooltip can call
+// formatDate on the original string instead of round-tripping back through
+// `Date` (toISOString is UTC-based and can shift the calendar day in a
+// positive-UTC-offset timezone — see format.ts's own header note on why
+// this codebase never does that).
+type Point = { date: Date; monthStr: string; avg: number; count: number };
 
 function Averager({
   points,
@@ -19,44 +29,48 @@ function Averager({
   width: number;
   height: number;
 }) {
-  const ref = useD3<SVGSVGElement>(
-    (svg) => {
-      const innerWidth = width - MARGIN.left - MARGIN.right;
-      const innerHeight = height - MARGIN.top - MARGIN.bottom;
+  const innerWidth = width - MARGIN.left - MARGIN.right;
+  const innerHeight = height - MARGIN.top - MARGIN.bottom;
 
-      const x = d3
+  // x/radius are recomputed here (not just inside useD3 below) because the
+  // crosshair below needs each point's pixel X in React state, outside the
+  // useD3-controlled <svg> — see tooltip.tsx's useCrosshair doc comment for
+  // why that has to live outside the d3-rendered subtree. Both this and the
+  // useD3 effect key off the same `points`/`innerWidth` deps, so they never
+  // disagree on where a point actually sits.
+  const x = useMemo(
+    () =>
+      d3
         .scaleTime()
         .domain(d3.extent(points, (p) => p.date) as [Date, Date])
-        .range([0, innerWidth]);
-      const y = d3.scaleLinear().domain([0, 100]).range([innerHeight, 0]);
-      // Marker radius scales with how many days fed that month's average —
-      // a month averaged from 30 entries reads as more confident than one
-      // averaged from 2.
-      const radius = d3
+        .range([0, innerWidth]),
+    [points, innerWidth],
+  );
+  const y = useMemo(() => d3.scaleLinear().domain([0, 100]).range([innerHeight, 0]), [innerHeight]);
+  // Marker radius scales with how many days fed that month's average — a
+  // month averaged from 30 entries reads as more confident than one
+  // averaged from 2.
+  const radius = useMemo(
+    () =>
+      d3
         .scaleSqrt()
         .domain([0, d3.max(points, (p) => p.count) ?? 1])
-        .range([1.5, 5]);
+        .range([1.5, 5]),
+    [points],
+  );
 
+  const xPositions = useMemo(() => points.map((p) => x(p.date)), [points, x]);
+  const crosshair = useCrosshair(points, xPositions);
+
+  const ref = useD3<SVGSVGElement>(
+    (svg) => {
       const g = svg
         .attr("width", width)
         .attr("height", height)
         .append("g")
         .attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
 
-      g.append("g")
-        .attr("transform", `translate(0,${innerHeight})`)
-        .call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(innerWidth / 90))))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--muted-foreground)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
-
-      g.append("g")
-        .call(d3.axisLeft(y).ticks(5))
-        .call((axis) =>
-          axis.selectAll("text").attr("fill", "var(--muted-foreground)").style("font-size", "11px"),
-        )
-        .call((axis) => axis.selectAll("line,path").attr("stroke", "var(--border)"));
+      drawStandardAxes({ g, x, y, innerWidth, innerHeight, yTicks: 5 });
 
       const line = d3
         .line<Point>()
@@ -68,7 +82,7 @@ function Averager({
         .datum(points)
         .attr("fill", "none")
         .attr("stroke", "var(--chart-1)")
-        .attr("stroke-width", 2)
+        .attr("stroke-width", MARK_SPECS.line.strokeWidth)
         .attr("d", line);
 
       g.selectAll("circle")
@@ -78,16 +92,53 @@ function Averager({
         .attr("cy", (d) => y(d.avg))
         .attr("r", (d) => radius(d.count))
         .attr("fill", "var(--chart-1)")
-        .append("title")
-        .text(
-          (d) =>
-            `${d3.timeFormat("%b %Y")(d.date)}: avg ${d.avg.toFixed(1)} (${d.count} day${d.count === 1 ? "" : "s"})`,
-        );
+        .attr("stroke", "var(--card)")
+        .attr("stroke-width", MARK_SPECS.marker.ringWidth);
     },
-    [points, width, height],
+    [points, width, height, x, y, radius],
   );
 
-  return <svg ref={ref} />;
+  const hovered = crosshair.point;
+
+  return (
+    <>
+      <svg ref={ref} />
+      {/* Crosshair interaction surface — a plain HTML overlay, not part of
+          the d3-rendered <svg>, so pointer moves update only this and never
+          re-trigger the full chart redraw (useD3 wipes+rebuilds its whole
+          <svg> on every dependency change). */}
+      <div
+        className="absolute"
+        style={{ left: MARGIN.left, top: MARGIN.top, width: innerWidth, height: innerHeight }}
+        role="img"
+        aria-label="Monthly average happiness over time. Use arrow keys to inspect individual months, or hover a point."
+        {...crosshair.handlers}
+      >
+        {crosshair.pixelX !== null ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
+            style={{ left: crosshair.pixelX }}
+          />
+        ) : null}
+      </div>
+      {hovered ? (
+        <ChartTooltip
+          x={MARGIN.left + (crosshair.pixelX ?? 0)}
+          y={MARGIN.top + y(hovered.avg)}
+          title={formatDate(hovered.monthStr, "monthYear")}
+          rows={[
+            {
+              label: `${hovered.count} day${hovered.count === 1 ? "" : "s"}`,
+              value: hovered.avg.toFixed(1),
+              color: categoricalColor(0),
+            },
+          ]}
+          containerWidth={width}
+        />
+      ) : null}
+    </>
+  );
 }
 
 /** Monthly average happiness, one point per month sized by how many days
@@ -100,7 +151,7 @@ export function HappinessAveragerChart({ data }: { data: MonthlyAverage[] }) {
     () =>
       data.map((d) => {
         const [y, m] = d.month.split("-").map(Number);
-        return { date: new Date(y, m - 1, 1), avg: d.avg, count: d.count };
+        return { date: new Date(y, m - 1, 1), monthStr: `${d.month}-01`, avg: d.avg, count: d.count };
       }),
     [data],
   );
