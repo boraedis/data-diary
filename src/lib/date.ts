@@ -17,8 +17,20 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-function toDateString(dt: Date): string {
+export function toDateString(dt: Date): string {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+/** Parses a "YYYY-MM-DD" string into a Date built from its own year/month/
+ * day fields — never `new Date(dateStr)`, which parses a bare date as UTC
+ * midnight and can print the wrong calendar day in a negative-UTC-offset
+ * timezone (see viz/format.ts's formatDate, which follows the same rule).
+ * The inverse of toDateString — together they're the round-trip pair every
+ * chart that plots real dates on a d3 time scale should use instead of
+ * re-deriving this by hand per file (see interactive-line.tsx, #18). */
+export function parseDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 /** Pure calendar-date arithmetic — no timezone involved, just adding days

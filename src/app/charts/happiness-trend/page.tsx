@@ -12,7 +12,7 @@ export default async function HappinessTrendChartPage() {
     <ChartPage title="Happiness trend">
       <ChartCard
         title="Happiness trend"
-        description="Monthly average, marker size shows how many days fed each point."
+        description="Monthly average, marker size shows how many days fed each point; shaded band shows that month's day-to-day range."
         empty={data.length === 0}
       >
         <HappinessAveragerChart data={data} />
