@@ -38,7 +38,7 @@ jobs:
         uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
-          parent_branch: prod
+          parent_branch: production
           branch_name: pr-${{ github.event.number }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
@@ -77,7 +77,7 @@ jobs:
               `DATABASE_URL=${{ steps.neon-branch.outputs.db_url }}`,
               "```",
               "",
-              "Seeded from `prod`, with this PR's schema already applied. Deleted automatically when the PR closes.",
+              "Seeded from `production`, with this PR's schema already applied. Deleted automatically when the PR closes.",
             ].join("\n");
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -126,7 +126,7 @@ jobs:
               log,
               "```",
               "",
-              "Until this is resolved, this PR's Preview Deployment and `npm run dev:pr` will fall back to the shared `prod` database, which does **not** have this PR's schema changes — expect \"relation/column does not exist\" errors that look unrelated to this.",
+              "Until this is resolved, this PR's Preview Deployment and `npm run dev:pr` will fall back to the shared `production` database, which does **not** have this PR's schema changes — expect \"relation/column does not exist\" errors that look unrelated to this.",
               "",
               `Full run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             ].join("\n");
