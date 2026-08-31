@@ -12,22 +12,28 @@ import { formatDate } from "@/lib/viz/format";
 import type { WeightPoint } from "@/lib/charts";
 
 const MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
-const MAIN_HEIGHT = 220;
+// Overview strip stays a small fixed height regardless of viewport — it's
+// a mini navigation aid, not something that benefits from more vertical
+// space. MainLine gets whatever's left of the chart's own (now viewport-
+// responsive) total height instead of a hardcoded constant.
 const OVERVIEW_HEIGHT = 64;
+const MIN_MAIN_HEIGHT = 220;
 
 type Point = { date: Date; dateStr: string; weightKg: number };
 
 function MainLine({
   points,
   width,
+  height,
   domain,
 }: {
   points: Point[];
   width: number;
+  height: number;
   domain: [Date, Date];
 }) {
   const innerWidth = width - MARGIN.left - MARGIN.right;
-  const innerHeight = MAIN_HEIGHT - MARGIN.top - MARGIN.bottom;
+  const innerHeight = height - MARGIN.top - MARGIN.bottom;
 
   const visible = useMemo(
     () => points.filter((p) => p.date >= domain[0] && p.date <= domain[1]),
@@ -55,7 +61,7 @@ function MainLine({
     (svg) => {
       const g = svg
         .attr("width", width)
-        .attr("height", MAIN_HEIGHT)
+        .attr("height", height)
         .append("g")
         .attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
 
@@ -93,7 +99,7 @@ function MainLine({
           .attr("fill", "var(--chart-1)");
       }
     },
-    [visible, width, x, y],
+    [visible, width, height, x, y],
   );
 
   const hovered = crosshair.point;
@@ -220,10 +226,15 @@ export function WeightScrollerChart({ data }: { data: WeightPoint[] }) {
   const [selection, setSelection] = useState<[Date, Date] | null>(null);
 
   return (
-    <ResponsiveChart height={MAIN_HEIGHT + OVERVIEW_HEIGHT}>
-      {({ width }) => (
+    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+      {({ width, height }) => (
         <div>
-          <MainLine points={points} width={width} domain={selection ?? fullExtent} />
+          <MainLine
+            points={points}
+            width={width}
+            height={Math.max(MIN_MAIN_HEIGHT, height - OVERVIEW_HEIGHT)}
+            domain={selection ?? fullExtent}
+          />
           <Overview
             points={points}
             width={width}

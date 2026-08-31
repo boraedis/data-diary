@@ -3,11 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type ResponsiveChartProps = {
-  /** Fixed chart height in px — only width is responsive. Every legacy
-   * chart hardcoded both width and height from window.innerWidth/Height at
-   * load time with no resize handling at all; this component is the fix,
-   * so every chart built on top of it gets real responsiveness for free. */
-  height: number;
+  /** Fixed chart height in px — use this for a chart whose height should
+   * come from its own content (a calendar's row count, a small-multiples
+   * grid's mini-chart size), not from available screen space. Omit it to
+   * size height from the container's own CSS instead: give `className` a
+   * height utility (e.g. "h-[min(62vh,640px)]") and the container's
+   * *rendered* height drives `children`'s height argument the same way
+   * width already works — so the chart actually grows to fill available
+   * vertical space on a tall desktop viewport instead of sitting at a
+   * small fixed number. (User feedback on the chart pages: width alone
+   * being responsive wasn't enough — "still not max height.") */
+  height?: number;
   minWidth?: number;
   className?: string;
   /** Optional callback ref to the measured wrapper div (the `position:
@@ -21,9 +27,10 @@ type ResponsiveChartProps = {
   children: (dimensions: { width: number; height: number }) => React.ReactNode;
 };
 
-/** Measures its container's width via ResizeObserver and passes
- * {width, height} to `children` as a render prop. Renders nothing until the
- * first measurement lands (avoids drawing a chart at a wrong width, then
+/** Measures its container's width — and, when `height` is omitted, its
+ * height too — via ResizeObserver, and passes {width, height} to
+ * `children` as a render prop. Renders nothing until the first
+ * measurement lands (avoids drawing a chart at a wrong size, then
  * snapping — there's exactly one layout pass, not a flash-then-resize).
  *
  * `position: relative` so a `<ChartTooltip>` (interactive/tooltip.tsx),
@@ -39,6 +46,7 @@ export function ResponsiveChart({
 }: ResponsiveChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [measuredHeight, setMeasuredHeight] = useState(0);
 
   const setRefs = useCallback(
     (el: HTMLDivElement | null) => {
@@ -55,14 +63,31 @@ export function ResponsiveChart({
       const entry = entries[0];
       if (!entry) return;
       setWidth(Math.max(minWidth, Math.floor(entry.contentRect.width)));
+      // Only track measured height when the caller isn't pinning it to a
+      // fixed number — a fixed-height chart sizes its own SVG and the
+      // container just follows that, so re-measuring here would be
+      // circular (and pointless).
+      if (height === undefined) {
+        setMeasuredHeight(Math.floor(entry.contentRect.height));
+      }
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [minWidth]);
+  }, [minWidth, height]);
+
+  const resolvedHeight = height ?? measuredHeight;
 
   return (
-    <div ref={setRefs} className={className} style={{ width: "100%", position: "relative" }}>
-      {width > 0 ? children({ width, height }) : <div style={{ height }} />}
+    <div
+      ref={setRefs}
+      className={className}
+      style={{ width: "100%", position: "relative", ...(height !== undefined ? { height } : {}) }}
+    >
+      {width > 0 && resolvedHeight > 0 ? (
+        children({ width, height: resolvedHeight })
+      ) : (
+        <div style={height !== undefined ? { height } : undefined} />
+      )}
     </div>
   );
 }

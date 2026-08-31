@@ -166,7 +166,7 @@ export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <ResponsiveChart height={260} wrapperRef={setContainerEl}>
+      <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" wrapperRef={setContainerEl}>
         {({ width, height }) => (
           <>
             <Combo
