@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { ChartCard } from "@/components/charts/chart-card";
+import { ChartPage } from "@/components/charts/chart-page";
 import { PeopleNetworkChart } from "@/components/charts/people-network-chart";
 import { getPeopleNetworkData } from "@/lib/charts";
 
@@ -9,15 +9,7 @@ export default async function PeopleNetworkChartPage() {
   const data = await getPeopleNetworkData();
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-5xl md:gap-6 md:py-12">
-      <div className="flex items-center justify-between">
-        <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">
-          People network
-        </h1>
-        <Link href="/charts" className="text-xs text-muted-foreground hover:text-foreground">
-          Charts
-        </Link>
-      </div>
+    <ChartPage title="People network">
       <ChartCard
         title="People network"
         description="The 40 most-logged people; connected when logged together on the same day. Drag to reposition."
@@ -25,6 +17,6 @@ export default async function PeopleNetworkChartPage() {
       >
         <PeopleNetworkChart data={data} />
       </ChartCard>
-    </main>
+    </ChartPage>
   );
 }
