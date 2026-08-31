@@ -51,7 +51,14 @@ export function HappinessAveragerChart({ data }: { data: MonthlyAverage[] }) {
             {
               id: "happiness",
               label: "Happiness",
-              color: categoricalColor(0),
+              // Happiness charts are green — an explicit, deliberate
+              // choice for this specific chart's identity (a single-series
+              // chart, not a multi-series categorical assignment the
+              // dataviz skill's fixed-slot-order rule governs), not the
+              // toolkit default. Same choice made in histogram-chart.tsx
+              // for the distribution chart, so every "happiness" chart
+              // reads the same color.
+              color: categoricalColor(2),
               points,
               band: true,
               markers: (_point, i) => radiusScale(data[i]?.count ?? 0),

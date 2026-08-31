@@ -12,7 +12,7 @@ export default async function HappinessChartPage() {
     <ChartPage title="Happiness distribution">
       <ChartCard
         title="Happiness distribution"
-        description={`${values.length} day${values.length === 1 ? "" : "s"} logged, bucketed in 10-point ranges.`}
+        description={`${values.length} day${values.length === 1 ? "" : "s"} logged, one bar per point.`}
         empty={values.length === 0}
       >
         <HistogramChart values={values} />
