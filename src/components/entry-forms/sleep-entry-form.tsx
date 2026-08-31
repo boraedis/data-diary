@@ -40,6 +40,7 @@ export function SleepEntryForm({ date, initial }: { date: string; initial: Sleep
       }
 
       const saved = body as DayPayload;
+
       setSleep({
         sleepTime: saved.sleepTime,
         wakeTime: saved.wakeTime,
@@ -57,6 +58,23 @@ export function SleepEntryForm({ date, initial }: { date: string; initial: Sleep
     }
   }
 
+  function parseTime(time: string | null): number {
+    if (!time) {
+      return 0;
+    }
+
+    const [hour, minute] = time.split(":").map(Number);
+    return hour * 60 + minute;
+  }
+
+  function handleSummary() {
+    const sleepTime = (document.getElementById("sleepTime") as HTMLInputElement)?.value || null;
+    const wakeTime = (document.getElementById("wakeTime") as HTMLInputElement)?.value || null;
+    const overNight = (document.getElementById("wakeCrossedMidnight") as HTMLInputElement)?.checked || false;
+    const sleepMins = (overNight ? 1440 : 0) + parseTime(wakeTime) - parseTime(sleepTime);
+    document.getElementById("sleep-summary")!.textContent = `Slept from ${sleepTime} to ${wakeTime} for ${Math.floor(sleepMins / 60)} hours and ${sleepMins % 60} minutes`;
+  }
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 pb-20">
       <Card size="sm">
@@ -70,7 +88,10 @@ export function SleepEntryForm({ date, initial }: { date: string; initial: Sleep
               id="sleepTime"
               type="time"
               value={sleep.sleepTime ?? ""}
-              onChange={(e) => set("sleepTime", e.target.value || null)}
+              onChange={(e) => {
+                set("sleepTime", e.target.value || null);
+                handleSummary();
+              }}
             />
           </div>
           <div className="space-y-1.5">
@@ -79,18 +100,30 @@ export function SleepEntryForm({ date, initial }: { date: string; initial: Sleep
               id="wakeTime"
               type="time"
               value={sleep.wakeTime ?? ""}
-              onChange={(e) => set("wakeTime", e.target.value || null)}
+              onChange={(e) => {
+                set("wakeTime", e.target.value || null);
+                handleSummary();
+              }}
             />
           </div>
           <label className="col-span-2 flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
+              id="wakeCrossedMidnight"
               className="size-4 rounded border-input accent-primary"
               checked={sleep.wakeCrossedMidnight}
-              onChange={(e) => set("wakeCrossedMidnight", e.target.checked)}
+              onChange={(e) => {
+                set("wakeCrossedMidnight", e.target.checked);
+                handleSummary();
+              }}
             />
             Woke up the day after I fell asleep
           </label>
+        </CardContent>
+        <Label className="block text-sm text-muted-foreground px-4" id="sleep-summary">
+          adadwawwaw
+        </Label>
+        <CardContent className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-6">
           <div className="space-y-1.5">
             <Label htmlFor="sleepLocationType">Sleep location</Label>
             <Input

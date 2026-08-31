@@ -19,10 +19,12 @@ export function DurationInput({
   id,
   totalMinutes,
   onChange,
+  max_hours = 24
 }: {
   id: string;
   totalMinutes: number | null;
   onChange: (totalMinutes: number | null) => void;
+  max_hours?: number;
 }) {
   const hours = totalMinutes !== null ? Math.floor(totalMinutes / 60) : null;
   const minutes = totalMinutes !== null ? totalMinutes % 60 : null;
@@ -46,6 +48,7 @@ export function DurationInput({
         aria-label="Hours"
         className="w-20"
         value={hours ?? ""}
+        max={max_hours}
         onChange={(e) => update(parseNonNegativeInt(e.target.value), minutes)}
       />
       <span className="text-base text-muted-foreground">h</span>
