@@ -248,7 +248,6 @@ function BookSessionDetailModal({
               onChange={(value) => setLocationType(value ?? "")}
               items={locationTypes}
               onCreated={onLocationTypeCreated}
-              placeholder="bed, commute…"
             />
           </div>
 

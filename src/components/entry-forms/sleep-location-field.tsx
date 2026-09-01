@@ -1,10 +1,11 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import type { SleepLocationSubtypeItem, SleepLocationTypeItem } from "@/lib/catalog-admin";
 
 type TypeWithSubtypes = SleepLocationTypeItem & { subtypes: SleepLocationSubtypeItem[] };
@@ -12,11 +13,14 @@ type TypeWithSubtypes = SleepLocationTypeItem & { subtypes: SleepLocationSubtype
 /** Sleep "location" / "location detail" pair (days.sleepLocationType/
  * sleepLocationSubtype), backed by the sleepLocationTypes/
  * sleepLocationSubtypes catalog (issue #59) — both fields stay free text
- * (see the `days` table comment in schema.ts), with catalog names offered
- * as suggestions via Input+datalist (same pattern place-detail.tsx uses for
- * category/subcategory) plus a single "+ New" modal that resolves-or-creates
- * both the type and (if given) its subtype in one step, since the day-entry
- * side only has the free-text strings to work from, not a type id. */
+ * (see the `days` table comment in schema.ts), rendered as plain styled
+ * `Select`s (same as every other small-option-set field in this app, e.g.
+ * Day type in happiness-entry-form.tsx) rather than free-text inputs, plus a
+ * single "+ New" modal that resolves-or-creates both the type and (if given)
+ * its subtype in one step, since the day-entry side only has the free-text
+ * strings to work from, not a type id. A value that predates this catalog
+ * (or isn't in it yet) still renders as a selectable option rather than
+ * silently resetting to "None". */
 export function SleepLocationField({
   type,
   subtype,
@@ -32,8 +36,6 @@ export function SleepLocationField({
   items: TypeWithSubtypes[];
   onCreated: (type: TypeWithSubtypes) => void;
 }) {
-  const typeListId = useId();
-  const subtypeListId = useId();
   const [modalOpen, setModalOpen] = useState(false);
   const [newType, setNewType] = useState("");
   const [newSubtype, setNewSubtype] = useState("");
@@ -42,6 +44,8 @@ export function SleepLocationField({
 
   const matchedType = items.find((t) => t.name === type);
   const subtypeOptions = matchedType ? matchedType.subtypes : items.flatMap((t) => t.subtypes);
+  const hasUnlistedType = type !== null && !items.some((t) => t.name === type);
+  const hasUnlistedSubtype = subtype !== null && !subtypeOptions.some((s) => s.name === subtype);
 
   function openModal() {
     setNewType(type ?? "");
@@ -97,39 +101,37 @@ export function SleepLocationField({
     <>
       <div className="space-y-1.5">
         <Label htmlFor="sleepLocationType">Sleep location</Label>
-        <Input
-          id="sleepLocationType"
-          list={typeListId}
-          placeholder="e.g. home"
-          value={type ?? ""}
-          onChange={(e) => onTypeChange(e.target.value || null)}
-        />
-        <datalist id={typeListId}>
+        <Select id="sleepLocationType" value={type ?? ""} onChange={(e) => onTypeChange(e.target.value || null)}>
+          <option value="">None</option>
+          {hasUnlistedType ? <option value={type ?? ""}>{type}</option> : null}
           {items.map((t) => (
-            <option key={t.id} value={t.name} />
+            <option key={t.id} value={t.name}>
+              {t.name}
+            </option>
           ))}
-        </datalist>
+        </Select>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="sleepLocationSubtype">Sleep location detail</Label>
         <div className="flex items-center gap-2">
-          <Input
+          <Select
             id="sleepLocationSubtype"
-            list={subtypeListId}
-            placeholder="e.g. own bed"
             value={subtype ?? ""}
             onChange={(e) => onSubtypeChange(e.target.value || null)}
             className="flex-1"
-          />
+          >
+            <option value="">None</option>
+            {hasUnlistedSubtype ? <option value={subtype ?? ""}>{subtype}</option> : null}
+            {subtypeOptions.map((s) => (
+              <option key={s.id} value={s.name}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
           <Button type="button" variant="outline" size="sm" onClick={openModal}>
             + New
           </Button>
         </div>
-        <datalist id={subtypeListId}>
-          {subtypeOptions.map((s) => (
-            <option key={s.id} value={s.name} />
-          ))}
-        </datalist>
       </div>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="New sleep location">

@@ -1,34 +1,37 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import type { EntertainmentLocationTypeItem } from "@/lib/catalog-admin";
 
-/** Free-text "Where" field for a movie/TV/book/sports/game entry, backed by
- * the entertainmentLocationTypes catalog (issue #59) — same
- * free-text-but-catalog-suggested relationship places.category has with
- * placeCategories (see place-detail.tsx's Input+datalist), plus a "+ New"
+/** "Where" field for a movie/TV/book/sports/game entry, backed by the
+ * entertainmentLocationTypes catalog (issue #59) — a plain styled `Select`
+ * (same as every other small-option-set field in this app, e.g. Day type in
+ * happiness-entry-form.tsx) rather than a free-text input, plus a "+ New"
  * modal so a brand-new location gets added to the catalog on the spot,
- * mirroring ExercisePicker's search-or-create shape. */
+ * mirroring the sports league/team pickers' Select+"+ New" shape. The value
+ * is still the catalog item's plain name string, not its id — matching
+ * movieWatches.locationType etc. staying free text, not an FK (see the
+ * schema comment) — so a legacy value that predates this catalog still
+ * renders correctly even if it's not (yet) a real catalog row. */
 export function EntertainmentLocationTypeField({
   id,
   value,
   onChange,
   items,
   onCreated,
-  placeholder,
 }: {
   id: string;
   value: string | null;
   onChange: (value: string | null) => void;
   items: EntertainmentLocationTypeItem[];
   onCreated: (item: EntertainmentLocationTypeItem) => void;
-  placeholder?: string;
 }) {
-  const datalistId = useId();
+  const hasUnlistedValue = value !== null && !items.some((item) => item.name === value);
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -64,19 +67,20 @@ export function EntertainmentLocationTypeField({
   return (
     <>
       <div className="flex items-center gap-2">
-        <Input
+        <Select
           id={id}
-          list={datalistId}
           value={value ?? ""}
           onChange={(e) => onChange(e.target.value || null)}
-          placeholder={placeholder}
           className="flex-1"
-        />
-        <datalist id={datalistId}>
+        >
+          <option value="">None</option>
+          {hasUnlistedValue ? <option value={value ?? ""}>{value}</option> : null}
           {items.map((item) => (
-            <option key={item.id} value={item.name} />
+            <option key={item.id} value={item.name}>
+              {item.name}
+            </option>
           ))}
-        </datalist>
+        </Select>
         <Button type="button" variant="outline" size="sm" onClick={() => setModalOpen(true)}>
           + New
         </Button>

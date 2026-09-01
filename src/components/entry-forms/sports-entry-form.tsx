@@ -451,7 +451,6 @@ function SportsWatchDetailModal({
               onChange={(value) => setLocationType(value ?? "")}
               items={locationTypes}
               onCreated={onLocationTypeCreated}
-              placeholder="stadium, home…"
             />
           </div>
 

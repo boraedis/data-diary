@@ -231,7 +231,6 @@ function MovieDetailModal({
               onChange={(value) => setLocationType(value ?? "")}
               items={locationTypes}
               onCreated={onLocationTypeCreated}
-              placeholder="theater, home…"
             />
           </div>
           <Button
