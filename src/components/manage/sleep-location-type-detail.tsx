@@ -167,6 +167,7 @@ function SubtypeRow({
           Edit
         </Button>
         <DeleteCatalogItem
+          size="xs"
           itemLabel={subtype.name}
           isBlocked={subtype.usage.dayCount > 0}
           onDelete={async () => {
