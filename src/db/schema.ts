@@ -618,7 +618,12 @@ export const entertainmentEntries = pgTable(
       .notNull()
       .references(() => entertainmentCatalog.id, { onDelete: "restrict" }),
     durationMinutes: integer("duration_minutes"),
-    notes: text("notes"),
+    // Free text matched by name against entertainmentLocationTypes (issue
+    // #61) — same relationship every other kind's locationType column has
+    // with that catalog. Replaces the old free-form `notes` field (dropped,
+    // not renamed — issue #61 narrows this kind down to "just duration and
+    // where," matching the fields every other kind already carries).
+    locationType: text("location_type"),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (table) => [index("entertainment_entries_date_idx").on(table.date)]
@@ -673,6 +678,11 @@ export const movieWatches = pgTable(
     // free-text-but-catalog-backed relationship days.sleepLocationType has
     // with sleepLocationTypes.
     locationType: text("location_type"),
+    // Defaults from movies.runtimeMinutes client-side but is independently
+    // editable/storable per watch (issue #61) — a rewatch might run long,
+    // get paused and resumed, etc., so it's its own column rather than
+    // always trusting the catalog's runtime.
+    durationMinutes: integer("duration_minutes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("movie_watches_date_idx").on(table.date)]
@@ -750,6 +760,9 @@ export const tvEpisodeWatches = pgTable(
       .references(() => tvEpisodes.id, { onDelete: "restrict" }),
     date: date("date", { mode: "string" }).references(() => days.date, { onDelete: "cascade" }),
     locationType: text("location_type"),
+    // Same reasoning as movieWatches.durationMinutes (issue #61) — defaults
+    // from tvEpisodes.runtimeMinutes client-side, independently editable.
+    durationMinutes: integer("duration_minutes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -897,6 +910,34 @@ export const sportsWatches = pgTable(
   },
   (table) => [index("sports_watches_date_idx").on(table.date)]
 );
+
+// --- Sports seasons / game types (catalog) ----------------------------------
+// Backs sportsWatches.season/gameType (issue #61) the same way
+// sleepLocationTypes/entertainmentLocationTypes back their own free-text
+// columns: both stay plain strings on sportsWatches, matched by name, not
+// FKs. Seasons are scoped to an existing league (a season name like
+// "2023-24" only means something within a specific league), so this
+// mirrors placeSubcategories/sleepLocationSubtypes — a child row under an
+// already-real parent catalog — rather than needing a second top-level
+// table the way sleep's type/subtype pair did.
+export const sportsSeasons = pgTable(
+  "sports_seasons",
+  {
+    id: serial("id").primaryKey(),
+    leagueId: integer("league_id")
+      .notNull()
+      .references(() => sportsLeagues.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("sports_seasons_league_id_name_idx").on(table.leagueId, table.name)]
+);
+
+// Flat, unscoped — "regular season"/"playoffs"/"exhibition" means the same
+// thing across every sport/league, unlike season.
+export const sportsGameTypes = pgTable("sports_game_types", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
 
 // --- Entertainment: games ---------------------------------------------
 // Kept intentionally minimal — the historical survey found the legacy games

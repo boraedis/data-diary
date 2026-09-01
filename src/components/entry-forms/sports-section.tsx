@@ -1,27 +1,24 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { DurationInput } from "@/components/ui/duration-input";
-import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
-import { EntertainmentLocationTypeField } from "@/components/entry-forms/entertainment-location-type-field";
-import type { EntertainmentLocationTypeItem } from "@/lib/catalog-admin";
-import type { DayPayload, SportCatalogItem, SportsLeagueItem, SportsPayload, SportsTeamItem } from "@/lib/days";
+import { NameCatalogField } from "@/components/entry-forms/name-catalog-field";
+import { usePendingOpenMatch, type PendingOpen } from "@/lib/use-pending-open";
+import type { EntertainmentLocationTypeItem, SportsGameTypeItem, SportsSeasonItem } from "@/lib/catalog-admin";
+import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem } from "@/lib/days";
 
 // The nested shape GET /api/sports actually returns — leagues and teams
 // hydrated onto each sport so the picker cascade (sport -> league -> team)
-// never needs a second round trip. Not exported from src/lib/days.ts as a
-// named type (listSportsCatalog's return type is inline there), so it's
-// composed locally from the three catalog item types that are exported.
+// never needs a second round trip.
 export type SportsCatalogEntry = SportCatalogItem & { leagues: SportsLeagueItem[]; teams: SportsTeamItem[] };
 
-type Row = {
+export type SportsRow = {
   sportId: number;
   leagueId: number | null;
   season: string | null;
@@ -33,13 +30,86 @@ type Row = {
   locationType: string | null;
 };
 
-function toSearchItem(sport: SportsCatalogEntry): SearchItem {
-  return { id: sport.id, primary: sport.name, secondary: sport.isTeamSport ? null : "individual" };
+// Home/away team options grouped by league (issue #61) — the currently
+// selected league's teams first (unlabeled, since that's the group you're
+// actually choosing from), then every other league as its own labeled
+// group (alphabetical), then any team with no league last.
+function groupTeamsByLeague(teams: SportsTeamItem[], leagues: SportsLeagueItem[], selectedLeagueId: number | null) {
+  const byLeague = new Map<number | null, SportsTeamItem[]>();
+  for (const t of teams) {
+    const list = byLeague.get(t.leagueId) ?? [];
+    list.push(t);
+    byLeague.set(t.leagueId, list);
+  }
+  const sortedLeagues = [...leagues].sort((a, b) => a.name.localeCompare(b.name));
+  const otherLeagues = sortedLeagues.filter((l) => l.id !== selectedLeagueId);
+  const selectedLeague = sortedLeagues.find((l) => l.id === selectedLeagueId) ?? null;
+  return {
+    selected: selectedLeague ? (byLeague.get(selectedLeague.id) ?? []) : [],
+    selectedLeague,
+    other: otherLeagues.map((l) => ({ league: l, teams: byLeague.get(l.id) ?? [] })).filter((g) => g.teams.length > 0),
+    unassigned: byLeague.get(null) ?? [],
+  };
 }
 
-/** "+ New sport" — mirrors NewExerciseModal (name + a small classification
- * toggle). isTeamSport decides nothing about the form below beyond framing
- * ("team" vs "individual athlete"), same as legacy's own use of the field. */
+function TeamSelect({
+  id,
+  label,
+  value,
+  onChange,
+  teams,
+  leagues,
+  selectedLeagueId,
+}: {
+  id: string;
+  label: string;
+  value: number | null;
+  onChange: (id: number | null) => void;
+  teams: SportsTeamItem[];
+  leagues: SportsLeagueItem[];
+  selectedLeagueId: number | null;
+}) {
+  const grouped = groupTeamsByLeague(teams, leagues, selectedLeagueId);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Select id={id} value={value ?? ""} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
+        <option value="">None</option>
+        {grouped.selected.length > 0 ? (
+          <optgroup label={grouped.selectedLeague?.name ?? "This league"}>
+            {grouped.selected.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
+        {grouped.other.map(({ league, teams: leagueTeams }) => (
+          <optgroup key={league.id} label={league.name}>
+            {leagueTeams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+        {grouped.unassigned.length > 0 ? (
+          <optgroup label="No league">
+            {grouped.unassigned.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
+      </Select>
+    </div>
+  );
+}
+
+/** "+ New sport" — a fallback for a sport with no leagues cataloged yet
+ * (the unified search only surfaces leagues, per issue #61 — a sport needs
+ * at least one league before it's reachable that way). */
 function NewSportModal({
   open,
   onClose,
@@ -117,8 +187,6 @@ function NewSportModal({
   );
 }
 
-/** "+ New league", scoped to whichever sport the watch-detail modal already
- * has open — same nested-under-a-parent shape as place subcategories. */
 function NewLeagueModal({
   open,
   sportId,
@@ -182,12 +250,7 @@ function NewLeagueModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-league-type">Type</Label>
-          <Input
-            id="new-league-type"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            placeholder="college, pro…"
-          />
+          <Input id="new-league-type" value={type} onChange={(e) => setType(e.target.value)} placeholder="college, pro…" />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
@@ -198,8 +261,6 @@ function NewLeagueModal({
   );
 }
 
-/** "+ New team", scoped to the sport and (as a convenience default, not a
- * hard requirement) whichever league is already selected. */
 function NewTeamModal({
   open,
   sportId,
@@ -310,16 +371,98 @@ function NewTeamModal({
   );
 }
 
-/** The "log this watch" modal — opens right after a sport is picked (from
- * search or freshly created), same reuse-for-add-and-edit shape as
- * MovieDetailModal. League and both team pickers are scoped to the chosen
- * sport's own catalog entry, with a "+ New" escape hatch at each level. */
+/** "+ New season", scoped to whichever league is currently selected in the
+ * parent modal — same nested-under-a-parent shape as NewLeagueModal itself. */
+function NewSeasonModal({
+  open,
+  leagueId,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  leagueId: number | null;
+  onClose: () => void;
+  onCreated: (item: SportsSeasonItem) => void;
+}) {
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function reset() {
+    setName("");
+    setError(null);
+  }
+
+  async function handleCreate() {
+    if (!name.trim() || leagueId === null) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sports-leagues/${leagueId}/seasons`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(typeof body?.error === "string" ? body.error : "Failed to create");
+        return;
+      }
+      onCreated(body as SportsSeasonItem);
+      reset();
+      onClose();
+    } catch {
+      setError("Network error");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => {
+        reset();
+        onClose();
+      }}
+      title="New season"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="new-sports-season-name">Name</Label>
+          <Input
+            id="new-sports-season-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. 2023-24"
+            autoFocus
+          />
+        </div>
+        {error ? <span className="text-sm text-destructive">{error}</span> : null}
+        <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
+          {creating ? "Adding…" : "Add"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** The "log this watch" modal — opens the moment a league is picked (from
+ * the unified search) or the sport-only "+ New sport" fallback, and is also
+ * how an already-logged watch gets edited. Season is scoped to whichever
+ * league is currently chosen (same cross-filtering SleepLocationField uses
+ * for type -> subtype); Game type is a flat catalog like Location Type. */
 function SportsWatchDetailModal({
   open,
   sport,
   initial,
+  initialLeagueId,
   locationTypes,
   onLocationTypeCreated,
+  gameTypes,
+  onGameTypeCreated,
+  seasonsByLeague,
+  onSeasonCreated,
   onClose,
   onSave,
   onLeagueCreated,
@@ -327,15 +470,20 @@ function SportsWatchDetailModal({
 }: {
   open: boolean;
   sport: SportsCatalogEntry | null;
-  initial: Omit<Row, "sportId"> | null;
+  initial: Omit<SportsRow, "sportId"> | null;
+  initialLeagueId: number | null;
   locationTypes: EntertainmentLocationTypeItem[];
   onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
+  gameTypes: SportsGameTypeItem[];
+  onGameTypeCreated: (item: SportsGameTypeItem) => void;
+  seasonsByLeague: Record<number, SportsSeasonItem[]>;
+  onSeasonCreated: (leagueId: number, season: SportsSeasonItem) => void;
   onClose: () => void;
-  onSave: (value: Omit<Row, "sportId">) => void;
+  onSave: (value: Omit<SportsRow, "sportId">) => void;
   onLeagueCreated: (sportId: number, league: SportsLeagueItem) => void;
   onTeamCreated: (sportId: number, team: SportsTeamItem) => void;
 }) {
-  const [leagueId, setLeagueId] = useState<number | null>(initial?.leagueId ?? null);
+  const [leagueId, setLeagueId] = useState<number | null>(initial?.leagueId ?? initialLeagueId);
   const [homeTeamId, setHomeTeamId] = useState<number | null>(initial?.homeTeamId ?? null);
   const [awayTeamId, setAwayTeamId] = useState<number | null>(initial?.awayTeamId ?? null);
   const [season, setSeason] = useState(initial?.season ?? "");
@@ -345,8 +493,12 @@ function SportsWatchDetailModal({
   const [locationType, setLocationType] = useState(initial?.locationType ?? "");
   const [newLeagueOpen, setNewLeagueOpen] = useState(false);
   const [newTeamOpen, setNewTeamOpen] = useState(false);
+  const [newSeasonOpen, setNewSeasonOpen] = useState(false);
 
   if (!sport) return null;
+
+  const seasonOptions = leagueId !== null ? (seasonsByLeague[leagueId] ?? []) : [];
+  const hasUnlistedSeason = season.trim() !== "" && !seasonOptions.some((s) => s.name === season);
 
   return (
     <>
@@ -373,59 +525,64 @@ function SportsWatchDetailModal({
             </Select>
           </div>
 
+          <TeamSelect
+            id="sports-detail-home"
+            label={sport.isTeamSport ? "Home team" : "Athlete"}
+            value={homeTeamId}
+            onChange={setHomeTeamId}
+            teams={sport.teams}
+            leagues={sport.leagues}
+            selectedLeagueId={leagueId}
+          />
+
+          {sport.isTeamSport ? (
+            <TeamSelect
+              id="sports-detail-away"
+              label="Away team"
+              value={awayTeamId}
+              onChange={setAwayTeamId}
+              teams={sport.teams}
+              leagues={sport.leagues}
+              selectedLeagueId={leagueId}
+            />
+          ) : null}
+
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="sports-detail-home">{sport.isTeamSport ? "Home team" : "Athlete"}</Label>
-              <Button type="button" variant="ghost" size="xs" onClick={() => setNewTeamOpen(true)}>
+              <Label htmlFor="sports-detail-season">Season</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setNewSeasonOpen(true)}
+                disabled={leagueId === null}
+              >
                 + New
               </Button>
             </div>
-            <Select
-              id="sports-detail-home"
-              value={homeTeamId ?? ""}
-              onChange={(e) => setHomeTeamId(e.target.value ? Number(e.target.value) : null)}
-            >
+            <Select id="sports-detail-season" value={season} onChange={(e) => setSeason(e.target.value)} disabled={leagueId === null}>
               <option value="">None</option>
-              {sport.teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {hasUnlistedSeason ? <option value={season}>{season}</option> : null}
+              {seasonOptions.map((s) => (
+                <option key={s.id} value={s.name}>
+                  {s.name}
                 </option>
               ))}
             </Select>
+            {leagueId === null ? <p className="text-xs text-muted-foreground">Pick a league to set a season.</p> : null}
           </div>
 
-          {sport.isTeamSport ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="sports-detail-away">Away team</Label>
-              <Select
-                id="sports-detail-away"
-                value={awayTeamId ?? ""}
-                onChange={(e) => setAwayTeamId(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">None</option>
-                {sport.teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="sports-detail-season">Season</Label>
-              <Input id="sports-detail-season" value={season} onChange={(e) => setSeason(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="sports-detail-gametype">Game type</Label>
-              <Input
-                id="sports-detail-gametype"
-                value={gameType}
-                onChange={(e) => setGameType(e.target.value)}
-                placeholder="regular, playoff…"
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sports-detail-gametype">Game type</Label>
+            <NameCatalogField
+              id="sports-detail-gametype"
+              value={gameType || null}
+              onChange={(value) => setGameType(value ?? "")}
+              items={gameTypes}
+              onCreated={onGameTypeCreated}
+              apiPath="/api/sports-game-types"
+              modalTitle="New game type"
+            />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -439,18 +596,20 @@ function SportsWatchDetailModal({
           </label>
 
           <div className="space-y-1.5">
-            <Label htmlFor="sports-detail-duration">Duration</Label>
+            <Label htmlFor="sports-detail-duration">Watch time</Label>
             <DurationInput id="sports-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="sports-detail-location">Where</Label>
-            <EntertainmentLocationTypeField
+            <NameCatalogField
               id="sports-detail-location"
               value={locationType || null}
               onChange={(value) => setLocationType(value ?? "")}
               items={locationTypes}
               onCreated={onLocationTypeCreated}
+              apiPath="/api/entertainment-location-types"
+              modalTitle="New location type"
             />
           </div>
 
@@ -495,44 +654,55 @@ function SportsWatchDetailModal({
           else setAwayTeamId(team.id);
         }}
       />
+      <NewSeasonModal
+        open={newSeasonOpen}
+        leagueId={leagueId}
+        onClose={() => setNewSeasonOpen(false)}
+        onCreated={(created) => {
+          if (leagueId !== null) onSeasonCreated(leagueId, created);
+          setSeason(created.name);
+        }}
+      />
     </>
   );
 }
 
-export function SportsEntryForm({
-  date,
-  initial,
+export function SportsSection({
   catalog,
-  locationTypes: initialLocationTypes,
+  locationTypes,
+  onLocationTypeCreated,
+  gameTypes: initialGameTypes,
+  seasonsByLeague: initialSeasonsByLeague,
+  rows,
+  onRowsChange,
+  pendingOpen,
 }: {
-  date: string;
-  initial: DayPayload["sportsWatches"];
   catalog: SportsCatalogEntry[];
   locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
+  gameTypes: SportsGameTypeItem[];
+  seasonsByLeague: Record<number, SportsSeasonItem[]>;
+  rows: SportsRow[];
+  onRowsChange: (rows: SportsRow[]) => void;
+  pendingOpen: PendingOpen;
 }) {
-  const router = useRouter();
   const [items, setItems] = useState<SportsCatalogEntry[]>(catalog);
-  const [rows, setRows] = useState<Row[]>(
-    initial.map((w) => ({
-      sportId: w.sportId,
-      leagueId: w.leagueId,
-      season: w.season,
-      gameType: w.gameType,
-      homeTeamId: w.homeTeamId,
-      awayTeamId: w.awayTeamId,
-      watchedLive: w.watchedLive,
-      durationMinutes: w.durationMinutes,
-      locationType: w.locationType,
-    }))
-  );
-  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
+  const [gameTypes, setGameTypes] = useState(initialGameTypes);
+  const [seasonsByLeague, setSeasonsByLeague] = useState(initialSeasonsByLeague);
   const [newSportOpen, setNewSportOpen] = useState(false);
-  const [detail, setDetail] = useState<{ sport: SportsCatalogEntry; editIndex: number | null } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [detail, setDetail] = useState<{ sport: SportsCatalogEntry; leagueId: number | null; editIndex: number | null } | null>(
+    null
+  );
 
   const editingRow = detail?.editIndex !== null && detail?.editIndex !== undefined ? rows[detail.editIndex] : null;
+
+  // The unified search encodes a LEAGUE id (issue #61) — find the sport
+  // that owns it.
+  const pendingLeagueId = usePendingOpenMatch(pendingOpen, "sports");
+  if (pendingLeagueId !== null) {
+    const sport = items.find((s) => s.leagues.some((l) => l.id === pendingLeagueId));
+    if (sport) setDetail({ sport, leagueId: pendingLeagueId, editIndex: null });
+  }
 
   function updateCatalogSport(sportId: number, updater: (s: SportsCatalogEntry) => SportsCatalogEntry) {
     setItems((prev) => prev.map((s) => (s.id === sportId ? updater(s) : s)));
@@ -543,7 +713,7 @@ export function SportsEntryForm({
     const entry: SportsCatalogEntry = { ...item, leagues: [], teams: [] };
     setItems((prev) => [...prev, entry].sort((a, b) => a.name.localeCompare(b.name)));
     setNewSportOpen(false);
-    setDetail({ sport: entry, editIndex: null });
+    setDetail({ sport: entry, leagueId: null, editIndex: null });
   }
 
   function handleLeagueCreated(sportId: number, league: SportsLeagueItem) {
@@ -554,39 +724,37 @@ export function SportsEntryForm({
     updateCatalogSport(sportId, (s) => ({ ...s, teams: [...s.teams, team] }));
   }
 
-  function openForPick(id: number) {
-    const sport = items.find((s) => s.id === id);
-    if (!sport) return;
-    setDetail({ sport, editIndex: null });
+  function handleSeasonCreated(leagueId: number, season: SportsSeasonItem) {
+    setSeasonsByLeague((prev) => ({
+      ...prev,
+      [leagueId]: [...(prev[leagueId] ?? []), season].sort((a, b) => a.name.localeCompare(b.name)),
+    }));
   }
 
   function openForEdit(index: number) {
     const row = rows[index];
     const sport = items.find((s) => s.id === row.sportId);
     if (!sport) return;
-    setDetail({ sport, editIndex: index });
+    setDetail({ sport, leagueId: row.leagueId, editIndex: index });
   }
 
-  function saveDetail(value: Omit<Row, "sportId">) {
+  function saveDetail(value: Omit<SportsRow, "sportId">) {
     if (!detail) return;
-    setSavedAt(null);
-    setRows((prev) => {
-      if (detail.editIndex !== null) {
-        const next = [...prev];
-        next[detail.editIndex] = { sportId: detail.sport.id, ...value };
-        return next;
-      }
-      return [...prev, { sportId: detail.sport.id, ...value }];
-    });
+    if (detail.editIndex !== null) {
+      const next = [...rows];
+      next[detail.editIndex] = { sportId: detail.sport.id, ...value };
+      onRowsChange(next);
+    } else {
+      onRowsChange([...rows, { sportId: detail.sport.id, ...value }]);
+    }
     setDetail(null);
   }
 
   function removeRow(index: number) {
-    setSavedAt(null);
-    setRows((prev) => prev.filter((_, i) => i !== index));
+    onRowsChange(rows.filter((_, i) => i !== index));
   }
 
-  function describeRow(row: Row): string {
+  function describeRow(row: SportsRow): string {
     const sport = items.find((s) => s.id === row.sportId);
     const home = items.flatMap((s) => s.teams).find((t) => t.id === row.homeTeamId);
     const away = items.flatMap((s) => s.teams).find((t) => t.id === row.awayTeamId);
@@ -599,94 +767,29 @@ export function SportsEntryForm({
     return parts.join(" · ");
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-
-    const payload: SportsPayload = { entries: rows };
-
-    try {
-      const res = await fetch(`/api/days/${date}/sports`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await res.json();
-
-      if (!res.ok) {
-        setError(typeof body?.error === "string" ? body.error : "Failed to save");
-        return;
-      }
-
-      const saved = body as DayPayload;
-      setRows(
-        saved.sportsWatches.map((w) => ({
-          sportId: w.sportId,
-          leagueId: w.leagueId,
-          season: w.season,
-          gameType: w.gameType,
-          homeTeamId: w.homeTeamId,
-          awayTeamId: w.awayTeamId,
-          watchedLive: w.watchedLive,
-          durationMinutes: w.durationMinutes,
-          locationType: w.locationType,
-        }))
-      );
-      setSavedAt(Date.now());
-      router.refresh();
-    } catch {
-      setError("Network error — could not save");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pb-20">
-      <Card size="sm">
-        <CardHeader>
+    <Card size="sm">
+      <CardHeader>
+        <div className="flex items-center justify-between">
           <CardTitle>Sports</CardTitle>
-          <CardDescription>
-            {rows.length === 0 ? "None logged yet." : `${rows.length} logged.`} Search a sport you&apos;ve watched
-            before, or add a new one.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {rows.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {rows.map((row, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
-                >
-                  <button type="button" onClick={() => openForEdit(i)} className="min-w-0 flex-1 text-left">
-                    <p className="truncate text-sm">{describeRow(row)}</p>
-                  </button>
-                  <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove" onClick={() => removeRow(i)}>
-                    &times;
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Add a sport</Label>
-              <Button type="button" variant="outline" size="xs" onClick={() => setNewSportOpen(true)}>
-                + New sport
-              </Button>
-            </div>
-            <SearchPanel
-              items={items.map(toSearchItem)}
-              onSelect={openForPick}
-              placeholder="Search sports you've logged before…"
-              emptyMessage="No matches — try “+ New sport”."
-            />
+          <Button type="button" variant="outline" size="xs" onClick={() => setNewSportOpen(true)}>
+            + New sport
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {rows.length === 0 ? <p className="text-sm text-muted-foreground">None logged yet.</p> : null}
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+            <button type="button" onClick={() => openForEdit(i)} className="min-w-0 flex-1 text-left">
+              <p className="truncate text-sm">{describeRow(row)}</p>
+            </button>
+            <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove" onClick={() => removeRow(i)}>
+              &times;
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        ))}
+      </CardContent>
 
       <NewSportModal open={newSportOpen} onClose={() => setNewSportOpen(false)} onCreated={handleSportCreated} />
 
@@ -695,30 +798,18 @@ export function SportsEntryForm({
         open={detail !== null}
         sport={detail?.sport ?? null}
         initial={editingRow ?? null}
+        initialLeagueId={detail?.leagueId ?? null}
         locationTypes={locationTypes}
-        onLocationTypeCreated={(item) =>
-          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-        }
+        onLocationTypeCreated={onLocationTypeCreated}
+        gameTypes={gameTypes}
+        onGameTypeCreated={(item) => setGameTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))}
+        seasonsByLeague={seasonsByLeague}
+        onSeasonCreated={handleSeasonCreated}
         onClose={() => setDetail(null)}
         onSave={saveDetail}
         onLeagueCreated={handleLeagueCreated}
         onTeamCreated={handleTeamCreated}
       />
-
-      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
-          <span className="text-sm">
-            {error ? (
-              <span className="text-destructive">{error}</span>
-            ) : savedAt ? (
-              <span className="text-muted-foreground">Saved.</span>
-            ) : null}
-          </span>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </div>
-      </div>
-    </form>
+    </Card>
   );
 }
