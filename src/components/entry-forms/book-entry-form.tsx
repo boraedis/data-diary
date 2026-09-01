@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Modal } from "@/components/ui/modal";
 import { DurationInput } from "@/components/ui/duration-input";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import { EntertainmentLocationTypeField } from "@/components/entry-forms/entertainment-location-type-field";
+import type { EntertainmentLocationTypeItem } from "@/lib/catalog-admin";
 import type { BookCatalogItem, BooksPayload, DayPayload } from "@/lib/days";
 import type { GoogleBooksSearchResult } from "@/lib/google-books";
 
@@ -171,12 +173,16 @@ function BookSessionDetailModal({
   open,
   book,
   initial,
+  locationTypes,
+  onLocationTypeCreated,
   onClose,
   onSave,
 }: {
   open: boolean;
   book: BookCatalogItem | null;
   initial: Omit<Row, "bookId"> | null;
+  locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   onClose: () => void;
   onSave: (value: Omit<Row, "bookId">) => void;
 }) {
@@ -236,10 +242,12 @@ function BookSessionDetailModal({
 
           <div className="space-y-1.5">
             <Label htmlFor="book-detail-location">Where</Label>
-            <Input
+            <EntertainmentLocationTypeField
               id="book-detail-location"
-              value={locationType}
-              onChange={(e) => setLocationType(e.target.value)}
+              value={locationType || null}
+              onChange={(value) => setLocationType(value ?? "")}
+              items={locationTypes}
+              onCreated={onLocationTypeCreated}
               placeholder="bed, commute…"
             />
           </div>
@@ -270,10 +278,12 @@ export function BookEntryForm({
   date,
   initial,
   catalog,
+  locationTypes: initialLocationTypes,
 }: {
   date: string;
   initial: DayPayload["bookSessions"];
   catalog: BookCatalogItem[];
+  locationTypes: EntertainmentLocationTypeItem[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<BookCatalogItem[]>(catalog);
@@ -287,6 +297,7 @@ export function BookEntryForm({
       durationMinutes: s.durationMinutes,
     }))
   );
+  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [detail, setDetail] = useState<{ book: BookCatalogItem; editIndex: number | null } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -436,6 +447,10 @@ export function BookEntryForm({
         open={detail !== null}
         book={detail?.book ?? null}
         initial={editingRow ?? null}
+        locationTypes={locationTypes}
+        onLocationTypeCreated={(item) =>
+          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+        }
         onClose={() => setDetail(null)}
         onSave={saveDetail}
       />

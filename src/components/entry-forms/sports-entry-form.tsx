@@ -10,6 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Modal } from "@/components/ui/modal";
 import { DurationInput } from "@/components/ui/duration-input";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import { EntertainmentLocationTypeField } from "@/components/entry-forms/entertainment-location-type-field";
+import type { EntertainmentLocationTypeItem } from "@/lib/catalog-admin";
 import type { DayPayload, SportCatalogItem, SportsLeagueItem, SportsPayload, SportsTeamItem } from "@/lib/days";
 
 // The nested shape GET /api/sports actually returns — leagues and teams
@@ -316,6 +318,8 @@ function SportsWatchDetailModal({
   open,
   sport,
   initial,
+  locationTypes,
+  onLocationTypeCreated,
   onClose,
   onSave,
   onLeagueCreated,
@@ -324,6 +328,8 @@ function SportsWatchDetailModal({
   open: boolean;
   sport: SportsCatalogEntry | null;
   initial: Omit<Row, "sportId"> | null;
+  locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   onClose: () => void;
   onSave: (value: Omit<Row, "sportId">) => void;
   onLeagueCreated: (sportId: number, league: SportsLeagueItem) => void;
@@ -439,10 +445,12 @@ function SportsWatchDetailModal({
 
           <div className="space-y-1.5">
             <Label htmlFor="sports-detail-location">Where</Label>
-            <Input
+            <EntertainmentLocationTypeField
               id="sports-detail-location"
-              value={locationType}
-              onChange={(e) => setLocationType(e.target.value)}
+              value={locationType || null}
+              onChange={(value) => setLocationType(value ?? "")}
+              items={locationTypes}
+              onCreated={onLocationTypeCreated}
               placeholder="stadium, home…"
             />
           </div>
@@ -496,10 +504,12 @@ export function SportsEntryForm({
   date,
   initial,
   catalog,
+  locationTypes: initialLocationTypes,
 }: {
   date: string;
   initial: DayPayload["sportsWatches"];
   catalog: SportsCatalogEntry[];
+  locationTypes: EntertainmentLocationTypeItem[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<SportsCatalogEntry[]>(catalog);
@@ -516,6 +526,7 @@ export function SportsEntryForm({
       locationType: w.locationType,
     }))
   );
+  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [newSportOpen, setNewSportOpen] = useState(false);
   const [detail, setDetail] = useState<{ sport: SportsCatalogEntry; editIndex: number | null } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -685,6 +696,10 @@ export function SportsEntryForm({
         open={detail !== null}
         sport={detail?.sport ?? null}
         initial={editingRow ?? null}
+        locationTypes={locationTypes}
+        onLocationTypeCreated={(item) =>
+          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+        }
         onClose={() => setDetail(null)}
         onSave={saveDetail}
         onLeagueCreated={handleLeagueCreated}
