@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
-import { TmdbSearchModal } from "@/components/entry-forms/movie-entry-form";
+import { TmdbMovieSearchModal } from "@/components/entry-forms/tmdb-movie-search-modal";
 import type { MovieCatalogItem } from "@/lib/days";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 
@@ -33,7 +33,7 @@ export function MoviesManageList({ initial }: { initial: MovieCatalogItem[] }) {
           </Button>
         }
       />
-      <TmdbSearchModal
+      <TmdbMovieSearchModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onAdded={(item) => {

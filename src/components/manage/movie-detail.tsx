@@ -62,7 +62,7 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
               <ul className="list-inside list-disc">
                 {usage.watches.map((w, i) => (
                   <li key={i}>
-                    <Link href={`/day/${w.date}/entertainment/movies`} className="text-primary hover:underline">
+                    <Link href={`/day/${w.date}/entertainment`} className="text-primary hover:underline">
                       {w.date}
                     </Link>
                   </li>
@@ -84,7 +84,7 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
             usage.watches.map((w, i) => (
               <Link
                 key={i}
-                href={`/day/${w.date}/entertainment/movies`}
+                href={`/day/${w.date}/entertainment`}
                 className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
               >
                 <span>{w.date}</span>
