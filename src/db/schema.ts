@@ -114,9 +114,10 @@ export const days = pgTable("days", {
   sleepTime: text("sleep_time"),
   wakeTime: text("wake_time"),
   wakeCrossedMidnight: boolean("wake_crossed_midnight").notNull().default(false),
-  // Free text for now rather than a foreign key into a location catalog —
-  // the legacy `searchs/sleep_location_types` catalog isn't part of this
-  // migration yet. Revisit if/when a real places/locations domain lands.
+  // Plain free-text strings matched by name against the sleepLocationTypes/
+  // sleepLocationSubtypes catalog below (issue #59), not FKs — same
+  // free-text-but-catalog-backed relationship as places.category/subcategory
+  // has with placeCategories/placeSubcategories.
   sleepLocationType: text("sleep_location_type"),
   sleepLocationSubtype: text("sleep_location_subtype"),
   // Legacy stored naps as separate {hours, mins}; flattened to one total.
@@ -431,6 +432,41 @@ export const metros = pgTable("metros", {
   alias: text("alias"),
 });
 
+// --- Sleep location types / subtypes (catalog) ------------------------------
+// Backs days.sleepLocationType/sleepLocationSubtype (see the `days` table
+// comment) the same way placeCategories/placeSubcategories above backs
+// places.category/subcategory: a real, maintained two-level taxonomy that a
+// picker reads from and "+ New" adds to, while the day's own columns stay
+// plain free-text strings matched by name, not FKs — same reasoning as
+// places' category/subcategory (issue #59).
+export const sleepLocationTypes = pgTable("sleep_location_types", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const sleepLocationSubtypes = pgTable(
+  "sleep_location_subtypes",
+  {
+    id: serial("id").primaryKey(),
+    typeId: integer("type_id")
+      .notNull()
+      .references(() => sleepLocationTypes.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("sleep_location_subtypes_type_name_idx").on(table.typeId, table.name)]
+);
+
+// --- Entertainment location types (catalog) ---------------------------------
+// Backs the `locationType` free-text column shared by movieWatches,
+// tvEpisodeWatches, bookReadingSessions, sportsWatches, and gameSessions
+// below — same free-text-matched-by-name relationship as
+// sleepLocationTypes above, just flat (one level) since none of those five
+// columns has a subtype (issue #59).
+export const entertainmentLocationTypes = pgTable("entertainment_location_types", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
 // --- people / places (catalogs) ------------------------------------------
 // The legacy app referenced a `searchs/people` / `searchs/places` catalog —
 // day-level people/places entries always pointed at a name from a
@@ -632,10 +668,10 @@ export const movieWatches = pgTable(
       .notNull()
       .references(() => days.date, { onDelete: "cascade" }),
     rating: smallint("rating"), // 1-10, matches the legacy slider
-    // Free text, not a catalog table — the legacy `entertainment/extras.
-    // location_types` list is itself just a small user-managed string
-    // list, not worth a real table yet (same call already made for
-    // `days.sleepLocationType`).
+    // Plain free-text string matched by name against the
+    // entertainmentLocationTypes catalog (issue #59) — not an FK, same
+    // free-text-but-catalog-backed relationship days.sleepLocationType has
+    // with sleepLocationTypes.
     locationType: text("location_type"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

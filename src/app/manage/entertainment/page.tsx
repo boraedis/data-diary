@@ -102,6 +102,12 @@ export default async function ManageEntertainmentPage() {
         </p>
         <EntertainmentManageList initial={items} initialKinds={kinds} />
       </div>
+
+      <div className="flex justify-end">
+        <Link href="/manage/entertainment/location-types" className={buttonVariants({ variant: "outline", size: "xs" })}>
+          Manage Location Types
+        </Link>
+      </div>
     </main>
   );
 }

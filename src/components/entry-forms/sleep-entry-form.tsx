@@ -7,11 +7,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DurationInput } from "@/components/ui/duration-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SleepLocationField } from "@/components/entry-forms/sleep-location-field";
+import type { SleepLocationSubtypeItem, SleepLocationTypeItem } from "@/lib/catalog-admin";
 import type { DayPayload, SleepPayload } from "@/lib/days";
 
-export function SleepEntryForm({ date, initial }: { date: string; initial: SleepPayload }) {
+type SleepLocationTypeWithSubtypes = SleepLocationTypeItem & { subtypes: SleepLocationSubtypeItem[] };
+
+export function SleepEntryForm({
+  date,
+  initial,
+  initialLocationTypes,
+}: {
+  date: string;
+  initial: SleepPayload;
+  initialLocationTypes: SleepLocationTypeWithSubtypes[];
+}) {
   const router = useRouter();
   const [sleep, setSleep] = useState<SleepPayload>(initial);
+  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -91,24 +104,20 @@ export function SleepEntryForm({ date, initial }: { date: string; initial: Sleep
             />
             Woke up the day after I fell asleep
           </label>
-          <div className="space-y-1.5">
-            <Label htmlFor="sleepLocationType">Sleep location</Label>
-            <Input
-              id="sleepLocationType"
-              placeholder="e.g. home"
-              value={sleep.sleepLocationType ?? ""}
-              onChange={(e) => set("sleepLocationType", e.target.value || null)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sleepLocationSubtype">Sleep location detail</Label>
-            <Input
-              id="sleepLocationSubtype"
-              placeholder="e.g. own bed"
-              value={sleep.sleepLocationSubtype ?? ""}
-              onChange={(e) => set("sleepLocationSubtype", e.target.value || null)}
-            />
-          </div>
+          <SleepLocationField
+            type={sleep.sleepLocationType}
+            subtype={sleep.sleepLocationSubtype}
+            onTypeChange={(value) => set("sleepLocationType", value)}
+            onSubtypeChange={(value) => set("sleepLocationSubtype", value)}
+            items={locationTypes}
+            onCreated={(created) =>
+              setLocationTypes((prev) => {
+                const existing = prev.find((t) => t.id === created.id);
+                if (!existing) return [...prev, created].sort((a, b) => a.name.localeCompare(b.name));
+                return prev.map((t) => (t.id === created.id ? { ...t, subtypes: [...t.subtypes, ...created.subtypes] } : t));
+              })
+            }
+          />
           <div className="space-y-1.5">
             <Label htmlFor="napMinutes-hours">Naps</Label>
             <DurationInput

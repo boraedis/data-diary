@@ -8,27 +8,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import { Select } from "@/components/ui/select";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type {
-  ExerciseFocusItem,
-  ExerciseFocusUsage,
-  ExerciseSubfocusItem,
-  ExerciseSubfocusUsage,
+  SleepLocationSubtypeItem,
+  SleepLocationSubtypeUsage,
+  SleepLocationTypeItem,
+  SleepLocationTypeUsage,
 } from "@/lib/catalog-admin";
 
-type SubfocusWithUsage = ExerciseSubfocusItem & { usage: ExerciseSubfocusUsage };
+type SubtypeWithUsage = SleepLocationSubtypeItem & { usage: SleepLocationSubtypeUsage };
 
-function AddSubfocusModal({
-  focusId,
+function AddSubtypeModal({
+  typeId,
   open,
   onClose,
   onCreated,
 }: {
-  focusId: number;
+  typeId: number;
   open: boolean;
   onClose: () => void;
-  onCreated: (subfocus: ExerciseSubfocusItem) => void;
+  onCreated: (subtype: SleepLocationSubtypeItem) => void;
 }) {
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -44,7 +43,7 @@ function AddSubfocusModal({
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch(`/api/exercise-focuses/${focusId}/subfocuses`, {
+      const res = await fetch(`/api/sleep-location-types/${typeId}/subtypes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
@@ -54,7 +53,7 @@ function AddSubfocusModal({
         setError(typeof body?.error === "string" ? body.error : "Failed to create");
         return;
       }
-      onCreated(body as ExerciseSubfocusItem);
+      onCreated(body as SleepLocationSubtypeItem);
       reset();
       onClose();
     } catch {
@@ -71,12 +70,18 @@ function AddSubfocusModal({
         reset();
         onClose();
       }}
-      title="New subfocus"
+      title="New subtype"
     >
       <div className="flex flex-col gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="add-subfocus-name">Name</Label>
-          <Input id="add-subfocus-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <Label htmlFor="add-sleep-location-subtype-name">Name</Label>
+          <Input
+            id="add-sleep-location-subtype-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. own bed"
+            autoFocus
+          />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
@@ -87,21 +92,18 @@ function AddSubfocusModal({
   );
 }
 
-function SubfocusRow({
-  subfocus: initial,
-  otherFocuses,
+function SubtypeRow({
+  subtype: initial,
   onUpdated,
   onDeleted,
 }: {
-  subfocus: SubfocusWithUsage;
-  otherFocuses: ExerciseFocusItem[];
-  onUpdated: (subfocus: ExerciseSubfocusItem) => void;
+  subtype: SubtypeWithUsage;
+  onUpdated: (subtype: SleepLocationSubtypeItem) => void;
   onDeleted: (id: number) => void;
 }) {
-  const [subfocus, setSubfocus] = useState(initial);
+  const [subtype, setSubtype] = useState(initial);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initial.name);
-  const [focusId, setFocusId] = useState(initial.focusId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,23 +112,20 @@ function SubfocusRow({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/exercise-subfocuses/${subfocus.id}`, {
+      const res = await fetch(`/api/sleep-location-subtypes/${subtype.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), focusId }),
+        body: JSON.stringify({ name: name.trim() }),
       });
       const body = await res.json();
       if (!res.ok) {
         setError(typeof body?.error === "string" ? body.error : "Failed to save");
         return;
       }
-      const updated = { ...subfocus, ...(body as ExerciseSubfocusItem) };
-      setSubfocus(updated);
+      const updated = { ...subtype, ...(body as SleepLocationSubtypeItem) };
+      setSubtype(updated);
       onUpdated(updated);
       setEditing(false);
-      // If the focus changed, this row no longer belongs on this page —
-      // the parent's onUpdated already dropped it from the current focus's
-      // list (see ExerciseFocusDetail below).
     } catch {
       setError("Network error");
     } finally {
@@ -134,23 +133,10 @@ function SubfocusRow({
     }
   }
 
-  const focusOptions = [{ id: subfocus.focusId, name: "(current)" }, ...otherFocuses].filter(
-    (f, i, arr) => arr.findIndex((x) => x.id === f.id) === i
-  );
-
   if (editing) {
     return (
       <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" autoFocus />
-        {otherFocuses.length > 0 ? (
-          <Select value={focusId} onChange={(e) => setFocusId(Number(e.target.value))}>
-            {focusOptions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.id === subfocus.focusId ? `${f.name} (current focus)` : f.name}
-              </option>
-            ))}
-          </Select>
-        ) : null}
         {error ? <span className="text-xs text-destructive">{error}</span> : null}
         <div className="flex gap-2">
           <Button type="button" size="xs" onClick={handleSave} disabled={saving || !name.trim()}>
@@ -161,8 +147,7 @@ function SubfocusRow({
             size="xs"
             variant="outline"
             onClick={() => {
-              setName(subfocus.name);
-              setFocusId(subfocus.focusId);
+              setName(subtype.name);
               setError(null);
               setEditing(false);
             }}
@@ -176,24 +161,24 @@ function SubfocusRow({
 
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-      <p className="min-w-0 truncate text-sm">{subfocus.name}</p>
+      <p className="min-w-0 truncate text-sm">{subtype.name}</p>
       <div className="flex shrink-0 gap-1">
         <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
           Edit
         </Button>
         <DeleteCatalogItem
           size="xs"
-          itemLabel={subfocus.name}
-          isBlocked={subfocus.usage.linkCount > 0}
+          itemLabel={subtype.name}
+          isBlocked={subtype.usage.dayCount > 0}
           onDelete={async () => {
-            const res = await fetch(`/api/exercise-subfocuses/${subfocus.id}`, { method: "DELETE" });
+            const res = await fetch(`/api/sleep-location-subtypes/${subtype.id}`, { method: "DELETE" });
             if (!res.ok) throw new Error("Failed to delete");
-            onDeleted(subfocus.id);
+            onDeleted(subtype.id);
           }}
           blockedContent={
             <p>
-              {subfocus.usage.linkCount} exercise{subfocus.usage.linkCount === 1 ? "" : "s"} still tagged with this
-              subfocus.
+              {subtype.usage.dayCount} day{subtype.usage.dayCount === 1 ? "" : "s"} still {" "}
+              {subtype.usage.dayCount === 1 ? "carries" : "carry"} this subtype.
             </p>
           }
         />
@@ -202,20 +187,18 @@ function SubfocusRow({
   );
 }
 
-export function ExerciseFocusDetail({
-  focus: initial,
+export function SleepLocationTypeDetail({
+  type: initial,
   usage,
-  subfocuses: initialSubfocuses,
-  otherFocuses,
+  subtypes: initialSubtypes,
 }: {
-  focus: ExerciseFocusItem;
-  usage: ExerciseFocusUsage;
-  subfocuses: SubfocusWithUsage[];
-  otherFocuses: ExerciseFocusItem[];
+  type: SleepLocationTypeItem;
+  usage: SleepLocationTypeUsage;
+  subtypes: SubtypeWithUsage[];
 }) {
   const router = useRouter();
-  const [focus, setFocus] = useState(initial);
-  const [subfocuses, setSubfocuses] = useState(initialSubfocuses);
+  const [type, setType] = useState(initial);
+  const [subtypes, setSubtypes] = useState(initialSubtypes);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initial.name);
   const [saving, setSaving] = useState(false);
@@ -223,7 +206,7 @@ export function ExerciseFocusDetail({
   const [addOpen, setAddOpen] = useState(false);
 
   function cancelEdit() {
-    setName(focus.name);
+    setName(type.name);
     setError(null);
     setEditing(false);
   }
@@ -236,7 +219,7 @@ export function ExerciseFocusDetail({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/exercise-focuses/${focus.id}`, {
+      const res = await fetch(`/api/sleep-location-types/${type.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
@@ -246,7 +229,7 @@ export function ExerciseFocusDetail({
         setError(typeof body?.error === "string" ? body.error : "Failed to save");
         return;
       }
-      setFocus(body as ExerciseFocusItem);
+      setType(body as SleepLocationTypeItem);
       setEditing(false);
       router.refresh();
     } catch {
@@ -259,22 +242,26 @@ export function ExerciseFocusDetail({
   return (
     <>
       <div className="flex items-center justify-between">
-        <Link href="/manage/exercises/focuses" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          &larr; Focuses
+        <Link href="/manage/sleep" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          &larr; Sleep location types
         </Link>
       </div>
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle>{editing ? "Edit focus" : focus.name}</CardTitle>
+          <CardTitle>{editing ? "Edit type" : type.name}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {editing ? (
             <>
               <div className="space-y-1.5">
-                <Label htmlFor="exercise-focus-name">Name</Label>
-                <Input id="exercise-focus-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Label htmlFor="sleep-location-type-name">Name</Label>
+                <Input id="sleep-location-type-name" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
+              <p className="text-xs text-muted-foreground">
+                Renaming doesn&rsquo;t update days that already carry the old name — see any day&rsquo;s own Sleep
+                location field to change that.
+              </p>
               {error ? <span className="text-sm text-destructive">{error}</span> : null}
               <div className="flex gap-2">
                 <Button type="button" onClick={handleSave} disabled={saving}>
@@ -288,27 +275,27 @@ export function ExerciseFocusDetail({
           ) : (
             <>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                <dt className="text-muted-foreground">Subfocuses</dt>
-                <dd>{usage.subfocusCount}</dd>
-                <dt className="text-muted-foreground">Tagged exercises</dt>
-                <dd>{usage.linkCount}</dd>
+                <dt className="text-muted-foreground">Days</dt>
+                <dd>{usage.dayCount}</dd>
+                <dt className="text-muted-foreground">Subtypes</dt>
+                <dd>{usage.subtypeCount}</dd>
               </dl>
               <div className="flex gap-2">
                 <Button type="button" variant="outline" onClick={() => setEditing(true)}>
                   Edit
                 </Button>
                 <DeleteCatalogItem
-                  itemLabel={focus.name}
-                  isBlocked={usage.subfocusCount > 0 || usage.linkCount > 0}
-                  afterDeleteHref="/manage/exercises/focuses"
+                  itemLabel={type.name}
+                  isBlocked={usage.dayCount > 0 || usage.subtypeCount > 0}
+                  afterDeleteHref="/manage/sleep"
                   onDelete={async () => {
-                    const res = await fetch(`/api/exercise-focuses/${focus.id}`, { method: "DELETE" });
+                    const res = await fetch(`/api/sleep-location-types/${type.id}`, { method: "DELETE" });
                     if (!res.ok) throw new Error("Failed to delete");
                   }}
                   blockedContent={
                     <p>
-                      {usage.subfocusCount} subfocus{usage.subfocusCount === 1 ? "" : "es"} and {usage.linkCount}{" "}
-                      tagged exercise{usage.linkCount === 1 ? "" : "s"} still use this focus.
+                      {usage.dayCount} day{usage.dayCount === 1 ? "" : "s"} and {usage.subtypeCount} subtype
+                      {usage.subtypeCount === 1 ? "" : "s"} still use this type.
                     </p>
                   }
                 />
@@ -321,38 +308,32 @@ export function ExerciseFocusDetail({
       <Card size="sm">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>Subfocuses</CardTitle>
+            <CardTitle>Subtypes</CardTitle>
             <Button type="button" variant="outline" size="xs" onClick={() => setAddOpen(true)}>
-              + New subfocus
+              + New subtype
             </Button>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {subfocuses.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
-          {subfocuses.map((s) => (
-            <SubfocusRow
+          {subtypes.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
+          {subtypes.map((s) => (
+            <SubtypeRow
               key={s.id}
-              subfocus={s}
-              otherFocuses={otherFocuses}
-              onUpdated={(updated) => {
-                if (updated.focusId !== focus.id) {
-                  // Moved to a different focus — no longer belongs here.
-                  setSubfocuses((prev) => prev.filter((x) => x.id !== updated.id));
-                  return;
-                }
-                setSubfocuses((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
-              }}
-              onDeleted={(id) => setSubfocuses((prev) => prev.filter((x) => x.id !== id))}
+              subtype={s}
+              onUpdated={(updated) =>
+                setSubtypes((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))
+              }
+              onDeleted={(id) => setSubtypes((prev) => prev.filter((x) => x.id !== id))}
             />
           ))}
         </CardContent>
       </Card>
 
-      <AddSubfocusModal
-        focusId={focus.id}
+      <AddSubtypeModal
+        typeId={type.id}
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        onCreated={(subfocus) => setSubfocuses((prev) => [...prev, { ...subfocus, usage: { linkCount: 0 } }])}
+        onCreated={(subtype) => setSubtypes((prev) => [...prev, { ...subtype, usage: { dayCount: 0 } }])}
       />
     </>
   );

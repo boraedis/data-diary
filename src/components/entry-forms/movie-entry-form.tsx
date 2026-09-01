@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
+import { EntertainmentLocationTypeField } from "@/components/entry-forms/entertainment-location-type-field";
+import type { EntertainmentLocationTypeItem } from "@/lib/catalog-admin";
 import type { DayPayload, MovieCatalogItem, MoviesPayload } from "@/lib/days";
 import type { TmdbMovieSearchResult } from "@/lib/tmdb";
 
@@ -178,6 +180,8 @@ function MovieDetailModal({
   movie,
   initialRating,
   initialLocationType,
+  locationTypes,
+  onLocationTypeCreated,
   onClose,
   onSave,
 }: {
@@ -185,6 +189,8 @@ function MovieDetailModal({
   movie: MovieCatalogItem | null;
   initialRating: number | null;
   initialLocationType: string | null;
+  locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   onClose: () => void;
   onSave: (rating: number | null, locationType: string | null) => void;
 }) {
@@ -219,11 +225,12 @@ function MovieDetailModal({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="movie-detail-location">Where</Label>
-            <Input
+            <EntertainmentLocationTypeField
               id="movie-detail-location"
-              value={locationType}
-              onChange={(e) => setLocationType(e.target.value)}
-              placeholder="theater, home…"
+              value={locationType || null}
+              onChange={(value) => setLocationType(value ?? "")}
+              items={locationTypes}
+              onCreated={onLocationTypeCreated}
             />
           </div>
           <Button
@@ -248,16 +255,19 @@ export function MovieEntryForm({
   date,
   initial,
   catalog,
+  locationTypes: initialLocationTypes,
 }: {
   date: string;
   initial: DayPayload["movies"];
   catalog: MovieCatalogItem[];
+  locationTypes: EntertainmentLocationTypeItem[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<MovieCatalogItem[]>(catalog);
   const [rows, setRows] = useState<Row[]>(
     initial.map((w) => ({ movieId: w.movieId, rating: w.rating, locationType: w.locationType }))
   );
+  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
   const [detail, setDetail] = useState<{ movie: MovieCatalogItem; editIndex: number | null } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -407,6 +417,10 @@ export function MovieEntryForm({
         movie={detail?.movie ?? null}
         initialRating={editingRow?.rating ?? null}
         initialLocationType={editingRow?.locationType ?? null}
+        locationTypes={locationTypes}
+        onLocationTypeCreated={(item) =>
+          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+        }
         onClose={() => setDetail(null)}
         onSave={saveDetail}
       />
