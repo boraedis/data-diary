@@ -164,19 +164,20 @@ function BookSessionDetailModal({
 
 export function BooksSection({
   catalog,
-  locationTypes: initialLocationTypes,
+  locationTypes,
+  onLocationTypeCreated,
   rows,
   onRowsChange,
   pendingOpen,
 }: {
   catalog: BookCatalogItem[];
   locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   rows: BookRow[];
   onRowsChange: (rows: BookRow[]) => void;
   pendingOpen: PendingOpen;
 }) {
   const [items, setItems] = useState<BookCatalogItem[]>(catalog);
-  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [detail, setDetail] = useState<{ book: BookCatalogItem; editIndex: number | null } | null>(null);
 
@@ -258,9 +259,7 @@ export function BooksSection({
         book={detail?.book ?? null}
         initial={editingRow ?? null}
         locationTypes={locationTypes}
-        onLocationTypeCreated={(item) =>
-          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-        }
+        onLocationTypeCreated={onLocationTypeCreated}
         onClose={() => setDetail(null)}
         onSave={saveDetail}
       />

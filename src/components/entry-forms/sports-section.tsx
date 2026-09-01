@@ -669,7 +669,8 @@ function SportsWatchDetailModal({
 
 export function SportsSection({
   catalog,
-  locationTypes: initialLocationTypes,
+  locationTypes,
+  onLocationTypeCreated,
   gameTypes: initialGameTypes,
   seasonsByLeague: initialSeasonsByLeague,
   rows,
@@ -678,6 +679,7 @@ export function SportsSection({
 }: {
   catalog: SportsCatalogEntry[];
   locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   gameTypes: SportsGameTypeItem[];
   seasonsByLeague: Record<number, SportsSeasonItem[]>;
   rows: SportsRow[];
@@ -685,7 +687,6 @@ export function SportsSection({
   pendingOpen: PendingOpen;
 }) {
   const [items, setItems] = useState<SportsCatalogEntry[]>(catalog);
-  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [gameTypes, setGameTypes] = useState(initialGameTypes);
   const [seasonsByLeague, setSeasonsByLeague] = useState(initialSeasonsByLeague);
   const [newSportOpen, setNewSportOpen] = useState(false);
@@ -799,9 +800,7 @@ export function SportsSection({
         initial={editingRow ?? null}
         initialLeagueId={detail?.leagueId ?? null}
         locationTypes={locationTypes}
-        onLocationTypeCreated={(item) =>
-          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-        }
+        onLocationTypeCreated={onLocationTypeCreated}
         gameTypes={gameTypes}
         onGameTypeCreated={(item) => setGameTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))}
         seasonsByLeague={seasonsByLeague}

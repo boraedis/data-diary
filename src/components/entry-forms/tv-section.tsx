@@ -226,19 +226,20 @@ function TvEpisodePickerModal({
 
 export function TvSection({
   catalog,
-  locationTypes: initialLocationTypes,
+  locationTypes,
+  onLocationTypeCreated,
   rows,
   onRowsChange,
   pendingOpen,
 }: {
   catalog: TvShowCatalogItem[];
   locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   rows: TvEpisodeRow[];
   onRowsChange: (rows: TvEpisodeRow[]) => void;
   pendingOpen: PendingOpen;
 }) {
   const [items, setItems] = useState<TvShowCatalogItem[]>(catalog);
-  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
   const [pickerShow, setPickerShow] = useState<TvShowCatalogItem | null>(null);
 
@@ -303,9 +304,7 @@ export function TvSection({
         onClose={() => setPickerShow(null)}
         onSave={handleEpisodesPicked}
         locationTypes={locationTypes}
-        onLocationTypeCreated={(item) =>
-          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-        }
+        onLocationTypeCreated={onLocationTypeCreated}
       />
     </Card>
   );

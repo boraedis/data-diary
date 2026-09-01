@@ -46,7 +46,7 @@ export function EntertainmentDayForm({
   bookCatalog,
   entertainmentCatalog,
   entertainmentKinds,
-  locationTypes,
+  locationTypes: initialLocationTypes,
   sportsGameTypes,
   sportsSeasonsByLeague,
 }: {
@@ -63,6 +63,16 @@ export function EntertainmentDayForm({
   sportsSeasonsByLeague: Record<number, SportsSeasonItem[]>;
 }) {
   const router = useRouter();
+
+  // Shared across all 5 sections (issue #61 follow-up: entertainmentLocationTypes
+  // is one catalog used by every kind, not a per-kind one) — lifted here so
+  // adding a new location type from any section's own "+ New" flow is
+  // immediately visible in every other section too, not just after a
+  // page reload.
+  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
+  function handleLocationTypeCreated(item: EntertainmentLocationTypeItem) {
+    setLocationTypes((prev) => (prev.some((t) => t.id === item.id) ? prev : [...prev, item].sort((a, b) => a.name.localeCompare(b.name))));
+  }
 
   const [movieRows, setMovieRows] = useState<MovieRow[]>(
     initial.movies.map((w) => ({ movieId: w.movieId, rating: w.rating, locationType: w.locationType, durationMinutes: w.durationMinutes }))
@@ -262,6 +272,7 @@ export function EntertainmentDayForm({
       <MoviesSection
         catalog={movieCatalog}
         locationTypes={locationTypes}
+        onLocationTypeCreated={handleLocationTypeCreated}
         rows={movieRows}
         onRowsChange={setMovieRows}
         pendingOpen={pendingOpen}
@@ -270,6 +281,7 @@ export function EntertainmentDayForm({
       <TvSection
         catalog={tvCatalog}
         locationTypes={locationTypes}
+        onLocationTypeCreated={handleLocationTypeCreated}
         rows={tvRows}
         onRowsChange={setTvRows}
         pendingOpen={pendingOpen}
@@ -278,6 +290,7 @@ export function EntertainmentDayForm({
       <SportsSection
         catalog={sportsCatalog}
         locationTypes={locationTypes}
+        onLocationTypeCreated={handleLocationTypeCreated}
         gameTypes={sportsGameTypes}
         seasonsByLeague={sportsSeasonsByLeague}
         rows={sportsRows}
@@ -288,6 +301,7 @@ export function EntertainmentDayForm({
       <BooksSection
         catalog={bookCatalog}
         locationTypes={locationTypes}
+        onLocationTypeCreated={handleLocationTypeCreated}
         rows={bookRows}
         onRowsChange={setBookRows}
         pendingOpen={pendingOpen}
@@ -297,6 +311,7 @@ export function EntertainmentDayForm({
         catalog={entertainmentCatalog}
         kinds={entertainmentKinds}
         locationTypes={locationTypes}
+        onLocationTypeCreated={handleLocationTypeCreated}
         rows={otherRows}
         onRowsChange={setOtherRows}
         pendingOpen={pendingOpen}

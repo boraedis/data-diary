@@ -115,19 +115,20 @@ function MovieDetailModal({
 
 export function MoviesSection({
   catalog,
-  locationTypes: initialLocationTypes,
+  locationTypes,
+  onLocationTypeCreated,
   rows,
   onRowsChange,
   pendingOpen,
 }: {
   catalog: MovieCatalogItem[];
   locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   rows: MovieRow[];
   onRowsChange: (rows: MovieRow[]) => void;
   pendingOpen: PendingOpen;
 }) {
   const [items, setItems] = useState<MovieCatalogItem[]>(catalog);
-  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
   const [detail, setDetail] = useState<{ movie: MovieCatalogItem; editIndex: number | null } | null>(null);
 
@@ -211,9 +212,7 @@ export function MoviesSection({
         initialLocationType={editingRow?.locationType ?? null}
         initialDurationMinutes={editingRow?.durationMinutes ?? null}
         locationTypes={locationTypes}
-        onLocationTypeCreated={(item) =>
-          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-        }
+        onLocationTypeCreated={onLocationTypeCreated}
         onClose={() => setDetail(null)}
         onSave={saveDetail}
       />

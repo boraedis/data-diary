@@ -184,7 +184,8 @@ function EntertainmentDetailModal({
 export function OtherEntertainmentSection({
   catalog,
   kinds,
-  locationTypes: initialLocationTypes,
+  locationTypes,
+  onLocationTypeCreated,
   rows,
   onRowsChange,
   pendingOpen,
@@ -192,12 +193,12 @@ export function OtherEntertainmentSection({
   catalog: EntertainmentCatalogItem[];
   kinds: EntertainmentKindItem[];
   locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   rows: OtherEntertainmentRow[];
   onRowsChange: (rows: OtherEntertainmentRow[]) => void;
   pendingOpen: PendingOpen;
 }) {
   const [items, setItems] = useState<EntertainmentCatalogItem[]>(catalog);
-  const [locationTypes, setLocationTypes] = useState(initialLocationTypes);
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [detail, setDetail] = useState<{ item: EntertainmentCatalogItem; editIndex: number | null } | null>(null);
 
@@ -278,9 +279,7 @@ export function OtherEntertainmentSection({
         initialDurationMinutes={editingRow?.durationMinutes ?? null}
         initialLocationType={editingRow?.locationType ?? null}
         locationTypes={locationTypes}
-        onLocationTypeCreated={(item) =>
-          setLocationTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-        }
+        onLocationTypeCreated={onLocationTypeCreated}
         onClose={() => setDetail(null)}
         onSave={saveDetail}
       />
