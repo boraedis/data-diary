@@ -125,6 +125,25 @@ Current shape:
   landed, diff trees instead: `git diff <main-tip> <branch-tip> --stat` —
   empty output means the content is fully present on `main`.
 
+## Schema changes and database testing
+
+**Before pushing schema changes and running tests:**
+
+1. **Create the PR first** — schema migrations require a dedicated branch database
+   to avoid conflicts and schema validation issues.
+2. **Wait for the branch database to be provisioned** — when a PR is created,
+   an automated branch database is created and associated with that PR.
+3. **Connect to the branch database** — run `npm run dev:pr` to pull the branch
+   database URL from the PR environment and connect the local dev server to it.
+   This ensures `drizzle-kit push` and tests run against an isolated schema.
+4. **Then push schema changes** — only after `npm run dev:pr` is running should
+   you execute `npx drizzle-kit push` or similar schema commands.
+
+This workflow prevents schema conflicts between concurrent PRs and local
+development. Do not attempt `drizzle-kit push` or schema validation against
+your local dev database while working on schema changes — use the PR database
+workflow instead.
+
 ## Where the epic stands
 
 `main` currently has #16-#21 and #19 merged (formatting/color utilities,
