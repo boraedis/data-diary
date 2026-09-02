@@ -64,10 +64,25 @@ its own one-off component — see `AGENTS.md` for the toolkit's architecture
 and the GitHub issues under the visualization epic (#14) for what's shipped
 and what's still in progress.
 
+**Public landing page** (`/`) — a curated, unauthenticated front door for
+visitors, separate from everything above: a hero with the project's
+name/tagline/goals and the three legacy stat tiles (days logged, % of life
+logged, last log), an about-the-project page, an about-me placeholder, and a
+small public charts section (weight, happiness trend, sleep) reusing the same
+chart components as the authenticated `/charts` section. Backed by its own
+narrow, explicit-include-list data layer — never a passthrough of the private
+profile/chart queries — so what's exposed (and what's permanently masked:
+exact address, the relationship timeline, all "subs" scores) is a deliberate,
+curated subset. See GitHub issue #12 for the full design decisions and
+`AGENTS.md` for the architecture.
+
 **Auth** — single-user password gate, not a multi-account system. One shared
 password (`APP_PASSWORD`) exchanges for a signed session cookie
 (`SESSION_SECRET`); a proxy/middleware gate (`src/proxy.ts`) requires a valid
-session on every route except `/login` and `/api/auth/*`.
+session on every route except a small public allowlist: `/login`,
+`/api/auth/*`, `/robots.txt`, `/api/public/*`, and the public landing page
+above (`/`, `/about-project`, `/about-me`, `/public-charts` and its
+per-chart routes).
 
 ## Tech stack
 
@@ -195,6 +210,9 @@ src/
     charts/            D3 chart pages
     api/                REST-ish route handlers backing the above
     login/              Password login page
+    page.tsx             Public landing page (unauthenticated)
+    about-project/, about-me/, public-charts/  Public pages linked from it
+    robots.ts            Generated robots.txt — public routes only
   components/
     ui/                 shadcn/ui primitives
     charts/             D3 chart components and pages
