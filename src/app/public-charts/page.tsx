@@ -1,6 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PUBLIC_CHART_TYPES } from "@/lib/public-content";
+
+export const metadata: Metadata = {
+  title: "Charts — Data Diary",
+  description: "A curated set of public charts from the diary's logged history.",
+};
 
 // Public counterpart to src/app/charts/page.tsx (#84) — a navigation index
 // of curated chart types rather than one page dumping all of them

@@ -1,7 +1,13 @@
+import type { Metadata } from "next";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { WeightScrollerChart } from "@/components/charts/weight-scroller-chart";
 import { getPublicWeightData } from "@/lib/public-charts";
+
+export const metadata: Metadata = {
+  title: "Weight over time — Data Diary",
+  description: "A zoomable line chart of weight logged over time.",
+};
 
 // Public counterpart to src/app/charts/weight/page.tsx (#84/#12) — same
 // component and shell, fed by public-charts.ts instead of the

@@ -1,6 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { buttonVariants } from "@/components/ui/button";
+
+export const metadata: Metadata = {
+  title: "About the project — Data Diary",
+  description: "What Data Diary is, what gets logged, and why any of it is public.",
+};
 
 // Static, hand-authored content (#85) — deliberately not pulled from the
 // DB. See the DB-vs-repo split locked in on #12: short structured facts

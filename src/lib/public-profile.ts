@@ -11,6 +11,7 @@
 // residences' exact place name/address/lat/lng (metro/region name only),
 // all "subs" scores, and anything from the `days` table beyond the two
 // aggregate numbers computed below.
+import { cache } from "react";
 import { asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
@@ -176,7 +177,11 @@ async function getPublicResidences(): Promise<PublicResidence[]> {
   return rows.reverse();
 }
 
-export async function getPublicLandingData(): Promise<PublicLandingData> {
+// Wrapped in React's cache() (#87) so the hero page and its
+// generateMetadata both calling this in the same request only hit the DB
+// once — a per-request dedupe, not cross-request caching; force-dynamic
+// still applies everywhere this is used.
+export const getPublicLandingData = cache(async (): Promise<PublicLandingData> => {
   const db = getDb();
   const [settingsRow] = await db
     .select({
@@ -202,4 +207,4 @@ export async function getPublicLandingData(): Promise<PublicLandingData> {
     occupations,
     residences,
   };
-}
+});

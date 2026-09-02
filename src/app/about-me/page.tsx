@@ -1,6 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { getPublicLandingData } from "@/lib/public-profile";
+
+export const metadata: Metadata = {
+  title: "About me — Data Diary",
+  description: "A short introduction to the person behind Data Diary.",
+};
 
 // Placeholder on purpose (#86) — the point of this issue is the page's own
 // shell and link existing, not final copy. "To be filled out eventually"
