@@ -1227,6 +1227,22 @@ export const profileSettings = pgTable("profile_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Project-level settings for the public landing page (#12/#82) — the
+// project's own identity (name, tagline, goal blurb), not the diary
+// owner's personal identity above. Kept as a separate table rather than
+// folded onto profileSettings since it's conceptually different data
+// (about the project, not about the person) and is safe to expose to
+// anonymous visitors in full — profileSettings never is. Same
+// single-row-table pattern as profileSettings above: id pinned to 1, plain
+// upsert, no seed migration needed.
+export const projectSettings = pgTable("project_settings", {
+  id: smallint("id").primaryKey().default(1),
+  name: text("name"),
+  tagline: text("tagline"),
+  goalsSummary: text("goals_summary"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Legacy shape: {position, company, place, name, start, end?, alias?,
 // color?, roles?: [{position, start, end?}]}. `placeId` resolves against
 // the existing `places` catalog (legacy's own `place` field derived from
