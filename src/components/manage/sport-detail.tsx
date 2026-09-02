@@ -12,6 +12,7 @@ import { Modal } from "@/components/ui/modal";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
 import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem, SportUsage } from "@/lib/days";
+import type { SportsDivisionItem } from "@/lib/catalog-admin";
 
 function AddLeagueModal({
   sportId,
@@ -90,12 +91,14 @@ function AddLeagueModal({
 function AddTeamModal({
   sportId,
   leagues,
+  divisionsByLeague,
   open,
   onClose,
   onCreated,
 }: {
   sportId: number;
   leagues: SportsLeagueItem[];
+  divisionsByLeague: Record<number, SportsDivisionItem[]>;
   open: boolean;
   onClose: () => void;
   onCreated: (team: SportsTeamItem) => void;
@@ -108,6 +111,8 @@ function AddTeamModal({
   const [division, setDivision] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const divisionOptions = leagueId !== null ? (divisionsByLeague[leagueId] ?? []) : [];
 
   function reset() {
     setName("");
@@ -133,7 +138,7 @@ function AddTeamModal({
           alias: alias.trim() || null,
           homeLocation: homeLocation.trim() || null,
           color: color.trim() || null,
-          division: division.trim() || null,
+          division: division || null,
         }),
       });
       const body = await res.json();
@@ -171,7 +176,10 @@ function AddTeamModal({
             <Select
               id="add-team-league"
               value={leagueId ?? ""}
-              onChange={(e) => setLeagueId(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) => {
+                setLeagueId(e.target.value ? Number(e.target.value) : null);
+                setDivision("");
+              }}
             >
               <option value="">No league</option>
               {leagues.map((l) => (
@@ -182,6 +190,25 @@ function AddTeamModal({
             </Select>
           </div>
         ) : null}
+        <div className="space-y-1.5">
+          <Label htmlFor="add-team-division">Division</Label>
+          <Select
+            id="add-team-division"
+            value={division}
+            onChange={(e) => setDivision(e.target.value)}
+            disabled={leagueId === null}
+          >
+            <option value="">None</option>
+            {divisionOptions.map((d) => (
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
+            ))}
+          </Select>
+          {leagueId === null ? (
+            <p className="text-xs text-muted-foreground">Pick a league to set a division.</p>
+          ) : null}
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="add-team-alias">Alias</Label>
           <Input id="add-team-alias" value={alias} onChange={(e) => setAlias(e.target.value)} />
@@ -200,10 +227,6 @@ function AddTeamModal({
             pattern="^#[0-9a-fA-F]{6}$"
             title="Use format #xxxxxx"
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="add-team-division">Division</Label>
-          <Input id="add-team-division" value={division} onChange={(e) => setDivision(e.target.value)} />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
@@ -229,11 +252,13 @@ export function SportDetail({
   usage,
   leagues: initialLeagues,
   teams: initialTeams,
+  divisionsByLeague,
 }: {
   sport: SportCatalogItem;
   usage: SportUsage;
   leagues: SportsLeagueItem[];
   teams: SportsTeamItem[];
+  divisionsByLeague: Record<number, SportsDivisionItem[]>;
 }) {
   const router = useRouter();
   const [sport, setSport] = useState(initial);
@@ -409,6 +434,7 @@ export function SportDetail({
       <AddTeamModal
         sportId={sport.id}
         leagues={leagues}
+        divisionsByLeague={divisionsByLeague}
         open={addTeamOpen}
         onClose={() => setAddTeamOpen(false)}
         onCreated={(team) => setTeams((prev) => [...prev, team])}

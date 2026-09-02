@@ -5,6 +5,7 @@ import { EntertainmentManageList } from "@/components/manage/entertainment-manag
 import {
   listBooksCatalog,
   listEntertainmentCatalog,
+  listGamesCatalog,
   listMoviesCatalog,
   listSportsCatalog,
   listTvShowsCatalog,
@@ -25,12 +26,13 @@ export const dynamic = "force-dynamic";
 const COMING_SOON = ["Music"] as const;
 
 export default async function ManageEntertainmentPage() {
-  const [items, movies, tvShows, sports, books, kinds] = await Promise.all([
+  const [items, movies, tvShows, sports, books, games, kinds] = await Promise.all([
     listEntertainmentCatalog(),
     listMoviesCatalog(),
     listTvShowsCatalog(),
     listSportsCatalog(),
     listBooksCatalog(),
+    listGamesCatalog(),
     listEntertainmentKinds(),
   ]);
 
@@ -80,6 +82,16 @@ export default async function ManageEntertainmentPage() {
               <div className="flex items-center justify-between">
                 <CardTitle>Books</CardTitle>
                 <span className="font-mono text-sm text-muted-foreground">{books.length}</span>
+              </div>
+            </CardHeader>
+          </Card>
+        </Link>
+        <Link href="/manage/entertainment/games">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Games</CardTitle>
+                <span className="font-mono text-sm text-muted-foreground">{games.length}</span>
               </div>
             </CardHeader>
           </Card>

@@ -14,6 +14,8 @@ import {
   entertainmentKinds,
   exerciseCategoryEnum,
   exercises,
+  games,
+  gameSessions,
   movies,
   movieWatches,
   people,
@@ -159,6 +161,7 @@ export type DayPayload = {
   tvEpisodeWatches: TvEpisodeWatchEntry[];
   sportsWatches: SportsWatchEntry[];
   bookSessions: BookReadingSessionEntry[];
+  gameSessions: GameSessionEntry[];
 };
 
 export type HealthPayload = {
@@ -347,6 +350,28 @@ export type BookReadingSessionPayload = {
 };
 export type BooksPayload = { entries: BookReadingSessionPayload[] };
 
+// Same open-ended replace-on-save shape as movies/sports/books — any number
+// of sessions per day, including the same game twice (issue #68).
+// `gameName`/`gameType`/`gameSubtype` on the read side are resolved via
+// join purely for display and aren't part of what gets saved.
+export type GameSessionEntry = {
+  id: number;
+  gameId: number;
+  gameName: string;
+  gameType: string | null;
+  gameSubtype: string | null;
+  durationMinutes: number | null;
+  deviceType: string | null;
+  locationType: string | null;
+};
+export type GameSessionPayload = {
+  gameId: number;
+  durationMinutes: number | null;
+  deviceType: string | null;
+  locationType: string | null;
+};
+export type GamesPayload = { entries: GameSessionPayload[] };
+
 // Catalog item shapes carry every field the legacy "New Person"/"New Place"/
 // "New entertainment" modals captured (see the schema comments above people/
 // places/entertainmentCatalog for exactly what was and wasn't carried over)
@@ -446,6 +471,13 @@ export type BookCatalogItem = {
   categories: string[];
 };
 
+// The games catalog, like sports, has no external API — a fully manual
+// name + optional type/subtype (issue #68), matched by name against the
+// gameCategories/gameSubcategories catalog in src/lib/catalog-admin.ts,
+// same free-text-but-catalog-backed relationship as places' category/
+// subcategory.
+export type GameCatalogItem = { id: number; name: string; type: string | null; subtype: string | null };
+
 /** Reads one day's full record — the scalar day row plus its workouts and
  * their sets — straight from the database. Used by the summary page, by
  * each section's own entry page (each just reads the slice it needs), and
@@ -509,6 +541,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
     tvEpisodeWatchRows,
     sportsWatchRows,
     bookSessionRows,
+    gameSessionRows,
   ] = await Promise.all([
     allPersonIds.length
       ? db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, allPersonIds))
@@ -605,6 +638,21 @@ export async function loadDay(date: string): Promise<DayPayload> {
       .innerJoin(books, eq(bookReadingSessions.bookId, books.id))
       .where(eq(bookReadingSessions.date, date))
       .orderBy(asc(bookReadingSessions.id)),
+    db
+      .select({
+        id: gameSessions.id,
+        gameId: gameSessions.gameId,
+        gameName: games.name,
+        gameType: games.type,
+        gameSubtype: games.subtype,
+        durationMinutes: gameSessions.durationMinutes,
+        deviceType: gameSessions.deviceType,
+        locationType: gameSessions.locationType,
+      })
+      .from(gameSessions)
+      .innerJoin(games, eq(gameSessions.gameId, games.id))
+      .where(eq(gameSessions.date, date))
+      .orderBy(asc(gameSessions.id)),
   ]);
 
   const personNameById = new Map(peopleNameRows.map((p) => [p.id, p.name]));
@@ -743,6 +791,16 @@ export async function loadDay(date: string): Promise<DayPayload> {
       completed: s.completed,
       locationType: s.locationType,
       durationMinutes: s.durationMinutes,
+    })),
+    gameSessions: gameSessionRows.map((s) => ({
+      id: s.id,
+      gameId: s.gameId,
+      gameName: s.gameName,
+      gameType: s.gameType,
+      gameSubtype: s.gameSubtype,
+      durationMinutes: s.durationMinutes,
+      deviceType: s.deviceType,
+      locationType: s.locationType,
     })),
   };
 }
@@ -1216,6 +1274,31 @@ export function validateBooksPayload(body: unknown): Result<BooksPayload> {
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
 
     entries.push({ bookId, startPage, endPage, completed, locationType, durationMinutes });
+  }
+
+  return { ok: true, value: { entries } };
+}
+
+export function validateGamesPayload(body: unknown): Result<GamesPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: GamesPayload["entries"] = [];
+  for (const e of input) {
+    const gameId = typeof e.gameId === "number" ? e.gameId : NaN;
+    if (!Number.isInteger(gameId)) {
+      return { ok: false, error: "Invalid game selection" };
+    }
+
+    const deviceType = typeof e.deviceType === "string" && e.deviceType.trim() ? e.deviceType.trim() : null;
+    const locationType =
+      typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+
+    entries.push({ gameId, durationMinutes, deviceType, locationType });
   }
 
   return { ok: true, value: { entries } };
@@ -1831,6 +1914,29 @@ export async function saveBookReadingSessions(date: string, value: BooksPayload)
   return loadDay(date);
 }
 
+// Same replace-on-save shape as saveMovies/saveSportsWatches/
+// saveBookReadingSessions above, against the game_sessions satellite table
+// (issue #68).
+export async function saveGameSessions(date: string, value: GamesPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(gameSessions).where(eq(gameSessions.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(gameSessions).values(
+      value.entries.map((e) => ({
+        date,
+        gameId: e.gameId,
+        durationMinutes: e.durationMinutes,
+        deviceType: e.deviceType,
+        locationType: e.locationType,
+      }))
+    );
+  }
+
+  return loadDay(date);
+}
+
 // --- Catalogs --------------------------------------------------------------
 // People/places/exercises/exercise-locations/entertainment all follow the
 // same "pick from a maintained list, add new via a quick create" pattern
@@ -1864,6 +1970,51 @@ function selectPeopleWithTag() {
 
 export async function listPeopleCatalog(): Promise<PersonCatalogItem[]> {
   return selectPeopleWithTag().orderBy(asc(people.name));
+}
+
+export type PersonMentionStats = { totalCount: number; mostRecentDate: string | null };
+
+/** Per-person total mention count plus most-recent mention date, across all
+ * 10 person slots (7 positive + 3 negative — same unpivot-in-JS approach as
+ * getPeopleNetworkData in src/lib/charts.ts, since the slots are 10 separate
+ * FK columns rather than rows in a table). Issue #73: the day-entry people
+ * picker should surface whoever's likely to be picked next — someone
+ * mentioned once yesterday should be able to outrank someone mentioned 5x a
+ * year ago, but total count should still govern order among people who
+ * haven't come up recently. See recencyWeightedPersonScore in
+ * src/lib/person-sort.ts for how these two numbers turn into a single
+ * ranking. */
+export async function getPeopleMentionStats(): Promise<Map<number, PersonMentionStats>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: days.date,
+      p1: days.positivePerson1Id,
+      p2: days.positivePerson2Id,
+      p3: days.positivePerson3Id,
+      p4: days.positivePerson4Id,
+      p5: days.positivePerson5Id,
+      p6: days.positivePerson6Id,
+      p7: days.positivePerson7Id,
+      n1: days.negativePerson1Id,
+      n2: days.negativePerson2Id,
+      n3: days.negativePerson3Id,
+    })
+    .from(days);
+
+  const stats = new Map<number, PersonMentionStats>();
+  for (const row of rows) {
+    const ids = [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7, row.n1, row.n2, row.n3].filter(
+      (id): id is number => id !== null
+    );
+    for (const id of new Set(ids)) {
+      const entry = stats.get(id) ?? { totalCount: 0, mostRecentDate: null };
+      entry.totalCount += 1;
+      if (entry.mostRecentDate === null || row.date > entry.mostRecentDate) entry.mostRecentDate = row.date;
+      stats.set(id, entry);
+    }
+  }
+  return stats;
 }
 
 export async function createPersonCatalogEntry(input: PersonCatalogInput): Promise<PersonCatalogItem> {
@@ -2389,14 +2540,7 @@ export async function getPlaceMentionHistory(
   return entries;
 }
 
-/** Per-place mention count, own mentions plus every descendant's (a
- * country's count includes every city and venue under it) — used to sort
- * the places manage list by "most mentioned" instead of alphabetically.
- * Reuses the exact 2x-for-1st-slot/1x-for-2nd-slot weighting
- * getPlaceLeaderboardData (src/lib/charts.ts) already established from
- * legacy's `location_leaderboard` chart, so "how mentioned" means the same
- * thing everywhere in the app rather than two competing definitions. */
-export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
+async function selectPlaceMentionRows(): Promise<{ id: number; parentId: number | null; own: number }[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -2410,8 +2554,20 @@ export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
     .from(places)
     .leftJoin(days, sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`)
     .groupBy(places.id, places.parentId);
+  return rows.map((r) => ({ id: r.id, parentId: r.parentId, own: Number(r.own) }));
+}
 
-  const own = new Map(rows.map((r) => [r.id, Number(r.own)]));
+/** Per-place mention count, own mentions plus every descendant's (a
+ * country's count includes every city and venue under it) — used to sort
+ * the places manage list by "most mentioned" instead of alphabetically.
+ * Reuses the exact 2x-for-1st-slot/1x-for-2nd-slot weighting
+ * getPlaceLeaderboardData (src/lib/charts.ts) already established from
+ * legacy's `location_leaderboard` chart, so "how mentioned" means the same
+ * thing everywhere in the app rather than two competing definitions. */
+export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
+  const rows = await selectPlaceMentionRows();
+
+  const own = new Map(rows.map((r) => [r.id, r.own]));
   const childrenByParent = new Map<number, number[]>();
   for (const r of rows) {
     if (r.parentId === null) continue;
@@ -2442,6 +2598,19 @@ export async function getPlaceMentionCounts(): Promise<Map<number, number>> {
   }
   for (const r of rows) computeTotal(r.id);
   return total;
+}
+
+/** Per-place mention count, own mentions only — no descendant roll-up (see
+ * getPlaceMentionCounts above for that version). Issue #72: the day-entry
+ * "add a place" picker should surface places that are actually, directly
+ * mentioned rather than letting a rarely-visited country outrank a
+ * frequently-visited specific venue just because the country's total
+ * includes every city under it — that roll-up is right for the parent
+ * picker (choosing a broad region) but wrong for ranking concrete places to
+ * log against today. */
+export async function getRawPlaceMentionCounts(): Promise<Map<number, number>> {
+  const rows = await selectPlaceMentionRows();
+  return new Map(rows.map((r) => [r.id, r.own]));
 }
 
 const ENTERTAINMENT_CATALOG_COLUMNS = {
@@ -3416,4 +3585,82 @@ export async function getBookProgress(bookId: number): Promise<BookProgress> {
   }
 
   return { currentPage, completions };
+}
+
+// --- Games ---------------------------------------------------------------
+// Fully manual catalog, no external API — same "+ New" pattern as sports
+// (issue #68), just without a league/team hierarchy underneath.
+
+const GAME_COLUMNS = {
+  id: games.id,
+  name: games.name,
+  type: games.type,
+  subtype: games.subtype,
+};
+
+export function validateGameInput(body: unknown): Result<{ name: string; type: string | null; subtype: string | null }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  const type = typeof b.type === "string" && b.type.trim() ? b.type.trim() : null;
+  const subtype = typeof b.subtype === "string" && b.subtype.trim() ? b.subtype.trim() : null;
+  return { ok: true, value: { name, type, subtype } };
+}
+
+export async function listGamesCatalog(): Promise<GameCatalogItem[]> {
+  const db = getDb();
+  return db.select(GAME_COLUMNS).from(games).orderBy(asc(games.name));
+}
+
+export async function createGameCatalogEntry(input: {
+  name: string;
+  type: string | null;
+  subtype: string | null;
+}): Promise<GameCatalogItem> {
+  const db = getDb();
+  const trimmed = input.name.trim();
+  const [inserted] = await db
+    .insert(games)
+    .values({ name: trimmed, type: input.type, subtype: input.subtype })
+    .onConflictDoNothing({ target: games.name })
+    .returning(GAME_COLUMNS);
+  if (inserted) return inserted;
+  const [existing] = await db.select(GAME_COLUMNS).from(games).where(eq(games.name, trimmed));
+  return existing;
+}
+
+export async function getGameCatalogEntry(id: number): Promise<GameCatalogItem | null> {
+  const db = getDb();
+  const [row] = await db.select(GAME_COLUMNS).from(games).where(eq(games.id, id));
+  return row ?? null;
+}
+
+export async function updateGameCatalogEntry(
+  id: number,
+  input: { name: string; type: string | null; subtype: string | null }
+): Promise<GameCatalogItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(games)
+    .set({ name: input.name.trim(), type: input.type, subtype: input.subtype })
+    .where(eq(games.id, id))
+    .returning(GAME_COLUMNS);
+  return updated;
+}
+
+// Only real block — gameSessions.gameId is onDelete: "restrict".
+export type GameUsage = { sessionCount: number };
+
+export async function getGameUsage(id: number): Promise<GameUsage> {
+  const db = getDb();
+  const rows = await db.select({ id: gameSessions.id }).from(gameSessions).where(eq(gameSessions.gameId, id));
+  return { sessionCount: rows.length };
+}
+
+export async function deleteGameCatalogEntry(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(games).where(eq(games.id, id));
 }

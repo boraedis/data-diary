@@ -15,8 +15,10 @@ import {
   type DayPayload,
   type PeoplePayload,
   type PersonCatalogItem,
+  type PersonMentionStats,
 } from "@/lib/days";
 import type { TagCatalogItem } from "@/lib/catalog-admin";
+import { comparePeopleByRecencyAndMentions } from "@/lib/person-sort";
 
 type Valence = "positive" | "negative";
 type SlotEntries = { slot: number; valence: Valence; personId: number }[];
@@ -173,6 +175,7 @@ function NewPersonModal({
 function PersonAddPanel({
   items,
   usedIds,
+  mentionStats,
   onAddPositive,
   onAddNegative,
   onCreated,
@@ -181,6 +184,7 @@ function PersonAddPanel({
 }: {
   items: PersonCatalogItem[];
   usedIds: Set<number>;
+  mentionStats: Map<number, PersonMentionStats>;
   onAddPositive: (personId: number) => void;
   onAddNegative: (personId: number) => void;
   onCreated: (item: PersonCatalogItem) => void;
@@ -188,7 +192,14 @@ function PersonAddPanel({
   onTagCreated: (tag: TagCatalogItem) => void;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
-  const searchItems = items.filter((p) => !usedIds.has(p.id)).map(toSearchItem);
+  // Recency-weighted score first, so whoever's most likely to be picked
+  // next surfaces at the top (issue #73) — recent mentions win, but total
+  // mention count still governs order once recency fades (see
+  // src/lib/person-sort.ts).
+  const searchItems = items
+    .filter((p) => !usedIds.has(p.id))
+    .sort(comparePeopleByRecencyAndMentions(mentionStats))
+    .map(toSearchItem);
 
   return (
     <div className="space-y-2">
@@ -262,11 +273,13 @@ export function PeopleEntryForm({
   initial,
   catalog,
   tags: initialTags,
+  mentionStats,
 }: {
   date: string;
   initial: PeoplePayload;
   catalog: PersonCatalogItem[];
   tags: TagCatalogItem[];
+  mentionStats: Map<number, PersonMentionStats>;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<PersonCatalogItem[]>(catalog);
@@ -403,6 +416,7 @@ export function PeopleEntryForm({
           <PersonAddPanel
             items={items}
             usedIds={usedIds}
+            mentionStats={mentionStats}
             onAddPositive={(id) => addToValence("positive", id)}
             onAddNegative={(id) => addToValence("negative", id)}
             onCreated={handleCreated}

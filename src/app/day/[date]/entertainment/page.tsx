@@ -5,13 +5,22 @@ import { isValidDateString } from "@/lib/date";
 import {
   listBooksCatalog,
   listEntertainmentCatalog,
+  listGamesCatalog,
   listMoviesCatalog,
   listSportsCatalog,
   listTvShowsCatalog,
   loadDay,
 } from "@/lib/days";
-import { listEntertainmentKinds, listEntertainmentLocationTypes, listSportsGameTypes, listSportsSeasonsByLeague } from "@/lib/catalog-admin";
-import type { SportsSeasonItem } from "@/lib/catalog-admin";
+import {
+  listEntertainmentKinds,
+  listEntertainmentLocationTypes,
+  listGameCategories,
+  listGameDeviceTypes,
+  listSportsDivisionsByLeague,
+  listSportsGameTypes,
+  listSportsSeasonsByLeague,
+} from "@/lib/catalog-admin";
+import type { SportsDivisionItem, SportsSeasonItem } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -25,24 +34,44 @@ export default async function EntertainmentEntryPage({
     notFound();
   }
 
-  const [day, movieCatalog, tvCatalog, sportsCatalog, bookCatalog, entertainmentCatalog, entertainmentKinds, locationTypes, sportsGameTypes] =
-    await Promise.all([
-      loadDay(date),
-      listMoviesCatalog(),
-      listTvShowsCatalog(),
-      listSportsCatalog(),
-      listBooksCatalog(),
-      listEntertainmentCatalog(),
-      listEntertainmentKinds(),
-      listEntertainmentLocationTypes(),
-      listSportsGameTypes(),
-    ]);
+  const [
+    day,
+    movieCatalog,
+    tvCatalog,
+    sportsCatalog,
+    bookCatalog,
+    gamesCatalog,
+    gameCategories,
+    gameDeviceTypes,
+    entertainmentCatalog,
+    entertainmentKinds,
+    locationTypes,
+    sportsGameTypes,
+  ] = await Promise.all([
+    loadDay(date),
+    listMoviesCatalog(),
+    listTvShowsCatalog(),
+    listSportsCatalog(),
+    listBooksCatalog(),
+    listGamesCatalog(),
+    listGameCategories(),
+    listGameDeviceTypes(),
+    listEntertainmentCatalog(),
+    listEntertainmentKinds(),
+    listEntertainmentLocationTypes(),
+    listSportsGameTypes(),
+  ]);
 
   const leagueIds = sportsCatalog.flatMap((sport) => sport.leagues.map((l) => l.id));
-  const seasonLists = await Promise.all(leagueIds.map((id) => listSportsSeasonsByLeague(id)));
+  const [seasonLists, divisionLists] = await Promise.all([
+    Promise.all(leagueIds.map((id) => listSportsSeasonsByLeague(id))),
+    Promise.all(leagueIds.map((id) => listSportsDivisionsByLeague(id))),
+  ]);
   const sportsSeasonsByLeague: Record<number, SportsSeasonItem[]> = {};
+  const sportsDivisionsByLeague: Record<number, SportsDivisionItem[]> = {};
   leagueIds.forEach((id, i) => {
     sportsSeasonsByLeague[id] = seasonLists[i];
+    sportsDivisionsByLeague[id] = divisionLists[i];
   });
 
   return (
@@ -55,11 +84,15 @@ export default async function EntertainmentEntryPage({
         tvCatalog={tvCatalog}
         sportsCatalog={sportsCatalog}
         bookCatalog={bookCatalog}
+        gamesCatalog={gamesCatalog}
+        gameCategories={gameCategories}
+        gameDeviceTypes={gameDeviceTypes}
         entertainmentCatalog={entertainmentCatalog}
         entertainmentKinds={entertainmentKinds}
         locationTypes={locationTypes}
         sportsGameTypes={sportsGameTypes}
         sportsSeasonsByLeague={sportsSeasonsByLeague}
+        sportsDivisionsByLeague={sportsDivisionsByLeague}
       />
     </main>
   );

@@ -20,7 +20,11 @@ import {
   exerciseFocuses,
   exerciseSubfocuses,
   exerciseSubtypes,
+  gameCategories,
+  gameDeviceTypes,
+  games,
   gameSessions,
+  gameSubcategories,
   metros,
   movieWatches,
   people,
@@ -29,8 +33,10 @@ import {
   placeSubcategories,
   sleepLocationSubtypes,
   sleepLocationTypes,
+  sportsDivisions,
   sportsGameTypes,
   sportsSeasons,
+  sportsTeams,
   sportsWatches,
   tags,
   tvEpisodeWatches,
@@ -697,6 +703,190 @@ export async function deletePlaceSubcategory(id: number): Promise<void> {
   await db.delete(placeSubcategories).where(eq(placeSubcategories.id, id));
 }
 
+// --- Game categories / subcategories / device types (catalog) ---------------
+// See the `gameCategories`/`gameSubcategories`/`gameDeviceTypes` table
+// comments in schema.ts (issue #68) — same "maintained catalog a picker
+// reads from, games.type/subtype/gameSessions.deviceType stay free-text
+// matched by name" shape as placeCategories/placeSubcategories above.
+
+export type GameCategoryItem = { id: number; name: string };
+export type GameSubcategoryItem = { id: number; categoryId: number; name: string };
+
+export async function listGameCategories(): Promise<(GameCategoryItem & { subcategories: GameSubcategoryItem[] })[]> {
+  const db = getDb();
+  const [catRows, subRows] = await Promise.all([
+    db.select().from(gameCategories).orderBy(asc(gameCategories.name)),
+    db.select().from(gameSubcategories).orderBy(asc(gameSubcategories.name)),
+  ]);
+  const byCategory = new Map<number, GameSubcategoryItem[]>();
+  for (const s of subRows) {
+    const list = byCategory.get(s.categoryId) ?? [];
+    list.push(s);
+    byCategory.set(s.categoryId, list);
+  }
+  return catRows.map((c) => ({ ...c, subcategories: byCategory.get(c.id) ?? [] }));
+}
+
+export async function createGameCategory(name: string): Promise<GameCategoryItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(gameCategories)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: gameCategories.name })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db.select().from(gameCategories).where(eq(gameCategories.name, trimmed));
+  return existing;
+}
+
+export async function getGameCategory(id: number): Promise<GameCategoryItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(gameCategories).where(eq(gameCategories.id, id));
+  return row ?? null;
+}
+
+export async function updateGameCategory(id: number, name: string): Promise<GameCategoryItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(gameCategories)
+    .set({ name: name.trim() })
+    .where(eq(gameCategories.id, id))
+    .returning();
+  return updated;
+}
+
+// games.type is a plain free-text string (see the `games` table comment in
+// schema.ts), not an FK, so this checks that soft reference at the app
+// level — same reasoning as getPlaceCategoryUsage. subcategoryCount also
+// doubles as a real DB guard: gameSubcategories.categoryId is onDelete:
+// "restrict".
+export type GameCategoryUsage = { gameCount: number; subcategoryCount: number };
+
+export async function getGameCategoryUsage(id: number): Promise<GameCategoryUsage> {
+  const db = getDb();
+  const category = await getGameCategory(id);
+  if (!category) return { gameCount: 0, subcategoryCount: 0 };
+  const [gameRows, subcategoryRows] = await Promise.all([
+    db.select({ id: games.id }).from(games).where(eq(games.type, category.name)),
+    db.select({ id: gameSubcategories.id }).from(gameSubcategories).where(eq(gameSubcategories.categoryId, id)),
+  ]);
+  return { gameCount: gameRows.length, subcategoryCount: subcategoryRows.length };
+}
+
+export async function deleteGameCategory(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(gameCategories).where(eq(gameCategories.id, id));
+}
+
+export async function createGameSubcategory(categoryId: number, name: string): Promise<GameSubcategoryItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(gameSubcategories)
+    .values({ categoryId, name: trimmed })
+    .onConflictDoNothing({ target: [gameSubcategories.categoryId, gameSubcategories.name] })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select()
+    .from(gameSubcategories)
+    .where(and(eq(gameSubcategories.categoryId, categoryId), eq(gameSubcategories.name, trimmed)));
+  return existing;
+}
+
+export async function getGameSubcategory(id: number): Promise<GameSubcategoryItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(gameSubcategories).where(eq(gameSubcategories.id, id));
+  return row ?? null;
+}
+
+export async function updateGameSubcategory(id: number, name: string): Promise<GameSubcategoryItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(gameSubcategories)
+    .set({ name: name.trim() })
+    .where(eq(gameSubcategories.id, id))
+    .returning();
+  return updated;
+}
+
+// Same soft-reference reasoning as getGameCategoryUsage — games.subtype is
+// free text, not an FK.
+export type GameSubcategoryUsage = { gameCount: number };
+
+export async function getGameSubcategoryUsage(id: number): Promise<GameSubcategoryUsage> {
+  const db = getDb();
+  const subcategory = await getGameSubcategory(id);
+  if (!subcategory) return { gameCount: 0 };
+  const rows = await db.select({ id: games.id }).from(games).where(eq(games.subtype, subcategory.name));
+  return { gameCount: rows.length };
+}
+
+export async function deleteGameSubcategory(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(gameSubcategories).where(eq(gameSubcategories.id, id));
+}
+
+// Named "device type" rather than "device" (issue #75 follow-up) — this is
+// a category like "Console"/"PC"/"Phone", not a specific physical device.
+export type GameDeviceTypeItem = { id: number; name: string };
+
+export async function listGameDeviceTypes(): Promise<GameDeviceTypeItem[]> {
+  const db = getDb();
+  return db.select().from(gameDeviceTypes).orderBy(asc(gameDeviceTypes.name));
+}
+
+export async function createGameDeviceType(name: string): Promise<GameDeviceTypeItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(gameDeviceTypes)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: gameDeviceTypes.name })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db.select().from(gameDeviceTypes).where(eq(gameDeviceTypes.name, trimmed));
+  return existing;
+}
+
+export async function getGameDeviceType(id: number): Promise<GameDeviceTypeItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(gameDeviceTypes).where(eq(gameDeviceTypes.id, id));
+  return row ?? null;
+}
+
+export async function updateGameDeviceType(id: number, name: string): Promise<GameDeviceTypeItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(gameDeviceTypes)
+    .set({ name: name.trim() })
+    .where(eq(gameDeviceTypes.id, id))
+    .returning();
+  return updated;
+}
+
+// gameSessions.deviceType is a plain free-text string, not an FK — same
+// soft-reference check as getEntertainmentLocationTypeUsage, just scoped to
+// the one table that has a deviceType column.
+export type GameDeviceTypeUsage = { sessionCount: number };
+
+export async function getGameDeviceTypeUsage(id: number): Promise<GameDeviceTypeUsage> {
+  const db = getDb();
+  const deviceType = await getGameDeviceType(id);
+  if (!deviceType) return { sessionCount: 0 };
+  const rows = await db
+    .select({ id: gameSessions.id })
+    .from(gameSessions)
+    .where(eq(gameSessions.deviceType, deviceType.name));
+  return { sessionCount: rows.length };
+}
+
+export async function deleteGameDeviceType(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(gameDeviceTypes).where(eq(gameDeviceTypes.id, id));
+}
+
 export type MetroItem = { id: number; name: string; country: string | null; alias: string | null };
 
 export function validateMetroInput(body: unknown): Result<{ name: string; country: string | null; alias: string | null }> {
@@ -1029,6 +1219,67 @@ export async function getSportsSeasonUsage(id: number): Promise<SportsSeasonUsag
 export async function deleteSportsSeason(id: number): Promise<void> {
   const db = getDb();
   await db.delete(sportsSeasons).where(eq(sportsSeasons.id, id));
+}
+
+// --- Sports divisions (catalog, scoped per league) ---------------------------
+// See the `sportsDivisions` table comment in schema.ts (issue #71) — same
+// shape as sportsSeasons above, just backing sportsTeams.division instead of
+// sportsWatches.season, so usage below counts teams, not watches.
+
+export type SportsDivisionItem = { id: number; leagueId: number; name: string };
+
+export async function listSportsDivisionsByLeague(leagueId: number): Promise<SportsDivisionItem[]> {
+  const db = getDb();
+  return db.select().from(sportsDivisions).where(eq(sportsDivisions.leagueId, leagueId)).orderBy(asc(sportsDivisions.name));
+}
+
+export async function createSportsDivision(leagueId: number, name: string): Promise<SportsDivisionItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(sportsDivisions)
+    .values({ leagueId, name: trimmed })
+    .onConflictDoNothing({ target: [sportsDivisions.leagueId, sportsDivisions.name] })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select()
+    .from(sportsDivisions)
+    .where(and(eq(sportsDivisions.leagueId, leagueId), eq(sportsDivisions.name, trimmed)));
+  return existing;
+}
+
+export async function getSportsDivision(id: number): Promise<SportsDivisionItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sportsDivisions).where(eq(sportsDivisions.id, id));
+  return row ?? null;
+}
+
+export async function updateSportsDivision(id: number, name: string): Promise<SportsDivisionItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sportsDivisions)
+    .set({ name: name.trim() })
+    .where(eq(sportsDivisions.id, id))
+    .returning();
+  return updated;
+}
+
+// Same soft-reference reasoning as getSportsSeasonUsage — sportsTeams.division
+// is free text, not an FK.
+export type SportsDivisionUsage = { teamCount: number };
+
+export async function getSportsDivisionUsage(id: number): Promise<SportsDivisionUsage> {
+  const db = getDb();
+  const division = await getSportsDivision(id);
+  if (!division) return { teamCount: 0 };
+  const rows = await db.select({ id: sportsTeams.id }).from(sportsTeams).where(eq(sportsTeams.division, division.name));
+  return { teamCount: rows.length };
+}
+
+export async function deleteSportsDivision(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sportsDivisions).where(eq(sportsDivisions.id, id));
 }
 
 // --- Sports game types (catalog) ---------------------------------------------

@@ -11,9 +11,10 @@ import { Modal } from "@/components/ui/modal";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { SportsWatchHistoryList } from "@/components/manage/sports-watch-history-list";
 import type { SportCatalogItem, SportsLeagueItem, SportsLeagueUsage } from "@/lib/days";
-import type { SportsSeasonItem, SportsSeasonUsage } from "@/lib/catalog-admin";
+import type { SportsDivisionItem, SportsDivisionUsage, SportsSeasonItem, SportsSeasonUsage } from "@/lib/catalog-admin";
 
 type SeasonWithUsage = SportsSeasonItem & { usage: SportsSeasonUsage };
+type DivisionWithUsage = SportsDivisionItem & { usage: SportsDivisionUsage };
 
 function AddSeasonModal({
   leagueId,
@@ -184,6 +185,175 @@ function SeasonRow({
   );
 }
 
+function AddDivisionModal({
+  leagueId,
+  open,
+  onClose,
+  onCreated,
+}: {
+  leagueId: number;
+  open: boolean;
+  onClose: () => void;
+  onCreated: (division: SportsDivisionItem) => void;
+}) {
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function reset() {
+    setName("");
+    setError(null);
+  }
+
+  async function handleCreate() {
+    if (!name.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sports-leagues/${leagueId}/divisions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(typeof body?.error === "string" ? body.error : "Failed to create");
+        return;
+      }
+      onCreated(body as SportsDivisionItem);
+      reset();
+      onClose();
+    } catch {
+      setError("Network error");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => {
+        reset();
+        onClose();
+      }}
+      title="New division"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="add-sports-division-name">Name</Label>
+          <Input
+            id="add-sports-division-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. AFC East"
+            autoFocus
+          />
+        </div>
+        {error ? <span className="text-sm text-destructive">{error}</span> : null}
+        <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
+          {creating ? "Adding…" : "Add"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function DivisionRow({
+  division: initial,
+  onUpdated,
+  onDeleted,
+}: {
+  division: DivisionWithUsage;
+  onUpdated: (division: SportsDivisionItem) => void;
+  onDeleted: (id: number) => void;
+}) {
+  const [division, setDivision] = useState(initial);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(initial.name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sports-divisions/${division.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(typeof body?.error === "string" ? body.error : "Failed to save");
+        return;
+      }
+      const updated = { ...division, ...(body as SportsDivisionItem) };
+      setDivision(updated);
+      onUpdated(updated);
+      setEditing(false);
+    } catch {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" autoFocus />
+        {error ? <span className="text-xs text-destructive">{error}</span> : null}
+        <div className="flex gap-2">
+          <Button type="button" size="xs" onClick={handleSave} disabled={saving || !name.trim()}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              setName(division.name);
+              setError(null);
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+      <p className="min-w-0 truncate text-sm">{division.name}</p>
+      <div className="flex shrink-0 gap-1">
+        <Button type="button" size="xs" variant="outline" onClick={() => setEditing(true)}>
+          Edit
+        </Button>
+        <DeleteCatalogItem
+          size="xs"
+          itemLabel={division.name}
+          isBlocked={division.usage.teamCount > 0}
+          onDelete={async () => {
+            const res = await fetch(`/api/sports-divisions/${division.id}`, { method: "DELETE" });
+            if (!res.ok) throw new Error("Failed to delete");
+            onDeleted(division.id);
+          }}
+          blockedContent={
+            <p>
+              {division.usage.teamCount} team{division.usage.teamCount === 1 ? "" : "s"} still{" "}
+              {division.usage.teamCount === 1 ? "uses" : "use"} this division.
+            </p>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 // Full detail page for a single league — see #9. Previously this was an
 // inline expand/edit row crammed into the parent sport's Leagues card
 // (LeagueRow in sport-detail.tsx), competing for space with the name label
@@ -194,11 +364,13 @@ export function SportsLeagueDetail({
   league: initial,
   usage,
   seasons: initialSeasons,
+  divisions: initialDivisions,
 }: {
   sport: SportCatalogItem;
   league: SportsLeagueItem;
   usage: SportsLeagueUsage;
   seasons: SeasonWithUsage[];
+  divisions: DivisionWithUsage[];
 }) {
   const router = useRouter();
   const [league, setLeague] = useState(initial);
@@ -209,6 +381,8 @@ export function SportsLeagueDetail({
   const [error, setError] = useState<string | null>(null);
   const [seasons, setSeasons] = useState(initialSeasons);
   const [addSeasonOpen, setAddSeasonOpen] = useState(false);
+  const [divisions, setDivisions] = useState(initialDivisions);
+  const [addDivisionOpen, setAddDivisionOpen] = useState(false);
 
   function cancelEdit() {
     setName(league.name);
@@ -350,6 +524,30 @@ export function SportsLeagueDetail({
 
       <Card size="sm">
         <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Divisions</CardTitle>
+            <Button type="button" variant="outline" size="xs" onClick={() => setAddDivisionOpen(true)}>
+              + New division
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {divisions.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : null}
+          {divisions.map((d) => (
+            <DivisionRow
+              key={d.id}
+              division={d}
+              onUpdated={(updated) =>
+                setDivisions((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))
+              }
+              onDeleted={(id) => setDivisions((prev) => prev.filter((x) => x.id !== id))}
+            />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
           <CardTitle>Watch history</CardTitle>
         </CardHeader>
         <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
@@ -362,6 +560,13 @@ export function SportsLeagueDetail({
         open={addSeasonOpen}
         onClose={() => setAddSeasonOpen(false)}
         onCreated={(season) => setSeasons((prev) => [...prev, { ...season, usage: { watchCount: 0 } }])}
+      />
+
+      <AddDivisionModal
+        leagueId={league.id}
+        open={addDivisionOpen}
+        onClose={() => setAddDivisionOpen(false)}
+        onCreated={(division) => setDivisions((prev) => [...prev, { ...division, usage: { teamCount: 0 } }])}
       />
     </>
   );

@@ -9,7 +9,10 @@ import { categoricalColor } from "@/lib/viz/color";
 // use, a composite id packs (kind, catalogId) into a single number local to
 // this feature. 10,000,000 per kind slot is comfortably larger than any
 // catalog this personal app will ever hold.
-export const ENTERTAINMENT_KINDS = ["movie", "tv", "sports", "book", "other"] as const;
+// "game" was appended last (issue #68) rather than inserted alphabetically —
+// each kind's composite-id slot is derived from its index in this array, so
+// reordering would silently reassign every existing search-id encoding.
+export const ENTERTAINMENT_KINDS = ["movie", "tv", "sports", "book", "other", "game"] as const;
 export type EntertainmentKind = (typeof ENTERTAINMENT_KINDS)[number];
 
 const KIND_MULTIPLIER = 10_000_000;
@@ -38,4 +41,5 @@ export const ENTERTAINMENT_KIND_LABELS: Record<EntertainmentKind, string> = {
   sports: "Sports",
   book: "Book",
   other: "Other",
+  game: "Game",
 };

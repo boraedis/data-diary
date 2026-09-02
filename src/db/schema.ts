@@ -841,11 +841,14 @@ export const bookRankings = pgTable("book_rankings", {
 // Fully manual catalog, no external API — the historical survey found this
 // domain genuinely complete and well-used in the legacy app (unlike games
 // below), so it's ported closely: sport -> league -> team, all user-entered
-// via "+ New" flows like people/places/exercises. Seasons and divisions
-// stay free text on the log/team rather than getting their own catalog
-// tables — in the legacy app they're just label lists scoped to a league
-// (`leagues[name].seasons`/`.divisions`), not real entities with their own
-// attributes, so a whole table each would be overhead a label doesn't need.
+// via "+ New" flows like people/places/exercises. Seasons stay free text on
+// the log rather than getting their own catalog table — in the legacy app
+// it's just a label list scoped to a league (`leagues[name].seasons`), not
+// a real entity with its own attributes, so a whole table would be
+// overhead a label doesn't need. Divisions started the same way but got
+// promoted to a real per-league catalog in issue #71 (see sportsDivisions
+// below) — teams needed to actually pick a division/conference from a
+// maintained list scoped to their league, not just type one in free-hand.
 export const sports = pgTable("sports", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -882,6 +885,11 @@ export const sportsTeams = pgTable(
     // ambiguity forward.
     homeLocation: text("home_location"),
     color: text("color"),
+    // Matched by name against the sportsDivisions catalog below (issue
+    // #71), same free-text-but-catalog-backed relationship as
+    // sportsWatches.season has with sportsSeasons — not an FK, since a
+    // division scoped to the wrong league would otherwise need its own
+    // migration path rather than just picking a different string.
     division: text("division"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -932,6 +940,24 @@ export const sportsSeasons = pgTable(
   (table) => [uniqueIndex("sports_seasons_league_id_name_idx").on(table.leagueId, table.name)]
 );
 
+// Backs sportsTeams.division (issue #71) — exact same shape as
+// sportsSeasons above: scoped to a league (a division/conference name like
+// "AFC East" or "Atlantic" only means something within a specific league),
+// child row under an already-real parent catalog. "Division" and
+// "conference" are treated as the same concept here (different leagues use
+// different words for it) rather than two separate catalogs.
+export const sportsDivisions = pgTable(
+  "sports_divisions",
+  {
+    id: serial("id").primaryKey(),
+    leagueId: integer("league_id")
+      .notNull()
+      .references(() => sportsLeagues.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("sports_divisions_league_id_name_idx").on(table.leagueId, table.name)]
+);
+
 // Flat, unscoped — "regular season"/"playoffs"/"exhibition" means the same
 // thing across every sport/league, unlike season.
 export const sportsGameTypes = pgTable("sports_game_types", {
@@ -945,10 +971,16 @@ export const sportsGameTypes = pgTable("sports_game_types", {
 // method that was never defined, and a copy-pasted stand-in for it silently
 // clobbered the *books* edit function instead (wrong-namespace bug); its
 // browse UI was leftover sports-catalog code, never adapted. There's no
-// real intended richer design underneath to reverse-engineer, so this is
+// real intended richer design underneath to reverse-engineer, so this was
 // just enough to log "played X for N minutes" — same treatment as
 // finance/todo/goals in spirit, just not fully dropped since logging a
 // game session is at least a working, real feature today.
+//
+// Issue #68 built the missing entry surface on top of this stub: `type`/
+// `subtype` are matched by name against gameCategories/gameSubcategories
+// below (same free-text-matched-by-name relationship as places.category/
+// subcategory), and `deviceType` against gameDeviceTypes, same as every
+// other catalog-backed-but-free-text column in this file.
 export const games = pgTable("games", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -967,12 +999,49 @@ export const gameSessions = pgTable(
       .notNull()
       .references(() => days.date, { onDelete: "cascade" }),
     durationMinutes: integer("duration_minutes"),
-    device: text("device"),
+    // Matched by name against gameDeviceTypes below — a *category* of
+    // device ("Console", "PC"), not a specific physical device, hence
+    // "type" in both the column and catalog name (issue #75 follow-up).
+    deviceType: text("device_type"),
     locationType: text("location_type"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("game_sessions_date_idx").on(table.date)]
 );
+
+// --- Game categories / subcategories (catalog) -------------------------
+// Backs games.type/games.subtype the same two-level way placeCategories/
+// placeSubcategories backs places.category/subcategory above — a real,
+// maintained taxonomy a picker reads from and "+ New" adds to, while the
+// game catalog row itself keeps type/subtype as plain free-text strings
+// matched by name, not FKs (issue #68).
+export const gameCategories = pgTable("game_categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const gameSubcategories = pgTable(
+  "game_subcategories",
+  {
+    id: serial("id").primaryKey(),
+    categoryId: integer("category_id")
+      .notNull()
+      .references(() => gameCategories.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("game_subcategories_category_name_idx").on(table.categoryId, table.name)]
+);
+
+// --- Game device types (catalog) -----------------------------------------
+// Backs gameSessions.deviceType the same flat, one-level way
+// entertainmentLocationTypes backs locationType (issue #68) — a category of
+// device ("Console", "PC", "Phone"), not a specific physical device, hence
+// "device type" rather than "device" (renamed in the issue #75 follow-up,
+// before this table had any real usage to migrate).
+export const gameDeviceTypes = pgTable("game_device_types", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
 
 // --- Music (Spotify listen history) ---------------------------------------
 // Architecturally separate from the five kinds above: the legacy app never
