@@ -72,7 +72,7 @@ export function WeightEntryForm({ date, initial }: { date: string; initial: Weig
             <Input
               id="weightKg"
               type="number"
-              step="0.1"
+              step="0.05"
               min="0"
               value={weight.weightKg ?? ""}
               onChange={(e) => set("weightKg", parseNumber(e.target.value))}
@@ -92,7 +92,7 @@ export function WeightEntryForm({ date, initial }: { date: string; initial: Weig
             <Input
               id="muscleMassKg"
               type="number"
-              step="0.1"
+              step="0.05"
               min="0"
               value={weight.muscleMassKg ?? ""}
               onChange={(e) => set("muscleMassKg", parseNumber(e.target.value))}
