@@ -161,6 +161,7 @@ function SubcategoryRow({
           Edit
         </Button>
         <DeleteCatalogItem
+          size="xs"
           itemLabel={subcategory.name}
           isBlocked={subcategory.usage.placeCount > 0}
           onDelete={async () => {

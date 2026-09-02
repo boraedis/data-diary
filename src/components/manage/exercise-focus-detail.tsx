@@ -182,6 +182,7 @@ function SubfocusRow({
           Edit
         </Button>
         <DeleteCatalogItem
+          size="xs"
           itemLabel={subfocus.name}
           isBlocked={subfocus.usage.linkCount > 0}
           onDelete={async () => {

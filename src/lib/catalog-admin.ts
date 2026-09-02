@@ -11,19 +11,29 @@ import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { parseOptionalHexColor } from "@/lib/color";
 import {
+  bookReadingSessions,
   days,
   entertainmentCatalog,
   entertainmentKinds,
+  entertainmentLocationTypes,
   exerciseFocusLinks,
   exerciseFocuses,
   exerciseSubfocuses,
   exerciseSubtypes,
+  gameSessions,
   metros,
+  movieWatches,
   people,
   placeCategories,
   places,
   placeSubcategories,
+  sleepLocationSubtypes,
+  sleepLocationTypes,
+  sportsGameTypes,
+  sportsSeasons,
+  sportsWatches,
   tags,
+  tvEpisodeWatches,
   type ExerciseCategory,
 } from "@/db/schema";
 
@@ -755,4 +765,324 @@ export async function getMetroUsage(id: number): Promise<MetroUsage> {
 export async function deleteMetro(id: number): Promise<void> {
   const db = getDb();
   await db.delete(metros).where(eq(metros.id, id));
+}
+
+// --- Sleep location types / subtypes (catalog) ------------------------------
+// See the `sleepLocationTypes`/`sleepLocationSubtypes` table comments in
+// schema.ts (issue #59) — same shape as placeCategories/placeSubcategories
+// above: days.sleepLocationType/sleepLocationSubtype stay plain free-text
+// strings, so there's no FK here to validate against on the days side either.
+
+export type SleepLocationTypeItem = { id: number; name: string };
+export type SleepLocationSubtypeItem = { id: number; typeId: number; name: string };
+
+export async function listSleepLocationTypes(): Promise<(SleepLocationTypeItem & { subtypes: SleepLocationSubtypeItem[] })[]> {
+  const db = getDb();
+  const [typeRows, subtypeRows] = await Promise.all([
+    db.select().from(sleepLocationTypes).orderBy(asc(sleepLocationTypes.name)),
+    db.select().from(sleepLocationSubtypes).orderBy(asc(sleepLocationSubtypes.name)),
+  ]);
+  const byType = new Map<number, SleepLocationSubtypeItem[]>();
+  for (const s of subtypeRows) {
+    const list = byType.get(s.typeId) ?? [];
+    list.push(s);
+    byType.set(s.typeId, list);
+  }
+  return typeRows.map((t) => ({ ...t, subtypes: byType.get(t.id) ?? [] }));
+}
+
+export async function createSleepLocationType(name: string): Promise<SleepLocationTypeItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(sleepLocationTypes)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: sleepLocationTypes.name })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db.select().from(sleepLocationTypes).where(eq(sleepLocationTypes.name, trimmed));
+  return existing;
+}
+
+export async function getSleepLocationType(id: number): Promise<SleepLocationTypeItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sleepLocationTypes).where(eq(sleepLocationTypes.id, id));
+  return row ?? null;
+}
+
+export async function updateSleepLocationType(id: number, name: string): Promise<SleepLocationTypeItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sleepLocationTypes)
+    .set({ name: name.trim() })
+    .where(eq(sleepLocationTypes.id, id))
+    .returning();
+  return updated;
+}
+
+// days.sleepLocationType is a plain free-text string, not an FK, so this
+// checks the soft reference by hand — same reasoning as
+// getPlaceCategoryUsage. subtypeCount also doubles as a real DB guard —
+// sleepLocationSubtypes.typeId is onDelete: "restrict".
+export type SleepLocationTypeUsage = { dayCount: number; subtypeCount: number };
+
+export async function getSleepLocationTypeUsage(id: number): Promise<SleepLocationTypeUsage> {
+  const db = getDb();
+  const type = await getSleepLocationType(id);
+  if (!type) return { dayCount: 0, subtypeCount: 0 };
+  const [dayRows, subtypeRows] = await Promise.all([
+    db.select({ date: days.date }).from(days).where(eq(days.sleepLocationType, type.name)),
+    db.select({ id: sleepLocationSubtypes.id }).from(sleepLocationSubtypes).where(eq(sleepLocationSubtypes.typeId, id)),
+  ]);
+  return { dayCount: dayRows.length, subtypeCount: subtypeRows.length };
+}
+
+export async function deleteSleepLocationType(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sleepLocationTypes).where(eq(sleepLocationTypes.id, id));
+}
+
+export async function createSleepLocationSubtype(typeId: number, name: string): Promise<SleepLocationSubtypeItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(sleepLocationSubtypes)
+    .values({ typeId, name: trimmed })
+    .onConflictDoNothing({ target: [sleepLocationSubtypes.typeId, sleepLocationSubtypes.name] })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select()
+    .from(sleepLocationSubtypes)
+    .where(and(eq(sleepLocationSubtypes.typeId, typeId), eq(sleepLocationSubtypes.name, trimmed)));
+  return existing;
+}
+
+export async function getSleepLocationSubtype(id: number): Promise<SleepLocationSubtypeItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sleepLocationSubtypes).where(eq(sleepLocationSubtypes.id, id));
+  return row ?? null;
+}
+
+export async function updateSleepLocationSubtype(id: number, name: string): Promise<SleepLocationSubtypeItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sleepLocationSubtypes)
+    .set({ name: name.trim() })
+    .where(eq(sleepLocationSubtypes.id, id))
+    .returning();
+  return updated;
+}
+
+// Same soft-reference reasoning as getSleepLocationTypeUsage —
+// days.sleepLocationSubtype is free text, not an FK.
+export type SleepLocationSubtypeUsage = { dayCount: number };
+
+export async function getSleepLocationSubtypeUsage(id: number): Promise<SleepLocationSubtypeUsage> {
+  const db = getDb();
+  const subtype = await getSleepLocationSubtype(id);
+  if (!subtype) return { dayCount: 0 };
+  const rows = await db.select({ date: days.date }).from(days).where(eq(days.sleepLocationSubtype, subtype.name));
+  return { dayCount: rows.length };
+}
+
+export async function deleteSleepLocationSubtype(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sleepLocationSubtypes).where(eq(sleepLocationSubtypes.id, id));
+}
+
+// --- Entertainment location types (catalog) ---------------------------------
+// See the `entertainmentLocationTypes` table comment in schema.ts (issue
+// #59) — backs the free-text `locationType` column shared by movieWatches,
+// tvEpisodeWatches, bookReadingSessions, sportsWatches, and gameSessions, all
+// matched by name, not an FK.
+
+export type EntertainmentLocationTypeItem = { id: number; name: string };
+
+export async function listEntertainmentLocationTypes(): Promise<EntertainmentLocationTypeItem[]> {
+  const db = getDb();
+  return db.select().from(entertainmentLocationTypes).orderBy(asc(entertainmentLocationTypes.name));
+}
+
+export async function createEntertainmentLocationType(name: string): Promise<EntertainmentLocationTypeItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(entertainmentLocationTypes)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: entertainmentLocationTypes.name })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db.select().from(entertainmentLocationTypes).where(eq(entertainmentLocationTypes.name, trimmed));
+  return existing;
+}
+
+export async function getEntertainmentLocationType(id: number): Promise<EntertainmentLocationTypeItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(entertainmentLocationTypes).where(eq(entertainmentLocationTypes.id, id));
+  return row ?? null;
+}
+
+export async function updateEntertainmentLocationType(id: number, name: string): Promise<EntertainmentLocationTypeItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(entertainmentLocationTypes)
+    .set({ name: name.trim() })
+    .where(eq(entertainmentLocationTypes.id, id))
+    .returning();
+  return updated;
+}
+
+// Every one of the five entertainment tables' locationType columns is a
+// plain free-text string matched by name, not an FK (same reasoning as
+// getPlaceCategoryUsage) — so this checks all five soft references by hand.
+export type EntertainmentLocationTypeUsage = {
+  movieCount: number;
+  tvEpisodeCount: number;
+  bookCount: number;
+  sportsCount: number;
+  gameCount: number;
+};
+
+export async function getEntertainmentLocationTypeUsage(id: number): Promise<EntertainmentLocationTypeUsage> {
+  const db = getDb();
+  const type = await getEntertainmentLocationType(id);
+  if (!type) return { movieCount: 0, tvEpisodeCount: 0, bookCount: 0, sportsCount: 0, gameCount: 0 };
+  const [movieRows, tvRows, bookRows, sportsRows, gameRows] = await Promise.all([
+    db.select({ id: movieWatches.id }).from(movieWatches).where(eq(movieWatches.locationType, type.name)),
+    db.select({ id: tvEpisodeWatches.id }).from(tvEpisodeWatches).where(eq(tvEpisodeWatches.locationType, type.name)),
+    db.select({ id: bookReadingSessions.id }).from(bookReadingSessions).where(eq(bookReadingSessions.locationType, type.name)),
+    db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.locationType, type.name)),
+    db.select({ id: gameSessions.id }).from(gameSessions).where(eq(gameSessions.locationType, type.name)),
+  ]);
+  return {
+    movieCount: movieRows.length,
+    tvEpisodeCount: tvRows.length,
+    bookCount: bookRows.length,
+    sportsCount: sportsRows.length,
+    gameCount: gameRows.length,
+  };
+}
+
+export async function deleteEntertainmentLocationType(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(entertainmentLocationTypes).where(eq(entertainmentLocationTypes.id, id));
+}
+
+// --- Sports seasons (catalog, scoped per league) -----------------------------
+// See the `sportsSeasons` table comment in schema.ts (issue #61) — same
+// shape as placeSubcategories/sleepLocationSubtypes: sportsWatches.season
+// stays a plain free-text string matched by name, so there's no FK here to
+// validate against on the sportsWatches side.
+
+export type SportsSeasonItem = { id: number; leagueId: number; name: string };
+
+export async function listSportsSeasonsByLeague(leagueId: number): Promise<SportsSeasonItem[]> {
+  const db = getDb();
+  return db.select().from(sportsSeasons).where(eq(sportsSeasons.leagueId, leagueId)).orderBy(asc(sportsSeasons.name));
+}
+
+export async function createSportsSeason(leagueId: number, name: string): Promise<SportsSeasonItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(sportsSeasons)
+    .values({ leagueId, name: trimmed })
+    .onConflictDoNothing({ target: [sportsSeasons.leagueId, sportsSeasons.name] })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db
+    .select()
+    .from(sportsSeasons)
+    .where(and(eq(sportsSeasons.leagueId, leagueId), eq(sportsSeasons.name, trimmed)));
+  return existing;
+}
+
+export async function getSportsSeason(id: number): Promise<SportsSeasonItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sportsSeasons).where(eq(sportsSeasons.id, id));
+  return row ?? null;
+}
+
+export async function updateSportsSeason(id: number, name: string): Promise<SportsSeasonItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sportsSeasons)
+    .set({ name: name.trim() })
+    .where(eq(sportsSeasons.id, id))
+    .returning();
+  return updated;
+}
+
+// Same soft-reference reasoning as getSleepLocationTypeUsage —
+// sportsWatches.season is free text, not an FK.
+export type SportsSeasonUsage = { watchCount: number };
+
+export async function getSportsSeasonUsage(id: number): Promise<SportsSeasonUsage> {
+  const db = getDb();
+  const season = await getSportsSeason(id);
+  if (!season) return { watchCount: 0 };
+  const rows = await db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.season, season.name));
+  return { watchCount: rows.length };
+}
+
+export async function deleteSportsSeason(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sportsSeasons).where(eq(sportsSeasons.id, id));
+}
+
+// --- Sports game types (catalog) ---------------------------------------------
+// See the `sportsGameTypes` table comment in schema.ts (issue #61) — flat,
+// mirrors entertainmentLocationTypes exactly. sportsWatches.gameType stays
+// free text matched by name, not an FK.
+
+export type SportsGameTypeItem = { id: number; name: string };
+
+export async function listSportsGameTypes(): Promise<SportsGameTypeItem[]> {
+  const db = getDb();
+  return db.select().from(sportsGameTypes).orderBy(asc(sportsGameTypes.name));
+}
+
+export async function createSportsGameType(name: string): Promise<SportsGameTypeItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(sportsGameTypes)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: sportsGameTypes.name })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db.select().from(sportsGameTypes).where(eq(sportsGameTypes.name, trimmed));
+  return existing;
+}
+
+export async function getSportsGameType(id: number): Promise<SportsGameTypeItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(sportsGameTypes).where(eq(sportsGameTypes.id, id));
+  return row ?? null;
+}
+
+export async function updateSportsGameType(id: number, name: string): Promise<SportsGameTypeItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(sportsGameTypes)
+    .set({ name: name.trim() })
+    .where(eq(sportsGameTypes.id, id))
+    .returning();
+  return updated;
+}
+
+export type SportsGameTypeUsage = { watchCount: number };
+
+export async function getSportsGameTypeUsage(id: number): Promise<SportsGameTypeUsage> {
+  const db = getDb();
+  const gameType = await getSportsGameType(id);
+  if (!gameType) return { watchCount: 0 };
+  const rows = await db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.gameType, gameType.name));
+  return { watchCount: rows.length };
+}
+
+export async function deleteSportsGameType(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(sportsGameTypes).where(eq(sportsGameTypes.id, id));
 }

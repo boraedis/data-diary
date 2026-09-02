@@ -17,6 +17,14 @@ export default async function ManageSportsPage() {
         </Link>
       </div>
       <SportsManageList initial={sports} />
+      <div className="flex justify-end">
+        <Link
+          href="/manage/entertainment/sports/game-types"
+          className={buttonVariants({ variant: "outline", size: "xs" })}
+        >
+          Manage Game Types
+        </Link>
+      </div>
     </main>
   );
 }

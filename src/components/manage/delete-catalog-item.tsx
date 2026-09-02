@@ -2,8 +2,9 @@
 
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button, type buttonVariants } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import type { VariantProps } from "class-variance-authority";
 
 /**
  * Shared delete flow for every /manage/<catalog>/[id] detail page — mirrors
@@ -22,6 +23,7 @@ export function DeleteCatalogItem({
   warningContent,
   onDelete,
   afterDeleteHref,
+  size,
 }: {
   itemLabel: string;
   isBlocked: boolean;
@@ -34,6 +36,10 @@ export function DeleteCatalogItem({
   // navigate to and instead updates local state from inside `onDelete`
   // itself, so it omits this and nothing navigates.
   afterDeleteHref?: string;
+  // Matches the trigger Button's size to whatever's sitting next to it
+  // (e.g. a row's "xs" Edit button) — defaults to Button's own default size
+  // for the main detail-card Edit/Delete pair.
+  size?: VariantProps<typeof buttonVariants>["size"];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -55,7 +61,7 @@ export function DeleteCatalogItem({
 
   return (
     <>
-      <Button type="button" variant="destructive" onClick={() => setOpen(true)}>
+      <Button type="button" variant="destructive" size={size} onClick={() => setOpen(true)}>
         Delete
       </Button>
 

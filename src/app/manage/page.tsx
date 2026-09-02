@@ -10,6 +10,7 @@ import {
   listPlacesCatalog,
   listSportsCatalog,
 } from "@/lib/days";
+import { listSleepLocationTypes } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -18,16 +19,19 @@ export const dynamic = "force-dynamic";
 // opposed to the entry forms' "+ New", which only ever adds. One card per
 // top-level catalog; entertainment's own sub-kinds (movies, tv, sports,
 // books, music) live one level down at /manage/entertainment, not here —
-// see that page.
+// see that page. "Sleep" (issue #59) only has the one location-type/subtype
+// catalog behind it, no richer sub-hierarchy the way entertainment does, so
+// its card links straight to /manage/sleep rather than an intermediate hub.
 const CATALOGS = [
   { key: "people", label: "People", accent: "border-chart-1" },
   { key: "places", label: "Places", accent: "border-chart-2" },
   { key: "exercises", label: "Exercises", accent: "border-chart-3" },
   { key: "entertainment", label: "Entertainment", accent: "border-chart-4" },
+  { key: "sleep", label: "Sleep", accent: "border-chart-5" },
 ] as const;
 
 export default async function ManagePage() {
-  const [people, places, exercises, entertainment, movies, sports, books] = await Promise.all([
+  const [people, places, exercises, entertainment, movies, sports, books, sleepLocationTypes] = await Promise.all([
     listPeopleCatalog(),
     listPlacesCatalog(),
     listExercisesCatalog(),
@@ -35,6 +39,7 @@ export default async function ManagePage() {
     listMoviesCatalog(),
     listSportsCatalog(),
     listBooksCatalog(),
+    listSleepLocationTypes(),
   ]);
 
   const counts: Record<(typeof CATALOGS)[number]["key"], number> = {
@@ -45,6 +50,7 @@ export default async function ManagePage() {
     // books, folded together — matches the day-summary page's same
     // "entertainment tile counts all of it" call.
     entertainment: entertainment.length + movies.length + sports.length + books.length,
+    sleep: sleepLocationTypes.length,
   };
 
   return (

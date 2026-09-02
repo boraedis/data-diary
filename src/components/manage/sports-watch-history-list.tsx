@@ -39,7 +39,7 @@ export function SportsWatchHistoryList({
         return (
           <Link
             key={i}
-            href={`/day/${w.date}/entertainment/sports`}
+            href={`/day/${w.date}/entertainment`}
             className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
           >
             <span>{w.date}</span>

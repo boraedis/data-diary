@@ -71,7 +71,7 @@ export function BookDetail({
               <ul className="flex flex-col gap-1">
                 {usage.sessions.map((s, i) => (
                   <li key={i} className="flex items-center justify-between text-sm">
-                    <Link href={`/day/${s.date}/entertainment/books`} className="text-primary hover:underline">
+                    <Link href={`/day/${s.date}/entertainment`} className="text-primary hover:underline">
                       {s.date}
                     </Link>
                     <span className="text-muted-foreground">
@@ -101,7 +101,7 @@ export function BookDetail({
               <ul className="list-inside list-disc">
                 {usage.sessions.map((s, i) => (
                   <li key={i}>
-                    <Link href={`/day/${s.date}/entertainment/books`} className="text-primary hover:underline">
+                    <Link href={`/day/${s.date}/entertainment`} className="text-primary hover:underline">
                       {s.date}
                     </Link>
                   </li>

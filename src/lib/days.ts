@@ -156,6 +156,7 @@ export type DayPayload = {
   places: PlaceEntry[];
   entertainment: EntertainmentEntry[];
   movies: MovieWatchEntry[];
+  tvEpisodeWatches: TvEpisodeWatchEntry[];
   sportsWatches: SportsWatchEntry[];
   bookSessions: BookReadingSessionEntry[];
 };
@@ -226,10 +227,10 @@ export type EntertainmentEntry = {
   kindName: string;
   title: string;
   durationMinutes: number | null;
-  notes: string | null;
+  locationType: string | null;
 };
 export type EntertainmentPayload = {
-  entries: { entertainmentId: number; durationMinutes: number | null; notes: string | null }[];
+  entries: { entertainmentId: number; durationMinutes: number | null; locationType: string | null }[];
 };
 
 // Movies are open-ended like entertainment (any number of watches per day,
@@ -247,8 +248,36 @@ export type MovieWatchEntry = {
   runtimeMinutes: number | null;
   rating: number | null;
   locationType: string | null;
+  durationMinutes: number | null;
 };
-export type MovieWatchPayload = { movieId: number; rating: number | null; locationType: string | null };
+export type MovieWatchPayload = {
+  movieId: number;
+  rating: number | null;
+  locationType: string | null;
+  durationMinutes: number | null;
+};
+
+// Same open-ended replace-on-save shape as movies — any number of episode
+// watches per day, including a rewatch (issue #61). `showTitle`/`season`/
+// `episode`/`episodeName`/`runtimeMinutes` on the read side are resolved
+// via join purely for display, same as movies' title/releaseDate/etc.
+export type TvEpisodeWatchEntry = {
+  id: number;
+  episodeId: number;
+  showTitle: string;
+  season: number;
+  episode: number;
+  episodeName: string | null;
+  runtimeMinutes: number | null;
+  durationMinutes: number | null;
+  locationType: string | null;
+};
+export type TvEpisodeWatchPayload = {
+  episodeId: number;
+  durationMinutes: number | null;
+  locationType: string | null;
+};
+export type TvEpisodesPayload = { entries: TvEpisodeWatchPayload[] };
 export type MoviesPayload = { entries: MovieWatchPayload[] };
 
 // Same open-ended replace-on-save shape as movies — any number of watches
@@ -472,8 +501,15 @@ export async function loadDay(date: string): Promise<DayPayload> {
   const allPersonIds = [...positiveIds, ...negativeIds].filter((id): id is number => id !== null);
   const allPlaceIds = placeIds.filter((id): id is number => id !== null);
 
-  const [peopleNameRows, placeNameRows, entertainmentRows, movieWatchRows, sportsWatchRows, bookSessionRows] =
-    await Promise.all([
+  const [
+    peopleNameRows,
+    placeNameRows,
+    entertainmentRows,
+    movieWatchRows,
+    tvEpisodeWatchRows,
+    sportsWatchRows,
+    bookSessionRows,
+  ] = await Promise.all([
     allPersonIds.length
       ? db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, allPersonIds))
       : Promise.resolve([]),
@@ -484,7 +520,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
       .select({
         entertainmentId: entertainmentEntries.entertainmentId,
         durationMinutes: entertainmentEntries.durationMinutes,
-        notes: entertainmentEntries.notes,
+        locationType: entertainmentEntries.locationType,
         sortOrder: entertainmentEntries.sortOrder,
         kindName: entertainmentKinds.name,
         title: entertainmentCatalog.title,
@@ -504,11 +540,29 @@ export async function loadDay(date: string): Promise<DayPayload> {
         runtimeMinutes: movies.runtimeMinutes,
         rating: movieWatches.rating,
         locationType: movieWatches.locationType,
+        durationMinutes: movieWatches.durationMinutes,
       })
       .from(movieWatches)
       .innerJoin(movies, eq(movieWatches.movieId, movies.id))
       .where(eq(movieWatches.date, date))
       .orderBy(asc(movieWatches.id)),
+    db
+      .select({
+        id: tvEpisodeWatches.id,
+        episodeId: tvEpisodeWatches.episodeId,
+        showTitle: tvShows.title,
+        season: tvEpisodes.season,
+        episode: tvEpisodes.episode,
+        episodeName: tvEpisodes.name,
+        runtimeMinutes: tvEpisodes.runtimeMinutes,
+        durationMinutes: tvEpisodeWatches.durationMinutes,
+        locationType: tvEpisodeWatches.locationType,
+      })
+      .from(tvEpisodeWatches)
+      .innerJoin(tvEpisodes, eq(tvEpisodeWatches.episodeId, tvEpisodes.id))
+      .innerJoin(tvShows, eq(tvEpisodes.showId, tvShows.id))
+      .where(eq(tvEpisodeWatches.date, date))
+      .orderBy(asc(tvEpisodeWatches.id)),
     db
       .select({
         id: sportsWatches.id,
@@ -637,7 +691,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
       kindName: e.kindName,
       title: e.title,
       durationMinutes: e.durationMinutes,
-      notes: e.notes,
+      locationType: e.locationType,
     })),
     movies: movieWatchRows.map((w) => ({
       id: w.id,
@@ -647,6 +701,18 @@ export async function loadDay(date: string): Promise<DayPayload> {
       posterPath: w.posterPath,
       runtimeMinutes: w.runtimeMinutes,
       rating: w.rating,
+      locationType: w.locationType,
+      durationMinutes: w.durationMinutes,
+    })),
+    tvEpisodeWatches: tvEpisodeWatchRows.map((w) => ({
+      id: w.id,
+      episodeId: w.episodeId,
+      showTitle: w.showTitle,
+      season: w.season,
+      episode: w.episode,
+      episodeName: w.episodeName,
+      runtimeMinutes: w.runtimeMinutes,
+      durationMinutes: w.durationMinutes,
       locationType: w.locationType,
     })),
     sportsWatches: sportsWatchRows.map((w) => ({
@@ -1004,10 +1070,12 @@ export function validateEntertainmentPayload(body: unknown): Result<Entertainmen
     if (!Number.isInteger(entertainmentId)) {
       return { ok: false, error: "Invalid entertainment selection" };
     }
+    const locationType =
+      typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
     entries.push({
       entertainmentId,
       durationMinutes: typeof e.durationMinutes === "number" ? e.durationMinutes : null,
-      notes: typeof e.notes === "string" && e.notes.trim() ? e.notes.trim() : null,
+      locationType,
     });
   }
 
@@ -1039,7 +1107,30 @@ export function validateMoviesPayload(body: unknown): Result<MoviesPayload> {
 
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
-    entries.push({ movieId, rating, locationType });
+    const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    entries.push({ movieId, rating, locationType, durationMinutes });
+  }
+
+  return { ok: true, value: { entries } };
+}
+
+export function validateTvEpisodesPayload(body: unknown): Result<TvEpisodesPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+
+  const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
+  const entries: TvEpisodesPayload["entries"] = [];
+  for (const e of input) {
+    const episodeId = typeof e.episodeId === "number" ? e.episodeId : NaN;
+    if (!Number.isInteger(episodeId)) {
+      return { ok: false, error: "Invalid episode selection" };
+    }
+    const locationType =
+      typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    entries.push({ episodeId, durationMinutes, locationType });
   }
 
   return { ok: true, value: { entries } };
@@ -1631,7 +1722,7 @@ export async function saveEntertainment(date: string, value: EntertainmentPayloa
         date,
         entertainmentId: e.entertainmentId,
         durationMinutes: e.durationMinutes,
-        notes: e.notes,
+        locationType: e.locationType,
         sortOrder: i,
       }))
     );
@@ -1654,6 +1745,33 @@ export async function saveMovies(date: string, value: MoviesPayload): Promise<Da
         date,
         movieId: e.movieId,
         rating: e.rating,
+        locationType: e.locationType,
+        durationMinutes: e.durationMinutes,
+      }))
+    );
+  }
+
+  return loadDay(date);
+}
+
+// Same replace-on-save shape as saveMovies above, against the
+// tv_episode_watches satellite table — a deliberate departure from
+// createTvEpisodeWatch/the Manage-side LogEpisodeModal (which POST one
+// watch immediately): the day-entry page needs every entertainment kind to
+// behave the same way (pick, accumulate locally, one shared Save), so TV
+// joins the batch-save family here instead (issue #61). The immediate-POST
+// endpoint stays untouched for Manage's own use.
+export async function saveTvEpisodeWatches(date: string, value: TvEpisodesPayload): Promise<DayPayload> {
+  const db = getDb();
+  await ensureDayRow(date);
+
+  await db.delete(tvEpisodeWatches).where(eq(tvEpisodeWatches.date, date));
+  if (value.entries.length > 0) {
+    await db.insert(tvEpisodeWatches).values(
+      value.entries.map((e) => ({
+        date,
+        episodeId: e.episodeId,
+        durationMinutes: e.durationMinutes,
         locationType: e.locationType,
       }))
     );

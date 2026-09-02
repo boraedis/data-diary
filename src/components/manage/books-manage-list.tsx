@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
-import { GoogleBooksSearchModal } from "@/components/entry-forms/book-entry-form";
+import { GoogleBooksSearchModal } from "@/components/entry-forms/google-books-search-modal";
 import type { BookCatalogItem } from "@/lib/days";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 
