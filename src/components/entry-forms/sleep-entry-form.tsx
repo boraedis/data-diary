@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,11 +29,14 @@ export function SleepEntryForm({
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  useEffect(() => {
+    handleSummary();
+  }, [sleep.sleepTime, sleep.wakeTime, sleep.wakeCrossedMidnight]);
+
   function set<K extends keyof SleepPayload>(key: K, value: SleepPayload[K]) {
     setSavedAt(null);
     setSleep((prev) => ({ ...prev, [key]: value }));
   }
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -71,23 +74,6 @@ export function SleepEntryForm({
     }
   }
 
-  function parseTime(time: string | null): number {
-    if (!time) {
-      return 0;
-    }
-
-    const [hour, minute] = time.split(":").map(Number);
-    return hour * 60 + minute;
-  }
-
-  function handleSummary() {
-    const sleepTime = (document.getElementById("sleepTime") as HTMLInputElement)?.value || null;
-    const wakeTime = (document.getElementById("wakeTime") as HTMLInputElement)?.value || null;
-    const overNight = (document.getElementById("wakeCrossedMidnight") as HTMLInputElement)?.checked || false;
-    const sleepMins = (overNight ? 1440 : 0) + parseTime(wakeTime) - parseTime(sleepTime);
-    document.getElementById("sleep-summary")!.textContent = `Slept from ${sleepTime} to ${wakeTime} for ${Math.floor(sleepMins / 60)} hours and ${sleepMins % 60} minutes`;
-  }
-
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 pb-20">
       <Card size="sm">
@@ -101,10 +87,7 @@ export function SleepEntryForm({
               id="sleepTime"
               type="time"
               value={sleep.sleepTime ?? ""}
-              onChange={(e) => {
-                set("sleepTime", e.target.value || null);
-                handleSummary();
-              }}
+              onChange={(e) => set("sleepTime", e.target.value || null)}
             />
           </div>
           <div className="space-y-1.5">
@@ -113,10 +96,7 @@ export function SleepEntryForm({
               id="wakeTime"
               type="time"
               value={sleep.wakeTime ?? ""}
-              onChange={(e) => {
-                set("wakeTime", e.target.value || null);
-                handleSummary();
-              }}
+              onChange={(e) => set("wakeTime", e.target.value || null)}
             />
           </div>
           <label className="col-span-2 flex items-center gap-2 text-sm text-muted-foreground">
@@ -125,36 +105,14 @@ export function SleepEntryForm({
               id="wakeCrossedMidnight"
               className="size-4 rounded border-input accent-primary"
               checked={sleep.wakeCrossedMidnight}
-              onChange={(e) => {
-                set("wakeCrossedMidnight", e.target.checked);
-                handleSummary();
-              }}
+              onChange={(e) => set("wakeCrossedMidnight", e.target.checked)}
             />
             Woke up the day after I fell asleep
           </label>
         </CardContent>
         <Label className="block text-sm text-muted-foreground px-4" id="sleep-summary">
-          adadwawwaw
         </Label>
         <CardContent className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-6">
-          <div className="space-y-1.5">
-            <Label htmlFor="sleepLocationType">Sleep location</Label>
-            <Input
-              id="sleepLocationType"
-              placeholder="e.g. home"
-              value={sleep.sleepLocationType ?? ""}
-              onChange={(e) => set("sleepLocationType", e.target.value || null)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sleepLocationSubtype">Sleep location detail</Label>
-            <Input
-              id="sleepLocationSubtype"
-              placeholder="e.g. own bed"
-              value={sleep.sleepLocationSubtype ?? ""}
-              onChange={(e) => set("sleepLocationSubtype", e.target.value || null)}
-            />
-          </div>
           <SleepLocationField
             type={sleep.sleepLocationType}
             subtype={sleep.sleepLocationSubtype}
@@ -196,4 +154,22 @@ export function SleepEntryForm({
       </div>
     </form>
   );
+}
+
+function parseTime(time: string | null): number {
+  if (!time) {
+    return 0;
+  }
+
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+
+function handleSummary() {
+  const sleepTime = (document.getElementById("sleepTime") as HTMLInputElement)?.value || null;
+  const wakeTime = (document.getElementById("wakeTime") as HTMLInputElement)?.value || null;
+  const overNight = (document.getElementById("wakeCrossedMidnight") as HTMLInputElement)?.checked || false;
+  const sleepMins = (overNight ? 1440 : 0) + parseTime(wakeTime) - parseTime(sleepTime);
+  document.getElementById("sleep-summary")!.textContent = `Slept from ${sleepTime} to ${wakeTime} for ${Math.floor(sleepMins / 60)} hours and ${sleepMins % 60} minutes`;
 }
