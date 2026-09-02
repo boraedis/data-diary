@@ -1,13 +1,21 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
+import { PodcastCategoryPanel } from "@/components/manage/podcast-category-panel";
+import { ReviewProgressRow } from "@/components/manage/review-progress-row";
 import { listPodcastCategories, listPodcastShows } from "@/lib/catalog-admin";
+import { getMusicCurationStats } from "@/lib/music";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function ManagePodcastsPage() {
-  const [shows, categories] = await Promise.all([listPodcastShows(), listPodcastCategories()]);
+  const [shows, categories, curation] = await Promise.all([
+    listPodcastShows(),
+    listPodcastCategories(),
+    getMusicCurationStats(),
+  ]);
   const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
 
   const items: SearchItem[] = shows.map((show) => ({
@@ -24,12 +32,30 @@ export default async function ManagePodcastsPage() {
           Back to Music
         </Link>
       </div>
-      <CatalogBrowser
-        items={items}
-        basePath="/manage/entertainment/music/podcasts"
-        placeholder="Search podcast shows…"
-        emptyMessage="No podcast shows yet — import some listens first."
-      />
+
+      {curation.totalPodcastShows > 0 && (
+        <Card>
+          <CardContent>
+            <ReviewProgressRow
+              label="Shows categorized"
+              href="#shows"
+              done={curation.categorizedPodcastShows}
+              total={curation.totalPodcastShows}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      <div id="shows" className="scroll-mt-4">
+        <CatalogBrowser
+          items={items}
+          basePath="/manage/entertainment/music/podcasts"
+          placeholder="Search podcast shows…"
+          emptyMessage="No podcast shows yet — import some listens first."
+        />
+      </div>
+
+      <PodcastCategoryPanel initial={categories} />
     </main>
   );
 }

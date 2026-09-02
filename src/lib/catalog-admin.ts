@@ -1444,39 +1444,6 @@ export async function listGenres(): Promise<(GenreItem & { artistCount: number }
     .orderBy(asc(genres.name));
 }
 
-export async function getGenre(id: number): Promise<(GenreItem & { artistCount: number }) | null> {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      id: genres.id,
-      name: genres.name,
-      groupId: genres.groupId,
-      artistCount: count(artistGenres.artistId),
-    })
-    .from(genres)
-    .leftJoin(artistGenres, eq(artistGenres.genreId, genres.id))
-    .where(eq(genres.id, id))
-    .groupBy(genres.id, genres.name, genres.groupId);
-  return row ?? null;
-}
-
-// The "who carries this genre" list — same role as getTagUsage's members
-// list, just read-only here since there's no per-artist genre editing on
-// this side (an artist's genres come from the import pipeline, not
-// hand-assigned the way a person's tag is).
-export type GenreUsage = { artists: { id: number; name: string }[] };
-
-export async function getGenreUsage(id: number): Promise<GenreUsage> {
-  const db = getDb();
-  const rows = await db
-    .select({ id: artists.id, name: artists.name })
-    .from(artistGenres)
-    .innerJoin(artists, eq(artists.id, artistGenres.artistId))
-    .where(eq(artistGenres.genreId, id))
-    .orderBy(asc(artists.name));
-  return { artists: rows };
-}
-
 export async function updateGenreGroupAssignment(id: number, groupId: number | null): Promise<GenreItem> {
   const db = getDb();
   const [updated] = await db
