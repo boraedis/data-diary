@@ -75,19 +75,19 @@ export function TechnologyEntryForm({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="laptopUsageMinutes-hours">Laptop usage</Label>
-            <DurationInput
-              id="laptopUsageMinutes"
-              totalMinutes={technology.laptopUsageMinutes}
-              onChange={(v) => set("laptopUsageMinutes", v)}
-            />
-          </div>
-          <div className="space-y-1.5">
             <Label htmlFor="instagramUsageMinutes-hours">Instagram usage</Label>
             <DurationInput
               id="instagramUsageMinutes"
               totalMinutes={technology.instagramUsageMinutes}
               onChange={(v) => set("instagramUsageMinutes", v)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="laptopUsageMinutes-hours">Laptop usage</Label>
+            <DurationInput
+              id="laptopUsageMinutes"
+              totalMinutes={technology.laptopUsageMinutes}
+              onChange={(v) => set("laptopUsageMinutes", v)}
             />
           </div>
         </CardContent>

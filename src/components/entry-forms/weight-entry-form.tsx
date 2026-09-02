@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DayPayload, WeightPayload } from "@/lib/days";
+import { PercentInput } from "../ui/percent-input";
 
 function parseNumber(value: string): number | null {
   if (value.trim() === "") return null;
@@ -71,7 +72,7 @@ export function WeightEntryForm({ date, initial }: { date: string; initial: Weig
             <Input
               id="weightKg"
               type="number"
-              step="0.1"
+              step="0.05"
               min="0"
               value={weight.weightKg ?? ""}
               onChange={(e) => set("weightKg", parseNumber(e.target.value))}
@@ -79,21 +80,19 @@ export function WeightEntryForm({ date, initial }: { date: string; initial: Weig
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="bodyFatPercent">Body fat (%)</Label>
-            <Input
+            <PercentInput
               id="bodyFatPercent"
-              type="number"
-              step="0.1"
-              min="0"
-              value={weight.bodyFatPercent ?? ""}
-              onChange={(e) => set("bodyFatPercent", parseNumber(e.target.value))}
-            />
+              value={weight.bodyFatPercent}
+              onChange={(value) => set("bodyFatPercent", value)}
+              step={0.1}
+            ></PercentInput>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="muscleMassKg">Muscle mass (kg)</Label>
             <Input
               id="muscleMassKg"
               type="number"
-              step="0.1"
+              step="0.05"
               min="0"
               value={weight.muscleMassKg ?? ""}
               onChange={(e) => set("muscleMassKg", parseNumber(e.target.value))}

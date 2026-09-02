@@ -8,6 +8,7 @@ import { DurationInput } from "@/components/ui/duration-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { DayPayload, WorkPayload } from "@/lib/days";
+import { PercentInput } from "../ui/percent-input";
 
 const WORK_LOCATIONS = ["home", "office", "cafe", "travel", "other"] as const;
 const COMMUTES = ["car", "carpool", "taxi", "public_transit", "bike", "walk", "other"] as const;
@@ -119,16 +120,12 @@ export function WorkEntryForm({ date, initial }: { date: string; initial: WorkPa
                 {work.productivity ?? "—"}%
               </span>
             </div>
-            <input
+            <PercentInput
               id="productivity"
-              type="range"
-              min={0}
-              max={100}
+              value={work.productivity}
+              onChange={(value) => set("productivity", value)}
               step={1}
-              value={work.productivity ?? 50}
-              onChange={(e) => set("productivity", Number(e.target.value))}
-              className="w-full accent-primary"
-            />
+            ></PercentInput>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="workDurationMinutes-hours">Work duration</Label>

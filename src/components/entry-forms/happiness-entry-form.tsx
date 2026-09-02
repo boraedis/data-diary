@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DayPayload, HappinessPayload } from "@/lib/days";
+import { PercentInput } from "../ui/percent-input";
 
 const DAY_TYPES = [
   { value: "", label: "Not set" },
@@ -76,20 +77,13 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="happiness">Happiness</Label>
-              <span className="font-mono text-sm text-muted-foreground">
-                {happiness.happiness ?? "—"}%
-              </span>
             </div>
-            <input
+            <PercentInput
               id="happiness"
-              type="range"
-              min={0}
-              max={100}
+              value={happiness.happiness}
+              onChange={(value) => set("happiness", value)}
               step={1}
-              value={happiness.happiness ?? 50}
-              onChange={(e) => set("happiness", Number(e.target.value))}
-              className="w-full accent-primary"
-            />
+            ></PercentInput>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="reason">Reason</Label>

@@ -35,6 +35,7 @@ function toSearchItem(person: PersonCatalogItem): SearchItem {
     primary: person.name,
     secondary: person.tagName,
     searchTerms: person.nicknames,
+    accentColor: person.tagColor,
   };
 }
 
@@ -238,16 +239,7 @@ function SlotRow({
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">
-          {index + 1}
-          {person ? "" : " — empty"}
-        </p>
-        {person ? (
-          <>
-            <p className="truncate text-sm">{person.name}</p>
-            {person.tagName ? <p className="truncate text-xs text-muted-foreground">{person.tagName}</p> : null}
-          </>
-        ) : null}
+        {person ? <p>{index + 1 + " — " + person.name}</p> : <p className="text-muted-foreground">{index + 1 + " — empty"}</p>}
       </div>
       {person ? (
         <div className="flex shrink-0 items-center gap-1">
@@ -310,7 +302,12 @@ export function PeopleEntryForm({
   function removeSlot(valence: Valence, slot: number) {
     setSavedAt(null);
     const setter = valence === "positive" ? setPositive : setNegative;
-    setter((prev) => prev.map((v, i) => (i === slot ? null : v)));
+    setter((prev) => {
+      const next = [...prev];
+      next.splice(slot, 1);
+      next.push(null);
+      return next;
+    });
   }
 
   function promoteSlot(valence: Valence, slot: number) {

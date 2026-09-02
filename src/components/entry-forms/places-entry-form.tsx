@@ -196,18 +196,15 @@ function SlotRow({
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">
-          {index + 1}
-          {place ? "" : " — empty"}
+        {place ? 
+        <p>
+          {index + 1 + " — " + place.name}
         </p>
-        {place ? (
-          <>
-            <p className="truncate text-sm">{place.name}</p>
-            {place.category ? (
-              <p className="truncate text-xs text-muted-foreground">{place.category}</p>
-            ) : null}
-          </>
-        ) : null}
+        :
+        <p className="text-muted-foreground">
+          {index + 1 + " — empty"}
+        </p>}
+        
       </div>
       {place ? (
         <div className="flex shrink-0 items-center gap-1">
@@ -264,7 +261,12 @@ export function PlacesEntryForm({
 
   function removeSlot(slot: number) {
     setSavedAt(null);
-    setSlots((prev) => prev.map((v, i) => (i === slot ? null : v)));
+    setSlots((prev) => {
+      const next = [...prev];
+      next.splice(slot, 1);
+      next.push(null);
+      return next;
+    });
   }
 
   function promoteSlot(slot: number) {
