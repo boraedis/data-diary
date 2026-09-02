@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { DurationInput } from "@/components/ui/duration-input";
 import { NameCatalogField } from "@/components/entry-forms/name-catalog-field";
 import { usePendingOpenMatch, type PendingOpen } from "@/lib/use-pending-open";
-import type { EntertainmentLocationTypeItem, SportsGameTypeItem, SportsSeasonItem } from "@/lib/catalog-admin";
+import type { EntertainmentLocationTypeItem, SportsDivisionItem, SportsGameTypeItem, SportsSeasonItem } from "@/lib/catalog-admin";
 import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem } from "@/lib/days";
 
 // The nested shape GET /api/sports actually returns — leagues and teams
@@ -275,6 +275,7 @@ function NewTeamModal({
   sportId,
   defaultLeagueId,
   leagues,
+  divisionsByLeague,
   onClose,
   onCreated,
 }: {
@@ -282,6 +283,7 @@ function NewTeamModal({
   sportId: number | null;
   defaultLeagueId: number | null;
   leagues: SportsLeagueItem[];
+  divisionsByLeague: Record<number, SportsDivisionItem[]>;
   onClose: () => void;
   onCreated: (item: SportsTeamItem) => void;
 }) {
@@ -289,14 +291,18 @@ function NewTeamModal({
   const [leagueId, setLeagueId] = useState<number | null>(defaultLeagueId);
   const [alias, setAlias] = useState("");
   const [homeLocation, setHomeLocation] = useState("");
+  const [division, setDivision] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const divisionOptions = leagueId !== null ? (divisionsByLeague[leagueId] ?? []) : [];
 
   function reset() {
     setName("");
     setLeagueId(defaultLeagueId);
     setAlias("");
     setHomeLocation("");
+    setDivision("");
     setError(null);
   }
 
@@ -314,7 +320,7 @@ function NewTeamModal({
           alias: alias.trim() || null,
           homeLocation: homeLocation.trim() || null,
           color: null,
-          division: null,
+          division: division || null,
         }),
       });
       const body = await res.json();
@@ -352,7 +358,10 @@ function NewTeamModal({
             <Select
               id="new-team-league"
               value={leagueId ?? ""}
-              onChange={(e) => setLeagueId(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) => {
+                setLeagueId(e.target.value ? Number(e.target.value) : null);
+                setDivision("");
+              }}
             >
               <option value="">No league</option>
               {leagues.map((l) => (
@@ -363,6 +372,25 @@ function NewTeamModal({
             </Select>
           </div>
         ) : null}
+        <div className="space-y-1.5">
+          <Label htmlFor="new-team-division">Division</Label>
+          <Select
+            id="new-team-division"
+            value={division}
+            onChange={(e) => setDivision(e.target.value)}
+            disabled={leagueId === null}
+          >
+            <option value="">None</option>
+            {divisionOptions.map((d) => (
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
+            ))}
+          </Select>
+          {leagueId === null ? (
+            <p className="text-xs text-muted-foreground">Pick a league to set a division.</p>
+          ) : null}
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-team-alias">Alias</Label>
           <Input id="new-team-alias" value={alias} onChange={(e) => setAlias(e.target.value)} />
@@ -472,6 +500,7 @@ function SportsWatchDetailModal({
   onGameTypeCreated,
   seasonsByLeague,
   onSeasonCreated,
+  divisionsByLeague,
   onClose,
   onSave,
   onLeagueCreated,
@@ -486,6 +515,7 @@ function SportsWatchDetailModal({
   gameTypes: SportsGameTypeItem[];
   onGameTypeCreated: (item: SportsGameTypeItem) => void;
   seasonsByLeague: Record<number, SportsSeasonItem[]>;
+  divisionsByLeague: Record<number, SportsDivisionItem[]>;
   onSeasonCreated: (leagueId: number, season: SportsSeasonItem) => void;
   onClose: () => void;
   onSave: (value: Omit<SportsRow, "sportId">) => void;
@@ -665,6 +695,7 @@ function SportsWatchDetailModal({
         sportId={sport.id}
         defaultLeagueId={leagueId}
         leagues={sport.leagues}
+        divisionsByLeague={divisionsByLeague}
         onClose={() => setNewTeamOpen(false)}
         onCreated={(team) => {
           onTeamCreated(sport.id, team);
@@ -691,6 +722,7 @@ export function SportsSection({
   onLocationTypeCreated,
   gameTypes: initialGameTypes,
   seasonsByLeague: initialSeasonsByLeague,
+  divisionsByLeague,
   rows,
   onRowsChange,
   pendingOpen,
@@ -700,6 +732,7 @@ export function SportsSection({
   onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   gameTypes: SportsGameTypeItem[];
   seasonsByLeague: Record<number, SportsSeasonItem[]>;
+  divisionsByLeague: Record<number, SportsDivisionItem[]>;
   rows: SportsRow[];
   onRowsChange: (rows: SportsRow[]) => void;
   pendingOpen: PendingOpen;
@@ -823,6 +856,7 @@ export function SportsSection({
         onGameTypeCreated={(item) => setGameTypes((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))}
         seasonsByLeague={seasonsByLeague}
         onSeasonCreated={handleSeasonCreated}
+        divisionsByLeague={divisionsByLeague}
         onClose={() => setDetail(null)}
         onSave={saveDetail}
         onLeagueCreated={handleLeagueCreated}

@@ -43,7 +43,7 @@ function mostRecentPastWatchDate(watches: TvEpisodeWatchItem[]): string | null {
 }
 
 function formatWatchDate(dateStr: string): string {
-  return parseDate(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return parseDate(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 /** Season picker -> checkbox episode list -> one shared Location Type +

@@ -22,8 +22,8 @@ export default async function ManageGamesPage() {
         <Link href="/manage/entertainment/games/categories" className={buttonVariants({ variant: "outline", size: "xs" })}>
           Manage Categories
         </Link>
-        <Link href="/manage/entertainment/games/devices" className={buttonVariants({ variant: "outline", size: "xs" })}>
-          Manage Devices
+        <Link href="/manage/entertainment/games/device-types" className={buttonVariants({ variant: "outline", size: "xs" })}>
+          Manage Device Types
         </Link>
       </div>
     </main>

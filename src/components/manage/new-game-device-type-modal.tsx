@@ -5,16 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import type { GameDeviceItem } from "@/lib/catalog-admin";
+import type { GameDeviceTypeItem } from "@/lib/catalog-admin";
 
-export function NewGameDeviceModal({
+export function NewGameDeviceTypeModal({
   open,
   onClose,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
-  onCreated: (item: GameDeviceItem) => void;
+  onCreated: (item: GameDeviceTypeItem) => void;
 }) {
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -30,7 +30,7 @@ export function NewGameDeviceModal({
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch("/api/game-devices", {
+      const res = await fetch("/api/game-device-types", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
@@ -40,7 +40,7 @@ export function NewGameDeviceModal({
         setError(typeof body?.error === "string" ? body.error : "Failed to create");
         return;
       }
-      onCreated(body as GameDeviceItem);
+      onCreated(body as GameDeviceTypeItem);
       reset();
       onClose();
     } catch {
@@ -57,13 +57,13 @@ export function NewGameDeviceModal({
         reset();
         onClose();
       }}
-      title="New device"
+      title="New device type"
     >
       <div className="flex flex-col gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="new-game-device-name">Name</Label>
+          <Label htmlFor="new-game-device-type-name">Name</Label>
           <Input
-            id="new-game-device-name"
+            id="new-game-device-type-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. phone, laptop, console…"

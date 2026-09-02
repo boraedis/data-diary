@@ -22,8 +22,9 @@ import type {
   EntertainmentLocationTypeItem,
   EntertainmentKindItem,
   GameCategoryItem,
-  GameDeviceItem,
+  GameDeviceTypeItem,
   GameSubcategoryItem,
+  SportsDivisionItem,
   SportsGameTypeItem,
   SportsSeasonItem,
 } from "@/lib/catalog-admin";
@@ -57,12 +58,13 @@ export function EntertainmentDayForm({
   bookCatalog,
   gamesCatalog,
   gameCategories,
-  gameDevices,
+  gameDeviceTypes,
   entertainmentCatalog,
   entertainmentKinds,
   locationTypes: initialLocationTypes,
   sportsGameTypes,
   sportsSeasonsByLeague,
+  sportsDivisionsByLeague,
 }: {
   date: string;
   initial: DayPayload;
@@ -72,12 +74,13 @@ export function EntertainmentDayForm({
   bookCatalog: BookCatalogItem[];
   gamesCatalog: GameCatalogItem[];
   gameCategories: (GameCategoryItem & { subcategories: GameSubcategoryItem[] })[];
-  gameDevices: GameDeviceItem[];
+  gameDeviceTypes: GameDeviceTypeItem[];
   entertainmentCatalog: EntertainmentCatalogItem[];
   entertainmentKinds: EntertainmentKindItem[];
   locationTypes: EntertainmentLocationTypeItem[];
   sportsGameTypes: SportsGameTypeItem[];
   sportsSeasonsByLeague: Record<number, SportsSeasonItem[]>;
+  sportsDivisionsByLeague: Record<number, SportsDivisionItem[]>;
 }) {
   const router = useRouter();
 
@@ -132,7 +135,7 @@ export function EntertainmentDayForm({
     initial.entertainment.map((e) => ({ entertainmentId: e.entertainmentId, durationMinutes: e.durationMinutes, locationType: e.locationType }))
   );
   const [gameRows, setGameRows] = useState<GameRow[]>(
-    initial.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, device: s.device, locationType: s.locationType }))
+    initial.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, deviceType: s.deviceType, locationType: s.locationType }))
   );
 
   const [pendingOpen, setPendingOpen] = useState<PendingOpen>(null);
@@ -274,7 +277,7 @@ export function EntertainmentDayForm({
       );
       setOtherRows(saved.entertainment.map((e) => ({ entertainmentId: e.entertainmentId, durationMinutes: e.durationMinutes, locationType: e.locationType })));
       setGameRows(
-        saved.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, device: s.device, locationType: s.locationType }))
+        saved.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, deviceType: s.deviceType, locationType: s.locationType }))
       );
       setSavedAt(Date.now());
       router.refresh();
@@ -325,6 +328,7 @@ export function EntertainmentDayForm({
         onLocationTypeCreated={handleLocationTypeCreated}
         gameTypes={sportsGameTypes}
         seasonsByLeague={sportsSeasonsByLeague}
+        divisionsByLeague={sportsDivisionsByLeague}
         rows={sportsRows}
         onRowsChange={setSportsRows}
         pendingOpen={pendingOpen}
@@ -342,7 +346,7 @@ export function EntertainmentDayForm({
       <GamesSection
         catalog={gamesCatalog}
         categories={gameCategories}
-        devices={gameDevices}
+        deviceTypes={gameDeviceTypes}
         locationTypes={locationTypes}
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={gameRows}

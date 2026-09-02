@@ -15,11 +15,12 @@ import {
   listEntertainmentKinds,
   listEntertainmentLocationTypes,
   listGameCategories,
-  listGameDevices,
+  listGameDeviceTypes,
+  listSportsDivisionsByLeague,
   listSportsGameTypes,
   listSportsSeasonsByLeague,
 } from "@/lib/catalog-admin";
-import type { SportsSeasonItem } from "@/lib/catalog-admin";
+import type { SportsDivisionItem, SportsSeasonItem } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export default async function EntertainmentEntryPage({
     bookCatalog,
     gamesCatalog,
     gameCategories,
-    gameDevices,
+    gameDeviceTypes,
     entertainmentCatalog,
     entertainmentKinds,
     locationTypes,
@@ -54,7 +55,7 @@ export default async function EntertainmentEntryPage({
     listBooksCatalog(),
     listGamesCatalog(),
     listGameCategories(),
-    listGameDevices(),
+    listGameDeviceTypes(),
     listEntertainmentCatalog(),
     listEntertainmentKinds(),
     listEntertainmentLocationTypes(),
@@ -62,10 +63,15 @@ export default async function EntertainmentEntryPage({
   ]);
 
   const leagueIds = sportsCatalog.flatMap((sport) => sport.leagues.map((l) => l.id));
-  const seasonLists = await Promise.all(leagueIds.map((id) => listSportsSeasonsByLeague(id)));
+  const [seasonLists, divisionLists] = await Promise.all([
+    Promise.all(leagueIds.map((id) => listSportsSeasonsByLeague(id))),
+    Promise.all(leagueIds.map((id) => listSportsDivisionsByLeague(id))),
+  ]);
   const sportsSeasonsByLeague: Record<number, SportsSeasonItem[]> = {};
+  const sportsDivisionsByLeague: Record<number, SportsDivisionItem[]> = {};
   leagueIds.forEach((id, i) => {
     sportsSeasonsByLeague[id] = seasonLists[i];
+    sportsDivisionsByLeague[id] = divisionLists[i];
   });
 
   return (
@@ -80,12 +86,13 @@ export default async function EntertainmentEntryPage({
         bookCatalog={bookCatalog}
         gamesCatalog={gamesCatalog}
         gameCategories={gameCategories}
-        gameDevices={gameDevices}
+        gameDeviceTypes={gameDeviceTypes}
         entertainmentCatalog={entertainmentCatalog}
         entertainmentKinds={entertainmentKinds}
         locationTypes={locationTypes}
         sportsGameTypes={sportsGameTypes}
         sportsSeasonsByLeague={sportsSeasonsByLeague}
+        sportsDivisionsByLeague={sportsDivisionsByLeague}
       />
     </main>
   );

@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { SportsWatchHistoryList } from "@/components/manage/sports-watch-history-list";
 import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem, SportsTeamUsage } from "@/lib/days";
+import type { SportsDivisionItem } from "@/lib/catalog-admin";
 
 // Full detail page for a single team — see #9. Same shape as
 // SportsLeagueDetail; the extra fields (league, alias, home location,
@@ -19,11 +20,13 @@ export function SportsTeamDetail({
   sport,
   team: initial,
   leagues,
+  divisionsByLeague,
   usage,
 }: {
   sport: SportCatalogItem;
   team: SportsTeamItem;
   leagues: SportsLeagueItem[];
+  divisionsByLeague: Record<number, SportsDivisionItem[]>;
   usage: SportsTeamUsage;
 }) {
   const router = useRouter();
@@ -37,6 +40,8 @@ export function SportsTeamDetail({
   const [division, setDivision] = useState(initial.division ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const divisionOptions = leagueId !== null ? (divisionsByLeague[leagueId] ?? []) : [];
 
   const leagueName = leagues.find((l) => l.id === team.leagueId)?.name ?? null;
 
@@ -114,7 +119,10 @@ export function SportsTeamDetail({
                   <Select
                     id="team-league"
                     value={leagueId ?? ""}
-                    onChange={(e) => setLeagueId(e.target.value ? Number(e.target.value) : null)}
+                    onChange={(e) => {
+                      setLeagueId(e.target.value ? Number(e.target.value) : null);
+                      setDivision("");
+                    }}
                   >
                     <option value="">No league</option>
                     {leagues.map((l) => (
@@ -125,6 +133,28 @@ export function SportsTeamDetail({
                   </Select>
                 </div>
               ) : null}
+              <div className="space-y-1.5">
+                <Label htmlFor="team-division">Division</Label>
+                <Select
+                  id="team-division"
+                  value={division}
+                  onChange={(e) => setDivision(e.target.value)}
+                  disabled={leagueId === null}
+                >
+                  <option value="">None</option>
+                  {division.trim() !== "" && !divisionOptions.some((d) => d.name === division) ? (
+                    <option value={division}>{division}</option>
+                  ) : null}
+                  {divisionOptions.map((d) => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </Select>
+                {leagueId === null ? (
+                  <p className="text-xs text-muted-foreground">Pick a league to set a division.</p>
+                ) : null}
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="team-alias">Alias</Label>
                 <Input id="team-alias" value={alias} onChange={(e) => setAlias(e.target.value)} />
@@ -143,10 +173,6 @@ export function SportsTeamDetail({
                   pattern="^#[0-9a-fA-F]{6}$"
                   title="Use format #xxxxxx"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="team-division">Division</Label>
-                <Input id="team-division" value={division} onChange={(e) => setDivision(e.target.value)} />
               </div>
               {error ? <span className="text-sm text-destructive">{error}</span> : null}
               <div className="flex gap-2">

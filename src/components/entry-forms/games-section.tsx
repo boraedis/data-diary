@@ -9,13 +9,13 @@ import { Modal } from "@/components/ui/modal";
 import { DurationInput } from "@/components/ui/duration-input";
 import { NameCatalogField } from "@/components/entry-forms/name-catalog-field";
 import { usePendingOpenMatch, type PendingOpen } from "@/lib/use-pending-open";
-import type { EntertainmentLocationTypeItem, GameCategoryItem, GameDeviceItem, GameSubcategoryItem } from "@/lib/catalog-admin";
+import type { EntertainmentLocationTypeItem, GameCategoryItem, GameDeviceTypeItem, GameSubcategoryItem } from "@/lib/catalog-admin";
 import type { GameCatalogItem } from "@/lib/days";
 
 export type GameRow = {
   gameId: number;
   durationMinutes: number | null;
-  device: string | null;
+  deviceType: string | null;
   locationType: string | null;
 };
 
@@ -121,15 +121,15 @@ function NewGameModal({
   );
 }
 
-/** The "log this session" modal — duration, device, and where (issue #68),
- * same baseline shape as EntertainmentDetailModal in
+/** The "log this session" modal — duration, device type, and where (issue
+ * #68), same baseline shape as EntertainmentDetailModal in
  * other-entertainment-section.tsx. */
 function GameSessionDetailModal({
   open,
   game,
   initial,
-  devices,
-  onDeviceCreated,
+  deviceTypes,
+  onDeviceTypeCreated,
   locationTypes,
   onLocationTypeCreated,
   onClose,
@@ -138,15 +138,15 @@ function GameSessionDetailModal({
   open: boolean;
   game: GameCatalogItem | null;
   initial: Omit<GameRow, "gameId"> | null;
-  devices: GameDeviceItem[];
-  onDeviceCreated: (item: GameDeviceItem) => void;
+  deviceTypes: GameDeviceTypeItem[];
+  onDeviceTypeCreated: (item: GameDeviceTypeItem) => void;
   locationTypes: EntertainmentLocationTypeItem[];
   onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   onClose: () => void;
   onSave: (value: Omit<GameRow, "gameId">) => void;
 }) {
   const [durationMinutes, setDurationMinutes] = useState<number | null>(initial?.durationMinutes ?? null);
-  const [device, setDevice] = useState(initial?.device ?? "");
+  const [deviceType, setDeviceType] = useState(initial?.deviceType ?? "");
   const [locationType, setLocationType] = useState(initial?.locationType ?? "");
 
   return (
@@ -161,15 +161,15 @@ function GameSessionDetailModal({
             <DurationInput id="game-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="game-detail-device">Device</Label>
+            <Label htmlFor="game-detail-device-type">Device type</Label>
             <NameCatalogField
-              id="game-detail-device"
-              value={device || null}
-              onChange={(value) => setDevice(value ?? "")}
-              items={devices}
-              onCreated={onDeviceCreated}
-              apiPath="/api/game-devices"
-              modalTitle="New device"
+              id="game-detail-device-type"
+              value={deviceType || null}
+              onChange={(value) => setDeviceType(value ?? "")}
+              items={deviceTypes}
+              onCreated={onDeviceTypeCreated}
+              apiPath="/api/game-device-types"
+              modalTitle="New device type"
             />
           </div>
           <div className="space-y-1.5">
@@ -187,7 +187,11 @@ function GameSessionDetailModal({
           <Button
             type="button"
             onClick={() =>
-              onSave({ durationMinutes, device: device.trim() || null, locationType: locationType.trim() || null })
+              onSave({
+                durationMinutes,
+                deviceType: deviceType.trim() || null,
+                locationType: locationType.trim() || null,
+              })
             }
           >
             Save
@@ -205,7 +209,7 @@ function GameSessionDetailModal({
 export function GamesSection({
   catalog,
   categories,
-  devices: initialDevices,
+  deviceTypes: initialDeviceTypes,
   locationTypes,
   onLocationTypeCreated,
   rows,
@@ -214,7 +218,7 @@ export function GamesSection({
 }: {
   catalog: GameCatalogItem[];
   categories: (GameCategoryItem & { subcategories: GameSubcategoryItem[] })[];
-  devices: GameDeviceItem[];
+  deviceTypes: GameDeviceTypeItem[];
   locationTypes: EntertainmentLocationTypeItem[];
   onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
   rows: GameRow[];
@@ -222,7 +226,7 @@ export function GamesSection({
   pendingOpen: PendingOpen;
 }) {
   const [items, setItems] = useState<GameCatalogItem[]>(catalog);
-  const [devices, setDevices] = useState<GameDeviceItem[]>(initialDevices);
+  const [deviceTypes, setDeviceTypes] = useState<GameDeviceTypeItem[]>(initialDeviceTypes);
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [detail, setDetail] = useState<{ game: GameCatalogItem; editIndex: number | null } | null>(null);
 
@@ -239,8 +243,8 @@ export function GamesSection({
     setDetail({ game: item, editIndex: null });
   }
 
-  function handleDeviceCreated(item: GameDeviceItem) {
-    setDevices((prev) => (prev.some((d) => d.id === item.id) ? prev : [...prev, item].sort((a, b) => a.name.localeCompare(b.name))));
+  function handleDeviceTypeCreated(item: GameDeviceTypeItem) {
+    setDeviceTypes((prev) => (prev.some((d) => d.id === item.id) ? prev : [...prev, item].sort((a, b) => a.name.localeCompare(b.name))));
   }
 
   function openForEdit(index: number) {
@@ -286,7 +290,7 @@ export function GamesSection({
                 <p className="truncate text-sm">{game?.name ?? "Unknown"}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   {row.durationMinutes ? `${row.durationMinutes} min` : null}
-                  {row.device ? ` · ${row.device}` : ""}
+                  {row.deviceType ? ` · ${row.deviceType}` : ""}
                   {row.locationType ? ` · ${row.locationType}` : ""}
                 </p>
               </button>
@@ -305,8 +309,8 @@ export function GamesSection({
         open={detail !== null}
         game={detail?.game ?? null}
         initial={editingRow ?? null}
-        devices={devices}
-        onDeviceCreated={handleDeviceCreated}
+        deviceTypes={deviceTypes}
+        onDeviceTypeCreated={handleDeviceTypeCreated}
         locationTypes={locationTypes}
         onLocationTypeCreated={onLocationTypeCreated}
         onClose={() => setDetail(null)}

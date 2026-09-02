@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { createGameDevice, listGameDevices, validateNameInput } from "@/lib/catalog-admin";
+import { createGameDeviceType, listGameDeviceTypes, validateNameInput } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const items = await listGameDevices();
+  const items = await listGameDeviceTypes();
   return NextResponse.json(items);
 }
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const created = await createGameDevice(parsed.value.name);
+    const created = await createGameDeviceType(parsed.value.name);
     return NextResponse.json(created);
   } catch (error) {
     return NextResponse.json(

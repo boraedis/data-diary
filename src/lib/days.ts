@@ -361,13 +361,13 @@ export type GameSessionEntry = {
   gameType: string | null;
   gameSubtype: string | null;
   durationMinutes: number | null;
-  device: string | null;
+  deviceType: string | null;
   locationType: string | null;
 };
 export type GameSessionPayload = {
   gameId: number;
   durationMinutes: number | null;
-  device: string | null;
+  deviceType: string | null;
   locationType: string | null;
 };
 export type GamesPayload = { entries: GameSessionPayload[] };
@@ -646,7 +646,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
         gameType: games.type,
         gameSubtype: games.subtype,
         durationMinutes: gameSessions.durationMinutes,
-        device: gameSessions.device,
+        deviceType: gameSessions.deviceType,
         locationType: gameSessions.locationType,
       })
       .from(gameSessions)
@@ -799,7 +799,7 @@ export async function loadDay(date: string): Promise<DayPayload> {
       gameType: s.gameType,
       gameSubtype: s.gameSubtype,
       durationMinutes: s.durationMinutes,
-      device: s.device,
+      deviceType: s.deviceType,
       locationType: s.locationType,
     })),
   };
@@ -1293,12 +1293,12 @@ export function validateGamesPayload(body: unknown): Result<GamesPayload> {
       return { ok: false, error: "Invalid game selection" };
     }
 
-    const device = typeof e.device === "string" && e.device.trim() ? e.device.trim() : null;
+    const deviceType = typeof e.deviceType === "string" && e.deviceType.trim() ? e.deviceType.trim() : null;
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
 
-    entries.push({ gameId, durationMinutes, device, locationType });
+    entries.push({ gameId, durationMinutes, deviceType, locationType });
   }
 
   return { ok: true, value: { entries } };
@@ -1928,7 +1928,7 @@ export async function saveGameSessions(date: string, value: GamesPayload): Promi
         date,
         gameId: e.gameId,
         durationMinutes: e.durationMinutes,
-        device: e.device,
+        deviceType: e.deviceType,
         locationType: e.locationType,
       }))
     );

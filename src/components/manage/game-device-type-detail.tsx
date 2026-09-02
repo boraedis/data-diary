@@ -8,18 +8,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
-import type { GameDeviceItem, GameDeviceUsage } from "@/lib/catalog-admin";
+import type { GameDeviceTypeItem, GameDeviceTypeUsage } from "@/lib/catalog-admin";
 
-export function GameDeviceDetail({ device: initial, usage }: { device: GameDeviceItem; usage: GameDeviceUsage }) {
+export function GameDeviceTypeDetail({
+  deviceType: initial,
+  usage,
+}: {
+  deviceType: GameDeviceTypeItem;
+  usage: GameDeviceTypeUsage;
+}) {
   const router = useRouter();
-  const [device, setDevice] = useState(initial);
+  const [deviceType, setDeviceType] = useState(initial);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initial.name);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function cancelEdit() {
-    setName(device.name);
+    setName(deviceType.name);
     setError(null);
     setEditing(false);
   }
@@ -32,7 +38,7 @@ export function GameDeviceDetail({ device: initial, usage }: { device: GameDevic
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/game-devices/${device.id}`, {
+      const res = await fetch(`/api/game-device-types/${deviceType.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
@@ -42,7 +48,7 @@ export function GameDeviceDetail({ device: initial, usage }: { device: GameDevic
         setError(typeof body?.error === "string" ? body.error : "Failed to save");
         return;
       }
-      setDevice(body as GameDeviceItem);
+      setDeviceType(body as GameDeviceTypeItem);
       setEditing(false);
       router.refresh();
     } catch {
@@ -55,25 +61,28 @@ export function GameDeviceDetail({ device: initial, usage }: { device: GameDevic
   return (
     <>
       <div className="flex items-center justify-between">
-        <Link href="/manage/entertainment/games/devices" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          &larr; Devices
+        <Link
+          href="/manage/entertainment/games/device-types"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          &larr; Device types
         </Link>
       </div>
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle>{editing ? "Edit device" : device.name}</CardTitle>
+          <CardTitle>{editing ? "Edit device type" : deviceType.name}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {editing ? (
             <>
               <div className="space-y-1.5">
-                <Label htmlFor="game-device-name">Name</Label>
-                <Input id="game-device-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Label htmlFor="game-device-type-name">Name</Label>
+                <Input id="game-device-type-name" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <p className="text-xs text-muted-foreground">
                 Renaming doesn&rsquo;t update sessions that already carry the old name — see the session&rsquo;s own
-                Device field to change that.
+                Device type field to change that.
               </p>
               {error ? <span className="text-sm text-destructive">{error}</span> : null}
               <div className="flex gap-2">
@@ -96,15 +105,17 @@ export function GameDeviceDetail({ device: initial, usage }: { device: GameDevic
                   Edit
                 </Button>
                 <DeleteCatalogItem
-                  itemLabel={device.name}
+                  itemLabel={deviceType.name}
                   isBlocked={usage.sessionCount > 0}
-                  afterDeleteHref="/manage/entertainment/games/devices"
+                  afterDeleteHref="/manage/entertainment/games/device-types"
                   onDelete={async () => {
-                    const res = await fetch(`/api/game-devices/${device.id}`, { method: "DELETE" });
+                    const res = await fetch(`/api/game-device-types/${deviceType.id}`, { method: "DELETE" });
                     if (!res.ok) throw new Error("Failed to delete");
                   }}
                   blockedContent={
-                    <p>{usage.sessionCount} session{usage.sessionCount === 1 ? "" : "s"} still use this device.</p>
+                    <p>
+                      {usage.sessionCount} session{usage.sessionCount === 1 ? "" : "s"} still use this device type.
+                    </p>
                   }
                 />
               </div>
