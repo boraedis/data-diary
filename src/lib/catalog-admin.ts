@@ -11,6 +11,8 @@ import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { parseOptionalHexColor } from "@/lib/color";
 import {
+  artistGenres,
+  artists,
   bookReadingSessions,
   days,
   entertainmentCatalog,
@@ -25,12 +27,16 @@ import {
   games,
   gameSessions,
   gameSubcategories,
+  genreGroups,
+  genres,
   metros,
   movieWatches,
   people,
   placeCategories,
   places,
   placeSubcategories,
+  podcastCategories,
+  podcastShows,
   sleepLocationSubtypes,
   sleepLocationTypes,
   sportsDivisions,
@@ -1336,4 +1342,259 @@ export async function getSportsGameTypeUsage(id: number): Promise<SportsGameType
 export async function deleteSportsGameType(id: number): Promise<void> {
   const db = getDb();
   await db.delete(sportsGameTypes).where(eq(sportsGameTypes.id, id));
+}
+
+// --- Music: genre groups (catalog) -----------------------------------------
+// See the `genreGroups`/`genres` table comments in schema.ts. Genre rows
+// themselves are resolved automatically from Spotify at import time
+// (src/lib/music-import.ts) — there's no API-derivable mapping from a
+// specific Spotify tag up to a broad bucket like "Rock", so that grouping
+// is hand-curated here, same "+ New" / assign flow as tags on people.
+
+export type GenreGroupItem = { id: number; name: string; color: string | null };
+
+const GENRE_GROUP_COLUMNS = { id: genreGroups.id, name: genreGroups.name, color: genreGroups.color };
+
+export function validateGenreGroupInput(body: unknown): Result<{ name: string; color: string | null }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name) return { ok: false, error: "Name is required" };
+  const color = parseOptionalHexColor(b.color);
+  if (!color.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
+  return { ok: true, value: { name, color: color.value } };
+}
+
+export async function listGenreGroups(): Promise<(GenreGroupItem & { genreCount: number })[]> {
+  const db = getDb();
+  return db
+    .select({ ...GENRE_GROUP_COLUMNS, genreCount: count(genres.id) })
+    .from(genreGroups)
+    .leftJoin(genres, eq(genres.groupId, genreGroups.id))
+    .groupBy(genreGroups.id, genreGroups.name, genreGroups.color)
+    .orderBy(asc(genreGroups.name));
+}
+
+export async function createGenreGroup(input: { name: string; color: string | null }): Promise<GenreGroupItem> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(genreGroups)
+    .values({ name: input.name.trim(), color: input.color })
+    .returning(GENRE_GROUP_COLUMNS);
+  return inserted;
+}
+
+export async function getGenreGroup(id: number): Promise<GenreGroupItem | null> {
+  const db = getDb();
+  const [row] = await db.select(GENRE_GROUP_COLUMNS).from(genreGroups).where(eq(genreGroups.id, id));
+  return row ?? null;
+}
+
+export async function updateGenreGroup(
+  id: number,
+  input: { name: string; color: string | null }
+): Promise<GenreGroupItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(genreGroups)
+    .set({ name: input.name.trim(), color: input.color })
+    .where(eq(genreGroups.id, id))
+    .returning(GENRE_GROUP_COLUMNS);
+  return updated;
+}
+
+export type GenreGroupUsage = { genres: { id: number; name: string }[] };
+
+export async function getGenreGroupUsage(id: number): Promise<GenreGroupUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: genres.id, name: genres.name })
+    .from(genres)
+    .where(eq(genres.groupId, id))
+    .orderBy(asc(genres.name));
+  return { genres: rows };
+}
+
+export async function deleteGenreGroup(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(genreGroups).where(eq(genreGroups.id, id));
+}
+
+// --- Music: genres (read + assign group) ------------------------------------
+// No create/delete here — genre rows come from the Spotify import pipeline
+// only, never hand-typed. The only admin action is assigning (or clearing)
+// a genre's group.
+
+export type GenreItem = { id: number; name: string; groupId: number | null };
+
+export async function listGenres(): Promise<(GenreItem & { artistCount: number })[]> {
+  const db = getDb();
+  return db
+    .select({
+      id: genres.id,
+      name: genres.name,
+      groupId: genres.groupId,
+      artistCount: count(artistGenres.artistId),
+    })
+    .from(genres)
+    .leftJoin(artistGenres, eq(artistGenres.genreId, genres.id))
+    .groupBy(genres.id, genres.name, genres.groupId)
+    .orderBy(asc(genres.name));
+}
+
+export async function updateGenreGroupAssignment(id: number, groupId: number | null): Promise<GenreItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(genres)
+    .set({ groupId })
+    .where(eq(genres.id, id))
+    .returning({ id: genres.id, name: genres.name, groupId: genres.groupId });
+  return updated;
+}
+
+// --- Music: artists (read + edit aliases) ------------------------------------
+// No create/delete either — artist rows come from the import pipeline,
+// resolved by the export's artist name (src/lib/music-import.ts). The
+// admin action here is fixing up `aliases` so a future import's
+// name-matching catches an alternate spelling instead of creating a
+// duplicate artist.
+
+export type ArtistItem = { id: number; name: string; aliases: string[]; spotifyId: string | null };
+
+export function validateArtistAliasesInput(body: unknown): Result<{ aliases: string[] }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  if (!Array.isArray(b.aliases) || !b.aliases.every((a) => typeof a === "string")) {
+    return { ok: false, error: "aliases must be an array of strings" };
+  }
+  const aliases = [...new Set(b.aliases.map((a) => a.trim()).filter(Boolean))];
+  return { ok: true, value: { aliases } };
+}
+
+export async function listArtists(): Promise<(ArtistItem & { genres: string[] })[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: artists.id,
+      name: artists.name,
+      aliases: artists.aliases,
+      spotifyId: artists.spotifyId,
+      genreName: genres.name,
+    })
+    .from(artists)
+    .leftJoin(artistGenres, eq(artistGenres.artistId, artists.id))
+    .leftJoin(genres, eq(genres.id, artistGenres.genreId))
+    .orderBy(asc(artists.name));
+
+  const byArtist = new Map<number, ArtistItem & { genres: string[] }>();
+  for (const row of rows) {
+    let entry = byArtist.get(row.id);
+    if (!entry) {
+      entry = { id: row.id, name: row.name, aliases: row.aliases, spotifyId: row.spotifyId, genres: [] };
+      byArtist.set(row.id, entry);
+    }
+    if (row.genreName) entry.genres.push(row.genreName);
+  }
+  return [...byArtist.values()];
+}
+
+export async function updateArtistAliases(id: number, aliases: string[]): Promise<ArtistItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(artists)
+    .set({ aliases })
+    .where(eq(artists.id, id))
+    .returning({ id: artists.id, name: artists.name, aliases: artists.aliases, spotifyId: artists.spotifyId });
+  return updated;
+}
+
+// --- Music: podcast categories (catalog) -------------------------------------
+// "A simple category catalog" per issue #76 — same shallow shape as place
+// categories. No color: podcasts aren't charted by category the way music
+// genres are, at least not yet.
+
+export type PodcastCategoryItem = { id: number; name: string };
+
+export async function listPodcastCategories(): Promise<(PodcastCategoryItem & { showCount: number })[]> {
+  const db = getDb();
+  return db
+    .select({ id: podcastCategories.id, name: podcastCategories.name, showCount: count(podcastShows.id) })
+    .from(podcastCategories)
+    .leftJoin(podcastShows, eq(podcastShows.categoryId, podcastCategories.id))
+    .groupBy(podcastCategories.id, podcastCategories.name)
+    .orderBy(asc(podcastCategories.name));
+}
+
+export async function createPodcastCategory(name: string): Promise<PodcastCategoryItem> {
+  const db = getDb();
+  const trimmed = name.trim();
+  const [inserted] = await db
+    .insert(podcastCategories)
+    .values({ name: trimmed })
+    .onConflictDoNothing({ target: podcastCategories.name })
+    .returning();
+  if (inserted) return inserted;
+  const [existing] = await db.select().from(podcastCategories).where(eq(podcastCategories.name, trimmed));
+  return existing;
+}
+
+export async function getPodcastCategory(id: number): Promise<PodcastCategoryItem | null> {
+  const db = getDb();
+  const [row] = await db.select().from(podcastCategories).where(eq(podcastCategories.id, id));
+  return row ?? null;
+}
+
+export async function updatePodcastCategory(id: number, name: string): Promise<PodcastCategoryItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(podcastCategories)
+    .set({ name: name.trim() })
+    .where(eq(podcastCategories.id, id))
+    .returning();
+  return updated;
+}
+
+export type PodcastCategoryUsage = { shows: { id: number; name: string }[] };
+
+export async function getPodcastCategoryUsage(id: number): Promise<PodcastCategoryUsage> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: podcastShows.id, name: podcastShows.name })
+    .from(podcastShows)
+    .where(eq(podcastShows.categoryId, id))
+    .orderBy(asc(podcastShows.name));
+  return { shows: rows };
+}
+
+export async function deletePodcastCategory(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(podcastCategories).where(eq(podcastCategories.id, id));
+}
+
+// --- Music: podcast shows (read + assign category) ---------------------------
+// No create/delete here either — same reasoning as artists: rows come from
+// the import pipeline, the admin action is assigning a category.
+
+export type PodcastShowItem = { id: number; name: string; categoryId: number | null };
+
+export async function listPodcastShows(): Promise<PodcastShowItem[]> {
+  const db = getDb();
+  return db
+    .select({ id: podcastShows.id, name: podcastShows.name, categoryId: podcastShows.categoryId })
+    .from(podcastShows)
+    .orderBy(asc(podcastShows.name));
+}
+
+export async function updatePodcastShowCategory(id: number, categoryId: number | null): Promise<PodcastShowItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(podcastShows)
+    .set({ categoryId })
+    .where(eq(podcastShows.id, id))
+    .returning({ id: podcastShows.id, name: podcastShows.name, categoryId: podcastShows.categoryId });
+  return updated;
 }

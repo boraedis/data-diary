@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -1043,6 +1044,89 @@ export const gameDeviceTypes = pgTable("game_device_types", {
   name: text("name").notNull().unique(),
 });
 
+// --- Music: artists / genres (catalogs) -------------------------------
+// Issue #76: the artist/album/genre enrichment layer noted below as
+// deliberately-not-ported is now being built, resolved at import time via
+// the Spotify Web API (src/lib/spotify.ts) rather than hand-curated —
+// legacy's genre/subgenre pair was set once per artist and never revisited
+// because it required manual research per artist; hitting Spotify's own
+// artist-genre data at import time removes that manual step entirely for
+// the specific-genre layer.
+//
+// Spotify's artist genre data is a flat bag of narrow tags (e.g.
+// "alternative r&b", "conscious hip hop"), not a genre/subgenre tree —
+// there is no API-derivable mapping from those tags up to broad buckets
+// like "Rock" or "Pop". So this is two real levels, only one of which is
+// automatable: `genres` rows are the specific Spotify tags, many-to-many
+// with artists via `artistGenres` (an artist can and usually does carry
+// several); `genreGroups` is the broad, hand-curated bucket a specific
+// genre optionally belongs to (assigned via a catalog-admin screen, same
+// "+ New" / assign flow as tags on people). Color lives on the group, not
+// the specific genre — Spotify's tag vocabulary runs into the hundreds,
+// far past what a legible categorical chart palette
+// (src/lib/viz/color.ts's 5 fixed slots) can represent, while the
+// hand-curated groups are exactly the small, stable set a chart needs.
+export const genreGroups = pgTable("genre_groups", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  color: text("color"), // hex, e.g. "#AFAFAF" — same convention as tags.color
+});
+
+export const genres = pgTable("genres", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(), // the raw Spotify genre tag
+  groupId: integer("group_id").references(() => genreGroups.id, { onDelete: "set null" }),
+});
+
+// Artists get a real catalog (unlike movies/tvShows' plain `genres: text[]`
+// column) because listens need to resolve to *one* artist identity across
+// however many name spellings Spotify's export uses for it — `aliases`
+// mirrors `people.nicknames`'s shape and role: alternate names an import
+// or a manual merge can attach without renaming the canonical row.
+// `spotifyId` is set the first time an artist is resolved via the Spotify
+// API and used to skip re-searching on every later import.
+export const artists = pgTable("artists", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  aliases: text("aliases").array().notNull().default([]),
+  spotifyId: text("spotify_id").unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const artistGenres = pgTable(
+  "artist_genres",
+  {
+    artistId: integer("artist_id")
+      .notNull()
+      .references(() => artists.id, { onDelete: "cascade" }),
+    genreId: integer("genre_id")
+      .notNull()
+      .references(() => genres.id, { onDelete: "cascade" }),
+  },
+  (table) => [uniqueIndex("artist_genres_artist_genre_idx").on(table.artistId, table.genreId)]
+);
+
+// --- Music: podcasts (catalog) ------------------------------------------
+// Issue #76: the Spotify export bundles podcast listens in with track
+// listens (same file, distinguished by episode_show_name being set instead
+// of a track/artist). Podcasts get their own catalog, same reasoning as
+// artists above (resolve the many episode-show-name spellings to one row),
+// but genre has no equivalent here — Spotify's API doesn't expose a
+// podcast taxonomy the way it does artist genres — so this is "a simple
+// category catalog" per the issue, hand-curated like place categories, not
+// auto-populated.
+export const podcastCategories = pgTable("podcast_categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const podcastShows = pgTable("podcast_shows", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  categoryId: integer("category_id").references(() => podcastCategories.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- Music (Spotify listen history) ---------------------------------------
 // Architecturally separate from the five kinds above: the legacy app never
 // logged listens as part of day-to-day entry at all — it bulk-read raw
@@ -1051,12 +1135,24 @@ export const gameDeviceTypes = pgTable("game_device_types", {
 // is the persisted version of that export data, populated by an in-app
 // upload/import flow (per your call — not a one-off migration script) —
 // there's no day-entry form for this, just an import page elsewhere in the
-// app. The artist/album/genre enrichment layer the legacy app had
-// (`music/artists`, `music/albums`, `music/genres`) is deliberately NOT
-// ported yet: the historical survey found nothing in the legacy codebase
-// actually wrote to it (seemingly synced by some process outside the repo),
-// so there's no real source data behind it to migrate — revisit if that
-// enrichment turns out to matter once raw listens are in.
+// app.
+//
+// The raw uploaded export file itself is never stored anywhere (not on
+// disk, not in Postgres, not in a blob bucket) — the import route parses
+// it in memory and discards it once these rows are written. There's no
+// storage layer in this app (Neon Postgres only, no S3/Blob dependency)
+// and nothing downstream needs the original JSON once its fields are
+// extracted: re-uploading the same or an overlapping export is already a
+// safe no-op via the dedupe index below, so there's no "reprocess the
+// original file" scenario the raw bytes would be needed for either.
+//
+// A listen row is written once at import time and never edited after —
+// there's deliberately no PATCH route for this table (unlike every other
+// catalog here). It's a historical record of what actually got streamed;
+// "fixing" a row would mean falsifying that record. If an import resolved
+// the wrong artist/show, the fix is correcting the `artists`/`podcastShows`
+// catalog row (or its aliases) so future imports resolve correctly, not
+// editing the listen.
 export const musicListens = pgTable(
   "music_listens",
   {
@@ -1064,22 +1160,35 @@ export const musicListens = pgTable(
     playedAt: timestamp("played_at", { withTimezone: true }).notNull(),
     msPlayed: integer("ms_played").notNull(),
     trackName: text("track_name"),
-    artistName: text("artist_name"),
+    artistId: integer("artist_id").references(() => artists.id, { onDelete: "set null" }),
     albumName: text("album_name"),
-    // Set instead of trackName/artistName for podcast episodes, matching
-    // the Spotify export's own shape (episode_show_name).
-    podcastShowName: text("podcast_show_name"),
+    // Set instead of trackName/artistId for podcast episodes, matching the
+    // Spotify export's own shape (episode_name/episode_show_name).
+    episodeName: text("episode_name"),
+    podcastShowId: integer("podcast_show_id").references(() => podcastShows.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("music_listens_played_at_idx").on(table.playedAt),
+    index("music_listens_artist_id_idx").on(table.artistId),
+    index("music_listens_podcast_show_id_idx").on(table.podcastShowId),
     // Re-uploading the same export (or overlapping exports — Spotify
     // splits a year into multiple numbered files once it's large enough,
     // and boundary-adjacent pairs like 2019/2019_1 are exactly the kind of
     // file split that could double-count a listen near the boundary)
     // should be a safe no-op, not duplicate rows — the import route uses
-    // ON CONFLICT DO NOTHING against this index.
-    uniqueIndex("music_listens_dedupe_idx").on(table.playedAt, table.trackName, table.msPlayed),
+    // ON CONFLICT DO NOTHING against this index. Postgres unique indexes
+    // never treat two NULLs as equal, and exactly one of trackName/
+    // episodeName is always null (music vs. podcast row) — a plain
+    // multi-column index on both would never detect a podcast-row
+    // conflict at all (every podcast row has trackName = NULL). The
+    // coalesce collapses them into one non-null discriminator so both
+    // kinds actually dedupe.
+    uniqueIndex("music_listens_dedupe_idx").on(
+      table.playedAt,
+      sql`coalesce(${table.trackName}, ${table.episodeName})`,
+      table.msPlayed
+    ),
   ]
 );
 
