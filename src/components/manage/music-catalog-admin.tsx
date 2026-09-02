@@ -6,24 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type {
-  ArtistItem,
-  GenreGroupItem,
-  GenreItem,
-  PodcastCategoryItem,
-  PodcastShowItem,
-} from "@/lib/catalog-admin";
+import type { GenreGroupItem, GenreItem, PodcastCategoryItem } from "@/lib/catalog-admin";
 
-// Everything artist/genre/podcast rows need editing for lives in one page
-// rather than this repo's usual list-page + [id]-detail-page split
-// (compare src/app/manage/people/tags/): none of these five catalogs
-// support create-by-hand or delete from here (see each lib function's own
-// comment in catalog-admin.ts — genres/artists/podcast shows only ever
-// come from the Spotify import pipeline), so there's no "+ New" flow or
-// usage-checked delete to justify a full detail page per row, just a
-// couple of editable fields per row.
+// Genre groups/genres and podcast categories stay here, admin'd inline —
+// none of the three support create-by-hand except genre groups/podcast
+// categories themselves (genres are only ever assigned a group, never
+// created), so there's no full list+detail page worth building for them.
+// Artists and podcast *shows* get their own browse + detail pages instead
+// (src/app/manage/entertainment/music/artists,
+// src/app/manage/entertainment/music/podcasts) — enough per-row content
+// (listen breakdowns) to be worth a real page, and alias/category editing
+// now lives there instead of in this inline list.
 
-type ArtistWithGenres = ArtistItem & { genres: string[] };
 type GenreGroupWithCount = GenreGroupItem & { genreCount: number };
 type GenreWithCount = GenreItem & { artistCount: number };
 type PodcastCategoryWithCount = PodcastCategoryItem & { showCount: number };
@@ -31,23 +25,17 @@ type PodcastCategoryWithCount = PodcastCategoryItem & { showCount: number };
 export function MusicCatalogAdmin({
   initialGenreGroups,
   initialGenres,
-  initialArtists,
   initialPodcastCategories,
-  initialPodcastShows,
 }: {
   initialGenreGroups: GenreGroupWithCount[];
   initialGenres: GenreWithCount[];
-  initialArtists: ArtistWithGenres[];
   initialPodcastCategories: PodcastCategoryWithCount[];
-  initialPodcastShows: PodcastShowItem[];
 }) {
   return (
     <div className="flex flex-col gap-5">
       <GenreGroupsSection initial={initialGenreGroups} />
       <GenresSection initial={initialGenres} groups={initialGenreGroups} />
-      <ArtistsSection initial={initialArtists} />
       <PodcastCategoriesSection initial={initialPodcastCategories} />
-      <PodcastShowsSection initial={initialPodcastShows} categories={initialPodcastCategories} />
     </div>
   );
 }
@@ -204,82 +192,7 @@ function GenresSection({ initial, groups }: { initial: GenreWithCount[]; groups:
   );
 }
 
-// --- Artists ------------------------------------------------------------
-
-function ArtistsSection({ initial }: { initial: ArtistWithGenres[] }) {
-  const [artists, setArtists] = useState(initial);
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
-  const [query, setQuery] = useState("");
-
-  const filtered = query.trim()
-    ? artists.filter((a) => a.name.toLowerCase().includes(query.trim().toLowerCase()))
-    : artists.slice(0, 25);
-
-  async function saveAliases(id: number) {
-    const raw = drafts[id];
-    if (raw === undefined) return;
-    const aliases = raw
-      .split(",")
-      .map((a) => a.trim())
-      .filter(Boolean);
-    const res = await fetch(`/api/artists/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ aliases }),
-    });
-    if (res.ok) {
-      const updated = await res.json();
-      setArtists((prev) => prev.map((a) => (a.id === id ? { ...a, aliases: updated.aliases } : a)));
-      setDrafts((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Artists</CardTitle>
-          <span className="text-xs text-muted-foreground">{artists.length} total</span>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <Input placeholder="Search artists…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <div className="flex max-h-96 flex-col gap-2 overflow-y-auto">
-          {filtered.map((artist) => (
-            <div key={artist.id} className="flex flex-col gap-1 rounded-lg border border-border px-3 py-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{artist.name}</span>
-                {artist.genres.length > 0 && (
-                  <span className="text-right text-xs text-muted-foreground">{artist.genres.join(", ")}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  className="h-8 flex-1 text-xs"
-                  placeholder="Aliases, comma-separated…"
-                  defaultValue={artist.aliases.join(", ")}
-                  onChange={(e) => setDrafts((prev) => ({ ...prev, [artist.id]: e.target.value }))}
-                />
-                {drafts[artist.id] !== undefined && (
-                  <Button type="button" size="sm" variant="outline" onClick={() => saveAliases(artist.id)}>
-                    Save
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-          {filtered.length === 0 && <p className="text-sm text-muted-foreground">No artists match.</p>}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// --- Podcast categories / shows -------------------------------------------
+// --- Podcast categories -----------------------------------------------------
 
 function PodcastCategoriesSection({ initial }: { initial: PodcastCategoryWithCount[] }) {
   const [categories, setCategories] = useState(initial);
@@ -311,7 +224,7 @@ function PodcastCategoriesSection({ initial }: { initial: PodcastCategoryWithCou
       <CardContent className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">
           A simple, hand-curated category list for podcast shows — unlike artist genres, Spotify&rsquo;s API
-          doesn&rsquo;t expose podcast categories to fetch automatically.
+          doesn&rsquo;t expose podcast categories to fetch automatically. Assign a show to one from its own page.
         </p>
         <div className="flex flex-col gap-1.5">
           {categories.map((c) => (
@@ -337,54 +250,6 @@ function PodcastCategoriesSection({ initial }: { initial: PodcastCategoryWithCou
           </Button>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function PodcastShowsSection({
-  initial,
-  categories,
-}: {
-  initial: PodcastShowItem[];
-  categories: PodcastCategoryWithCount[];
-}) {
-  const [shows, setShows] = useState(initial);
-
-  async function assign(id: number, categoryId: number | null) {
-    setShows((prev) => prev.map((s) => (s.id === id ? { ...s, categoryId } : s)));
-    await fetch(`/api/podcast-shows/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ categoryId }),
-    });
-  }
-
-  if (shows.length === 0) return null;
-
-  return (
-    <Card id="podcast-shows" className="scroll-mt-4">
-      <CardHeader>
-        <CardTitle>Podcast shows</CardTitle>
-      </CardHeader>
-      <CardContent className="flex max-h-96 flex-col gap-1.5 overflow-y-auto">
-        {shows.map((show) => (
-          <div key={show.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm">
-            <span className="flex-1">{show.name}</span>
-            <Select
-              className="h-8 w-40 text-xs"
-              value={show.categoryId ?? ""}
-              onChange={(e) => assign(show.id, e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        ))}
       </CardContent>
     </Card>
   );

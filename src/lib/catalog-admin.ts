@@ -1502,6 +1502,32 @@ export async function listArtists(): Promise<(ArtistItem & { genres: string[] })
   return [...byArtist.values()];
 }
 
+export async function getArtist(id: number): Promise<(ArtistItem & { genres: string[] }) | null> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: artists.id,
+      name: artists.name,
+      aliases: artists.aliases,
+      spotifyId: artists.spotifyId,
+      genreName: genres.name,
+    })
+    .from(artists)
+    .leftJoin(artistGenres, eq(artistGenres.artistId, artists.id))
+    .leftJoin(genres, eq(genres.id, artistGenres.genreId))
+    .where(eq(artists.id, id));
+  if (rows.length === 0) return null;
+
+  const [first] = rows;
+  return {
+    id: first.id,
+    name: first.name,
+    aliases: first.aliases,
+    spotifyId: first.spotifyId,
+    genres: rows.map((r) => r.genreName).filter((g): g is string => g !== null),
+  };
+}
+
 export async function updateArtistAliases(id: number, aliases: string[]): Promise<ArtistItem> {
   const db = getDb();
   const [updated] = await db
@@ -1587,6 +1613,15 @@ export async function listPodcastShows(): Promise<PodcastShowItem[]> {
     .select({ id: podcastShows.id, name: podcastShows.name, categoryId: podcastShows.categoryId })
     .from(podcastShows)
     .orderBy(asc(podcastShows.name));
+}
+
+export async function getPodcastShow(id: number): Promise<PodcastShowItem | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: podcastShows.id, name: podcastShows.name, categoryId: podcastShows.categoryId })
+    .from(podcastShows)
+    .where(eq(podcastShows.id, id));
+  return row ?? null;
 }
 
 export async function updatePodcastShowCategory(id: number, categoryId: number | null): Promise<PodcastShowItem> {

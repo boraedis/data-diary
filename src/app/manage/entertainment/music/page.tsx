@@ -3,13 +3,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MusicCatalogAdmin } from "@/components/manage/music-catalog-admin";
 import { MusicUploadPanel } from "@/components/manage/music-upload-panel";
-import {
-  listArtists,
-  listGenreGroups,
-  listGenres,
-  listPodcastCategories,
-  listPodcastShows,
-} from "@/lib/catalog-admin";
+import { listGenreGroups, listGenres, listPodcastCategories } from "@/lib/catalog-admin";
 import { getMusicCurationStats, getMusicListenStats } from "@/lib/music";
 
 export const dynamic = "force-dynamic";
@@ -41,14 +35,12 @@ function ReviewProgressRow({ label, href, done, total }: { label: string; href: 
 }
 
 export default async function ManageMusicPage() {
-  const [stats, curation, genreGroups, genres, artists, podcastCategories, podcastShows] = await Promise.all([
+  const [stats, curation, genreGroups, genres, podcastCategories] = await Promise.all([
     getMusicListenStats(),
     getMusicCurationStats(),
     listGenreGroups(),
     listGenres(),
-    listArtists(),
     listPodcastCategories(),
-    listPodcastShows(),
   ]);
 
   const needsReview = curation.totalGenres - curation.groupedGenres + (curation.totalPodcastShows - curation.categorizedPodcastShows);
@@ -90,6 +82,29 @@ export default async function ManageMusicPage() {
         </CardContent>
       </Card>
 
+      <div className="grid grid-cols-2 gap-4">
+        <Link href="/manage/entertainment/music/artists">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Artists</CardTitle>
+                <span className="font-mono text-sm text-muted-foreground">{stats.uniqueArtists}</span>
+              </div>
+            </CardHeader>
+          </Card>
+        </Link>
+        <Link href="/manage/entertainment/music/podcasts">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Podcasts</CardTitle>
+                <span className="font-mono text-sm text-muted-foreground">{stats.uniquePodcastShows}</span>
+              </div>
+            </CardHeader>
+          </Card>
+        </Link>
+      </div>
+
       {(curation.totalGenres > 0 || curation.totalPodcastShows > 0) && (
         <Card>
           <CardHeader>
@@ -112,7 +127,7 @@ export default async function ManageMusicPage() {
             {curation.totalPodcastShows > 0 && (
               <ReviewProgressRow
                 label="Podcast shows categorized"
-                href="#podcast-shows"
+                href="/manage/entertainment/music/podcasts"
                 done={curation.categorizedPodcastShows}
                 total={curation.totalPodcastShows}
               />
@@ -124,9 +139,7 @@ export default async function ManageMusicPage() {
       <MusicCatalogAdmin
         initialGenreGroups={genreGroups}
         initialGenres={genres}
-        initialArtists={artists}
         initialPodcastCategories={podcastCategories}
-        initialPodcastShows={podcastShows}
       />
     </main>
   );

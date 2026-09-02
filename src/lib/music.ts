@@ -2,7 +2,7 @@
 // src/lib/music-import.ts (the write path) and src/lib/catalog-admin.ts
 // (the artists/genres/podcasts catalog CRUD), same file-per-concern split
 // this app already uses elsewhere.
-import { count, countDistinct, max, min } from "drizzle-orm";
+import { count, countDistinct, desc, eq, max, min, sum } from "drizzle-orm";
 import { genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
 
@@ -62,4 +62,52 @@ export async function getMusicCurationStats(): Promise<MusicCurationStats> {
     totalPodcastShows: showRow.total,
     categorizedPodcastShows: showRow.categorized,
   };
+}
+
+// --- Per-artist / per-show listen breakdowns --------------------------
+// Backs the artist and podcast-show detail pages — "what did I actually
+// listen to by this artist/show, and for how long" grouped straight out of
+// musicListens rather than needing a separate rollup table: this app's
+// listen counts are personal-scale (thousands, not billions), so a GROUP
+// BY over the raw rows is cheap enough to run at page-load time.
+
+export type AlbumListenSummary = { albumName: string | null; totalMs: number; playCount: number };
+export type TrackListenSummary = { trackName: string | null; albumName: string | null; totalMs: number; playCount: number };
+
+export async function getArtistAlbums(artistId: number): Promise<AlbumListenSummary[]> {
+  const db = getDb();
+  const totalMs = sum(musicListens.msPlayed).mapWith(Number);
+  const rows = await db
+    .select({ albumName: musicListens.albumName, totalMs, playCount: count() })
+    .from(musicListens)
+    .where(eq(musicListens.artistId, artistId))
+    .groupBy(musicListens.albumName)
+    .orderBy(desc(totalMs));
+  return rows.map((r) => ({ ...r, totalMs: r.totalMs ?? 0 }));
+}
+
+export async function getArtistTracks(artistId: number): Promise<TrackListenSummary[]> {
+  const db = getDb();
+  const totalMs = sum(musicListens.msPlayed).mapWith(Number);
+  const rows = await db
+    .select({ trackName: musicListens.trackName, albumName: musicListens.albumName, totalMs, playCount: count() })
+    .from(musicListens)
+    .where(eq(musicListens.artistId, artistId))
+    .groupBy(musicListens.trackName, musicListens.albumName)
+    .orderBy(desc(totalMs));
+  return rows.map((r) => ({ ...r, totalMs: r.totalMs ?? 0 }));
+}
+
+export type EpisodeListenSummary = { episodeName: string | null; totalMs: number; playCount: number };
+
+export async function getPodcastShowEpisodes(showId: number): Promise<EpisodeListenSummary[]> {
+  const db = getDb();
+  const totalMs = sum(musicListens.msPlayed).mapWith(Number);
+  const rows = await db
+    .select({ episodeName: musicListens.episodeName, totalMs, playCount: count() })
+    .from(musicListens)
+    .where(eq(musicListens.podcastShowId, showId))
+    .groupBy(musicListens.episodeName)
+    .orderBy(desc(totalMs));
+  return rows.map((r) => ({ ...r, totalMs: r.totalMs ?? 0 }));
 }
