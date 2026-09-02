@@ -9,6 +9,7 @@ import { MoviesSection, type MovieRow } from "@/components/entry-forms/movies-se
 import { TvSection, type TvEpisodeRow } from "@/components/entry-forms/tv-section";
 import { SportsSection, type SportsCatalogEntry, type SportsRow } from "@/components/entry-forms/sports-section";
 import { BooksSection, type BookRow } from "@/components/entry-forms/books-section";
+import { GamesSection, type GameRow } from "@/components/entry-forms/games-section";
 import { OtherEntertainmentSection, type OtherEntertainmentRow } from "@/components/entry-forms/other-entertainment-section";
 import {
   decodeSearchId,
@@ -17,26 +18,36 @@ import {
   ENTERTAINMENT_KIND_LABELS,
 } from "@/lib/entertainment-search";
 import type { PendingOpen } from "@/lib/use-pending-open";
-import type { EntertainmentLocationTypeItem, EntertainmentKindItem, SportsGameTypeItem, SportsSeasonItem } from "@/lib/catalog-admin";
+import type {
+  EntertainmentLocationTypeItem,
+  EntertainmentKindItem,
+  GameCategoryItem,
+  GameDeviceItem,
+  GameSubcategoryItem,
+  SportsGameTypeItem,
+  SportsSeasonItem,
+} from "@/lib/catalog-admin";
 import type {
   BookCatalogItem,
   DayPayload,
   EntertainmentCatalogItem,
+  GameCatalogItem,
   MovieCatalogItem,
   TvShowCatalogItem,
 } from "@/lib/days";
 
 /** The merged entertainment day-entry page (issue #61) — one unified search
- * across movies/TV/sports leagues/books/generic entertainment, color-coded
- * by kind, feeding whichever kind's own detail modal via `pendingOpen`
- * (search results carry a composite id — see src/lib/entertainment-search.ts
- * — decoded here and handed down as `{kind, id, nonce}`; each section uses
- * usePendingOpenMatch, src/lib/use-pending-open.ts, to notice a match
- * without an effect — nonce increments on every select, even a reselect of
- * the same item, so nothing needs to explicitly clear pendingOpen back to
- * null). Every kind keeps its own local row state (same shape each old
- * per-kind page/form owned individually) but they now share one bottom
- * Save button, firing all five PATCHes at once. */
+ * across movies/TV/sports leagues/books/games/generic entertainment (games
+ * added in issue #68), color-coded by kind, feeding whichever kind's own
+ * detail modal via `pendingOpen` (search results carry a composite id — see
+ * src/lib/entertainment-search.ts — decoded here and handed down as
+ * `{kind, id, nonce}`; each section uses usePendingOpenMatch,
+ * src/lib/use-pending-open.ts, to notice a match without an effect — nonce
+ * increments on every select, even a reselect of the same item, so nothing
+ * needs to explicitly clear pendingOpen back to null). Every kind keeps its
+ * own local row state (same shape each old per-kind page/form owned
+ * individually) but they now share one bottom Save button, firing all six
+ * PATCHes at once. */
 export function EntertainmentDayForm({
   date,
   initial,
@@ -44,6 +55,9 @@ export function EntertainmentDayForm({
   tvCatalog,
   sportsCatalog,
   bookCatalog,
+  gamesCatalog,
+  gameCategories,
+  gameDevices,
   entertainmentCatalog,
   entertainmentKinds,
   locationTypes: initialLocationTypes,
@@ -56,6 +70,9 @@ export function EntertainmentDayForm({
   tvCatalog: TvShowCatalogItem[];
   sportsCatalog: SportsCatalogEntry[];
   bookCatalog: BookCatalogItem[];
+  gamesCatalog: GameCatalogItem[];
+  gameCategories: (GameCategoryItem & { subcategories: GameSubcategoryItem[] })[];
+  gameDevices: GameDeviceItem[];
   entertainmentCatalog: EntertainmentCatalogItem[];
   entertainmentKinds: EntertainmentKindItem[];
   locationTypes: EntertainmentLocationTypeItem[];
@@ -114,6 +131,9 @@ export function EntertainmentDayForm({
   const [otherRows, setOtherRows] = useState<OtherEntertainmentRow[]>(
     initial.entertainment.map((e) => ({ entertainmentId: e.entertainmentId, durationMinutes: e.durationMinutes, locationType: e.locationType }))
   );
+  const [gameRows, setGameRows] = useState<GameRow[]>(
+    initial.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, device: s.device, locationType: s.locationType }))
+  );
 
   const [pendingOpen, setPendingOpen] = useState<PendingOpen>(null);
   const nonceRef = useRef(0);
@@ -160,8 +180,15 @@ export function EntertainmentDayForm({
       caption: e.kindName,
       accentColor: entertainmentKindColor("other"),
     }));
-    return [...movies, ...shows, ...leagues, ...books, ...other];
-  }, [movieCatalog, tvCatalog, sportsLeagueItems, bookCatalog, entertainmentCatalog]);
+    const games: SearchItem[] = gamesCatalog.map((g) => ({
+      id: encodeSearchId("game", g.id),
+      primary: g.name,
+      secondary: ENTERTAINMENT_KIND_LABELS.game,
+      caption: [g.type, g.subtype].filter(Boolean).join(" · ") || null,
+      accentColor: entertainmentKindColor("game"),
+    }));
+    return [...movies, ...shows, ...leagues, ...books, ...other, ...games];
+  }, [movieCatalog, tvCatalog, sportsLeagueItems, bookCatalog, entertainmentCatalog, gamesCatalog]);
 
   function handleSearchSelect(compositeId: number) {
     nonceRef.current += 1;
@@ -173,9 +200,10 @@ export function EntertainmentDayForm({
   // parallel would let an earlier response's snapshot race a later
   // request's still-in-flight write, so a table's rows could look stale in
   // the response used to resync local state. Running in order means the
-  // final (entertainment) response reflects all five tables' just-saved
-  // state, since every prior write has already committed by the time it
-  // runs — that response alone is enough to resync every section's rows.
+  // final (game sessions, issue #68) response reflects all six tables'
+  // just-saved state, since every prior write has already committed by the
+  // time it runs — that response alone is enough to resync every section's
+  // rows.
   async function handleSubmit() {
     setSaving(true);
     setError(null);
@@ -190,6 +218,7 @@ export function EntertainmentDayForm({
         [`/api/days/${date}/sports`, { entries: sportsRows }],
         [`/api/days/${date}/books`, { entries: bookRows }],
         [`/api/days/${date}/entertainment`, { entries: otherRows }],
+        [`/api/days/${date}/game-sessions`, { entries: gameRows }],
       ];
 
       let saved: DayPayload | null = null;
@@ -244,6 +273,9 @@ export function EntertainmentDayForm({
         }))
       );
       setOtherRows(saved.entertainment.map((e) => ({ entertainmentId: e.entertainmentId, durationMinutes: e.durationMinutes, locationType: e.locationType })));
+      setGameRows(
+        saved.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, device: s.device, locationType: s.locationType }))
+      );
       setSavedAt(Date.now());
       router.refresh();
     } catch {
@@ -304,6 +336,17 @@ export function EntertainmentDayForm({
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={bookRows}
         onRowsChange={setBookRows}
+        pendingOpen={pendingOpen}
+      />
+
+      <GamesSection
+        catalog={gamesCatalog}
+        categories={gameCategories}
+        devices={gameDevices}
+        locationTypes={locationTypes}
+        onLocationTypeCreated={handleLocationTypeCreated}
+        rows={gameRows}
+        onRowsChange={setGameRows}
         pendingOpen={pendingOpen}
       />
 

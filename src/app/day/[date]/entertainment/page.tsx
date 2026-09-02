@@ -5,12 +5,20 @@ import { isValidDateString } from "@/lib/date";
 import {
   listBooksCatalog,
   listEntertainmentCatalog,
+  listGamesCatalog,
   listMoviesCatalog,
   listSportsCatalog,
   listTvShowsCatalog,
   loadDay,
 } from "@/lib/days";
-import { listEntertainmentKinds, listEntertainmentLocationTypes, listSportsGameTypes, listSportsSeasonsByLeague } from "@/lib/catalog-admin";
+import {
+  listEntertainmentKinds,
+  listEntertainmentLocationTypes,
+  listGameCategories,
+  listGameDevices,
+  listSportsGameTypes,
+  listSportsSeasonsByLeague,
+} from "@/lib/catalog-admin";
 import type { SportsSeasonItem } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
@@ -25,18 +33,33 @@ export default async function EntertainmentEntryPage({
     notFound();
   }
 
-  const [day, movieCatalog, tvCatalog, sportsCatalog, bookCatalog, entertainmentCatalog, entertainmentKinds, locationTypes, sportsGameTypes] =
-    await Promise.all([
-      loadDay(date),
-      listMoviesCatalog(),
-      listTvShowsCatalog(),
-      listSportsCatalog(),
-      listBooksCatalog(),
-      listEntertainmentCatalog(),
-      listEntertainmentKinds(),
-      listEntertainmentLocationTypes(),
-      listSportsGameTypes(),
-    ]);
+  const [
+    day,
+    movieCatalog,
+    tvCatalog,
+    sportsCatalog,
+    bookCatalog,
+    gamesCatalog,
+    gameCategories,
+    gameDevices,
+    entertainmentCatalog,
+    entertainmentKinds,
+    locationTypes,
+    sportsGameTypes,
+  ] = await Promise.all([
+    loadDay(date),
+    listMoviesCatalog(),
+    listTvShowsCatalog(),
+    listSportsCatalog(),
+    listBooksCatalog(),
+    listGamesCatalog(),
+    listGameCategories(),
+    listGameDevices(),
+    listEntertainmentCatalog(),
+    listEntertainmentKinds(),
+    listEntertainmentLocationTypes(),
+    listSportsGameTypes(),
+  ]);
 
   const leagueIds = sportsCatalog.flatMap((sport) => sport.leagues.map((l) => l.id));
   const seasonLists = await Promise.all(leagueIds.map((id) => listSportsSeasonsByLeague(id)));
@@ -55,6 +78,9 @@ export default async function EntertainmentEntryPage({
         tvCatalog={tvCatalog}
         sportsCatalog={sportsCatalog}
         bookCatalog={bookCatalog}
+        gamesCatalog={gamesCatalog}
+        gameCategories={gameCategories}
+        gameDevices={gameDevices}
         entertainmentCatalog={entertainmentCatalog}
         entertainmentKinds={entertainmentKinds}
         locationTypes={locationTypes}

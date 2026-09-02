@@ -945,10 +945,16 @@ export const sportsGameTypes = pgTable("sports_game_types", {
 // method that was never defined, and a copy-pasted stand-in for it silently
 // clobbered the *books* edit function instead (wrong-namespace bug); its
 // browse UI was leftover sports-catalog code, never adapted. There's no
-// real intended richer design underneath to reverse-engineer, so this is
+// real intended richer design underneath to reverse-engineer, so this was
 // just enough to log "played X for N minutes" — same treatment as
 // finance/todo/goals in spirit, just not fully dropped since logging a
 // game session is at least a working, real feature today.
+//
+// Issue #68 built the missing entry surface on top of this stub: `type`/
+// `subtype` are matched by name against gameCategories/gameSubcategories
+// below (same free-text-matched-by-name relationship as places.category/
+// subcategory), and `device` against gameDevices, same as every other
+// catalog-backed-but-free-text column in this file.
 export const games = pgTable("games", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -973,6 +979,37 @@ export const gameSessions = pgTable(
   },
   (table) => [index("game_sessions_date_idx").on(table.date)]
 );
+
+// --- Game categories / subcategories (catalog) -------------------------
+// Backs games.type/games.subtype the same two-level way placeCategories/
+// placeSubcategories backs places.category/subcategory above — a real,
+// maintained taxonomy a picker reads from and "+ New" adds to, while the
+// game catalog row itself keeps type/subtype as plain free-text strings
+// matched by name, not FKs (issue #68).
+export const gameCategories = pgTable("game_categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const gameSubcategories = pgTable(
+  "game_subcategories",
+  {
+    id: serial("id").primaryKey(),
+    categoryId: integer("category_id")
+      .notNull()
+      .references(() => gameCategories.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("game_subcategories_category_name_idx").on(table.categoryId, table.name)]
+);
+
+// --- Game devices (catalog) ---------------------------------------------
+// Backs gameSessions.device the same flat, one-level way
+// entertainmentLocationTypes backs locationType (issue #68).
+export const gameDevices = pgTable("game_devices", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
 
 // --- Music (Spotify listen history) ---------------------------------------
 // Architecturally separate from the five kinds above: the legacy app never

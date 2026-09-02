@@ -13,6 +13,7 @@ import { usePendingOpenMatch, type PendingOpen } from "@/lib/use-pending-open";
 import type { EntertainmentLocationTypeItem } from "@/lib/catalog-admin";
 import type { TvEpisodeItem, TvEpisodeWatchItem, TvShowCatalogItem } from "@/lib/days";
 import type { TmdbSeasonSummary } from "@/lib/tmdb";
+import { parseDate, todayDateString } from "@/lib/date";
 
 export type TvEpisodeRow = {
   episodeId: number;
@@ -25,6 +26,25 @@ export type TvEpisodeRow = {
 };
 
 type EpisodeWithWatches = TvEpisodeItem & { watches: TvEpisodeWatchItem[] };
+
+/** Most recent watch date that isn't in the future (a `null` date means
+ * "watched, exact date unknown" per schema.ts's tvEpisodeWatches comment —
+ * excluded here since it can't be compared for recency). Issue #67: a raw
+ * watch count is less useful than "when did I last see this" for deciding
+ * whether to rewatch. */
+function mostRecentPastWatchDate(watches: TvEpisodeWatchItem[]): string | null {
+  const today = todayDateString();
+  let latest: string | null = null;
+  for (const w of watches) {
+    if (!w.date || w.date > today) continue;
+    if (!latest || w.date > latest) latest = w.date;
+  }
+  return latest;
+}
+
+function formatWatchDate(dateStr: string): string {
+  return parseDate(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 /** Season picker -> checkbox episode list -> one shared Location Type +
  * per-episode duration (issue #61, "shared location, per-episode duration"
@@ -180,6 +200,7 @@ function TvEpisodePickerModal({
             <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
               {episodes.map((ep) => {
                 const isSelected = selected.has(ep.id);
+                const lastWatched = mostRecentPastWatchDate(ep.watches);
                 return (
                   <div key={ep.id} className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2">
                     <label className="flex items-center gap-2">
@@ -193,9 +214,9 @@ function TvEpisodePickerModal({
                         E{ep.episode}
                         {ep.name ? ` — ${ep.name}` : ""}
                       </span>
-                      {ep.watches.length > 0 ? (
+                      {lastWatched ? (
                         <span className="shrink-0 text-xs text-muted-foreground">
-                          watched {ep.watches.length}×
+                          last watched {formatWatchDate(lastWatched)}
                         </span>
                       ) : null}
                     </label>

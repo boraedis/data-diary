@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
+import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 import { comparePlacesByMentions } from "@/lib/place-sort";
 
 function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[] {
@@ -41,12 +42,13 @@ function toSearchItem(place: PlaceCatalogItem): SearchItem {
 /** New-place creation form — fields mirror the legacy "New Place" modal
  * (functions/views/entry/database/new_place_form.*): name, an optional
  * alias (matched during search, same as the legacy app), an optional
- * address, and an optional category shown as the search result's secondary
- * line. Deliberately NOT carried over: the legacy catalog's full category/
- * subcategory taxonomy tree — `category` here is just a free-text field
- * standing in for that until it's worth building for real (see the schema
- * comment on the `places` table; src/components/manage/new-place-modal.tsx
- * has the DB-backed version for the manage-catalog "+ New" flow).
+ * address, and category/subcategory. Issue #72: category/subcategory are
+ * now sourced from the real DB catalogs (place_categories/place_
+ * subcategories, via the `categories` prop) instead of free text, matching
+ * src/components/manage/new-place-modal.tsx's datalist-backed version —
+ * `category`/`subcategory` still land as free-text strings on the `places`
+ * row either way (see the schema comment on the `places` table), so this
+ * only changes what the input suggests, not the column type.
  *
  * Parent IS a real picker here (not free text) — a place can only be
  * top-level with category "Region" (assertValidRoot in src/lib/days.ts),
@@ -58,20 +60,26 @@ function NewPlaceModal({
   onCreated,
   parentOptions,
   mentionCounts,
+  categories,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
   parentOptions: { id: number; name: string; namePath: string | null }[];
   mentionCounts: Map<number, number>;
+  categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
   const [address, setAddress] = useState("");
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
   const [parentId, setParentId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const categoryNames = categories.map((c) => c.name);
+  const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
 
   // Most-mentioned first, then shallower before deeper, then name (see
   // src/lib/place-sort.ts) — with the full hierarchy path as each option's
@@ -89,6 +97,7 @@ function NewPlaceModal({
     setAlias("");
     setAddress("");
     setCategory("");
+    setSubcategory("");
     setParentId(null);
     setError(null);
   }
@@ -110,6 +119,7 @@ function NewPlaceModal({
           alias: alias.trim() || null,
           address: address.trim() || null,
           category: category.trim() || null,
+          subcategory: subcategory.trim() || null,
           parentId,
         }),
       });
@@ -165,10 +175,30 @@ function NewPlaceModal({
           <Label htmlFor="new-place-category">Category</Label>
           <Input
             id="new-place-category"
+            list="new-place-category-options"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="restaurant, gym, friend's place…"
           />
+          <datalist id="new-place-category-options">
+            {categoryNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="new-place-subcategory">Subcategory</Label>
+          <Input
+            id="new-place-subcategory"
+            list="new-place-subcategory-options"
+            value={subcategory}
+            onChange={(e) => setSubcategory(e.target.value)}
+          />
+          <datalist id="new-place-subcategory-options">
+            {subcategoryNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
@@ -227,11 +257,15 @@ export function PlacesEntryForm({
   initial,
   catalog,
   mentionCounts,
+  rawMentionCounts,
+  categories,
 }: {
   date: string;
   initial: PlacesPayload;
   catalog: PlaceCatalogItem[];
   mentionCounts: Map<number, number>;
+  rawMentionCounts: Map<number, number>;
+  categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<PlaceCatalogItem[]>(catalog);
@@ -241,8 +275,14 @@ export function PlacesEntryForm({
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  const usedIds = new Set(slots.filter((v): v is number => v !== null));
-  const searchItems = items.filter((p) => !usedIds.has(p.id)).map(toSearchItem);
+  // Sorted by raw (own-mentions-only, not hierarchy roll-up) mentions so
+  // actually-visited venues rank above a rarely-mentioned parent region
+  // (issue #72c) — the parent picker inside NewPlaceModal below
+  // deliberately keeps the roll-up version (`mentionCounts`), since ranking
+  // *regions* by their whole family's mentions is the right call there.
+  // Same place can now fill both slots (issue #72b) — no longer filtered
+  // out of the search list just because it's already used in a slot.
+  const searchItems = [...items].sort(comparePlacesByMentions(rawMentionCounts)).map(toSearchItem);
 
   function handleCreated(item: PlaceCatalogItem) {
     setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
@@ -353,6 +393,7 @@ export function PlacesEntryForm({
               onClose={() => setModalOpen(false)}
               parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
               mentionCounts={mentionCounts}
+              categories={categories}
               onCreated={(item) => {
                 handleCreated(item);
                 addPlace(item.id);

@@ -60,6 +60,7 @@ function TeamSelect({
   teams,
   leagues,
   selectedLeagueId,
+  onNew,
 }: {
   id: string;
   label: string;
@@ -68,11 +69,19 @@ function TeamSelect({
   teams: SportsTeamItem[];
   leagues: SportsLeagueItem[];
   selectedLeagueId: number | null;
+  onNew?: () => void;
 }) {
   const grouped = groupTeamsByLeague(teams, leagues, selectedLeagueId);
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center justify-between">
+        <Label htmlFor={id}>{label}</Label>
+        {onNew ? (
+          <Button type="button" variant="ghost" size="xs" onClick={onNew}>
+            + New
+          </Button>
+        ) : null}
+      </div>
       <Select id={id} value={value ?? ""} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
         <option value="">None</option>
         {grouped.selected.length > 0 ? (
@@ -493,6 +502,7 @@ function SportsWatchDetailModal({
   const [locationType, setLocationType] = useState(initial?.locationType ?? "");
   const [newLeagueOpen, setNewLeagueOpen] = useState(false);
   const [newTeamOpen, setNewTeamOpen] = useState(false);
+  const [newTeamSlot, setNewTeamSlot] = useState<"home" | "away">("home");
   const [newSeasonOpen, setNewSeasonOpen] = useState(false);
 
   if (!sport) return null;
@@ -533,6 +543,10 @@ function SportsWatchDetailModal({
             teams={sport.teams}
             leagues={sport.leagues}
             selectedLeagueId={leagueId}
+            onNew={() => {
+              setNewTeamSlot("home");
+              setNewTeamOpen(true);
+            }}
           />
 
           {sport.isTeamSport ? (
@@ -544,6 +558,10 @@ function SportsWatchDetailModal({
               teams={sport.teams}
               leagues={sport.leagues}
               selectedLeagueId={leagueId}
+              onNew={() => {
+                setNewTeamSlot("away");
+                setNewTeamOpen(true);
+              }}
             />
           ) : null}
 
@@ -650,7 +668,7 @@ function SportsWatchDetailModal({
         onClose={() => setNewTeamOpen(false)}
         onCreated={(team) => {
           onTeamCreated(sport.id, team);
-          if (homeTeamId === null) setHomeTeamId(team.id);
+          if (newTeamSlot === "home") setHomeTeamId(team.id);
           else setAwayTeamId(team.id);
         }}
       />
