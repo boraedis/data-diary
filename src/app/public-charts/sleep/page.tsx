@@ -1,7 +1,13 @@
+import type { Metadata } from "next";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { SleepCalendarChart } from "@/components/charts/sleep-calendar-chart";
 import { getPublicSleepData } from "@/lib/public-charts";
+
+export const metadata: Metadata = {
+  title: "Sleep calendar — Data Diary",
+  description: "A year-by-year heatmap of nightly sleep duration.",
+};
 
 // Public counterpart to src/app/charts/sleep/page.tsx (#84/#12).
 export const dynamic = "force-dynamic";

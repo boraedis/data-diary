@@ -2,13 +2,12 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 
-// The public landing page (#12) and the pages it links to. "/about-project"
-// and "/about-me" are still coming-soon stubs (see
-// src/components/coming-soon-page.tsx) until #85/#86 land — listed here so
-// an unauthenticated visitor following the hero's own links gets that stub
-// instead of being funneled into the login redirect below, which would
-// otherwise catch any path not explicitly public.
-const PUBLIC_PATHS = new Set(["/", "/login", "/about-project", "/about-me", "/public-charts"]);
+// The public landing page (#12) and the pages it links to, plus
+// "/robots.txt" (#87) — a Next.js metadata route (src/app/robots.ts) that
+// goes through this same proxy like any other path, so it needs to be
+// listed here too or an unauthenticated crawler fetching it gets bounced
+// to /login instead of the file it's actually there to read.
+const PUBLIC_PATHS = new Set(["/", "/login", "/about-project", "/about-me", "/public-charts", "/robots.txt"]);
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
