@@ -26,6 +26,12 @@ were established.
   locked-in design decisions (drill-down scope, zoom/pan modes, color
   rules) and the sub-issue build order — read it before touching anything
   under `src/components/charts/`.
+- **GitHub issue #12** — the external-landing-page epic (sub-issues
+  #82-#87, all merged). Its comment thread has the locked-in decisions on
+  what's public vs. masked — read it before touching `src/proxy.ts`'s
+  public paths or anything under `src/lib/public-*.ts`. **Issue #96**
+  tracks follow-up work on this area (more public chart types, an actual
+  edit UI for `projectSettings`, a project version timeline, a copy pass).
 - Each closed sub-issue's own final comment documents what actually
   shipped against its acceptance criteria, and flags anything unverified —
   more reliable than the issue's original scope text, which sometimes
@@ -87,6 +93,53 @@ Current shape:
 - **`src/components/charts/chart-page.tsx`** / **`chart-card.tsx`** — the
   shared page shell (title, back link, filters row) and card wrapper every
   `/charts/*` page uses.
+
+## The public landing page
+
+Built as GitHub issue #12 (sub-issues #82-#87, all merged) — a curated,
+unauthenticated front door at `/`, separate from the private, single-user
+app everything else in this codebase serves. Follow-up work lives on #96.
+
+- **`src/proxy.ts`** — the session gate. A `PUBLIC_PATHS` set (exact
+  matches) plus a couple of prefix checks (`/public-charts/`,
+  `/api/public/`, `/api/auth/`) are the *only* unauthenticated surface.
+  Adding a new public page means adding it here explicitly — nothing is
+  public by omission. `/robots.txt` had to be added the same way: it's a
+  Next.js metadata route (`src/app/robots.ts`), not exempt from the proxy
+  just because it's a special file convention.
+- **`src/lib/public-profile.ts`** / **`src/lib/public-charts.ts`** — the
+  data boundary. Every function here is its own narrow, explicit
+  include-list query, never a passthrough of the private
+  `src/lib/profile.ts`/`src/lib/charts.ts` functions — a field added to
+  the private domain doesn't leak onto the public site just because it
+  exists there. Permanently excluded: exact address/lat-lng, the
+  relationship timeline, all "subs" scores, and per-day free text.
+  `getPublicLandingData` is wrapped in React's `cache()` so a page and its
+  `generateMetadata` share one DB call per request instead of two.
+- **`src/lib/public-content.ts`** — `PUBLIC_CHART_TYPES`, the curated,
+  hardcoded list of which chart types get a public page. Deliberately not
+  a general "publish this chart" flag/admin UI — add a chart type here and
+  give it a route under `src/app/public-charts/` when it should go public.
+- **DB vs. repo content split** (locked in on #12): short, structured
+  facts (project name/tagline/goals) live in the `projectSettings` table
+  (`src/lib/project.ts`, mirroring `profileSettings`'s singleton-row
+  pattern) so they're editable without a deploy — though no edit UI exists
+  for it yet, tracked on #96. Long-form prose (`/about-project`'s body,
+  the hero's descriptive copy) is hand-authored directly in the repo, not
+  a DB column.
+- Public pages: `/` (hero + the 3 legacy stat tiles), `/about-project`,
+  `/about-me` (placeholder — "to be filled out eventually" is intentional,
+  not unfinished work), `/public-charts` (a nav index, same card-grid
+  pattern as the private `/charts`) and its per-chart routes. Each
+  individual public chart page mirrors its private counterpart's own
+  page/shell almost exactly, just fed by the public data layer instead.
+- **`src/components/coming-soon-page.tsx`** — the stub a future public
+  link should render until its own real page exists. Not currently
+  instantiated anywhere (every current public link has real content), but
+  keep it for the next one — it exists because a hero link to a
+  real-but-unbuilt path was falling through `proxy.ts` into the login
+  redirect instead of a normal 404, which reads as "why is this asking me
+  to log in" to a visitor who was never meant to authenticate at all.
 
 ## Conventions this codebase leans on
 
