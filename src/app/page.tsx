@@ -1,106 +1,111 @@
 import Link from "next/link";
-import { getSql } from "@/lib/db";
-import { Button } from "@/components/ui/button";
-import { TodayLink } from "@/components/today-link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
+import { getPublicLandingData } from "@/lib/public-profile";
+import { parseDate } from "@/lib/date";
 
-// Never statically cache this — it's a live DB check.
+// Never statically cache this — it's live data, same reasoning as
+// src/app/home/page.tsx's own dynamic dashboard.
 export const dynamic = "force-dynamic";
 
-type HealthResult = { ok: boolean; error?: string };
-
-// Checks the database directly, in-process — no self-fetch over HTTP.
-// A server component calling its own /api/health route via fetch() is
-// fragile on Vercel (e.g. deployment protection intercepting the
-// server-to-server request and returning an HTML page instead of JSON),
-// and it's strictly slower than just querying here.
-async function getHealth(): Promise<HealthResult> {
-  try {
-    const sql = getSql();
-    await sql`select 1`;
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
-  }
+function formatLifePct(n: number | null): string {
+  if (n === null) return "—";
+  return `${n.toFixed(1)}%`;
 }
 
-export default async function HomePage() {
-  const health = await getHealth();
+function formatDaysSinceLastLog(n: number | null): string {
+  if (n === null) return "—";
+  if (n <= 0) return "Today";
+  if (n === 1) return "1 day ago";
+  return `${n} days ago`;
+}
+
+// Whole years + months since diaryStartDate, e.g. "2 years, 4 months" —
+// hand-rolled rather than pulled from src/lib/viz/format.ts, which formats
+// chart axis/tooltip values, not this kind of "how long has this been
+// running" prose.
+function formatRunningFor(diaryStartDate: string | null): string {
+  if (!diaryStartDate) return "a while";
+  const start = parseDate(diaryStartDate);
+  const today = new Date();
+  let years = today.getFullYear() - start.getFullYear();
+  let months = today.getMonth() - start.getMonth();
+  if (today.getDate() < start.getDate()) months--;
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years} year${years === 1 ? "" : "s"}`);
+  if (months > 0 || years === 0) parts.push(`${months} month${months === 1 ? "" : "s"}`);
+  return parts.join(", ");
+}
+
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1 rounded-2xl border bg-card/70 px-6 py-5 text-center shadow-sm backdrop-blur-sm">
+      <span className="text-3xl font-semibold tabular-nums text-primary md:text-4xl">{value}</span>
+      <span className="text-xs font-medium tracking-widest text-muted-foreground uppercase">{label}</span>
+    </div>
+  );
+}
+
+export default async function LandingPage() {
+  const { project, ownerName, diaryStartDate, stats } = await getPublicLandingData();
+
+  const projectName = project.name ?? "Data Diary";
+  const tagline = project.tagline ?? "A statistical diary of one life, logged one day at a time.";
+  const goals =
+    project.goalsSummary ??
+    "Every day gets a row here — sleep, mood, work, the people and places that filled it — and this site is where the shape of that adds up over time.";
+  const intro = ownerName
+    ? `Written and logged by ${ownerName}, running for ${formatRunningFor(diaryStartDate)} now.`
+    : `Running for ${formatRunningFor(diaryStartDate)} now.`;
 
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-8 px-4 py-12">
-      <div className="flex flex-col items-center gap-1 text-center">
-        <h1 className="font-heading text-4xl font-medium tracking-tight text-primary italic md:text-5xl">
-          Data Diary
+    <main className="relative flex min-h-svh flex-col items-center overflow-hidden px-4 py-16 md:py-24">
+      {/* Facelapse (see #12): a rotating self-portrait timelapse was floated
+          for this hero but has no photo pipeline yet, so it's explicitly
+          out of scope here (#83). This gradient band is left as the visual
+          slot it would eventually sit in — not empty space, but nothing
+          that assumes a specific future layout either. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 bg-linear-to-br from-primary/10 via-transparent to-chart-3/10"
+      />
+
+      <div className="flex w-full max-w-3xl flex-col items-center gap-5 text-center">
+        <h1 className="font-heading text-5xl font-medium tracking-tight text-primary italic md:text-6xl">
+          {projectName}
         </h1>
-        <p className="text-muted-foreground">A little corner for tracking the shape of your days.</p>
+        <p className="text-lg text-muted-foreground md:text-xl">{tagline}</p>
+        <p className="max-w-2xl text-balance text-muted-foreground">{goals}</p>
+        <p className="text-sm text-muted-foreground">{intro}</p>
       </div>
 
-      <div className="grid w-full max-w-4xl grid-cols-1 gap-4 md:grid-cols-4">
-        <Card className="md:col-span-4">
-          <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3 text-sm">
-              <span
-                className={`size-2.5 rounded-full ${health.ok ? "bg-chart-3" : "bg-destructive"}`}
-                aria-hidden
-              />
-              <span className="text-muted-foreground">
-                {health.ok ? "Database connected" : `Connection failed: ${health.error ?? "unknown"}`}
-              </span>
-            </div>
-            <TodayLink />
-          </CardContent>
-        </Card>
-
-        <Link href="/charts">
-          <Card className="h-full transition-colors hover:bg-accent">
-            <CardHeader>
-              <CardTitle>Charts</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              See the trends behind everything you&rsquo;ve logged.
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/manage">
-          <Card className="h-full transition-colors hover:bg-accent">
-            <CardHeader>
-              <CardTitle>Manage</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              People, places, exercises, entertainment — the catalog behind every entry.
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/profile">
-          <Card className="h-full transition-colors hover:bg-accent">
-            <CardHeader>
-              <CardTitle>Profile</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Who you are — occupation, residence, and relationship history.
-            </CardContent>
-          </Card>
-        </Link>
-
-        <form action="/api/auth/logout" method="post" className="h-full">
-          <Card className="flex h-full flex-col">
-            <CardHeader>
-              <CardTitle>Account</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Button type="submit" variant="outline" className="w-full">
-                Sign out
-              </Button>
-            </CardContent>
-          </Card>
-        </form>
+      <div className="mt-10 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatTile label="Days logged" value={String(stats.daysLogged)} />
+        <StatTile label="% of life logged" value={formatLifePct(stats.percentOfLifeLogged)} />
+        <StatTile label="Last log" value={formatDaysSinceLastLog(stats.daysSinceLastLog)} />
       </div>
+
+      <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+        <Link href="/public-charts" className={buttonVariants({ size: "lg" })}>
+          Explore the charts
+        </Link>
+        <Link href="/about-project" className={buttonVariants({ variant: "outline", size: "lg" })}>
+          About the project
+        </Link>
+        <Link href="/about-me" className={buttonVariants({ variant: "outline", size: "lg" })}>
+          About me
+        </Link>
+      </div>
+
+      <Link
+        href="/login"
+        className="mt-12 text-sm text-muted-foreground underline-offset-4 hover:underline"
+      >
+        Owner? Sign in
+      </Link>
     </main>
   );
 }
