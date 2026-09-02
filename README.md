@@ -134,6 +134,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `SESSION_SECRET` | Yes | Random secret used to sign session cookies. Generate with `openssl rand -hex 32`. |
 | `TMDB_API_KEY` | For movie/TV metadata lookup | [TMDB](https://www.themoviedb.org/documentation/api) API key, used by `/api/tmdb/*`. |
 | `GOOGLE_BOOKS_API_KEY` | For book metadata lookup | Google Books API key, used by `/api/google-books/*`. |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | For artist genre lookup on music import | Spotify [Client Credentials](https://developer.spotify.com/documentation/web-api/tutorials/client-credentials-flow) app keys, used by `/api/music/import` to resolve a newly-seen artist's genre tags. Without these, import still works — new artists just get no genres. |
 
 ### Scripts
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EntertainmentManageList } from "@/components/manage/entertainment-manage-list";
 import {
   listBooksCatalog,
@@ -11,22 +11,22 @@ import {
   listTvShowsCatalog,
 } from "@/lib/days";
 import { listEntertainmentKinds } from "@/lib/catalog-admin";
+import { getMusicCurationStats, getMusicListenStats } from "@/lib/music";
 
 export const dynamic = "force-dynamic";
 
 // One card per entertainment kind that has its own real management feature
 // (mirrors the day-entry entertainment hub's "kind card here, form lives
 // under entertainment/<kind>" pattern — see
-// src/app/day/[date]/entertainment/page.tsx). Music doesn't have one yet
-// (see REBUILD_PLAN.md — built one at a time; it's bulk Spotify import, not
-// a day-entry feature, so it may never need a card here at all), so it
-// shows as a non-clickable placeholder rather than a card that goes
-// nowhere; the generic EntertainmentManageList below still covers every
-// kind, including this one, until it gets its own dedicated feature.
-const COMING_SOON = ["Music"] as const;
+// src/app/day/[date]/entertainment/page.tsx). Music (issue #76) is a bulk
+// Spotify import rather than a day-entry feature, so it never gets a
+// day-entry form the way the others do, but it does get its own manage
+// page — deliberately not in the generic EntertainmentManageList below,
+// which is backed by entertainmentCatalog/entertainmentEntries and never
+// held music data.
 
 export default async function ManageEntertainmentPage() {
-  const [items, movies, tvShows, sports, books, games, kinds] = await Promise.all([
+  const [items, movies, tvShows, sports, books, games, kinds, musicStats, musicCuration] = await Promise.all([
     listEntertainmentCatalog(),
     listMoviesCatalog(),
     listTvShowsCatalog(),
@@ -34,7 +34,14 @@ export default async function ManageEntertainmentPage() {
     listBooksCatalog(),
     listGamesCatalog(),
     listEntertainmentKinds(),
+    getMusicListenStats(),
+    getMusicCurationStats(),
   ]);
+
+  const musicNeedsReview =
+    musicCuration.totalGenres -
+    musicCuration.groupedGenres +
+    (musicCuration.totalPodcastShows - musicCuration.categorizedPodcastShows);
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8 md:py-12">
@@ -96,16 +103,21 @@ export default async function ManageEntertainmentPage() {
             </CardHeader>
           </Card>
         </Link>
-        {COMING_SOON.map((label) => (
-          <Card key={label} size="sm" className="h-full opacity-50">
+        <Link href="/manage/entertainment/music">
+          <Card size="sm" className="h-full transition-colors hover:bg-accent">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>{label}</CardTitle>
-                <span className="text-xs text-muted-foreground">Coming soon</span>
+                <CardTitle>Music</CardTitle>
+                <span className="font-mono text-sm text-muted-foreground">{musicStats.totalListens}</span>
               </div>
             </CardHeader>
+            {musicNeedsReview > 0 && (
+              <CardContent>
+                <p className="text-xs text-muted-foreground">{musicNeedsReview} genres/shows need review</p>
+              </CardContent>
+            )}
           </Card>
-        ))}
+        </Link>
       </div>
 
       <div className="flex flex-col gap-2 border-t border-border pt-4">
