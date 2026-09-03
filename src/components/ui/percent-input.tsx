@@ -48,6 +48,7 @@ export function PercentInput({
       placeholder="0"
       aria-label="%"
       value={value ?? ""}
+      step={step ?? "any"}
       onChange={(e) => update(parseValue(e.target.value, step))}
     />
   );
