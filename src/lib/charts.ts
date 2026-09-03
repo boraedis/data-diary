@@ -1,6 +1,6 @@
 import { asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { days, exercises, people, places, workouts } from "@/db/schema";
+import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
@@ -305,7 +305,7 @@ export async function getSubsScrollerData(): Promise<SubsSeries[]> {
 
 // --- People network ---------------------------------------------------
 
-export type NetworkNode = { id: number; name: string; count: number };
+export type NetworkNode = { id: number; name: string; count: number; color: string | null };
 export type NetworkEdge = { source: number; target: number; weight: number };
 export type PeopleNetworkData = { nodes: NetworkNode[]; edges: NetworkEdge[] };
 
@@ -364,18 +364,28 @@ export async function getPeopleNetworkData(maxNodes = 40): Promise<PeopleNetwork
 
   if (topIds.length === 0) return { nodes: [], edges: [] };
 
+  // Left-joined for the tag's color (#23 follow-up: the network graph
+  // colors each person by their tag, same as everywhere else in the app a
+  // person shows up tagged) — a person with no tag, or no color set on
+  // their tag, falls back to the chart's own default color at the call
+  // site rather than here, so this stays a plain "what's in the DB" read.
   const peopleRows = await db
-    .select({ id: people.id, name: people.name })
+    .select({ id: people.id, name: people.name, color: tags.color })
     .from(people)
+    .leftJoin(tags, eq(people.tagId, tags.id))
     .where(inArray(people.id, topIds));
-  const nameById = new Map<number, string>(
-    peopleRows.map((p): [number, string] => [p.id, p.name]),
+  const infoById = new Map<number, { name: string; color: string | null }>(
+    peopleRows.map((p): [number, { name: string; color: string | null }] => [
+      p.id,
+      { name: p.name, color: p.color },
+    ]),
   );
 
   const nodes: NetworkNode[] = topIds.map((id) => ({
     id,
-    name: nameById.get(id) ?? "?",
+    name: infoById.get(id)?.name ?? "?",
     count: appearanceCount.get(id) ?? 0,
+    color: infoById.get(id)?.color ?? null,
   }));
 
   const edges: NetworkEdge[] = [];
