@@ -856,7 +856,39 @@ function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
   return { ok: true, value: parsed };
 }
 
-export function validateHealthPayload(body: unknown): Result<HealthPayload> {
+// Which of `ids` (deduped) have no matching row in `exercises`/`places`/
+// `people` — used to turn a bad/stale/typo'd foreign key from the client
+// into a clean 400 here, instead of letting it reach the INSERT and fail
+// as a raw Postgres FK-constraint-violation string surfaced through the
+// route's generic 500 handler.
+async function findMissingExerciseIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: exercises.id }).from(exercises).where(inArray(exercises.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+async function findMissingPlaceIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: places.id }).from(places).where(inArray(places.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+async function findMissingPersonIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: people.id }).from(people).where(inArray(people.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+export async function validateHealthPayload(body: unknown): Promise<Result<HealthPayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -864,6 +896,18 @@ export function validateHealthPayload(body: unknown): Result<HealthPayload> {
 
   const workoutsResult = parseWorkouts(b.workouts);
   if (!workoutsResult.ok) return workoutsResult;
+
+  const missingExerciseIds = await findMissingExerciseIds(workoutsResult.value.map((w) => w.exerciseId));
+  if (missingExerciseIds.length > 0) {
+    return { ok: false, error: `Exercise not found: ${missingExerciseIds.join(", ")}` };
+  }
+  const locationIds = workoutsResult.value
+    .map((w) => w.locationId)
+    .filter((id): id is number => id !== null);
+  const missingLocationIds = await findMissingPlaceIds(locationIds);
+  if (missingLocationIds.length > 0) {
+    return { ok: false, error: `Location not found: ${missingLocationIds.join(", ")}` };
+  }
 
   return {
     ok: true,
@@ -882,11 +926,21 @@ export function validateSleepPayload(body: unknown): Result<SleepPayload> {
   }
   const b = body as Record<string, unknown>;
 
+  const sleepTime = typeof b.sleepTime === "string" && b.sleepTime ? b.sleepTime : null;
+  const wakeTime = typeof b.wakeTime === "string" && b.wakeTime ? b.wakeTime : null;
+  // A half-logged sleep session (only one of the two times) can't compute a
+  // duration and isn't a state the UI should be able to save — require both
+  // once either is given, same "conditional required" shape as
+  // validateWorkPayload's commute rule above.
+  if ((sleepTime === null) !== (wakeTime === null)) {
+    return { ok: false, error: "Sleep time and wake time must be entered together" };
+  }
+
   return {
     ok: true,
     value: {
-      sleepTime: typeof b.sleepTime === "string" && b.sleepTime ? b.sleepTime : null,
-      wakeTime: typeof b.wakeTime === "string" && b.wakeTime ? b.wakeTime : null,
+      sleepTime,
+      wakeTime,
       wakeCrossedMidnight: Boolean(b.wakeCrossedMidnight),
       sleepLocationType:
         typeof b.sleepLocationType === "string" && b.sleepLocationType ? b.sleepLocationType : null,
@@ -1051,7 +1105,7 @@ export function validateSubsPayload(body: unknown): Result<SubsPayload> {
   return { ok: true, value: { entries } };
 }
 
-export function validatePeoplePayload(body: unknown): Result<PeoplePayload> {
+export async function validatePeoplePayload(body: unknown): Promise<Result<PeoplePayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -1083,10 +1137,15 @@ export function validatePeoplePayload(body: unknown): Result<PeoplePayload> {
     entries.push({ slot, valence: valence as PersonValence, personId });
   }
 
+  const missingPersonIds = await findMissingPersonIds(entries.map((e) => e.personId));
+  if (missingPersonIds.length > 0) {
+    return { ok: false, error: `Person not found: ${missingPersonIds.join(", ")}` };
+  }
+
   return { ok: true, value: { entries } };
 }
 
-export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
+export async function validatePlacesPayload(body: unknown): Promise<Result<PlacesPayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -1110,6 +1169,11 @@ export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
       return { ok: false, error: "Invalid place" };
     }
     entries.push({ slot, placeId });
+  }
+
+  const missingPlaceIds = await findMissingPlaceIds(entries.map((e) => e.placeId));
+  if (missingPlaceIds.length > 0) {
+    return { ok: false, error: `Place not found: ${missingPlaceIds.join(", ")}` };
   }
 
   return { ok: true, value: { entries } };
