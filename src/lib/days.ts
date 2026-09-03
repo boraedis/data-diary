@@ -2833,9 +2833,9 @@ export type MovieUsage = {
   watches: { date: string; rating: number | null; locationType: string | null }[];
 };
 
-// movie_watches.movieId is onDelete: "restrict" (movie_watchlist/
-// movie_rankings both cascade instead, but neither has any UI yet — see
-// REBUILD_PLAN.md — so watches are the only usage worth surfacing).
+// movie_watches.movieId is onDelete: "restrict" — the only real usage a
+// movie can have right now (watchlist/rankings tables were dropped in
+// issue #79 pending a real UI; see issue #124 for rebuilding them).
 export async function getMovieUsage(id: number): Promise<MovieUsage> {
   const db = getDb();
   const rows = await db
@@ -3528,10 +3528,9 @@ export type BookUsage = {
   }[];
 };
 
-// book_reading_sessions.bookId is onDelete: "restrict" (book_watchlist/
-// book_rankings both cascade instead, but neither has any UI yet — same
-// "not worth surfacing" call as movie_watchlist/movie_rankings above — so
-// sessions are the only usage worth checking).
+// book_reading_sessions.bookId is onDelete: "restrict" — the only real
+// usage a book can have right now (watchlist/rankings tables were dropped
+// in issue #79 pending a real UI, same call as movies above).
 export async function getBookUsage(id: number): Promise<BookUsage> {
   const db = getDb();
   const rows = await db

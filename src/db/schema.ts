@@ -689,25 +689,6 @@ export const movieWatches = pgTable(
   (table) => [index("movie_watches_date_idx").on(table.date)]
 );
 
-export const movieWatchlist = pgTable("movie_watchlist", {
-  movieId: integer("movie_id")
-    .primaryKey()
-    .references(() => movies.id, { onDelete: "cascade" }),
-  addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-// The current top-10 ranked list, replace-on-save (delete all rows,
-// reinsert) rather than fixed rank1Id..rank10Id columns — unlike the
-// legacy-confirmed-fixed person/place slot counts on `days`, "top 10" isn't
-// a load-bearing fixed count from the source app, just this feature's
-// current shape, so a satellite table stays easier to adjust later.
-export const movieRankings = pgTable("movie_rankings", {
-  rank: smallint("rank").primaryKey(), // 1-10
-  movieId: integer("movie_id")
-    .notNull()
-    .references(() => movies.id, { onDelete: "cascade" }),
-});
-
 export const tvShows = pgTable("tv_shows", {
   id: serial("id").primaryKey(),
   tmdbId: integer("tmdb_id").notNull().unique(),
@@ -823,20 +804,6 @@ export const bookReadingSessions = pgTable(
     index("book_reading_sessions_book_id_idx").on(table.bookId),
   ]
 );
-
-export const bookWatchlist = pgTable("book_watchlist", {
-  bookId: integer("book_id")
-    .primaryKey()
-    .references(() => books.id, { onDelete: "cascade" }),
-  addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const bookRankings = pgTable("book_rankings", {
-  rank: smallint("rank").primaryKey(), // 1-10
-  bookId: integer("book_id")
-    .notNull()
-    .references(() => books.id, { onDelete: "cascade" }),
-});
 
 // --- Entertainment: sports ---------------------------------------------
 // Fully manual catalog, no external API — the historical survey found this
