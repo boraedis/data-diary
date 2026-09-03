@@ -1,4 +1,5 @@
 import { asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
@@ -181,16 +182,29 @@ export async function getExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {
 
 // --- Place leaderboard ---------------------------------------------------
 
-export type PlaceLeaderboardEntry = { name: string; value: number };
+export type PlaceLeaderboardEntry = { name: string; value: number; color: string | null };
+
+// places.color is only ever set on a top-level ("country") place — see
+// that column's own comment in schema.ts — so a leaf place's own "country
+// color" is its root ancestor's color, not its own. idPath is
+// "<id>/<id>/.../<id>/" from root to self inclusive (schema.ts), so the
+// root's id is always the first segment; self-joining places against that
+// gives the root row (and, for a place that's already a root, joins back
+// to itself). Left-joined and nullable throughout: idPath is null until
+// backfilled (see schema.ts), and a root place may simply have no color
+// set — both cases fall back to the toolkit default at the call site
+// rather than here, matching getPeopleNetworkData's own tag-color
+// convention just above.
+const rootPlaces = alias(places, "root_places");
 
 /** Ranks places by how often they were logged in a day's two place slots,
  * weighting slot 1 double slot 2 — the exact scheme the legacy
  * `location_leaderboard` chart used (`places[mens.place1].value += 2`,
  * `+= 1` for place2). The legacy chart then grouped results into a
  * metro/category hierarchy for a nested table; that enrichment isn't in
- * this schema yet (see REBUILD_PLAN.md), so this is the flat top-15
+ * this schema yet (see REBUILD_PLAN.md), so this is the flat top-N
  * ranking underneath it — still the real, meaningful part. */
-export async function getPlaceLeaderboardData(limit = 15): Promise<PlaceLeaderboardEntry[]> {
+export async function getPlaceLeaderboardData(limit = 30): Promise<PlaceLeaderboardEntry[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -199,17 +213,19 @@ export async function getPlaceLeaderboardData(limit = 15): Promise<PlaceLeaderbo
         coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
         + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
       `.as("value"),
+      color: rootPlaces.color,
     })
     .from(places)
     .innerJoin(
       days,
       sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`,
     )
-    .groupBy(places.id, places.name)
+    .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`)
+    .groupBy(places.id, places.name, rootPlaces.color)
     .orderBy(desc(sql`value`))
     .limit(limit);
 
-  return rows.map((r) => ({ name: r.name, value: Number(r.value) }));
+  return rows.map((r) => ({ name: r.name, value: Number(r.value), color: r.color }));
 }
 
 // --- Happiness averager ---------------------------------------------------

@@ -51,9 +51,15 @@ export function InteractiveRanked({
   const resolveColor = (entry: RankedEntry, index: number) => (typeof color === "function" ? color(entry, index) : color);
 
   return (
-    <ol className="space-y-2" aria-label={ariaLabel}>
+    // No space-y here — each row's own py-1 (below) provides the gap now
+    // that rows carry hover padding, so stacking them with zero extra gap
+    // keeps the same ~8px rhythm the old space-y-2 gave a padding-less row.
+    <ol aria-label={ariaLabel}>
       {entries.map((entry, i) => (
-        <li key={entry.label} className="flex items-center gap-3">
+        <li
+          key={entry.label}
+          className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-1 transition-colors hover:bg-accent"
+        >
           <span className="w-5 shrink-0 text-right text-xs text-muted-foreground">{i + 1}</span>
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-2">
