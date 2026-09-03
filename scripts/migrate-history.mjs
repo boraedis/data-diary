@@ -1014,11 +1014,34 @@ async function migratePlaces(client, metroIdMap, coordinates) {
     const categoryId = await upsertNamedCatalogRow(client, "place_categories", d.category || null, placeCategoryCache, "placeCategoriesUpserted");
     await upsertScopedCatalogRow(client, "place_subcategories", "category_id", categoryId, d.subcategory || null, placeSubcategoryCache, "placeSubcategoriesUpserted");
 
+    // Real bug found running this against real production data (issue
+    // #79): this used to read `on conflict (name)`, matching a real
+    // `unique(name)` constraint that existed when this script was written.
+    // That constraint is gone (2026-08-29, see places.name's own comment in
+    // schema.ts) — replaced by places_name_parent_id_idx on (name,
+    // parent_id), since real geography reuses names across hierarchy
+    // levels. `on conflict (name)` no longer matches ANY constraint, so
+    // --commit failed outright with a Postgres 42P10 the first time this
+    // ever ran against a live database. Fixed to match the real index.
+    // Every row this function inserts always has parent_id NULL (hierarchy
+    // is applied afterward by applyPlaceHierarchy's separate UPDATE) — and
+    // Postgres unique indexes treat every NULL as distinct from every
+    // other NULL, so this ON CONFLICT target will in practice never fire
+    // for a NULL-parent row even when the name repeats (a second row is
+    // inserted instead). That matches this schema's own accepted tradeoff
+    // (see places.name's comment: "two root-level places with the same
+    // name... intentionally rare edge case") for the sanctioned `--wipe
+    // --commit` clean-reload path this script is meant for; it does mean a
+    // `--commit` WITHOUT `--wipe`, re-run against a places table a prior
+    // run already gave real parent ids to, can add a duplicate root-level
+    // place rather than updating the existing one — a narrower, pre-
+    // existing version of the same edge case, not something this fix
+    // introduces.
     if (COMMIT) {
       const { rows } = await client.query(
         `insert into places (name, alias, address, category, subcategory, subregion_name, color, metro_id, lat, lng)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         on conflict (name) do update set
+         on conflict (name, parent_id) do update set
            alias = excluded.alias,
            address = excluded.address,
            category = excluded.category,
