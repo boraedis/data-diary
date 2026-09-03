@@ -1,4 +1,4 @@
-import { scaleDiverging, scaleSequential, interpolateHcl } from "d3";
+import { scaleDiverging, scaleSequential, scaleSequentialLog, interpolateHcl } from "d3";
 import type { ScaleDiverging, ScaleSequential } from "d3";
 
 // Shared color-system helpers (#16's "color system" scope item). Every
@@ -73,6 +73,20 @@ const SEQUENTIAL_ENDPOINTS: Record<ColorMode, [string, string]> = {
 export function sequentialScale(domain: [number, number], mode: ColorMode = "light"): ScaleSequential<string> {
   const [low, high] = SEQUENTIAL_ENDPOINTS[mode];
   return scaleSequential(interpolateHcl(low, high)).domain(domain);
+}
+
+/**
+ * Same one-hue ramp as `sequentialScale`, but log-distributed rather than
+ * linear — for a heavy-tailed magnitude metric (a choropleth where one or
+ * two regions dwarf the rest) where a linear domain crushes every smaller
+ * value into visually the same color, leaving only the single largest
+ * region distinguishable. `domain` must be strictly positive (a log scale
+ * has no representation for 0 or negative values) — filter those out
+ * before computing the domain, same as any `d3.scaleLog` caller has to.
+ */
+export function sequentialLogScale(domain: [number, number], mode: ColorMode = "light"): ScaleSequential<string> {
+  const [low, high] = SEQUENTIAL_ENDPOINTS[mode];
+  return scaleSequentialLog(interpolateHcl(low, high)).domain(domain);
 }
 
 const DIVERGING_ENDPOINTS: Record<ColorMode, { cool: string; warm: string; neutral: string }> = {

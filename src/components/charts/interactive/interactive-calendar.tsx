@@ -5,6 +5,7 @@ import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { MARK_SPECS, attachMarkHover } from "./marks";
 import { ChartTooltip } from "./tooltip";
+import { SequentialLegend } from "./legend";
 import { sequentialScale, type ColorMode } from "@/lib/viz/color";
 import { formatDate } from "@/lib/viz/format";
 import { parseDate } from "@/lib/date";
@@ -266,15 +267,6 @@ export function InteractiveCalendar({
   const containerRect = containerEl?.getBoundingClientRect();
   const hoveredColor = hovered ? colorScale(hovered.value) : undefined;
 
-  // Ten sampled stops (not just the two endpoints) — sequentialScale's
-  // interpolator (interpolateHcl) isn't linear in sRGB, so a plain
-  // 2-stop CSS gradient would visibly diverge from what the cells
-  // themselves actually render partway through the ramp.
-  const gradientStops = useMemo(() => {
-    const interpolate = colorScale.interpolator();
-    return d3.range(0, 1.0001, 0.1).map((t) => interpolate(t));
-  }, [colorScale]);
-
   // Where the hovered cell's value falls on the low->high legend, as a
   // 0-1 fraction — drives the hover indicator line below. Clamped in case
   // of floating-point edges right at the domain endpoints.
@@ -339,27 +331,14 @@ export function InteractiveCalendar({
           scale" directly, rather than making the reader eyeball a color
           match against the swatch. */}
       {containerRect ? (
-        <div
-          className="fixed bottom-0 z-10 flex items-center gap-3 border-t border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground backdrop-blur"
+        <SequentialLegend
+          domain={domain}
+          colorScale={colorScale}
+          formatValue={formatValue}
+          valueT={legendT}
+          className="fixed bottom-0 z-10 border-t border-border bg-background/95 px-3 py-2 backdrop-blur"
           style={{ left: containerRect.left + gridLeft, width: gridWidth }}
-        >
-          <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
-          <span className="relative h-2 min-w-0 flex-1">
-            <span
-              aria-hidden
-              className="block h-2 w-full rounded-full"
-              style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
-            />
-            {legendT !== null ? (
-              <span
-                aria-hidden
-                className="absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
-                style={{ left: `${legendT * 100}%` }}
-              />
-            ) : null}
-          </span>
-          <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
-        </div>
+        />
       ) : null}
     </div>
   );

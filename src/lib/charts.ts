@@ -1,8 +1,9 @@
-import { asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
+import { normalizeCountryName } from "@/lib/geo/country-names";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
 // domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
@@ -413,4 +414,81 @@ export async function getPeopleNetworkData(maxNodes = 40): Promise<PeopleNetwork
   }
 
   return { nodes, edges };
+}
+
+// --- Country visits (world choropleth, #24) -------------------------------
+
+export type CountryVisitEntry = { country: string; days: number };
+
+/** Distinct days logged in each country, resolved the same way the place
+ * leaderboard's root-color join does: a day's place1/place2 aren't
+ * themselves countries (they're specific cities/venues), so each one's
+ * root ancestor — the first segment of its idPath — is looked up and named
+ * (see places.color's own schema.ts comment on why only root places carry
+ * that identity). A day where both slots land in the same country counts
+ * once, not twice — this is "was I in France that day," not a mention
+ * tally like the leaderboard's weighted slot1/slot2 scheme, since summing
+ * per-country here feeds a choropleth's per-day-presence read, not a
+ * ranked "which place got logged most" one.
+ *
+ * Aggregated in JS rather than SQL, same reasoning as getPeopleNetworkData
+ * just above: `days` is only a few thousand rows, and expressing "the
+ * root ancestor of whichever of two nullable FKs is set, deduped per day"
+ * as a single SQL query is far less legible than three small queries plus
+ * a Set. Place names are joined against map geometry by
+ * normalizeCountryName (src/lib/geo/country-names.ts) at the call site,
+ * not here — this function stays a plain "what did the catalog say" read.
+ */
+export async function getCountryVisitData(): Promise<CountryVisitEntry[]> {
+  const db = getDb();
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return [];
+
+  const placeRows = await db
+    .select({ id: places.id, idPath: places.idPath })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+  const rootIdByPlaceId = new Map<number, number | null>();
+  for (const p of placeRows) {
+    const rootIdStr = p.idPath?.split("/")[0];
+    rootIdByPlaceId.set(p.id, rootIdStr ? Number(rootIdStr) : null);
+  }
+
+  const rootIds = [...new Set([...rootIdByPlaceId.values()].filter((id): id is number => id !== null))];
+  const rootRows = rootIds.length
+    ? await db.select({ id: places.id, name: places.name }).from(places).where(inArray(places.id, rootIds))
+    : [];
+  const nameByRootId = new Map(rootRows.map((r) => [r.id, r.name]));
+
+  // Set of "date\0country" pairs — the null-byte separator can't appear in
+  // either a date string or a place name, so it's a safe join delimiter
+  // for using the pair as a Set key.
+  const dayCountryPairs = new Set<string>();
+  for (const row of dayRows) {
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const rootId = rootIdByPlaceId.get(placeId);
+      const country = rootId != null ? nameByRootId.get(rootId) : undefined;
+      if (country) dayCountryPairs.add(`${row.date}\0${country}`);
+    }
+  }
+
+  const counts = new Map<string, number>();
+  for (const pair of dayCountryPairs) {
+    const country = normalizeCountryName(pair.split("\0")[1]);
+    counts.set(country, (counts.get(country) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([country, dayCount]) => ({ country, days: dayCount }))
+    .sort((a, b) => b.days - a.days);
 }
