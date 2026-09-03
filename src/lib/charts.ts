@@ -282,44 +282,6 @@ export async function getHappinessAveragerData(): Promise<MonthlyAverage[]> {
   });
 }
 
-// --- Subs small multiples ---------------------------------------------------
-
-/** One row per day that has at least one of the 9 subs filled in; `values`
- * is aligned index-for-index with SUB_NAMES from `@/lib/days` (the single
- * source of truth for sub ordering — reused here rather than re-declared,
- * same as every other place in the app that touches subs). */
-export type SubsSeries = { date: string; values: (number | null)[] };
-
-export async function getSubsScrollerData(): Promise<SubsSeries[]> {
-  const db = getDb();
-  const rows = await db
-    .select({
-      date: days.date,
-      subA: days.subA,
-      subW: days.subW,
-      subC: days.subC,
-      subL: days.subL,
-      subNi: days.subNi,
-      subNO: days.subNO,
-      subAd: days.subAd,
-      subD: days.subD,
-      subK: days.subK,
-    })
-    .from(days)
-    .where(
-      sql`${days.subA} is not null or ${days.subW} is not null or ${days.subC} is not null
-        or ${days.subL} is not null or ${days.subNi} is not null or ${days.subNO} is not null
-        or ${days.subAd} is not null or ${days.subD} is not null or ${days.subK} is not null`,
-    )
-    .orderBy(asc(days.date));
-
-  // Order matches SUB_NAMES = ["A", "W", "C", "L", "Ni", "NO", "Ad", "D", "K"].
-  return rows.map((r) => ({
-    date: r.date,
-    values: [r.subA, r.subW, r.subC, r.subL, r.subNi, r.subNO, r.subAd, r.subD, r.subK],
-  }));
-}
-
 // --- People network ---------------------------------------------------
 
 export type NetworkNode = { id: number; name: string; count: number; color: string | null };
