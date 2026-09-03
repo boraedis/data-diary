@@ -145,6 +145,13 @@ function TvEpisodePickerModal({
   }
 
   const selectedCount = selected.size;
+  // TMDB often doesn't report a per-episode runtime, so a batch of checked
+  // episodes can easily include one with no duration pre-filled and no
+  // manual entry either — that single missing duration would otherwise
+  // only surface as a confusing, unspecific error after Save, once it's
+  // bundled with every other (fine) episode in the same day's PATCH.
+  // Blocking Log here instead catches it at the exact row that needs it.
+  const hasMissingDuration = [...selected.values()].some((minutes) => minutes === null);
 
   function handleConfirm() {
     if (!episodes) return;
@@ -235,12 +242,79 @@ function TvEpisodePickerModal({
               })}
             </div>
 
-            <Button type="button" onClick={handleConfirm} disabled={selectedCount === 0}>
+            <Button
+              type="button"
+              onClick={handleConfirm}
+              disabled={selectedCount === 0 || !locationType || hasMissingDuration}
+            >
               Log {selectedCount || ""} episode{selectedCount === 1 ? "" : "s"}
             </Button>
+            {selectedCount > 0 && hasMissingDuration ? (
+              <p className="text-xs text-muted-foreground">
+                Set a watch time for every checked episode above to continue.
+              </p>
+            ) : null}
           </>
         ) : null}
       </div>
+    </Modal>
+  );
+}
+
+/** Edits an already-logged episode watch's duration/location in place.
+ * Unlike Movies/Books/Games/Other, TV rows come out of the batch
+ * TvEpisodePickerModal above rather than a per-row detail modal, so there
+ * was previously no way to fix a row after the fact — a real dead end once
+ * duration/location became required (#64): a row saved before that (or
+ * added via the picker with a duration you then decided to change) had no
+ * path back to a valid state short of removing and re-adding it. */
+function TvEpisodeRowEditModal({
+  open,
+  row,
+  locationTypes,
+  onLocationTypeCreated,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  row: TvEpisodeRow | null;
+  locationTypes: EntertainmentLocationTypeItem[];
+  onLocationTypeCreated: (item: EntertainmentLocationTypeItem) => void;
+  onClose: () => void;
+  onSave: (value: { durationMinutes: number | null; locationType: string | null }) => void;
+}) {
+  const [durationMinutes, setDurationMinutes] = useState<number | null>(row?.durationMinutes ?? null);
+  const [locationType, setLocationType] = useState(row?.locationType ?? "");
+
+  return (
+    <Modal open={open} onClose={onClose} title={row ? `${row.showTitle} — S${row.season}E${row.episode}` : ""}>
+      {row ? (
+        <div className="flex flex-col gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="tv-row-edit-duration">Watch time</Label>
+            <DurationInput id="tv-row-edit-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="tv-row-edit-location">Where</Label>
+            <NameCatalogField
+              id="tv-row-edit-location"
+              value={locationType || null}
+              onChange={(value) => setLocationType(value ?? "")}
+              items={locationTypes}
+              onCreated={onLocationTypeCreated}
+              apiPath="/api/entertainment-location-types"
+              modalTitle="New location type"
+            />
+          </div>
+          <Button
+            type="button"
+            disabled={!locationType.trim() || durationMinutes === null}
+            onClick={() => onSave({ durationMinutes, locationType: locationType.trim() || null })}
+          >
+            Save
+          </Button>
+        </div>
+      ) : null}
     </Modal>
   );
 }
@@ -263,6 +337,7 @@ export function TvSection({
   const [items, setItems] = useState<TvShowCatalogItem[]>(catalog);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
   const [pickerShow, setPickerShow] = useState<TvShowCatalogItem | null>(null);
+  const [editIndex, setEditIndex] = useState<number | null>(null);
 
   const pendingShowId = usePendingOpenMatch(pendingOpen, "tv");
   if (pendingShowId !== null) {
@@ -286,6 +361,14 @@ export function TvSection({
     onRowsChange(rows.filter((_, i) => i !== index));
   }
 
+  function saveRowEdit(value: { durationMinutes: number | null; locationType: string | null }) {
+    if (editIndex === null) return;
+    const next = [...rows];
+    next[editIndex] = { ...next[editIndex], ...value };
+    onRowsChange(next);
+    setEditIndex(null);
+  }
+
   return (
     <Card size="sm">
       <CardHeader>
@@ -300,16 +383,17 @@ export function TvSection({
         {rows.length === 0 ? <p className="text-sm text-muted-foreground">None logged yet.</p> : null}
         {rows.map((row, i) => (
           <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-            <div className="min-w-0 flex-1">
+            <button type="button" onClick={() => setEditIndex(i)} className="min-w-0 flex-1 text-left">
               <p className="truncate text-sm">
                 {row.showTitle} — S{row.season}E{row.episode}
                 {row.episodeName ? ` — ${row.episodeName}` : ""}
               </p>
               <p className="truncate text-xs text-muted-foreground">
-                {row.durationMinutes ? `${row.durationMinutes} min` : null}
-                {row.locationType ? ` · ${row.locationType}` : ""}
+                {row.durationMinutes ? `${row.durationMinutes} min` : <span className="text-destructive">missing watch time</span>}
+                {" · "}
+                {row.locationType ?? <span className="text-destructive">missing location</span>}
               </p>
-            </div>
+            </button>
             <Button type="button" variant="ghost" size="icon-xs" aria-label="Remove" onClick={() => removeRow(i)}>
               &times;
             </Button>
@@ -326,6 +410,16 @@ export function TvSection({
         onSave={handleEpisodesPicked}
         locationTypes={locationTypes}
         onLocationTypeCreated={onLocationTypeCreated}
+      />
+
+      <TvEpisodeRowEditModal
+        key={editIndex ?? "closed"}
+        open={editIndex !== null}
+        row={editIndex !== null ? rows[editIndex] : null}
+        locationTypes={locationTypes}
+        onLocationTypeCreated={onLocationTypeCreated}
+        onClose={() => setEditIndex(null)}
+        onSave={saveRowEdit}
       />
     </Card>
   );

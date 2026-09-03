@@ -172,7 +172,11 @@ function EntertainmentDetailModal({
               modalTitle="New location type"
             />
           </div>
-          <Button type="button" onClick={() => onSave(durationMinutes, locationType.trim() || null)}>
+          <Button
+            type="button"
+            disabled={!locationType.trim() || durationMinutes === null}
+            onClick={() => onSave(durationMinutes, locationType.trim() || null)}
+          >
             Save
           </Button>
         </div>
