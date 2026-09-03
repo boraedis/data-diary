@@ -47,45 +47,84 @@
  * ID, e.g. --only=9500) — use this together with --commit and a few
  * `console.log`s if you need to debug one specific day in isolation.
  *
- * WHAT THIS COVERS (as of the 2026-08-28 update):
+ * WHAT THIS COVERS (as of the issue #79 update — the "final" pre-go-live
+ * pass, six days of schema growth after the 2026-08-28 update below):
  *   - Core day log: every scalar `days/{daynum}` field, workouts + sets,
  *     positive/negative people, places, subs. (unchanged from Phase 3)
  *   - People's real tag (searchs/people_extras.tags catalog + people.tagId
  *     FK, replacing the old free-text tag column).
- *   - Places' full catalog shape: category, subcategory, parentId (from
- *     the `world` collection's recursive tree), subregionName, color,
- *     metroId (from searchs/metros), lat/lng (from searchs/coordinates).
+ *   - Places' full catalog shape: category, subcategory (now ALSO backed
+ *     by the real place_categories/place_subcategories catalog tables,
+ *     auto-derived from every distinct value seen — issue #59), parentId
+ *     (from the `world` collection's recursive tree), subregionName,
+ *     color, metroId (from searchs/metros), lat/lng (from
+ *     searchs/coordinates).
  *   - Exercise subtypes (exercise_subtypes, derived from what's actually
  *     on historical workouts, same as the original Phase 3 pass) AND
  *     exercise focus/subfocus (searchs/exercise_focuses + each exercise's
  *     .focuses array -> exercise_focuses/exercise_subfocuses/
  *     exercise_focus_links).
+ *   - sleep_location_types/subtypes, entertainment_location_types,
+ *     sports_seasons/sports_divisions/sports_game_types, and
+ *     game_categories/game_subcategories/game_device_types — the six
+ *     catalog tables added by issues #59/#61/#68/#71 to back columns that
+ *     were ALREADY being migrated as plain free text (sleep location,
+ *     every kind's locationType, sports season/game_type/division, game
+ *     type/subtype/device). This script always carried the values; it just
+ *     never populated the catalogs those values are matched against. Now
+ *     it auto-derives every catalog row from the distinct values actually
+ *     observed in your history (see upsertNamedCatalogRow/
+ *     upsertScopedCatalogRow and finalizeDerivedCatalogsFromDays) rather
+ *     than a hand-curated guessed list — so the catalog admin pickers
+ *     aren't empty on day one, seeded with real values instead of typos
+ *     you'd have to weed out.
+ *   - entertainment_kinds' five system rows (Movie/TV show/Sport/Book/
+ *     Game) — required for the app's generic "other entertainment" picker
+ *     to work at all; nothing else seeds these on a from-scratch database
+ *     (see migrateEntertainmentKinds' own comment for why
+ *     migrate-entertainment-kinds.mjs doesn't cover this case).
  *   - Entertainment, now that Phase 5 has built real per-kind catalogs:
  *       - Movies: full catalog (searchs/media, type=='movie') + one
  *         movie_watches row per day-doc movies[] entry.
- *       - TV shows: catalog only (searchs/media, type=='tv_show') — see
- *         below for what's deliberately NOT migrated here.
+ *       - TV shows: full catalog (searchs/media, type=='tv_show') AND, new
+ *         in #79, real episode-level history: tv_episodes (catalog, from
+ *         the single entertainment/episodes doc — NOT per-episode
+ *         Firestore docs, see migrateTvEpisodes' comment) + one
+ *         tv_episode_watches row per day-doc tvshows[] entry, PLUS any
+ *         "legacy, exact date unknown" bulk-marked watches (the
+ *         `watches.legacy` sentinel count on each entertainment/episodes
+ *         entry) as null-date rows.
  *       - Sports: full sport -> league -> team catalog
- *         (entertainment/sports) + one sports_watches row per day-doc
- *         sports[] entry.
+ *         (entertainment/sports), team.division backed by the real
+ *         sports_divisions catalog (issue #71), + one sports_watches row
+ *         per day-doc sports[] entry.
  *       - Books: full catalog (entertainment/books) + one
  *         book_reading_sessions row per day-doc books[] entry.
  *       - Games: full catalog (entertainment/games, minus its unused
- *         `series` field — no column for it) + one game_sessions row per
- *         day-doc games[] entry.
+ *         `series` field — no column for it), type/subtype backed by the
+ *         real game_categories/game_subcategories catalog (issue #68), +
+ *         one game_sessions row per day-doc games[] entry (device_type
+ *         included — a prior version of this script wrote a `device`
+ *         column that hasn't existed since the issue #75 rename, so it was
+ *         silently failing every game_sessions insert; fixed here).
  *
- * WHAT THIS DOES NOT MIGRATE, ON PURPOSE, EVEN NOW:
- *   - TV episode-level watch history (searchs/media[id].seasons, the
- *     media_library tv_season/tv_episode docs, and each day doc's
- *     tvshows[] array). The new schema has real tv_episodes/
- *     tv_episode_watches tables, but there's no entry-form UI reading or
- *     writing them yet — building the migration for data nothing can show
- *     or edit felt premature. TV *shows* themselves are still migrated
- *     (see above) so the catalog exists once that UI lands. Revisit then.
+ * WHAT THIS STILL DOES NOT MIGRATE, ON PURPOSE:
  *   - Movie/book watchlists and rankings (entertainment/watchlists,
- *     entertainment/rankings) — same reasoning: movie_watchlist/
- *     movie_rankings/book_watchlist/book_rankings tables exist, but no UI
- *     reads/writes them yet.
+ *     entertainment/rankings — real Firestore data, both structurally
+ *     verified against the legacy app's source: movie watchlist is a
+ *     {movieId: dayAdded} map, movie ranking an ordered array of up to 10
+ *     movie ids, book watchlist/ranking the same idea in the `.books`
+ *     field). The movie_watchlist/movie_rankings/book_watchlist/
+ *     book_rankings tables were DROPPED from the schema entirely in #79
+ *     (dead — no UI had ever read or written them). See issue #124 for
+ *     building that UI and migrating this data for real once there's
+ *     somewhere for it to show up — including a flagged data-quality risk
+ *     found while researching this: the legacy
+ *     books watchlist/ranking *edit* pages were wired to the wrong
+ *     script/API (they actually edit *movie* data), so
+ *     entertainment/watchlists.books and entertainment/rankings.books may
+ *     be stale or empty and need verifying against real production data
+ *     before trusting them.
  *   - Finance, todo, goals — no Postgres schema exists for these yet at
  *     all (later-phase territory), so there's nothing to migrate them
  *     into.
@@ -93,8 +132,15 @@
  *     legacy app never persisted listens per-day in Firestore at all (it
  *     bulk-read raw Spotify export JSON at chart-render time), so there's
  *     no Firestore data for this script to read in the first place. That
- *     stays a separate in-app Spotify import flow, not migration-script
- *     territory.
+ *     stays a separate in-app Spotify import flow (see src/lib/music-
+ *     import.ts), not migration-script territory.
+ *   - profile_settings/project_settings and the profile timeline tables
+ *     (occupations/roles/residences/relationships) — no Firestore
+ *     equivalent ever existed in the legacy app; these are populated
+ *     directly through their own in-app forms, not this script. --wipe
+ *     still truncates them (see ALL_TABLES) since they're real schema
+ *     tables, so know that before reaching for --wipe against a database
+ *     you've already filled these in on.
  *
  * Workout `subtype` (e.g. "Barbell" vs "Dumbbell" vs "Machine" for the same
  * named exercise) IS migrated — a first dry run found it on effectively
@@ -303,13 +349,16 @@ function formatDuration(totalSeconds) {
   return m > 0 ? `${m}m${String(rem).padStart(2, "0")}s` : `${rem}s`;
 }
 
-/** Single-line, self-overwriting progress bar for the days loop below — the
- * days collection can run into the thousands, and a full --commit run does
- * several real Postgres round-trips per day, so a silent multi-minute wait
- * with no feedback was worth fixing. Redraws in place via a bare `\r` (no
- * newline) until the final call, which is what makes it "one line" rather
- * than thousands of scrolling log lines. */
-function printProgress(current, total, startTime) {
+/** Single-line, self-overwriting progress bar, one per migration
+ * subcomponent (days, but also every catalog phase big enough to run for a
+ * while — places, people, movies/TV, TV episodes, ...). A full --commit run
+ * does several real Postgres round-trips per item, so a silent multi-minute
+ * wait with no feedback was worth fixing everywhere it can happen, not just
+ * the days loop. Redraws in place via a bare `\r` (no newline) until the
+ * final call, which is what makes it "one line" rather than thousands of
+ * scrolling log lines. `label` names what's being counted (e.g. "days",
+ * "places", "episodes"). */
+function printProgress(current, total, startTime, label = "days") {
   if (total <= 0) return;
   const width = 30;
   const pct = current / total;
@@ -321,9 +370,26 @@ function printProgress(current, total, startTime) {
   const pctStr = String(Math.floor(pct * 100)).padStart(3, " ");
   const eta = current < total ? formatDuration(etaSec) : "0s";
   process.stdout.write(
-    `\r  [${bar}] ${pctStr}%  ${current}/${total} days  —  elapsed ${formatDuration(elapsedSec)}, ETA ${eta}   `
+    `\r  [${bar}] ${pctStr}%  ${current}/${total} ${label}  —  elapsed ${formatDuration(elapsedSec)}, ETA ${eta}   `
   );
   if (current === total) process.stdout.write("\n");
+}
+
+/** Returns a `tick()` function a loop calls once per item — redraws the bar
+ * at most ~200 times over the whole loop (always including the last item)
+ * rather than on every single iteration, same throttling the days loop
+ * always used, now shared by every catalog loop below. Skips entirely for
+ * small collections (<50 items) — not worth the terminal I/O or the visual
+ * noise for something that finishes near-instantly anyway. */
+function makeProgressTicker(total, label) {
+  if (total < 50) return () => {};
+  const every = Math.max(1, Math.floor(total / 200));
+  const startTime = Date.now();
+  let current = 0;
+  return () => {
+    current++;
+    if (current % every === 0 || current === total) printProgress(current, total, startTime, label);
+  };
 }
 
 /** hh:mm string -> minutes-since-midnight, for comparing sleep/wake times. */
@@ -412,7 +478,15 @@ const SUB_COLUMNS = ["sub_a", "sub_w", "sub_c", "sub_l", "sub_ni", "sub_no", "su
 // Every table in the current schema — used only by --wipe. Order doesn't
 // matter (TRUNCATE ... CASCADE handles FK ordering itself), but it's listed
 // in roughly the same grouping as src/db/schema.ts for easy cross-checking
-// against a schema change.
+// against a schema change. Kept exhaustive on purpose (issue #79) — even
+// tables this script never writes to (music, profile) belong here so
+// --wipe really does mean "every table" rather than silently missing
+// whatever's newest.
+//
+// movie_watchlist/movie_rankings/book_watchlist/book_rankings were dropped
+// from the schema entirely in #79 (dead: no UI ever read/wrote them) — see
+// the follow-up issue for rebuilding them with real historical data once
+// there's a UI to show it in.
 const ALL_TABLES = [
   "days",
   "workouts",
@@ -428,26 +502,44 @@ const ALL_TABLES = [
   "metros",
   "people",
   "places",
+  "sleep_location_types",
+  "sleep_location_subtypes",
+  "entertainment_location_types",
+  "entertainment_kinds",
   "entertainment_catalog",
   "entertainment_entries",
   "movies",
   "movie_watches",
-  "movie_watchlist",
-  "movie_rankings",
   "tv_shows",
   "tv_episodes",
   "tv_episode_watches",
   "books",
   "book_reading_sessions",
-  "book_watchlist",
-  "book_rankings",
   "sports",
   "sports_leagues",
   "sports_teams",
   "sports_watches",
+  "sports_seasons",
+  "sports_divisions",
+  "sports_game_types",
   "games",
   "game_sessions",
+  "game_categories",
+  "game_subcategories",
+  "game_device_types",
+  "genre_groups",
+  "genres",
+  "artists",
+  "artist_genres",
+  "podcast_categories",
+  "podcast_shows",
   "music_listens",
+  "profile_settings",
+  "project_settings",
+  "profile_occupations",
+  "profile_occupation_roles",
+  "profile_residences",
+  "profile_relationships",
 ];
 
 async function wipeAllData(client) {
@@ -460,11 +552,14 @@ async function wipeAllData(client) {
 // ---------------------------------------------------------------------------
 
 const report = {
+  entertainmentKindsUpserted: 0,
   tagsUpserted: 0,
   peopleUpserted: 0,
   metrosUpserted: 0,
   placesUpserted: 0,
   placesHierarchyApplied: 0,
+  placeCategoriesUpserted: 0,
+  placeSubcategoriesUpserted: 0,
   exerciseFocusesUpserted: 0,
   exerciseSubfocusesUpserted: 0,
   exerciseFocusLinksWritten: 0,
@@ -472,11 +567,21 @@ const report = {
   exerciseSubtypesUpserted: 0,
   moviesUpserted: 0,
   tvShowsUpserted: 0,
+  tvEpisodesUpserted: 0,
   sportsUpserted: 0,
   sportsLeaguesUpserted: 0,
   sportsTeamsUpserted: 0,
+  sportsDivisionsUpserted: 0,
+  sportsSeasonsUpserted: 0,
+  sportsGameTypesUpserted: 0,
   booksUpserted: 0,
   gamesUpserted: 0,
+  gameCategoriesUpserted: 0,
+  gameSubcategoriesUpserted: 0,
+  gameDeviceTypesUpserted: 0,
+  sleepLocationTypesUpserted: 0,
+  sleepLocationSubtypesUpserted: 0,
+  entertainmentLocationTypesUpserted: 0,
 
   daysProcessed: 0,
   daysWritten: 0,
@@ -488,12 +593,28 @@ const report = {
 
   movieWatchesSeen: 0,
   movieWatchesWritten: 0,
+  tvEpisodeWatchesSeen: 0,
+  tvEpisodeWatchesWritten: 0,
   sportsWatchesSeen: 0,
   sportsWatchesWritten: 0,
   bookSessionsSeen: 0,
   bookSessionsWritten: 0,
   gameSessionsSeen: 0,
   gameSessionsWritten: 0,
+
+  // Distinct free-text values observed on day-level entries, collected
+  // during the days loop and upserted into their backing catalog tables
+  // afterward (finalizeDerivedCatalogsFromDays) — same "can only run after
+  // the full days loop" reasoning as subtypesSeen/
+  // finalizeExerciseSubtypesFromWorkouts below, just for the newer
+  // catalog-backed-but-free-text columns (issue #59/#61/#71 catalogs) that
+  // predate this script and were never wired up to auto-populate.
+  sleepLocationTypesSeen: new Set(),
+  sleepLocationSubtypesSeen: new Map(), // sleepLocationType -> Set(subtype)
+  entertainmentLocationTypesSeen: new Set(), // union across movie/tv/book/sports/game locationType
+  sportsGameTypesSeen: new Set(),
+  sportsSeasonsSeen: new Map(), // "sport/league" -> Set(season)
+  gameDeviceTypesSeen: new Set(),
 
   unmatchedPersonIds: new Set(),
   unmatchedPlaceIds: new Set(),
@@ -503,6 +624,7 @@ const report = {
   unmatchedPlaceHierarchy: new Set(),
   unmatchedExerciseFocuses: new Set(),
   unmatchedMovies: new Set(),
+  unmatchedTvEpisodes: new Set(),
   unmatchedSports: new Set(),
   unmatchedSportsLeagues: new Set(),
   unmatchedSportsTeams: new Set(),
@@ -525,6 +647,95 @@ const report = {
 // for exercises/tags/metros/sports/books/games, name) -> Postgres-id map
 // used while transforming `days` docs below.
 // ---------------------------------------------------------------------------
+
+// Every entertainment-kind/place-category/sleep-location/etc. catalog added
+// since this script's original Phase 3/5 passes (issue #59/#61/#68/#71)
+// follows the exact same shape: a small, flat-or-one-level-scoped table a
+// free-text column is matched against by name, not an FK — see each
+// column's own comment in schema.ts. Rather than hand-write the same
+// upsert-and-cache logic six more times, these two helpers cover every one
+// of them: `cache` is a plain Map the caller owns (so repeated values
+// within a run hit Postgres once, not once per occurrence), keyed by name
+// for the flat case and "parentId/name" for the scoped case. Table/column
+// names are always script-internal constants, never Firestore/user input,
+// so interpolating them into the query text carries the same trust level
+// as e.g. ALL_TABLES.join(", ") in wipeAllData above.
+async function upsertNamedCatalogRow(client, table, name, cache, reportKey) {
+  if (!name) return null;
+  if (cache.has(name)) return cache.get(name);
+  let id;
+  if (COMMIT) {
+    const { rows } = await client.query(
+      `insert into ${table} (name) values ($1)
+       on conflict (name) do update set name = excluded.name
+       returning id`,
+      [name]
+    );
+    id = rows[0].id;
+  } else {
+    id = -1;
+  }
+  cache.set(name, id);
+  if (reportKey) report[reportKey]++;
+  return id;
+}
+
+async function upsertScopedCatalogRow(client, table, parentColumn, parentId, name, cache, reportKey) {
+  if (!name || parentId === null || parentId === undefined) return null;
+  const key = `${parentId}/${name}`;
+  if (cache.has(key)) return cache.get(key);
+  let id;
+  if (COMMIT) {
+    const { rows } = await client.query(
+      `insert into ${table} (${parentColumn}, name) values ($1, $2)
+       on conflict (${parentColumn}, name) do update set name = excluded.name
+       returning id`,
+      [parentId, name]
+    );
+    id = rows[0].id;
+  } else {
+    id = -1;
+  }
+  cache.set(key, id);
+  if (reportKey) report[reportKey]++;
+  return id;
+}
+
+// Caches for the helpers above — module-scoped since each backs exactly one
+// catalog table for the lifetime of a single run.
+const placeCategoryCache = new Map();
+const placeSubcategoryCache = new Map();
+const sportsDivisionCache = new Map();
+const sportsSeasonCache = new Map();
+const sportsGameTypeCache = new Map();
+const gameCategoryCache = new Map();
+const gameSubcategoryCache = new Map();
+const gameDeviceTypeCache = new Map();
+const sleepLocationTypeCache = new Map();
+const sleepLocationSubtypeCache = new Map();
+const entertainmentLocationTypeCache = new Map();
+
+// entertainment_kinds needs its five system rows (Movie/TV show/Sport/
+// Book/Game) to exist before the app's generic "other entertainment"
+// picker works at all — nothing else seeds them on a brand-new database.
+// scripts/migrate-entertainment-kinds.mjs used to be the thing that did
+// this, but it's a one-time ALTER-TABLE-shape migration for databases
+// created back when entertainment_catalog.kind was still a fixed enum; a
+// database created fresh via `drizzle-kit push` against the current
+// schema.ts never has that old enum column, so that script's own
+// "already migrated, nothing to do" check fires immediately and the seed
+// never happens. Doing it here instead — idempotent, harmless to re-run —
+// closes that gap for a true from-scratch go-live.
+async function migrateEntertainmentKinds(client) {
+  const SYSTEM_KINDS = ["Movie", "TV show", "Sport", "Book", "Game"];
+  console.log(`entertainment kinds: seeding ${SYSTEM_KINDS.length} system kinds`);
+  for (const name of SYSTEM_KINDS) {
+    if (COMMIT) {
+      await client.query(`insert into entertainment_kinds (name, is_system) values ($1, true) on conflict (name) do nothing`, [name]);
+    }
+    report.entertainmentKindsUpserted++;
+  }
+}
 
 /** Scans every `days` doc once to find, per person, the earliest daynum they
  * were ever logged in a person1..person7/person-1..person-3 slot — used to
@@ -629,6 +840,7 @@ async function migratePeople(client, firstAppearance, earliestDaynum, tagIdMap) 
     return a.name.localeCompare(b.name); // stable tiebreaker when neither ever appeared
   });
 
+  const tick = makeProgressTicker(entries.length, "people");
   for (const { fsId, name, d, createdAt } of entries) {
     let tagId = null;
     if (d.tag) {
@@ -654,6 +866,7 @@ async function migratePeople(client, firstAppearance, earliestDaynum, tagIdMap) 
       idMap.set(fsId, -1); // placeholder id, dry run only
       report.peopleUpserted++;
     }
+    tick();
   }
   return idMap;
 }
@@ -765,11 +978,15 @@ async function migratePlaces(client, metroIdMap, coordinates) {
   const snap = await fs.collection("places").get();
   const idMap = new Map();
   console.log(`places: ${snap.size} docs`);
+  const tick = makeProgressTicker(snap.size, "places");
 
   for (const doc of snap.docs) {
     const d = doc.data();
     const name = (d.name || "").trim();
-    if (!name) continue;
+    if (!name) {
+      tick();
+      continue;
+    }
 
     // Legacy places don't have a flat `address` field — it's computed at
     // creation time for a one-off geocode call, never stored. Reconstruct
@@ -790,11 +1007,41 @@ async function migratePlaces(client, metroIdMap, coordinates) {
     const lat = coord && typeof coord.lat === "number" ? coord.lat : null;
     const lng = coord && typeof coord.lng === "number" ? coord.lng : null;
 
+    // places.category/subcategory stay free text (unchanged), but back them
+    // with the real place_categories/place_subcategories catalog (issue
+    // #59) the same way exercise focuses/subtypes are, so the catalog
+    // admin picker isn't empty on day one.
+    const categoryId = await upsertNamedCatalogRow(client, "place_categories", d.category || null, placeCategoryCache, "placeCategoriesUpserted");
+    await upsertScopedCatalogRow(client, "place_subcategories", "category_id", categoryId, d.subcategory || null, placeSubcategoryCache, "placeSubcategoriesUpserted");
+
+    // Real bug found running this against real production data (issue
+    // #79): this used to read `on conflict (name)`, matching a real
+    // `unique(name)` constraint that existed when this script was written.
+    // That constraint is gone (2026-08-29, see places.name's own comment in
+    // schema.ts) — replaced by places_name_parent_id_idx on (name,
+    // parent_id), since real geography reuses names across hierarchy
+    // levels. `on conflict (name)` no longer matches ANY constraint, so
+    // --commit failed outright with a Postgres 42P10 the first time this
+    // ever ran against a live database. Fixed to match the real index.
+    // Every row this function inserts always has parent_id NULL (hierarchy
+    // is applied afterward by applyPlaceHierarchy's separate UPDATE) — and
+    // Postgres unique indexes treat every NULL as distinct from every
+    // other NULL, so this ON CONFLICT target will in practice never fire
+    // for a NULL-parent row even when the name repeats (a second row is
+    // inserted instead). That matches this schema's own accepted tradeoff
+    // (see places.name's comment: "two root-level places with the same
+    // name... intentionally rare edge case") for the sanctioned `--wipe
+    // --commit` clean-reload path this script is meant for; it does mean a
+    // `--commit` WITHOUT `--wipe`, re-run against a places table a prior
+    // run already gave real parent ids to, can add a duplicate root-level
+    // place rather than updating the existing one — a narrower, pre-
+    // existing version of the same edge case, not something this fix
+    // introduces.
     if (COMMIT) {
       const { rows } = await client.query(
         `insert into places (name, alias, address, category, subcategory, subregion_name, color, metro_id, lat, lng)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         on conflict (name) do update set
+         on conflict (name, parent_id) do update set
            alias = excluded.alias,
            address = excluded.address,
            category = excluded.category,
@@ -824,6 +1071,7 @@ async function migratePlaces(client, metroIdMap, coordinates) {
       idMap.set(doc.id, -1);
       report.placesUpserted++;
     }
+    tick();
   }
   return idMap;
 }
@@ -982,6 +1230,41 @@ async function finalizeExerciseSubtypesFromWorkouts(client, categoryByName) {
   }
 }
 
+/** Must also run AFTER the days loop, same reasoning as
+ * finalizeExerciseSubtypesFromWorkouts above — upserts every distinct
+ * free-text value the days loop observed on sleep_location_type/subtype,
+ * the shared locationType column (movies/TV/books/sports/games), and
+ * sports_watches.season/game_type into their real catalog tables (issues
+ * #59/#61/#71). `leagueIdMap` (built earlier by migrateSportsCatalog) is
+ * needed to scope each season to the right league. */
+async function finalizeDerivedCatalogsFromDays(client, leagueIdMap) {
+  for (const type of report.sleepLocationTypesSeen) {
+    await upsertNamedCatalogRow(client, "sleep_location_types", type, sleepLocationTypeCache, "sleepLocationTypesUpserted");
+  }
+  for (const [type, subtypes] of report.sleepLocationSubtypesSeen) {
+    const typeId = sleepLocationTypeCache.get(type);
+    for (const subtype of subtypes) {
+      await upsertScopedCatalogRow(client, "sleep_location_subtypes", "type_id", typeId, subtype, sleepLocationSubtypeCache, "sleepLocationSubtypesUpserted");
+    }
+  }
+  for (const locationType of report.entertainmentLocationTypesSeen) {
+    await upsertNamedCatalogRow(client, "entertainment_location_types", locationType, entertainmentLocationTypeCache, "entertainmentLocationTypesUpserted");
+  }
+  for (const gameType of report.sportsGameTypesSeen) {
+    await upsertNamedCatalogRow(client, "sports_game_types", gameType, sportsGameTypeCache, "sportsGameTypesUpserted");
+  }
+  for (const [sportLeagueKey, seasons] of report.sportsSeasonsSeen) {
+    const leagueId = leagueIdMap.get(sportLeagueKey);
+    if (leagueId === undefined) continue; // league itself didn't resolve — already reported via unmatchedSportsLeagues
+    for (const season of seasons) {
+      await upsertScopedCatalogRow(client, "sports_seasons", "league_id", leagueId, season, sportsSeasonCache, "sportsSeasonsUpserted");
+    }
+  }
+  for (const deviceType of report.gameDeviceTypesSeen) {
+    await upsertNamedCatalogRow(client, "game_device_types", deviceType, gameDeviceTypeCache, "gameDeviceTypesUpserted");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Entertainment catalog migration: movies/TV, sports, books, games. Each
 // builds a Firestore-key -> Postgres-id map (or, for sports, several,
@@ -992,20 +1275,28 @@ async function finalizeExerciseSubtypesFromWorkouts(client, categoryByName) {
  * 'tv_show', runtime, watches: {date: count} (legacy denormalized index,
  * NOT migrated — day docs' own movies[] arrays are the source of truth for
  * movie_watches below), id, tmdb_id, genres: [{id,name}], poster_path,
- * collection?, seasons?, interested?, uninterested_date?, status?,
- * last_refreshed?, next_episode?}}. Returns a movieFsId -> Postgres movie
- * id map (TV shows don't need one — nothing downstream references a TV
- * show by id, since episode watches aren't migrated). */
+ * collection?, seasons? ({season_number: {episode_number: tmdbEpisodeId}} —
+ * the real episode-id lookup table, not a summary; migrateTvEpisodes below
+ * reads it from entertainment/episodes directly instead, but it's the same
+ * data), interested?, uninterested_date?, status?, last_refreshed?,
+ * next_episode?}}. Returns { movieIdMapByFsId, tvShowIdMapByFsId } —
+ * tvShowIdMapByFsId now matters: migrateTvEpisodes below resolves each
+ * episode's `show` field against it. */
 async function migrateMoviesAndTvShows(client) {
   const doc = await fs.collection("searchs").doc("media").get();
   const data = doc.data() || {};
   const movieIdMapByFsId = new Map();
+  const tvShowIdMapByFsId = new Map();
   const fsIds = Object.keys(data);
   console.log(`movies/TV: ${fsIds.length} entries in searchs/media`);
+  const tick = makeProgressTicker(fsIds.length, "movies/TV shows");
 
   for (const fsId of fsIds) {
     const d = data[fsId];
-    if (!d || !d.tmdb_id) continue;
+    if (!d || !d.tmdb_id) {
+      tick();
+      continue;
+    }
 
     if (d.type === "movie") {
       const runtime = typeof d.runtime === "number" ? d.runtime : parseIntOrNull(d.runtime);
@@ -1049,7 +1340,7 @@ async function migrateMoviesAndTvShows(client) {
       }
 
       if (COMMIT) {
-        await client.query(
+        const { rows } = await client.query(
           `insert into tv_shows (tmdb_id, title, poster_path, genres, status, interested, uninterested_date, last_refreshed, next_episode_date, next_episode_season, next_episode_number)
            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            on conflict (tmdb_id) do update set
@@ -1062,7 +1353,8 @@ async function migrateMoviesAndTvShows(client) {
              last_refreshed = excluded.last_refreshed,
              next_episode_date = excluded.next_episode_date,
              next_episode_season = excluded.next_episode_season,
-             next_episode_number = excluded.next_episode_number`,
+             next_episode_number = excluded.next_episode_number
+           returning id`,
           [
             d.tmdb_id,
             d.name || "(untitled)",
@@ -1077,11 +1369,114 @@ async function migrateMoviesAndTvShows(client) {
             nextEpisodeNumber,
           ]
         );
+        tvShowIdMapByFsId.set(fsId, rows[0].id);
+      } else {
+        tvShowIdMapByFsId.set(fsId, -1);
       }
       report.tvShowsUpserted++;
     }
+    tick();
   }
-  return movieIdMapByFsId;
+  return { movieIdMapByFsId, tvShowIdMapByFsId };
+}
+
+/** entertainment/episodes = {tmdbEpisodeId: {id, air_date ("YYYY/MM/DD" —
+ * slashes, unlike every other date field in this script), runtime, name,
+ * show (internal show id, == searchs/media key == the tvShowIdMapByFsId key
+ * above), season, episode, watches: {daynum: count, legacy?: count}}} — a
+ * flat map covering every episode ever added, across every show. Per-day
+ * watch EVENTS live on days/{day}.tvshows[] (transformTvEpisodeWatches
+ * below) — this map's own `watches` counts are a denormalized index kept in
+ * sync from that, EXCEPT the "legacy" key: a season-level "mark as watched,
+ * exact date unknown" toggle that writes directly here and never touches
+ * any day doc at all (tv_episode_watches.date is nullable specifically for
+ * this — a null-date row means "watched, unknown when"). Confirmed via the
+ * legacy app's own source that this bulk-mark flow calls a function
+ * (`episode.addWatch`) that doesn't actually exist anywhere in its
+ * codebase, so it may have never worked in practice — migrated defensively
+ * here regardless (harmless no-op if `watches.legacy` is empty/absent
+ * everywhere, correct if it isn't).
+ *
+ * Returns a TMDB episode id (string) -> Postgres tv_episodes.id map, used
+ * by transformTvEpisodeWatches to resolve each day doc's tvshows[]
+ * entries. */
+async function migrateTvEpisodes(client, tvShowIdMapByFsId) {
+  const doc = await fs.collection("entertainment").doc("episodes").get();
+  const data = doc.data() || {};
+  const episodeIdMap = new Map(); // tmdbEpisodeId (string) -> Postgres id
+  const tmdbEpisodeIds = Object.keys(data);
+  console.log(`tv episodes: ${tmdbEpisodeIds.length} entries in entertainment/episodes`);
+  const tick = makeProgressTicker(tmdbEpisodeIds.length, "tv episodes");
+
+  const legacyWatches = []; // {episodeId, count} — written after every episode has a Postgres id
+
+  for (const tmdbEpisodeIdStr of tmdbEpisodeIds) {
+    const d = data[tmdbEpisodeIdStr] || {};
+    const showId = tvShowIdMapByFsId.get(d.show);
+    const season = parseIntOrNull(d.season);
+    const episode = parseIntOrNull(d.episode);
+    const tmdbEpisodeId = parseIntOrNull(d.id) ?? parseIntOrNull(tmdbEpisodeIdStr);
+    // season/episode/show are all NOT NULL columns — skip (reported, not
+    // fatal) rather than let a Postgres constraint violation abort the run
+    // over what should be rare, malformed data.
+    if (showId === undefined || season === null || episode === null || tmdbEpisodeId === null) {
+      report.unmatchedTvEpisodes.add(`${d.show ?? "(no show)"}/${d.season ?? "?"}x${d.episode ?? "?"}`);
+      tick();
+      continue;
+    }
+
+    let airDate = null;
+    if (typeof d.air_date === "string" && d.air_date.trim()) {
+      const dt = new Date(d.air_date.replaceAll("/", "-"));
+      if (!Number.isNaN(dt.getTime())) airDate = toDateColumn(dt);
+    }
+
+    let episodePgId;
+    if (COMMIT) {
+      const { rows } = await client.query(
+        `insert into tv_episodes (show_id, tmdb_episode_id, season, episode, name, air_date, runtime_minutes)
+         values ($1, $2, $3, $4, $5, $6, $7)
+         on conflict (tmdb_episode_id) do update set
+           show_id = excluded.show_id,
+           season = excluded.season,
+           episode = excluded.episode,
+           name = excluded.name,
+           air_date = excluded.air_date,
+           runtime_minutes = excluded.runtime_minutes
+         returning id`,
+        [showId, tmdbEpisodeId, season, episode, d.name || null, airDate, parseIntOrNull(d.runtime)]
+      );
+      episodePgId = rows[0].id;
+    } else {
+      episodePgId = -1;
+    }
+    episodeIdMap.set(tmdbEpisodeIdStr, episodePgId);
+    report.tvEpisodesUpserted++;
+
+    const legacyCount = d.watches && typeof d.watches.legacy === "number" ? d.watches.legacy : 0;
+    if (legacyCount > 0) legacyWatches.push({ episodePgId, count: legacyCount });
+    tick();
+  }
+
+  if (legacyWatches.length > 0) {
+    const total = legacyWatches.reduce((n, w) => n + w.count, 0);
+    console.log(`tv episodes: ${legacyWatches.length} episode(s) have "legacy" (exact-date-unknown) watches — ${total} watch row(s)`);
+  }
+  report.tvEpisodeWatchesSeen += legacyWatches.reduce((n, w) => n + w.count, 0);
+  if (COMMIT) {
+    for (const { episodePgId, count } of legacyWatches) {
+      // Replace-on-save, same re-runnable pattern as everything else:
+      // clear any previously-migrated legacy-date rows for this episode,
+      // then reinsert `count` of them.
+      await client.query(`delete from tv_episode_watches where episode_id = $1 and date is null`, [episodePgId]);
+      for (let i = 0; i < count; i++) {
+        await client.query(`insert into tv_episode_watches (episode_id, date) values ($1, null)`, [episodePgId]);
+        report.tvEpisodeWatchesWritten++;
+      }
+    }
+  }
+
+  return episodeIdMap;
 }
 
 /** entertainment/sports = {sportName: {is_team_sport, leagues:
@@ -1100,6 +1495,8 @@ async function migrateSportsCatalog(client) {
   const teamIdMap = new Map(); // "sportName/teamName" -> id
   const sportNames = Object.keys(data);
   console.log(`sports: ${sportNames.length} entries in entertainment/sports`);
+  const totalTeams = sportNames.reduce((n, name) => n + Object.keys(data[name]?.teams || {}).length, 0);
+  const tick = makeProgressTicker(totalTeams, "sports teams");
 
   for (const sportName of sportNames) {
     const sport = data[sportName] || {};
@@ -1147,6 +1544,11 @@ async function migrateSportsCatalog(client) {
       }
       const homeLocation = team.city || team.nationaltity || null;
 
+      // sports_teams.division stays free text, backed by sports_divisions
+      // (issue #71) scoped to the same league — same reasoning as
+      // place_categories above.
+      await upsertScopedCatalogRow(client, "sports_divisions", "league_id", leagueId, team.division || null, sportsDivisionCache, "sportsDivisionsUpserted");
+
       if (COMMIT) {
         const { rows } = await client.query(
           `insert into sports_teams (sport_id, league_id, name, alias, home_location, color, division)
@@ -1165,6 +1567,7 @@ async function migrateSportsCatalog(client) {
         teamIdMap.set(`${sportName}/${teamName}`, -1);
       }
       report.sportsTeamsUpserted++;
+      tick();
     }
   }
   return { sportIdMap, leagueIdMap, teamIdMap };
@@ -1183,6 +1586,7 @@ async function migrateBooksCatalog(client) {
   const idMap = new Map();
   const googleBooksIds = Object.keys(data);
   console.log(`books: ${googleBooksIds.length} entries in entertainment/books`);
+  const tick = makeProgressTicker(googleBooksIds.length, "books");
 
   for (const googleBooksId of googleBooksIds) {
     const d = data[googleBooksId] || {};
@@ -1219,6 +1623,7 @@ async function migrateBooksCatalog(client) {
       idMap.set(googleBooksId, -1);
     }
     report.booksUpserted++;
+    tick();
   }
   return idMap;
 }
@@ -1232,9 +1637,17 @@ async function migrateGamesCatalog(client) {
   const idMap = new Map();
   const gameNames = Object.keys(data);
   console.log(`games: ${gameNames.length} entries in entertainment/games`);
+  const tick = makeProgressTicker(gameNames.length, "games");
 
   for (const gameName of gameNames) {
     const d = data[gameName] || {};
+
+    // games.type/subtype stay free text, backed by game_categories/
+    // game_subcategories (issue #68) — same reasoning as place_categories
+    // above.
+    const categoryId = await upsertNamedCatalogRow(client, "game_categories", d.type || null, gameCategoryCache, "gameCategoriesUpserted");
+    await upsertScopedCatalogRow(client, "game_subcategories", "category_id", categoryId, d.subtype || null, gameSubcategoryCache, "gameSubcategoriesUpserted");
+
     if (COMMIT) {
       const { rows } = await client.query(
         `insert into games (name, type, subtype)
@@ -1248,6 +1661,7 @@ async function migrateGamesCatalog(client) {
       idMap.set(gameName, -1);
     }
     report.gamesUpserted++;
+    tick();
   }
   return idMap;
 }
@@ -1308,6 +1722,18 @@ function transformDay(daynum, data, peopleIdMap, placesIdMap) {
     instagram_followers: typeof data.insta_followers === "number" ? data.insta_followers : parseIntOrNull(data.insta_followers),
     instagram_following: typeof data.insta_following === "number" ? data.insta_following : parseIntOrNull(data.insta_following),
   };
+
+  // Backs sleep_location_types/subtypes (issue #59) — see
+  // finalizeDerivedCatalogsFromDays, which runs once the full days loop
+  // (and therefore this Set/Map) is complete.
+  if (columns.sleep_location_type) {
+    report.sleepLocationTypesSeen.add(columns.sleep_location_type);
+    if (columns.sleep_location_subtype) {
+      const set = report.sleepLocationSubtypesSeen.get(columns.sleep_location_type) || new Set();
+      set.add(columns.sleep_location_subtype);
+      report.sleepLocationSubtypesSeen.set(columns.sleep_location_type, set);
+    }
+  }
 
   // Positive/negative people — legacy keys are person1..person7 (positive)
   // and person-1..person-3 (negative), values are `people` doc IDs.
@@ -1414,11 +1840,41 @@ function transformMovieWatches(date, rawMovies, movieIdMapByFsId) {
       report.unmatchedMovies.add(m.id || m.name || "(unknown)");
       continue;
     }
+    if (m.location_type) report.entertainmentLocationTypesSeen.add(m.location_type);
     out.push({
       date,
       movie_id: movieId,
       rating: typeof m.rating === "number" ? m.rating : parseIntOrNull(m.rating),
       location_type: m.location_type || null,
+    });
+  }
+  return out;
+}
+
+/** Day doc tvshows[]: {show, name, season, episode, episode_id,
+ * location_type} — a genuinely different shape from movies[] above (no
+ * id/type/rating; episode_id is the TMDB episode id, the same key
+ * migrateTvEpisodes' episodeIdMap uses, so resolution goes straight through
+ * that rather than reconstructing show/season/episode). One entry per watch
+ * instance that day — a same-day rewatch appears as two entries with the
+ * same episode_id. No duration field in the legacy shape (same as movies —
+ * tv_episode_watches.durationMinutes is a client-side-only default from
+ * tv_episodes.runtimeMinutes per schema.ts, issue #61, not something
+ * historical data ever carried). */
+function transformTvEpisodeWatches(date, rawTvShows, episodeIdMap) {
+  if (!Array.isArray(rawTvShows)) return [];
+  const out = [];
+  for (const t of rawTvShows) {
+    const episodeId = episodeIdMap.get(String(t.episode_id));
+    if (episodeId === undefined) {
+      report.unmatchedTvEpisodes.add(String(t.episode_id ?? t.name ?? "(unknown)"));
+      continue;
+    }
+    if (t.location_type) report.entertainmentLocationTypesSeen.add(t.location_type);
+    out.push({
+      date,
+      episode_id: episodeId,
+      location_type: t.location_type || null,
     });
   }
   return out;
@@ -1453,6 +1909,18 @@ function transformSportsWatches(date, rawSports, sportIdMap, leagueIdMap, teamId
       awayTeamId = teamIdMap.get(`${s.sport}/${s.away_team}`) ?? null;
       if (awayTeamId === null) report.unmatchedSportsTeams.add(`${s.sport}/${s.away_team}`);
     }
+    // Backs sports_seasons/sports_game_types (issue #61) — season is scoped
+    // to a league (same "sport/league" key already used above), game_type
+    // is flat/unscoped. See finalizeDerivedCatalogsFromDays.
+    if (s.game_type) report.sportsGameTypesSeen.add(s.game_type);
+    if (s.season && s.league) {
+      const key = `${s.sport}/${s.league}`;
+      const set = report.sportsSeasonsSeen.get(key) || new Set();
+      set.add(s.season);
+      report.sportsSeasonsSeen.set(key, set);
+    }
+    if (s.location_type) report.entertainmentLocationTypesSeen.add(s.location_type);
+
     out.push({
       date,
       sport_id: sportId,
@@ -1481,6 +1949,7 @@ function transformBookSessions(date, rawBooks, bookIdMap) {
       report.unmatchedBooks.add(b.book || b.title || "(unknown)");
       continue;
     }
+    if (b.location_type) report.entertainmentLocationTypesSeen.add(b.location_type);
     out.push({
       date,
       book_id: bookId,
@@ -1505,11 +1974,16 @@ function transformGameSessions(date, rawGames, gameIdMap) {
       report.unmatchedGames.add(g.game || "(unknown)");
       continue;
     }
+    if (g.location_type) report.entertainmentLocationTypesSeen.add(g.location_type);
+    if (g.device) report.gameDeviceTypesSeen.add(g.device);
     out.push({
       date,
       game_id: gameId,
       duration_minutes: flattenDurationToMinutes(g.duration),
-      device: g.device || null,
+      // Firestore field is still `device` (legacy name, unchanged) — the
+      // Postgres column was renamed device -> device_type (issue #75); this
+      // used to write `device` and silently didn't match any column.
+      device_type: g.device || null,
       location_type: g.location_type || null,
     });
   }
@@ -1616,6 +2090,17 @@ async function writeMovieWatches(client, date, watches) {
   }
 }
 
+async function writeTvEpisodeWatches(client, date, watches) {
+  await client.query(`delete from tv_episode_watches where date = $1`, [date]);
+  for (const w of watches) {
+    await client.query(
+      `insert into tv_episode_watches (episode_id, date, location_type) values ($1, $2, $3)`,
+      [w.episode_id, w.date, w.location_type]
+    );
+    report.tvEpisodeWatchesWritten++;
+  }
+}
+
 async function writeSportsWatches(client, date, watches) {
   await client.query(`delete from sports_watches where date = $1`, [date]);
   for (const w of watches) {
@@ -1644,9 +2129,9 @@ async function writeGameSessions(client, date, sessions) {
   await client.query(`delete from game_sessions where date = $1`, [date]);
   for (const s of sessions) {
     await client.query(
-      `insert into game_sessions (game_id, date, duration_minutes, device, location_type)
+      `insert into game_sessions (game_id, date, duration_minutes, device_type, location_type)
        values ($1, $2, $3, $4, $5)`,
-      [s.game_id, s.date, s.duration_minutes, s.device, s.location_type]
+      [s.game_id, s.date, s.duration_minutes, s.device_type, s.location_type]
     );
     report.gameSessionsWritten++;
   }
@@ -1683,6 +2168,7 @@ async function main() {
     const { firstAppearance, earliestDaynum } = computePersonFirstAppearance(allDaySnaps);
 
     console.log("\n--- Catalogs ---");
+    await migrateEntertainmentKinds(client);
     const tagIdMap = await migrateTags(client);
     const peopleIdMap = await migratePeople(client, firstAppearance, earliestDaynum, tagIdMap);
     const metroIdMap = await migrateMetros(client);
@@ -1708,7 +2194,8 @@ async function main() {
     }
 
     console.log("\n--- Entertainment catalogs ---");
-    const movieIdMapByFsId = await migrateMoviesAndTvShows(client);
+    const { movieIdMapByFsId, tvShowIdMapByFsId } = await migrateMoviesAndTvShows(client);
+    const tvEpisodeIdMap = await migrateTvEpisodes(client, tvShowIdMapByFsId);
     const { sportIdMap, leagueIdMap, teamIdMap } = await migrateSportsCatalog(client);
     const bookIdMap = await migrateBooksCatalog(client);
     const gameIdMap = await migrateGamesCatalog(client);
@@ -1747,6 +2234,9 @@ async function main() {
           const movieWatches = transformMovieWatches(columns.date, data.movies, movieIdMapByFsId);
           report.movieWatchesSeen += movieWatches.length;
 
+          const tvEpisodeWatches = transformTvEpisodeWatches(columns.date, data.tvshows, tvEpisodeIdMap);
+          report.tvEpisodeWatchesSeen += tvEpisodeWatches.length;
+
           const sportsWatches = transformSportsWatches(columns.date, data.sports, sportIdMap, leagueIdMap, teamIdMap);
           report.sportsWatchesSeen += sportsWatches.length;
 
@@ -1759,6 +2249,7 @@ async function main() {
           if (COMMIT) {
             await writeDay(client, columns, workouts);
             await writeMovieWatches(client, columns.date, movieWatches);
+            await writeTvEpisodeWatches(client, columns.date, tvEpisodeWatches);
             await writeSportsWatches(client, columns.date, sportsWatches);
             await writeBookSessions(client, columns.date, bookSessions);
             await writeGameSessions(client, columns.date, gameSessions);
@@ -1771,8 +2262,9 @@ async function main() {
         }
       }
 
-      // Needs the now-complete report.subtypesSeen from the loop above.
+      // Both need the now-complete report state from the loop above.
       await finalizeExerciseSubtypesFromWorkouts(client, exerciseCategoryByName);
+      await finalizeDerivedCatalogsFromDays(client, leagueIdMap);
 
       if (COMMIT) await client.query("commit");
     } catch (err) {
@@ -1794,25 +2286,38 @@ function printReport() {
   console.log("\n=== Report ===\n");
 
   console.log("-- Core catalogs --");
+  console.log(`Entertainment kinds:      ${report.entertainmentKindsUpserted}`);
   console.log(`Tags upserted:            ${report.tagsUpserted}`);
   console.log(`People upserted:          ${report.peopleUpserted}`);
   console.log(`Metros upserted:          ${report.metrosUpserted}`);
   console.log(`Places upserted:          ${report.placesUpserted}`);
   console.log(`Place hierarchy applied:  ${report.placesHierarchyApplied}`);
+  console.log(`Place categories:         ${report.placeCategoriesUpserted}`);
+  console.log(`Place subcategories:      ${report.placeSubcategoriesUpserted}`);
   console.log(`Exercise focuses:         ${report.exerciseFocusesUpserted}`);
   console.log(`Exercise subfocuses:      ${report.exerciseSubfocusesUpserted}`);
   console.log(`Exercise focus links:     ${report.exerciseFocusLinksWritten}`);
   console.log(`Exercises upserted:       ${report.exercisesUpserted}`);
   console.log(`Exercise subtypes:        ${report.exerciseSubtypesUpserted}`);
+  console.log(`Sleep location types:     ${report.sleepLocationTypesUpserted}`);
+  console.log(`Sleep location subtypes:  ${report.sleepLocationSubtypesUpserted}`);
+  console.log(`Entertainment loc. types: ${report.entertainmentLocationTypesUpserted}`);
 
   console.log("\n-- Entertainment catalogs --");
   console.log(`Movies upserted:          ${report.moviesUpserted}`);
   console.log(`TV shows upserted:        ${report.tvShowsUpserted}`);
+  console.log(`TV episodes upserted:     ${report.tvEpisodesUpserted}`);
   console.log(`Sports upserted:          ${report.sportsUpserted}`);
   console.log(`Sports leagues upserted:  ${report.sportsLeaguesUpserted}`);
   console.log(`Sports teams upserted:    ${report.sportsTeamsUpserted}`);
+  console.log(`Sports divisions:         ${report.sportsDivisionsUpserted}`);
+  console.log(`Sports seasons:           ${report.sportsSeasonsUpserted}`);
+  console.log(`Sports game types:        ${report.sportsGameTypesUpserted}`);
   console.log(`Books upserted:           ${report.booksUpserted}`);
   console.log(`Games upserted:           ${report.gamesUpserted}`);
+  console.log(`Game categories:          ${report.gameCategoriesUpserted}`);
+  console.log(`Game subcategories:       ${report.gameSubcategoriesUpserted}`);
+  console.log(`Game device types:        ${report.gameDeviceTypesUpserted}`);
 
   console.log("\n-- Days --");
   console.log(`Days processed:           ${report.daysProcessed}`);
@@ -1820,6 +2325,7 @@ function printReport() {
   console.log(`Workouts found:           ${report.workoutsSeen}${note}`);
   console.log(`Sets found:               ${report.setsSeen}${note}`);
   console.log(`Movie watches found:      ${report.movieWatchesSeen}${note}`);
+  console.log(`TV episode watches found: ${report.tvEpisodeWatchesSeen}${note}`);
   console.log(`Sports watches found:     ${report.sportsWatchesSeen}${note}`);
   console.log(`Book sessions found:      ${report.bookSessionsSeen}${note}`);
   console.log(`Game sessions found:      ${report.gameSessionsSeen}${note}`);
@@ -1827,6 +2333,7 @@ function printReport() {
     console.log(`Workouts written:         ${report.workoutsWritten}`);
     console.log(`Sets written:             ${report.setsWritten}`);
     console.log(`Movie watches written:    ${report.movieWatchesWritten}`);
+    console.log(`TV episode watches written: ${report.tvEpisodeWatchesWritten}`);
     console.log(`Sports watches written:   ${report.sportsWatchesWritten}`);
     console.log(`Book sessions written:    ${report.bookSessionsWritten}`);
     console.log(`Game sessions written:    ${report.gameSessionsWritten}`);
@@ -1856,6 +2363,7 @@ function printReport() {
     ["world-tree place ids not found in the places catalog (hierarchy skipped)", report.unmatchedPlaceHierarchy],
     ["Exercise focus/subfocus references not found in the focuses catalog", report.unmatchedExerciseFocuses],
     ["Movie ids referenced by a day but not found in the media catalog", report.unmatchedMovies],
+    ["TV episodes referenced but not found/mapped (missing show/season/episode or resolved via a bad episode_id)", report.unmatchedTvEpisodes],
     ["Sports referenced by a day but not found in the sports catalog", report.unmatchedSports],
     ["Sports leagues referenced but not found", report.unmatchedSportsLeagues],
     ["Sports teams referenced but not found", report.unmatchedSportsTeams],
