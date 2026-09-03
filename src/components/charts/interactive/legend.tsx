@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import * as d3 from "d3";
 import { cn } from "@/lib/utils";
 
 // Shared Legend component (#17's "shared Legend component" scope item).
@@ -130,6 +132,75 @@ export function Legend({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * A sequential color scale's own legend — low value -> gradient bar -> high
+ * value, with an optional indicator tick marking where a hovered/focused
+ * point falls. Extracted from InteractiveCalendar (#21) so InteractiveGeo
+ * (#24) and any future sequential-fill primitive share one implementation
+ * instead of a second hand-rolled gradient swatch drifting from the first.
+ *
+ * Deliberately positioning-agnostic on its own — renders as a normal flow
+ * row by default; `className`/`style` are how a caller opts into something
+ * else (InteractiveCalendar's own `position: fixed` bottom-of-viewport
+ * treatment, needed there because a multi-year calendar can scroll far
+ * past the viewport; InteractiveGeo just renders it inline below the map,
+ * whose height is already fixed and always on screen).
+ */
+export function SequentialLegend({
+  domain,
+  colorScale,
+  formatValue,
+  valueT,
+  className,
+  style,
+}: {
+  /** The scale's `[min, max]` — rendered as the two end labels. */
+  domain: [number, number];
+  /** Any d3 sequential scale exposing `.interpolator()` (linear or log —
+   * this component sampling t in [0,1] for the gradient bar doesn't care
+   * which; only the *legend* row's own position-mapping would, and that's
+   * `valueT`'s job, not this component's). */
+  colorScale: { interpolator(): (t: number) => string };
+  formatValue: (value: number) => string;
+  /** Where a hovered/focused value falls along the gradient, as a 0-1
+   * fraction — pass `null` to hide the indicator tick. The caller computes
+   * this rather than this component deriving it from `domain`, since that
+   * mapping depends on whether the underlying scale is linear or log. */
+  valueT: number | null;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  // Ten sampled stops (not just the two endpoints) — the interpolator
+  // (interpolateHcl) isn't linear in sRGB, so a plain 2-stop CSS gradient
+  // would visibly diverge from what the scale actually produces partway
+  // through the ramp.
+  const gradientStops = useMemo(() => {
+    const interpolate = colorScale.interpolator();
+    return d3.range(0, 1.0001, 0.1).map((t) => interpolate(t));
+  }, [colorScale]);
+
+  return (
+    <div className={cn("flex items-center gap-3 text-xs text-muted-foreground", className)} style={style}>
+      <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
+      <span className="relative h-2 min-w-0 flex-1">
+        <span
+          aria-hidden
+          className="block h-2 w-full rounded-full"
+          style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
+        />
+        {valueT !== null ? (
+          <span
+            aria-hidden
+            className="absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
+            style={{ left: `${valueT * 100}%` }}
+          />
+        ) : null}
+      </span>
+      <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { SeriesKey } from "./legend";
+import { SeriesKey, type SeriesKeyVariant } from "./legend";
 
 // Shared tooltip + crosshair (#17's "shared tooltip component" and
 // "crosshair hook" scope items) — the interactive half of the toolkit.
@@ -20,6 +20,13 @@ export type TooltipRow = {
    * component doesn't format numbers itself. */
   value: string;
   color: string;
+  /** The swatch's own shape — defaults to "line" (matching every existing
+   * line/area/hist/calendar/network caller, where a row's color identifies
+   * a *line* series or a point mark). Pass "swatch" for a row whose color
+   * identifies an *area* (a filled region, a choropleth country) instead —
+   * a line key reads as "this is a line series" and is the wrong shape
+   * entirely when the thing being colored is a 2D area, not a stroke. */
+  variant?: SeriesKeyVariant;
 };
 
 /**
@@ -80,7 +87,7 @@ export function ChartTooltip({
       <div className="flex flex-col gap-1">
         {rows.map((row) => (
           <div key={row.label} className="flex items-center gap-1.5">
-            <SeriesKey color={row.color} variant="line" />
+            <SeriesKey color={row.color} variant={row.variant ?? "line"} />
             <span className="font-semibold text-popover-foreground tabular-nums">{row.value}</span>
             <span className="text-muted-foreground">{row.label}</span>
           </div>
