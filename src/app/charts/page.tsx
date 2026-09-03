@@ -36,11 +36,6 @@ const CHARTS = [
     description: "Workout count by category, exercise, or subtype, over any time range.",
   },
   {
-    href: "/charts/subs",
-    title: "Subs over time",
-    description: "A mini trend chart per sub, side by side.",
-  },
-  {
     href: "/charts/places",
     title: "Most-visited places",
     description: "Ranked by how often each place filled your day's two place slots.",
