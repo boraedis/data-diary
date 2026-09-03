@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "migrate:history": "node scripts/migrate-history.mjs",
     "backfill:place-paths": "node scripts/backfill-place-paths.mjs",
     "diagnose:place-cycles": "node scripts/diagnose-place-cycles.mjs",
@@ -45,6 +47,8 @@
     "firebase-admin": "^13.10.0",
     "pg": "^8.23.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^3.2.7"
   }
 }
