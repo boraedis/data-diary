@@ -80,7 +80,13 @@ function summarize(day: DayPayload): CategorySummary[] {
       key: "entertainment",
       label: "Entertainment",
       kind: "count",
-      count: day.entertainment.length + day.movies.length + day.tvEpisodeWatches.length + day.sportsWatches.length + day.bookSessions.length,
+      count:
+        day.entertainment.length +
+        day.movies.length +
+        day.tvEpisodeWatches.length +
+        day.sportsWatches.length +
+        day.bookSessions.length +
+        day.gameSessions.length,
     },
     { key: "places", label: "Places", kind: "progress", filled: day.places.length, total: PLACE_SLOTS },
     {
