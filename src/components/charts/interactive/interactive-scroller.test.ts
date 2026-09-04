@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { computeMovingAverage, type InteractiveScrollerPoint } from "./interactive-scroller";
+import {
+  computeLabelPlacements,
+  computeMovingAverage,
+  computeRegionDepths,
+  type InteractiveScrollerPoint,
+  type LabelCandidate,
+} from "./interactive-scroller";
 
-// Covers computeMovingAverage's own logic (issue #117) — the one piece of
-// non-trivial, easily-isolated math in this primitive. Everything else
-// (the d3 rendering, the zoom/minimap sync) was verified live against real
-// weight data in the browser instead, per this issue's own acceptance
-// criteria; see the PR for that record.
+// Covers this primitive's non-trivial, easily-isolated pure logic (issue
+// #117's deep-dive design pass): the moving average, region depth-stacking,
+// and the simplified point-label placement heuristic. Everything else (the
+// d3 rendering, the zoom/minimap sync, actual on-screen label/region
+// layout) was verified live against real data in the browser instead; see
+// the PR for that record.
 
 function pts(values: number[]): InteractiveScrollerPoint[] {
   return values.map((y, i) => ({ x: new Date(2024, 0, i + 1), y }));
@@ -38,5 +45,95 @@ describe("computeMovingAverage", () => {
 
   it("handles an empty series", () => {
     expect(computeMovingAverage([], 30)).toEqual([]);
+  });
+});
+
+function region(start: string, end: string, label: string) {
+  return { start: new Date(start), end: new Date(end), label };
+}
+
+describe("computeRegionDepths", () => {
+  it("gives non-overlapping regions the same depth (0)", () => {
+    const regions = [region("2020-01-01", "2020-06-01", "A"), region("2020-07-01", "2020-12-01", "B")];
+    const result = computeRegionDepths(regions);
+    expect(result.map((r) => r.depth)).toEqual([0, 0]);
+  });
+
+  it("bumps an overlapping region to the next free depth", () => {
+    // B overlaps A entirely (nested), so B needs depth 1.
+    const regions = [region("2020-01-01", "2020-12-01", "A"), region("2020-03-01", "2020-06-01", "B")];
+    const result = computeRegionDepths(regions);
+    expect(result.find((r) => r.label === "A")?.depth).toBe(0);
+    expect(result.find((r) => r.label === "B")?.depth).toBe(1);
+  });
+
+  it("reuses a freed depth once the earlier region has ended", () => {
+    // B overlaps A (depth 1), but C starts after A ends — C can reuse depth 0, not stack to depth 2.
+    const regions = [
+      region("2020-01-01", "2020-03-01", "A"),
+      region("2020-02-01", "2020-02-15", "B"),
+      region("2020-04-01", "2020-05-01", "C"),
+    ];
+    const result = computeRegionDepths(regions);
+    expect(result.find((r) => r.label === "A")?.depth).toBe(0);
+    expect(result.find((r) => r.label === "B")?.depth).toBe(1);
+    expect(result.find((r) => r.label === "C")?.depth).toBe(0);
+  });
+
+  it("stacks three mutually-overlapping regions into three distinct depths", () => {
+    const regions = [
+      region("2020-01-01", "2020-12-01", "A"),
+      region("2020-01-01", "2020-12-01", "B"),
+      region("2020-01-01", "2020-12-01", "C"),
+    ];
+    const result = computeRegionDepths(regions);
+    expect(new Set(result.map((r) => r.depth))).toEqual(new Set([0, 1, 2]));
+  });
+
+  it("handles an empty list", () => {
+    expect(computeRegionDepths([])).toEqual([]);
+  });
+});
+
+function candidate(id: string, pixelX: number, pixelY: number, text: string): LabelCandidate {
+  return { id, pixelX, pixelY, text, color: "red" };
+}
+
+describe("computeLabelPlacements", () => {
+  it("places every label when they're far apart", () => {
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A"), candidate("b", 500, 100, "B")], 11);
+    expect(result.map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("prefers placing a label above its point", () => {
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A")], 11);
+    expect(result).toEqual([{ id: "a", pixelX: 0, pixelY: 100, text: "A", color: "red", above: true }]);
+  });
+
+  it("falls back to below when two nearby labels would collide above", () => {
+    // Two points close enough in x that their "above" boxes would overlap —
+    // the second-processed (by x order) one should fall back to below
+    // rather than being hidden outright.
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A"), candidate("b", 5, 100, "B")], 11);
+    expect(result).toHaveLength(2);
+    const a = result.find((r) => r.id === "a");
+    const b = result.find((r) => r.id === "b");
+    expect(a?.above).toBe(true);
+    expect(b?.above).toBe(false);
+  });
+
+  it("hides a label that overlaps in both directions", () => {
+    // Three points stacked at the same x, 10px apart — a takes "above", b
+    // (blocked above by a) takes "below", leaving c blocked in both
+    // directions (a's box above it, b's box below it) and hidden.
+    const result = computeLabelPlacements(
+      [candidate("a", 0, 90, "AAAAAAAAAA"), candidate("b", 0, 100, "BBBBBBBBBB"), candidate("c", 0, 110, "CCCCCCCCCC")],
+      11,
+    );
+    expect(result.map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("handles an empty candidate list", () => {
+    expect(computeLabelPlacements([], 11)).toEqual([]);
   });
 });
