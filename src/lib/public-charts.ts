@@ -5,11 +5,11 @@
 // intentionally the same for the curated chart types below. That keeps
 // this module self-contained: charts.ts can grow new fields or new chart
 // types without anything here changing unless someone deliberately adds
-// it. The three chart types here (weight, happiness trend, sleep) involve
-// no "subs", no address, no relationships, and no per-day free text, so
-// nothing needs masking beyond picking the right columns in the first
-// place — see PUBLIC_CHART_TYPES in src/lib/public-content.ts for the
-// curated list this corresponds to.
+// it. The chart types here (weight, happiness trend, daily happiness,
+// sleep) involve no "subs", no address, no relationships, and no per-day
+// free text, so nothing needs masking beyond picking the right columns in
+// the first place — see PUBLIC_CHART_TYPES in src/lib/public-content.ts
+// for the curated list this corresponds to.
 import { asc, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
@@ -66,6 +66,22 @@ export async function getPublicHappinessTrendData(): Promise<PublicMonthlyHappin
       max: Math.max(...values),
     };
   });
+}
+
+export type PublicHappinessScrollerPoint = { date: string; happiness: number };
+
+/** Raw-daily counterpart to getPublicHappinessTrendData's monthly
+ * bucketing above — issue #117 follow-up's happiness scroller, public
+ * side. No occupation/residence/relationship/age regions here (those stay
+ * private-only, same call as the weight scroller's own). */
+export async function getPublicHappinessScrollerData(): Promise<PublicHappinessScrollerPoint[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, happiness: days.happiness })
+    .from(days)
+    .where(isNotNull(days.happiness))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number }));
 }
 
 export type PublicSleepDay = { date: string; durationMinutes: number };

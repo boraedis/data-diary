@@ -16,6 +16,11 @@ const CHARTS = [
     description: "Monthly average happiness over time.",
   },
   {
+    href: "/charts/happiness-daily",
+    title: "Daily happiness",
+    description: "Zoomable line of every logged day's happiness score.",
+  },
+  {
     href: "/charts/weight",
     title: "Weight over time",
     description: "Zoomable line — drag the strip below to zoom into a range.",

@@ -9,7 +9,7 @@ import { MultiSelectPicker, type MultiSelectOption } from "@/components/charts/i
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
-import type { WeightChartRegionGroups, WeightMetricsPoint } from "@/lib/charts";
+import type { ProfileRegionGroups, WeightMetricsPoint } from "@/lib/charts";
 
 // First real consumer of InteractiveScroller (#117) — weight is exactly
 // this primitive's use case (raw daily density, not a pre-bucketed
@@ -117,10 +117,10 @@ export function WeightScrollerChart({
 }: {
   data: WeightMetricsPoint[];
   /** Age/occupation/residence/relationship region datasets — private-only
-   * (see getWeightChartRegions' own comment in src/lib/charts.ts). Omit
+   * (see getProfileRegionGroups' own comment in src/lib/charts.ts). Omit
    * entirely on the public chart page rather than passing empty arrays, so
    * the region-type picker doesn't render there at all. */
-  regionGroups?: WeightChartRegionGroups;
+  regionGroups?: ProfileRegionGroups;
   backHref?: string;
   backLabel?: string;
 }) {

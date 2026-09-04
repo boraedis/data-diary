@@ -31,6 +31,24 @@ export async function getHappinessHistogramData(): Promise<number[]> {
   return rows.map((r) => r.happiness as number);
 }
 
+// --- Happiness scroller ---------------------------------------------------
+
+export type HappinessScrollerPoint = { date: string; happiness: number };
+
+/** Every recorded happiness value, oldest first — the raw-daily-density
+ * counterpart to getHappinessAveragerData's monthly bucketing below,
+ * feeding InteractiveScroller the same way getWeightScrollerData does for
+ * weight (issue #117 follow-up). */
+export async function getHappinessScrollerData(): Promise<HappinessScrollerPoint[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, happiness: days.happiness })
+    .from(days)
+    .where(isNotNull(days.happiness))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number }));
+}
+
 // --- Weight scroller ---------------------------------------------------
 
 // Widened from a single weightKg field (issue #117 follow-up: "multi
@@ -94,7 +112,12 @@ export function computeAgeRegions(birthdate: string, until: Date): InteractiveSc
   return regions;
 }
 
-export type WeightChartRegionGroups = {
+// Generic across every InteractiveScroller chart, not weight-specific
+// (renamed from WeightChartRegionGroups once the happiness scroller became
+// a second real consumer of the exact same four region types — same
+// "generalize once there's a real second use" call this schema already
+// makes elsewhere).
+export type ProfileRegionGroups = {
   age: InteractiveScrollerRegion[];
   occupation: InteractiveScrollerRegion[];
   residence: InteractiveScrollerRegion[];
@@ -110,7 +133,7 @@ export type WeightChartRegionGroups = {
  * (today, typically) rather than left unbounded, since a region needs a
  * real right edge to render. Private-only (issue #117's own follow-up
  * note) — never call this from src/lib/public-charts.ts. */
-export async function getWeightChartRegions(until: Date = new Date()): Promise<WeightChartRegionGroups> {
+export async function getProfileRegionGroups(until: Date = new Date()): Promise<ProfileRegionGroups> {
   const [settings, occupations, residences, relationships] = await Promise.all([
     getProfileSettings(),
     listProfileOccupations(),
