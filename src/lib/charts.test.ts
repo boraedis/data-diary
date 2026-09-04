@@ -25,8 +25,15 @@ describe("computeAgeRegions", () => {
     expect(computeAgeRegions("2020-01-01", new Date(2010, 0, 1))).toEqual([]);
   });
 
-  it("never assigns a color (age bands are ordinal, not categorical)", () => {
-    const regions = computeAgeRegions("2000-01-01", new Date(2001, 0, 1));
-    expect(regions.every((r) => r.color === undefined)).toBe(true);
+  it("cycles through the fixed 7-color wheel by age, wrapping around", () => {
+    // 9 regions (age 0-8) over a wheel of 7 colors: age 7 repeats age 0's
+    // color, age 8 repeats age 1's.
+    const regions = computeAgeRegions("2000-01-01", new Date(2009, 0, 1));
+    expect(regions).toHaveLength(9);
+    const colors = regions.map((r) => r.color);
+    expect(colors.every((c) => typeof c === "string")).toBe(true);
+    expect(colors[7]).toBe(colors[0]);
+    expect(colors[8]).toBe(colors[1]);
+    expect(colors[0]).not.toBe(colors[1]);
   });
 });

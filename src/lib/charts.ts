@@ -57,16 +57,23 @@ export async function getWeightScrollerData(): Promise<WeightMetricsPoint[]> {
   return rows;
 }
 
+// Legacy's own fixed 7-color wheel for age bands (vis_functions.js:3294,
+// `ageRegions()`'s COLOR_WHEEL), cycled by `age % length` — explicitly
+// requested to carry this forward as-is rather than leaving age bands
+// uncolored. A deliberate, named exception to the categorical palette's
+// own "never cycle" rule the same way --metric-weight is: age bands are
+// ordinal (there's no fixed "5 real categories" here, potentially decades
+// of them), so cycling through a fixed rainbow and repeating is the only
+// way to give every band *some* color at all — it reads as "these are
+// different bands," not as "these are 7 comparable categories" the way
+// chart-1..5 does.
+const AGE_COLOR_WHEEL = ["#5F0F40", "#9A031E", "#E36414", "#C7BA25", "#518241", "#0F4C5C", "#242964"];
+
 /** One age-year band per birthday-to-birthday span, from birth to `until`
  * — the real-birthdate equivalent of legacy's `ageRegions()`
- * (vis_functions.js:3289), which instead hardcoded a fixed March 20 cutoff
- * and a fixed 7-color wheel cycling by `age % 7`. Neither carries over:
+ * (vis_functions.js:3289), which instead hardcoded a fixed March 20 cutoff;
  * this schema has a real `profileSettings.birthdate` to compute the actual
- * cutoff from, and a cycling hue wheel not anchored to the categorical
- * palette's fixed slots would break the dataviz skill's "never a
- * generated/cycled color" rule — age bands are ordinal, not categorical,
- * so they're left uncolored (InteractiveScroller's own muted-foreground
- * default) and differentiated by label alone. Exported for testability. */
+ * cutoff from instead. Exported for testability. */
 export function computeAgeRegions(birthdate: string, until: Date): InteractiveScrollerRegion[] {
   const birth = parseDate(birthdate);
   const regions: InteractiveScrollerRegion[] = [];
@@ -75,7 +82,12 @@ export function computeAgeRegions(birthdate: string, until: Date): InteractiveSc
   while (start < until) {
     const end = new Date(start);
     end.setFullYear(end.getFullYear() + 1);
-    regions.push({ start, end: end > until ? until : end, label: `Age ${age}` });
+    regions.push({
+      start,
+      end: end > until ? until : end,
+      label: `Age ${age}`,
+      color: AGE_COLOR_WHEEL[age % AGE_COLOR_WHEEL.length],
+    });
     start = end;
     age++;
   }
