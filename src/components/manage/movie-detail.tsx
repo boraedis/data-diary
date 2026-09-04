@@ -47,12 +47,16 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
               <dd>{movie.genres.length > 0 ? movie.genres.join(", ") : "—"}</dd>
               <dt className="text-muted-foreground">Collection</dt>
               <dd>{movie.collectionName ?? "—"}</dd>
+              <dt className="text-muted-foreground">Watchlist</dt>
+              <dd>{usage.onWatchlist ? "Yes" : "—"}</dd>
+              <dt className="text-muted-foreground">Ranking</dt>
+              <dd>{usage.rank !== null ? `#${usage.rank}` : "—"}</dd>
             </dl>
           </div>
 
           <DeleteCatalogItem
             itemLabel={movie.title}
-            isBlocked={usage.watches.length > 0}
+            isBlocked={usage.watches.length > 0 || usage.onWatchlist || usage.rank !== null}
             afterDeleteHref="/manage/entertainment/movies"
             onDelete={async () => {
               const res = await fetch(`/api/movies/${movie.id}`, { method: "DELETE" });
@@ -67,6 +71,8 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
                     </Link>
                   </li>
                 ))}
+                {usage.onWatchlist ? <li>On the watchlist</li> : null}
+                {usage.rank !== null ? <li>Ranked #{usage.rank}</li> : null}
               </ul>
             }
           />

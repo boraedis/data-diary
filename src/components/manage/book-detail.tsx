@@ -60,6 +60,10 @@ export function BookDetail({
               </dd>
               <dt className="text-muted-foreground">Completions</dt>
               <dd>{progress.completions}</dd>
+              <dt className="text-muted-foreground">Watchlist</dt>
+              <dd>{usage.onWatchlist ? "Yes" : "—"}</dd>
+              <dt className="text-muted-foreground">Ranking</dt>
+              <dd>{usage.rank !== null ? `#${usage.rank}` : "—"}</dd>
             </dl>
           </div>
 
@@ -91,7 +95,7 @@ export function BookDetail({
 
           <DeleteCatalogItem
             itemLabel={book.title}
-            isBlocked={usage.sessions.length > 0}
+            isBlocked={usage.sessions.length > 0 || usage.onWatchlist || usage.rank !== null}
             afterDeleteHref="/manage/entertainment/books"
             onDelete={async () => {
               const res = await fetch(`/api/books/${book.id}`, { method: "DELETE" });
@@ -106,6 +110,8 @@ export function BookDetail({
                     </Link>
                   </li>
                 ))}
+                {usage.onWatchlist ? <li>On the watchlist</li> : null}
+                {usage.rank !== null ? <li>Ranked #{usage.rank}</li> : null}
               </ul>
             }
           />
