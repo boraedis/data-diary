@@ -117,6 +117,7 @@ function EpisodeRow({
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="h-8"
+              autoFocus
             />
           </div>
           <div className="space-y-1">
@@ -231,6 +232,7 @@ function LogEpisodeModal({
               id="log-episode-season"
               value={selectedSeason ?? ""}
               onChange={(e) => setSelectedSeason(e.target.value ? Number(e.target.value) : null)}
+              autoFocus
             >
               <option value="">Choose a season…</option>
               {seasons.map((s) => (
