@@ -78,6 +78,17 @@
   --chart-3: oklch(0.64 0.14 150);
   --chart-4: oklch(0.43 0.18 20);
   --chart-5: oklch(0.47 0.14 225);
+  /* Fixed colors for specific, always-recognizable metrics — NOT part of
+     the categorical-slot rotation above (never assigned by series index,
+     never reused for an arbitrary series), an intentional, named exception
+     the same way the sequential/diverging scales have their own dedicated
+     endpoints outside the chart-1..5 index space. Weight = violet per
+     explicit request (issue #117 follow-up) — this app's 5-hue categorical
+     palette has no violet, so this needed its own token rather than
+     reusing a chart-N slot. Lightness/chroma matched to the chart-1..5
+     range for visual consistency; not run through validate_palette.js
+     since it's a single fixed accent, not a new palette.*/
+  --metric-weight: oklch(0.55 0.16 300);
   /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
   --radius: 0.75rem;
   --sidebar: oklch(0.97 0.01 65);
@@ -124,6 +135,7 @@
   --chart-3: oklch(0.49 0.13 150);
   --chart-4: oklch(0.65 0.11 20);
   --chart-5: oklch(0.52 0.14 225);
+  --metric-weight: oklch(0.68 0.16 300);
   --sidebar: oklch(0.19 0.016 48);
   --sidebar-foreground: oklch(0.96 0.012 70);
   --sidebar-primary: oklch(0.72 0.16 40);

@@ -5,26 +5,40 @@
 // intentionally the same for the curated chart types below. That keeps
 // this module self-contained: charts.ts can grow new fields or new chart
 // types without anything here changing unless someone deliberately adds
-// it. The three chart types here (weight, happiness trend, sleep) involve
-// no "subs", no address, no relationships, and no per-day free text, so
-// nothing needs masking beyond picking the right columns in the first
-// place — see PUBLIC_CHART_TYPES in src/lib/public-content.ts for the
-// curated list this corresponds to.
-import { asc, isNotNull, sql } from "drizzle-orm";
+// it. Most chart types here involve no "subs", no address, no
+// relationships, and no per-day free text, so nothing needs masking
+// beyond picking the right columns in the first place. The one deliberate
+// exception is daily happiness's `reason` field below — explicit call by
+// the app owner to expose it, not an oversight of the "no free text"
+// default every other chart here still follows — see
+// PUBLIC_CHART_TYPES in src/lib/public-content.ts for the curated list
+// this corresponds to.
+import { asc, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
-export type PublicWeightPoint = { date: string; weightKg: number };
+// Widened alongside charts.ts's own WeightMetricsPoint (issue #117
+// follow-up) — body fat % and muscle mass are body-composition data, not
+// address/relationship/free-text, so per this file's own header comment
+// they don't need masking, just picking the right columns (explicit
+// product call: expose them here rather than defaulting to "weight only"
+// just because that's what shipped first).
+export type PublicWeightPoint = {
+  date: string;
+  weightKg: number | null;
+  bodyFatPercent: number | null;
+  muscleMassKg: number | null;
+};
 
 export async function getPublicWeightData(): Promise<PublicWeightPoint[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, weightKg: days.weightKg })
+    .select({ date: days.date, weightKg: days.weightKg, bodyFatPercent: days.bodyFatPercent, muscleMassKg: days.muscleMassKg })
     .from(days)
-    .where(isNotNull(days.weightKg))
+    .where(or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)))
     .orderBy(asc(days.date));
-  return rows.map((r) => ({ date: r.date, weightKg: r.weightKg as number }));
+  return rows;
 }
 
 export type PublicMonthlyHappiness = {
@@ -55,6 +69,25 @@ export async function getPublicHappinessTrendData(): Promise<PublicMonthlyHappin
       max: Math.max(...values),
     };
   });
+}
+
+// `reason` included — explicit call by the app owner (see this file's own
+// header comment) to expose happiness's per-day free text publicly,
+// unlike every other chart in this module.
+export type PublicHappinessScrollerPoint = { date: string; happiness: number; reason: string | null };
+
+/** Raw-daily counterpart to getPublicHappinessTrendData's monthly
+ * bucketing above — issue #117 follow-up's happiness scroller, public
+ * side. No occupation/residence/relationship/age regions here (those stay
+ * private-only, same call as the weight scroller's own). */
+export async function getPublicHappinessScrollerData(): Promise<PublicHappinessScrollerPoint[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, happiness: days.happiness, reason: days.happinessReason })
+    .from(days)
+    .where(isNotNull(days.happiness))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, reason: r.reason }));
 }
 
 export type PublicSleepDay = { date: string; durationMinutes: number };

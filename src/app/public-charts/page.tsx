@@ -24,6 +24,10 @@ const CHARTS: Record<(typeof PUBLIC_CHART_TYPES)[number], { title: string; descr
     title: "Happiness trend",
     description: "Monthly average happiness over time.",
   },
+  "happiness-daily": {
+    title: "Daily happiness",
+    description: "Zoomable line of every logged day's happiness score.",
+  },
   sleep: {
     title: "Sleep calendar",
     description: "A year-by-year heatmap of nightly sleep duration.",
