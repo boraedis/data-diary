@@ -4,6 +4,9 @@ import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
+import { parseDate } from "@/lib/date";
+import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
+import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
 // domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
@@ -30,18 +33,94 @@ export async function getHappinessHistogramData(): Promise<number[]> {
 
 // --- Weight scroller ---------------------------------------------------
 
-export type WeightPoint = { date: string; weightKg: number };
+// Widened from a single weightKg field (issue #117 follow-up: "multi
+// select between 3 weight fields... visualize all on the same y scale") —
+// each field is independently nullable since they're logged separately
+// (a day can have weight without body fat/muscle mass, or vice versa).
+export type WeightMetricsPoint = {
+  date: string;
+  weightKg: number | null;
+  bodyFatPercent: number | null;
+  muscleMassKg: number | null;
+};
 
-/** Every recorded weight, oldest first — feeds a zoomable line chart via a
- * brush on a mini overview strip (the legacy "scroller" pattern). */
-export async function getWeightScrollerData(): Promise<WeightPoint[]> {
+/** Every day with at least one of weight/body fat/muscle mass recorded,
+ * oldest first — feeds InteractiveScroller's multi-series zoomable chart
+ * (issue #117). */
+export async function getWeightScrollerData(): Promise<WeightMetricsPoint[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, weightKg: days.weightKg })
+    .select({ date: days.date, weightKg: days.weightKg, bodyFatPercent: days.bodyFatPercent, muscleMassKg: days.muscleMassKg })
     .from(days)
-    .where(isNotNull(days.weightKg))
+    .where(or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)))
     .orderBy(asc(days.date));
-  return rows.map((r) => ({ date: r.date, weightKg: r.weightKg as number }));
+  return rows;
+}
+
+/** One age-year band per birthday-to-birthday span, from birth to `until`
+ * — the real-birthdate equivalent of legacy's `ageRegions()`
+ * (vis_functions.js:3289), which instead hardcoded a fixed March 20 cutoff
+ * and a fixed 7-color wheel cycling by `age % 7`. Neither carries over:
+ * this schema has a real `profileSettings.birthdate` to compute the actual
+ * cutoff from, and a cycling hue wheel not anchored to the categorical
+ * palette's fixed slots would break the dataviz skill's "never a
+ * generated/cycled color" rule — age bands are ordinal, not categorical,
+ * so they're left uncolored (InteractiveScroller's own muted-foreground
+ * default) and differentiated by label alone. Exported for testability. */
+export function computeAgeRegions(birthdate: string, until: Date): InteractiveScrollerRegion[] {
+  const birth = parseDate(birthdate);
+  const regions: InteractiveScrollerRegion[] = [];
+  let age = 0;
+  let start = birth;
+  while (start < until) {
+    const end = new Date(start);
+    end.setFullYear(end.getFullYear() + 1);
+    regions.push({ start, end: end > until ? until : end, label: `Age ${age}` });
+    start = end;
+    age++;
+  }
+  return regions;
+}
+
+export type WeightChartRegionGroups = {
+  age: InteractiveScrollerRegion[];
+  occupation: InteractiveScrollerRegion[];
+  residence: InteractiveScrollerRegion[];
+  relationship: InteractiveScrollerRegion[];
+};
+
+/** Occupation/residence/relationship timelines, reusing src/lib/profile.ts's
+ * existing list functions rather than re-querying those tables — each
+ * entry's own `color` (set via the profile admin UI) carries straight
+ * through; `alias` wins over the full `name` as the on-chart label when
+ * present (the shorter of the two, meant for exactly this kind of
+ * space-constrained display). An open-ended entry's `end` becomes `until`
+ * (today, typically) rather than left unbounded, since a region needs a
+ * real right edge to render. Private-only (issue #117's own follow-up
+ * note) — never call this from src/lib/public-charts.ts. */
+export async function getWeightChartRegions(until: Date = new Date()): Promise<WeightChartRegionGroups> {
+  const [settings, occupations, residences, relationships] = await Promise.all([
+    getProfileSettings(),
+    listProfileOccupations(),
+    listProfileResidences(),
+    listProfileRelationships(),
+  ]);
+
+  function toRegion(item: { name: string; alias: string | null; start: string; end: string | null; color: string | null }): InteractiveScrollerRegion {
+    return {
+      start: parseDate(item.start),
+      end: item.end ? parseDate(item.end) : until,
+      label: item.alias ?? item.name,
+      color: item.color ?? undefined,
+    };
+  }
+
+  return {
+    age: settings.birthdate ? computeAgeRegions(settings.birthdate, until) : [],
+    occupation: occupations.map(toRegion),
+    residence: residences.map(toRegion),
+    relationship: relationships.map(toRegion),
+  };
 }
 
 // --- Sleep calendar ---------------------------------------------------
@@ -90,6 +169,13 @@ export async function getSleepCalendarData(): Promise<SleepDay[]> {
 // --- Weight + workout volume combo ---------------------------------------------------
 
 export type WorkoutMonth = { month: string; count: number }; // month = "YYYY-MM"
+
+// Plain {date, weightKg} — this combo chart only ever needed the one
+// field, unlike WeightMetricsPoint above (widened for the scroller's
+// multi-field #117 follow-up); kept separate rather than reusing that
+// wider type so this chart doesn't have to deal with fields it never
+// plots.
+export type WeightPoint = { date: string; weightKg: number };
 
 export type GymWeightComboData = {
   weight: WeightPoint[];

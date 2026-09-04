@@ -10,21 +10,32 @@
 // nothing needs masking beyond picking the right columns in the first
 // place — see PUBLIC_CHART_TYPES in src/lib/public-content.ts for the
 // curated list this corresponds to.
-import { asc, isNotNull, sql } from "drizzle-orm";
+import { asc, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
-export type PublicWeightPoint = { date: string; weightKg: number };
+// Widened alongside charts.ts's own WeightMetricsPoint (issue #117
+// follow-up) — body fat % and muscle mass are body-composition data, not
+// address/relationship/free-text, so per this file's own header comment
+// they don't need masking, just picking the right columns (explicit
+// product call: expose them here rather than defaulting to "weight only"
+// just because that's what shipped first).
+export type PublicWeightPoint = {
+  date: string;
+  weightKg: number | null;
+  bodyFatPercent: number | null;
+  muscleMassKg: number | null;
+};
 
 export async function getPublicWeightData(): Promise<PublicWeightPoint[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, weightKg: days.weightKg })
+    .select({ date: days.date, weightKg: days.weightKg, bodyFatPercent: days.bodyFatPercent, muscleMassKg: days.muscleMassKg })
     .from(days)
-    .where(isNotNull(days.weightKg))
+    .where(or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)))
     .orderBy(asc(days.date));
-  return rows.map((r) => ({ date: r.date, weightKg: r.weightKg as number }));
+  return rows;
 }
 
 export type PublicMonthlyHappiness = {
