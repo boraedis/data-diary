@@ -33,7 +33,12 @@ export async function getHappinessHistogramData(): Promise<number[]> {
 
 // --- Happiness scroller ---------------------------------------------------
 
-export type HappinessScrollerPoint = { date: string; happiness: number };
+// `reason` included (unlike the public version in public-charts.ts) — it's
+// per-day free text, which the public landing page's own locked-in rules
+// (issue #12) permanently exclude, so this type/function stays
+// private-only. Powers InteractiveScroller's point-label feature (issue
+// #117 follow-up).
+export type HappinessScrollerPoint = { date: string; happiness: number; reason: string | null };
 
 /** Every recorded happiness value, oldest first — the raw-daily-density
  * counterpart to getHappinessAveragerData's monthly bucketing below,
@@ -42,11 +47,11 @@ export type HappinessScrollerPoint = { date: string; happiness: number };
 export async function getHappinessScrollerData(): Promise<HappinessScrollerPoint[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, happiness: days.happiness })
+    .select({ date: days.date, happiness: days.happiness, reason: days.happinessReason })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number }));
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, reason: r.reason }));
 }
 
 // --- Weight scroller ---------------------------------------------------

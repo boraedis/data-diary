@@ -15,6 +15,13 @@ import type { ProfileRegionGroups } from "@/lib/charts";
 // same "scroller" role weight's chart plays for its own metric. Much
 // simpler than the weight chart: one metric, no unit conversion, so the
 // only filter is which region overlays are showing.
+//
+// No fixed `yDomain` here, deliberately unlike happiness-averager-chart.tsx's
+// own `yDomain={[0, 100]}` — InteractiveScroller's default auto-domain
+// (min/max of whatever's currently VISIBLE, ±10% padding, recomputed live
+// as you zoom/pan) is exactly the "focus in on the relevant range as you
+// zoom" behavior wanted here; pinning to the metric's full 0-100 range
+// would defeat that by keeping the axis static regardless of zoom level.
 
 type RegionType = "age" | "occupation" | "residence" | "relationship";
 
@@ -31,7 +38,7 @@ export function HappinessScrollerChart({
   backHref,
   backLabel,
 }: {
-  data: { date: string; happiness: number }[];
+  data: { date: string; happiness: number; reason?: string | null }[];
   /** Age/occupation/residence/relationship region datasets — private-only
    * (see getProfileRegionGroups' own comment in src/lib/charts.ts). Omit
    * entirely on the public chart page so the region-type picker doesn't
@@ -59,7 +66,12 @@ export function HappinessScrollerChart({
         // --metric-weight.
         color: categoricalColor(2),
         movingAverage: true,
-        points: data.map((d) => ({ x: parseDate(d.date), y: d.happiness })),
+        // `reason` (the day's own happinessReason text) feeds
+        // InteractiveScroller's point-label feature directly — shown
+        // publicly too, an explicit call by the app owner overriding this
+        // app's usual "no per-day free text on the public site" default
+        // (see src/lib/public-charts.ts's own comment on this exception).
+        points: data.map((d) => ({ x: parseDate(d.date), y: d.happiness, label: d.reason ?? undefined })),
       },
     ],
     [data],
@@ -90,7 +102,6 @@ export function HappinessScrollerChart({
               width={width}
               height={height}
               regions={regions}
-              yDomain={[0, 100]}
               valueFormat={(v) => v.toFixed(1)}
               ariaLabel="Daily happiness over time. Use arrow keys to inspect individual entries, or hover a point."
             />

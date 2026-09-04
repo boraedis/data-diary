@@ -383,7 +383,13 @@ function Minimap({
       if (selection) {
         brushG.call(brush.move, [x(selection[0]), x(selection[1])]);
       }
-      brushG.selectAll(".selection").attr("fill", "var(--chart-1)").attr("fill-opacity", 0.15).attr("stroke", "var(--chart-1)");
+      // The brush selection reads as "this chart's own zoomed window," so
+      // it takes the PRIMARY (first) series' own color — weight's violet,
+      // happiness's green — rather than a hardcoded chart-1, which read as
+      // an unrelated accent on any chart whose first series isn't chart-1
+      // (violet weight, most obviously).
+      const brushColor = smoothedSeries[0]?.color ?? "var(--chart-1)";
+      brushG.selectAll(".selection").attr("fill", brushColor).attr("fill-opacity", 0.15).attr("stroke", brushColor);
     },
     // `onBrush` deliberately excluded — see InteractiveLine's Overview for
     // why (would rebuild the brush, and drop an in-progress drag, on every

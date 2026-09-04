@@ -5,11 +5,14 @@
 // intentionally the same for the curated chart types below. That keeps
 // this module self-contained: charts.ts can grow new fields or new chart
 // types without anything here changing unless someone deliberately adds
-// it. The chart types here (weight, happiness trend, daily happiness,
-// sleep) involve no "subs", no address, no relationships, and no per-day
-// free text, so nothing needs masking beyond picking the right columns in
-// the first place — see PUBLIC_CHART_TYPES in src/lib/public-content.ts
-// for the curated list this corresponds to.
+// it. Most chart types here involve no "subs", no address, no
+// relationships, and no per-day free text, so nothing needs masking
+// beyond picking the right columns in the first place. The one deliberate
+// exception is daily happiness's `reason` field below — explicit call by
+// the app owner to expose it, not an oversight of the "no free text"
+// default every other chart here still follows — see
+// PUBLIC_CHART_TYPES in src/lib/public-content.ts for the curated list
+// this corresponds to.
 import { asc, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
@@ -68,7 +71,10 @@ export async function getPublicHappinessTrendData(): Promise<PublicMonthlyHappin
   });
 }
 
-export type PublicHappinessScrollerPoint = { date: string; happiness: number };
+// `reason` included — explicit call by the app owner (see this file's own
+// header comment) to expose happiness's per-day free text publicly,
+// unlike every other chart in this module.
+export type PublicHappinessScrollerPoint = { date: string; happiness: number; reason: string | null };
 
 /** Raw-daily counterpart to getPublicHappinessTrendData's monthly
  * bucketing above — issue #117 follow-up's happiness scroller, public
@@ -77,11 +83,11 @@ export type PublicHappinessScrollerPoint = { date: string; happiness: number };
 export async function getPublicHappinessScrollerData(): Promise<PublicHappinessScrollerPoint[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, happiness: days.happiness })
+    .select({ date: days.date, happiness: days.happiness, reason: days.happinessReason })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number }));
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, reason: r.reason }));
 }
 
 export type PublicSleepDay = { date: string; durationMinutes: number };
