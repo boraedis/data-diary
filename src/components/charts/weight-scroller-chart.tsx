@@ -27,7 +27,7 @@ import type { ProfileRegionGroups, WeightMetricsPoint } from "@/lib/charts";
 
 type WeightField = "weight" | "bodyFat" | "muscleMass";
 type WeightUnit = "kg" | "lbs" | "pctWeight";
-type RegionType = "age" | "occupation" | "residence" | "relationship";
+type RegionType = "none" | "age" | "occupation" | "residence" | "relationship";
 
 const FIELD_OPTIONS: MultiSelectOption<WeightField>[] = [
   { id: "weight", label: "Weight" },
@@ -52,7 +52,15 @@ const UNIT_OPTIONS: GroupByOption<WeightUnit>[] = [
   { id: "pctWeight", label: "% of Weight" },
 ];
 
-const REGION_TYPE_OPTIONS: MultiSelectOption<RegionType>[] = [
+// Single-select, not multi — overlapping depth-stacked bands from several
+// region types at once turned out to read as clutter rather than useful
+// correlation (explicit follow-up call), so only one region type can be
+// active at a time now, same GroupByPicker-style control as the unit
+// toggle above. "None" is a real option here (unlike GroupByPicker's other
+// uses in this file) so the default "nothing shown" state stays reachable
+// without a separate on/off control.
+const REGION_TYPE_OPTIONS: GroupByOption<RegionType>[] = [
+  { id: "none", label: "None" },
   { id: "age", label: "Age" },
   { id: "occupation", label: "Occupation" },
   { id: "residence", label: "Residence" },
@@ -126,13 +134,15 @@ export function WeightScrollerChart({
 }) {
   const [fields, setFields] = useState<WeightField[]>(["weight"]);
   const [unit, setUnit] = useState<WeightUnit>("kg");
-  // Starts empty — up to four depth-stacked overlapping bands at once is a
-  // lot to greet a first-time visitor with; showing them is an opt-in, not
-  // a default.
-  const [regionTypes, setRegionTypes] = useState<RegionType[]>([]);
+  // Starts at "none" — showing a region overlay is an opt-in, not a
+  // default, for a first-time visitor.
+  const [regionType, setRegionType] = useState<RegionType>("none");
 
   const series = useMemo(() => buildSeries(data, fields, unit), [data, fields, unit]);
-  const regions = useMemo(() => regionTypes.flatMap((t) => regionGroups?.[t] ?? []), [regionTypes, regionGroups]);
+  const regions = useMemo(
+    () => (regionType === "none" ? [] : (regionGroups?.[regionType] ?? [])),
+    [regionType, regionGroups],
+  );
 
   const unitSuffix = unit === "pctWeight" ? "%" : unit === "lbs" ? "lbs" : "kg";
 
@@ -146,7 +156,7 @@ export function WeightScrollerChart({
           <MultiSelectPicker values={fields} onChange={setFields} options={FIELD_OPTIONS} label="Show" minSelected={1} />
           <GroupByPicker value={unit} onChange={setUnit} options={UNIT_OPTIONS} label="Unit" />
           {regionGroups ? (
-            <MultiSelectPicker values={regionTypes} onChange={setRegionTypes} options={REGION_TYPE_OPTIONS} label="Regions" />
+            <GroupByPicker value={regionType} onChange={setRegionType} options={REGION_TYPE_OPTIONS} label="Regions" />
           ) : null}
         </>
       }

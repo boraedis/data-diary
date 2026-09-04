@@ -5,7 +5,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveScroller, type InteractiveScrollerSeries } from "@/components/charts/interactive/interactive-scroller";
-import { MultiSelectPicker, type MultiSelectOption } from "@/components/charts/interactive/multi-select-picker";
+import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups } from "@/lib/charts";
@@ -23,9 +23,14 @@ import type { ProfileRegionGroups } from "@/lib/charts";
 // zoom" behavior wanted here; pinning to the metric's full 0-100 range
 // would defeat that by keeping the axis static regardless of zoom level.
 
-type RegionType = "age" | "occupation" | "residence" | "relationship";
+type RegionType = "none" | "age" | "occupation" | "residence" | "relationship";
 
-const REGION_TYPE_OPTIONS: MultiSelectOption<RegionType>[] = [
+// Single-select, not multi — same follow-up call as weight-scroller-chart's
+// own region picker: several overlay types stacked at once read as clutter,
+// not correlation. "None" is a real option so the picker can still turn
+// regions off entirely.
+const REGION_TYPE_OPTIONS: GroupByOption<RegionType>[] = [
+  { id: "none", label: "None" },
   { id: "age", label: "Age" },
   { id: "occupation", label: "Occupation" },
   { id: "residence", label: "Residence" },
@@ -48,11 +53,11 @@ export function HappinessScrollerChart({
   backLabel?: string;
 }) {
   // Occupation on by default here (unlike the weight chart, which starts
-  // with none selected) — explicit request: happiness swings against job
-  // changes are exactly the kind of correlation this chart exists to
-  // surface at a glance, so it's worth greeting a first-time visitor with
-  // rather than making them discover the picker first.
-  const [regionTypes, setRegionTypes] = useState<RegionType[]>(regionGroups ? ["occupation"] : []);
+  // at "none") — explicit request: happiness swings against job changes
+  // are exactly the kind of correlation this chart exists to surface at a
+  // glance, so it's worth greeting a first-time visitor with rather than
+  // making them discover the picker first.
+  const [regionType, setRegionType] = useState<RegionType>(regionGroups ? "occupation" : "none");
 
   const series = useMemo<InteractiveScrollerSeries[]>(
     () => [
@@ -77,7 +82,10 @@ export function HappinessScrollerChart({
     [data],
   );
 
-  const regions = useMemo(() => regionTypes.flatMap((t) => regionGroups?.[t] ?? []), [regionTypes, regionGroups]);
+  const regions = useMemo(
+    () => (regionType === "none" ? [] : (regionGroups?.[regionType] ?? [])),
+    [regionType, regionGroups],
+  );
 
   return (
     <ChartPage
@@ -86,7 +94,7 @@ export function HappinessScrollerChart({
       backLabel={backLabel}
       filters={
         regionGroups ? (
-          <MultiSelectPicker values={regionTypes} onChange={setRegionTypes} options={REGION_TYPE_OPTIONS} label="Regions" />
+          <GroupByPicker value={regionType} onChange={setRegionType} options={REGION_TYPE_OPTIONS} label="Regions" />
         ) : null
       }
     >
