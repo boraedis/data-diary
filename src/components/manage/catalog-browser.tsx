@@ -36,6 +36,7 @@ export function CatalogBrowser({
       placeholder={placeholder ?? "Search…"}
       emptyMessage={emptyMessage ?? "No matches."}
       trailingAction={trailingAction}
+      autoFocus
     />
   );
 }
