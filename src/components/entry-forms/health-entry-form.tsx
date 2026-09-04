@@ -283,8 +283,8 @@ export function HealthEntryForm({
             const category = exercise?.category ?? null;
 
             return (
-              <div key={wi} className="rounded-lg border border-border p-3">
-                <div className="flex flex-col gap-3">
+              <div key={wi} className="rounded-lg border border-border p-4">
+                <div className="flex flex-col gap-4">
                   <div className="space-y-1.5">
                     <Label htmlFor={`exercise-${wi}`}>Exercise</Label>
                     <ExercisePicker
@@ -293,6 +293,7 @@ export function HealthEntryForm({
                       valueId={workout.exerciseId}
                       onChange={(id) => updateWorkout(wi, { exerciseId: id, locationId: null })}
                       onCreated={handleExerciseCreated}
+                      autoFocus={workout.exerciseId === null}
                     />
                   </div>
 

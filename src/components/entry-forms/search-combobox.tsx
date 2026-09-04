@@ -31,6 +31,7 @@ export function SearchCombobox({
   onChange,
   placeholder,
   emptyLabel = "—",
+  autoFocus = false,
 }: {
   id: string;
   items: SearchItem[];
@@ -38,6 +39,7 @@ export function SearchCombobox({
   onChange: (id: number | null) => void;
   placeholder?: string;
   emptyLabel?: string;
+  autoFocus?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -123,7 +125,7 @@ export function SearchCombobox({
                   setOpen(false);
                 }}
                 placeholder={placeholder}
-                autoFocus
+                autoFocus={autoFocus}
               />
               {valueId !== null ? (
                 <Button
