@@ -19,12 +19,14 @@ export function DurationInput({
   id,
   totalMinutes,
   onChange,
-  max_hours = 24
+  max_hours = 24,
+  autoFocus = false
 }: {
   id: string;
   totalMinutes: number | null;
   onChange: (totalMinutes: number | null) => void;
   max_hours?: number;
+  autoFocus?: boolean;
 }) {
   const hours = totalMinutes !== null ? Math.floor(totalMinutes / 60) : null;
   const minutes = totalMinutes !== null ? totalMinutes % 60 : null;
@@ -50,6 +52,7 @@ export function DurationInput({
         value={hours ?? ""}
         max={max_hours}
         onChange={(e) => update(parseNonNegativeInt(e.target.value), minutes)}
+        autoFocus={autoFocus}
       />
       <span className="text-base text-muted-foreground">h</span>
       <Input

@@ -83,6 +83,7 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
               value={happiness.happiness}
               onChange={(value) => set("happiness", value)}
               step={1}
+              autoFocus
             ></PercentInput>
           </div>
           <div className="space-y-1.5">

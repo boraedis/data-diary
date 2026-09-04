@@ -76,6 +76,7 @@ export function WeightEntryForm({ date, initial }: { date: string; initial: Weig
               min="0"
               value={weight.weightKg ?? ""}
               onChange={(e) => set("weightKg", parseNumber(e.target.value))}
+              autoFocus
             />
           </div>
           <div className="space-y-1.5">

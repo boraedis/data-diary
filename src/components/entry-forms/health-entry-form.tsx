@@ -241,6 +241,7 @@ export function HealthEntryForm({
               min="0"
               value={health.distanceWalkedKm ?? ""}
               onChange={(e) => set("distanceWalkedKm", parseNumber(e.target.value))}
+              autoFocus
             />
           </div>
           <div className="space-y-1.5">

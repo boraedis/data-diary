@@ -158,7 +158,7 @@ function EntertainmentDetailModal({
           <p className="text-xs text-muted-foreground">{item.detail ? `${item.kindName} · ${item.detail}` : item.kindName}</p>
           <div className="space-y-1.5">
             <Label htmlFor="entertainment-detail-duration">Duration</Label>
-            <DurationInput id="entertainment-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
+            <DurationInput id="entertainment-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} autoFocus />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="entertainment-detail-location">Where</Label>

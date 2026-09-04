@@ -175,6 +175,7 @@ function TvEpisodePickerModal({
               id="tv-picker-season"
               value={selectedSeason ?? ""}
               onChange={(e) => setSelectedSeason(e.target.value ? Number(e.target.value) : null)}
+              autoFocus
             >
               <option value="">Choose a season…</option>
               {seasons.map((s) => (
@@ -292,7 +293,7 @@ function TvEpisodeRowEditModal({
         <div className="flex flex-col gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="tv-row-edit-duration">Watch time</Label>
-            <DurationInput id="tv-row-edit-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
+            <DurationInput id="tv-row-edit-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} autoFocus />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="tv-row-edit-location">Where</Label>

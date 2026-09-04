@@ -103,6 +103,7 @@ export function SubsEntryForm({ date, initial }: { date: string; initial: SubsPa
                   max="10"
                   value={values[i] ?? ""}
                   onChange={(e) => setValue(i, parseValue(e.target.value))}
+                  autoFocus={i === 0}
                 />
               </div>
             ))}
