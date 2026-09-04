@@ -4,8 +4,10 @@ import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
 import { geocodeAddress } from "@/lib/geocode";
 import {
+  bookRankings,
   bookReadingSessions,
   books,
+  bookWatchlist,
   commuteEnum,
   days,
   dayTypeEnum,
@@ -16,8 +18,10 @@ import {
   exercises,
   games,
   gameSessions,
+  movieRankings,
   movies,
   movieWatches,
+  movieWatchlist,
   people,
   places,
   sports,
@@ -2931,24 +2935,127 @@ export async function getMovieCatalogEntry(id: number): Promise<MovieCatalogItem
 // it was added by mistake.
 export type MovieUsage = {
   watches: { date: string; rating: number | null; locationType: string | null }[];
+  onWatchlist: boolean;
+  rank: number | null;
 };
 
-// movie_watches.movieId is onDelete: "restrict" — the only real usage a
-// movie can have right now (watchlist/rankings tables were dropped in
-// issue #79 pending a real UI; see issue #124 for rebuilding them).
+// movie_watches/movie_watchlist/movie_rankings.movieId are all
+// onDelete: "restrict" — every one of them counts as "in use" for delete
+// blocking (issue #124 re-added the latter two after #79 dropped them).
 export async function getMovieUsage(id: number): Promise<MovieUsage> {
   const db = getDb();
-  const rows = await db
-    .select({ date: movieWatches.date, rating: movieWatches.rating, locationType: movieWatches.locationType })
-    .from(movieWatches)
-    .where(eq(movieWatches.movieId, id))
-    .orderBy(asc(movieWatches.date));
-  return { watches: rows };
+  const [watches, [watchlistRow], [rankingRow]] = await Promise.all([
+    db
+      .select({ date: movieWatches.date, rating: movieWatches.rating, locationType: movieWatches.locationType })
+      .from(movieWatches)
+      .where(eq(movieWatches.movieId, id))
+      .orderBy(asc(movieWatches.date)),
+    db.select({ movieId: movieWatchlist.movieId }).from(movieWatchlist).where(eq(movieWatchlist.movieId, id)),
+    db.select({ rank: movieRankings.rank }).from(movieRankings).where(eq(movieRankings.movieId, id)),
+  ]);
+  return { watches, onWatchlist: watchlistRow !== undefined, rank: rankingRow?.rank ?? null };
 }
 
 export async function deleteMovieCatalogEntry(id: number): Promise<void> {
   const db = getDb();
   await db.delete(movies).where(eq(movies.id, id));
+}
+
+// --- Movie watchlist + top-10 ranking (issue #124) ------------------------
+
+export type MovieWatchlistItem = {
+  movieId: number;
+  title: string;
+  posterPath: string | null;
+  releaseDate: string | null;
+  addedAt: string | null;
+};
+
+export async function listMovieWatchlist(): Promise<MovieWatchlistItem[]> {
+  const db = getDb();
+  return db
+    .select({
+      movieId: movieWatchlist.movieId,
+      addedAt: movieWatchlist.addedAt,
+      title: movies.title,
+      posterPath: movies.posterPath,
+      releaseDate: movies.releaseDate,
+    })
+    .from(movieWatchlist)
+    .innerJoin(movies, eq(movies.id, movieWatchlist.movieId))
+    .orderBy(desc(movieWatchlist.addedAt), asc(movies.title));
+}
+
+export async function addToMovieWatchlist(movieId: number): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(movieWatchlist)
+    .values({ movieId, addedAt: new Date().toISOString().slice(0, 10) })
+    .onConflictDoNothing({ target: movieWatchlist.movieId });
+}
+
+export async function removeFromMovieWatchlist(movieId: number): Promise<void> {
+  const db = getDb();
+  await db.delete(movieWatchlist).where(eq(movieWatchlist.movieId, movieId));
+}
+
+export type MovieRankingItem = {
+  rank: number;
+  movieId: number;
+  title: string;
+  posterPath: string | null;
+  releaseDate: string | null;
+};
+
+export const RANKING_SIZE = 10;
+
+export async function listMovieRanking(): Promise<MovieRankingItem[]> {
+  const db = getDb();
+  return db
+    .select({
+      rank: movieRankings.rank,
+      movieId: movieRankings.movieId,
+      title: movies.title,
+      posterPath: movies.posterPath,
+      releaseDate: movies.releaseDate,
+    })
+    .from(movieRankings)
+    .innerJoin(movies, eq(movies.id, movieRankings.movieId))
+    .orderBy(asc(movieRankings.rank));
+}
+
+// Replace-all, same shape as the day-entry satellite saves above (e.g.
+// saveMovies) — rank IS a row's identity here (primary key), so there's no
+// meaningful partial update; the client always sends the full ordered list
+// and this rewrites the table to match. No transaction wrapper, same
+// reasoning as those saves: the neon-http driver this app uses doesn't
+// support them, so every multi-statement write here is already best-effort
+// sequential, not atomic.
+export async function findMissingMovieIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: movies.id }).from(movies).where(inArray(movies.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+export async function setMovieRanking(movieIds: number[]): Promise<void> {
+  if (movieIds.length > RANKING_SIZE) {
+    throw new Error(`Ranking can hold at most ${RANKING_SIZE} movies`);
+  }
+  if (new Set(movieIds).size !== movieIds.length) {
+    throw new Error("Ranking cannot contain the same movie twice");
+  }
+  const missingIds = await findMissingMovieIds(movieIds);
+  if (missingIds.length > 0) {
+    throw new Error(`Movie not found: ${missingIds.join(", ")}`);
+  }
+  const db = getDb();
+  await db.delete(movieRankings);
+  if (movieIds.length > 0) {
+    await db.insert(movieRankings).values(movieIds.map((movieId, i) => ({ rank: i + 1, movieId })));
+  }
 }
 
 // --- TV shows ------------------------------------------------------------
@@ -3626,30 +3733,127 @@ export type BookUsage = {
     completed: boolean;
     locationType: string | null;
   }[];
+  onWatchlist: boolean;
+  rank: number | null;
 };
 
-// book_reading_sessions.bookId is onDelete: "restrict" — the only real
-// usage a book can have right now (watchlist/rankings tables were dropped
-// in issue #79 pending a real UI, same call as movies above).
+// book_reading_sessions/book_watchlist/book_rankings.bookId are all
+// onDelete: "restrict" — same reasoning as getMovieUsage above.
 export async function getBookUsage(id: number): Promise<BookUsage> {
   const db = getDb();
-  const rows = await db
-    .select({
-      date: bookReadingSessions.date,
-      startPage: bookReadingSessions.startPage,
-      endPage: bookReadingSessions.endPage,
-      completed: bookReadingSessions.completed,
-      locationType: bookReadingSessions.locationType,
-    })
-    .from(bookReadingSessions)
-    .where(eq(bookReadingSessions.bookId, id))
-    .orderBy(asc(bookReadingSessions.date), asc(bookReadingSessions.id));
-  return { sessions: rows };
+  const [sessions, [watchlistRow], [rankingRow]] = await Promise.all([
+    db
+      .select({
+        date: bookReadingSessions.date,
+        startPage: bookReadingSessions.startPage,
+        endPage: bookReadingSessions.endPage,
+        completed: bookReadingSessions.completed,
+        locationType: bookReadingSessions.locationType,
+      })
+      .from(bookReadingSessions)
+      .where(eq(bookReadingSessions.bookId, id))
+      .orderBy(asc(bookReadingSessions.date), asc(bookReadingSessions.id)),
+    db.select({ bookId: bookWatchlist.bookId }).from(bookWatchlist).where(eq(bookWatchlist.bookId, id)),
+    db.select({ rank: bookRankings.rank }).from(bookRankings).where(eq(bookRankings.bookId, id)),
+  ]);
+  return { sessions, onWatchlist: watchlistRow !== undefined, rank: rankingRow?.rank ?? null };
 }
 
 export async function deleteBookCatalogEntry(id: number): Promise<void> {
   const db = getDb();
   await db.delete(books).where(eq(books.id, id));
+}
+
+// --- Book watchlist ("readlist") + top-10 ranking (issue #124) -----------
+// Same shape as the movie versions above — see movieWatchlist/movieRankings
+// in schema.ts for the restore reasoning shared by both.
+
+export type BookWatchlistItem = {
+  bookId: number;
+  title: string;
+  thumbnailUrl: string | null;
+  authors: string[];
+  addedAt: string | null;
+};
+
+export async function listBookWatchlist(): Promise<BookWatchlistItem[]> {
+  const db = getDb();
+  return db
+    .select({
+      bookId: bookWatchlist.bookId,
+      addedAt: bookWatchlist.addedAt,
+      title: books.title,
+      thumbnailUrl: books.thumbnailUrl,
+      authors: books.authors,
+    })
+    .from(bookWatchlist)
+    .innerJoin(books, eq(books.id, bookWatchlist.bookId))
+    .orderBy(desc(bookWatchlist.addedAt), asc(books.title));
+}
+
+export async function addToBookWatchlist(bookId: number): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(bookWatchlist)
+    .values({ bookId, addedAt: new Date().toISOString().slice(0, 10) })
+    .onConflictDoNothing({ target: bookWatchlist.bookId });
+}
+
+export async function removeFromBookWatchlist(bookId: number): Promise<void> {
+  const db = getDb();
+  await db.delete(bookWatchlist).where(eq(bookWatchlist.bookId, bookId));
+}
+
+export type BookRankingItem = {
+  rank: number;
+  bookId: number;
+  title: string;
+  thumbnailUrl: string | null;
+  authors: string[];
+};
+
+export async function listBookRanking(): Promise<BookRankingItem[]> {
+  const db = getDb();
+  return db
+    .select({
+      rank: bookRankings.rank,
+      bookId: bookRankings.bookId,
+      title: books.title,
+      thumbnailUrl: books.thumbnailUrl,
+      authors: books.authors,
+    })
+    .from(bookRankings)
+    .innerJoin(books, eq(books.id, bookRankings.bookId))
+    .orderBy(asc(bookRankings.rank));
+}
+
+// Replace-all — see setMovieRanking above for the reasoning (rank as PK, no
+// transaction support on this app's neon-http driver).
+export async function findMissingBookIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: books.id }).from(books).where(inArray(books.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+export async function setBookRanking(bookIds: number[]): Promise<void> {
+  if (bookIds.length > RANKING_SIZE) {
+    throw new Error(`Ranking can hold at most ${RANKING_SIZE} books`);
+  }
+  if (new Set(bookIds).size !== bookIds.length) {
+    throw new Error("Ranking cannot contain the same book twice");
+  }
+  const missingIds = await findMissingBookIds(bookIds);
+  if (missingIds.length > 0) {
+    throw new Error(`Book not found: ${missingIds.join(", ")}`);
+  }
+  const db = getDb();
+  await db.delete(bookRankings);
+  if (bookIds.length > 0) {
+    await db.insert(bookRankings).values(bookIds.map((bookId, i) => ({ rank: i + 1, bookId })));
+  }
 }
 
 export type BookProgress = { currentPage: number | null; completions: number };

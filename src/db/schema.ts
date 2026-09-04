@@ -689,6 +689,34 @@ export const movieWatches = pgTable(
   (table) => [index("movie_watches_date_idx").on(table.date)]
 );
 
+// Watchlist + top-10 ranking (issue #124) — re-added after being dropped in
+// #79 (dead weight until there was a real UI for them; see that issue's
+// migration-script comment for the exact legacy Firestore shapes this was
+// backfilled from: `entertainment/watchlists.movies` was a map of {movieId:
+// dayNumberAdded}, `entertainment/rankings.movies` an ordered array of up to
+// 10 movie ids). `onDelete: "restrict"` matches movieWatches above — a
+// movie's watchlist/ranking membership counts as "in use" the same way a
+// watch does, so deleting the movie needs the entry removed here first
+// rather than silently vanishing.
+export const movieWatchlist = pgTable("movie_watchlist", {
+  movieId: integer("movie_id")
+    .primaryKey()
+    .references(() => movies.id, { onDelete: "restrict" }),
+  addedAt: date("added_at", { mode: "string" }),
+});
+
+// rank is the primary key (1-10, enforced app-side) rather than a plain
+// serial id — legacy's ranking was always "the current top 10, in order,"
+// never a history, and a replace-all save (same pattern as
+// entertainment_entries/movie_watches per-day satellites) is simplest when
+// position IS the identity of the row.
+export const movieRankings = pgTable("movie_rankings", {
+  rank: smallint("rank").primaryKey(),
+  movieId: integer("movie_id")
+    .notNull()
+    .references(() => movies.id, { onDelete: "restrict" }),
+});
+
 export const tvShows = pgTable("tv_shows", {
   id: serial("id").primaryKey(),
   tmdbId: integer("tmdb_id").notNull().unique(),
@@ -804,6 +832,29 @@ export const bookReadingSessions = pgTable(
     index("book_reading_sessions_book_id_idx").on(table.bookId),
   ]
 );
+
+// Watchlist ("readlist") + top-10 ranking (issue #124), same shape and
+// restore reasoning as movieWatchlist/movieRankings above. Legacy's
+// `entertainment/watchlists.books` was a plain array of book ids with no
+// per-entry added-date (unlike movies' map) — addedAt is nullable here for
+// exactly that reason, populated going forward but left null for anything
+// migrated from that array. The real legacy data for both books tables
+// turned out to be empty at migration time (its own watchlist/ranking edit
+// pages had a wrong-namespace bug — see issue #124 — so nothing was ever
+// successfully saved through them), so there was nothing to backfill.
+export const bookWatchlist = pgTable("book_watchlist", {
+  bookId: integer("book_id")
+    .primaryKey()
+    .references(() => books.id, { onDelete: "restrict" }),
+  addedAt: date("added_at", { mode: "string" }),
+});
+
+export const bookRankings = pgTable("book_rankings", {
+  rank: smallint("rank").primaryKey(),
+  bookId: integer("book_id")
+    .notNull()
+    .references(() => books.id, { onDelete: "restrict" }),
+});
 
 // --- Entertainment: sports ---------------------------------------------
 // Fully manual catalog, no external API — the historical survey found this

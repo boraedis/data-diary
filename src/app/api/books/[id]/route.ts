@@ -31,7 +31,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   }
 
   const usage = await getBookUsage(id);
-  if (usage.sessions.length > 0) {
+  if (usage.sessions.length > 0 || usage.onWatchlist || usage.rank !== null) {
     return NextResponse.json({ error: "Still in use", usage }, { status: 409 });
   }
 
