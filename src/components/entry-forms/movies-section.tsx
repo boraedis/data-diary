@@ -96,6 +96,7 @@ function MovieDetailModal({
           </div>
           <Button
             type="button"
+            disabled={!locationType.trim() || durationMinutes === null}
             onClick={() => {
               const parsed = rating.trim() ? Number(rating) : null;
               onSave({

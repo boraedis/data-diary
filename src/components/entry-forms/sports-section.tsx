@@ -663,6 +663,14 @@ function SportsWatchDetailModal({
 
           <Button
             type="button"
+            disabled={
+              leagueId === null ||
+              !season.trim() ||
+              homeTeamId === null ||
+              (sport.isTeamSport && awayTeamId === null) ||
+              !locationType.trim() ||
+              durationMinutes === null
+            }
             onClick={() =>
               onSave({
                 leagueId,

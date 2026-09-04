@@ -186,6 +186,7 @@ function GameSessionDetailModal({
           </div>
           <Button
             type="button"
+            disabled={!locationType.trim() || durationMinutes === null}
             onClick={() =>
               onSave({
                 durationMinutes,

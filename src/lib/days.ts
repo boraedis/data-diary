@@ -856,7 +856,39 @@ function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
   return { ok: true, value: parsed };
 }
 
-export function validateHealthPayload(body: unknown): Result<HealthPayload> {
+// Which of `ids` (deduped) have no matching row in `exercises`/`places`/
+// `people` — used to turn a bad/stale/typo'd foreign key from the client
+// into a clean 400 here, instead of letting it reach the INSERT and fail
+// as a raw Postgres FK-constraint-violation string surfaced through the
+// route's generic 500 handler.
+async function findMissingExerciseIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: exercises.id }).from(exercises).where(inArray(exercises.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+async function findMissingPlaceIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: places.id }).from(places).where(inArray(places.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+async function findMissingPersonIds(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db.select({ id: people.id }).from(people).where(inArray(people.id, uniqueIds));
+  const found = new Set(rows.map((r) => r.id));
+  return uniqueIds.filter((id) => !found.has(id));
+}
+
+export async function validateHealthPayload(body: unknown): Promise<Result<HealthPayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -864,6 +896,18 @@ export function validateHealthPayload(body: unknown): Result<HealthPayload> {
 
   const workoutsResult = parseWorkouts(b.workouts);
   if (!workoutsResult.ok) return workoutsResult;
+
+  const missingExerciseIds = await findMissingExerciseIds(workoutsResult.value.map((w) => w.exerciseId));
+  if (missingExerciseIds.length > 0) {
+    return { ok: false, error: `Exercise not found: ${missingExerciseIds.join(", ")}` };
+  }
+  const locationIds = workoutsResult.value
+    .map((w) => w.locationId)
+    .filter((id): id is number => id !== null);
+  const missingLocationIds = await findMissingPlaceIds(locationIds);
+  if (missingLocationIds.length > 0) {
+    return { ok: false, error: `Location not found: ${missingLocationIds.join(", ")}` };
+  }
 
   return {
     ok: true,
@@ -882,11 +926,21 @@ export function validateSleepPayload(body: unknown): Result<SleepPayload> {
   }
   const b = body as Record<string, unknown>;
 
+  const sleepTime = typeof b.sleepTime === "string" && b.sleepTime ? b.sleepTime : null;
+  const wakeTime = typeof b.wakeTime === "string" && b.wakeTime ? b.wakeTime : null;
+  // A half-logged sleep session (only one of the two times) can't compute a
+  // duration and isn't a state the UI should be able to save — require both
+  // once either is given, same "conditional required" shape as
+  // validateWorkPayload's commute rule above.
+  if ((sleepTime === null) !== (wakeTime === null)) {
+    return { ok: false, error: "Sleep time and wake time must be entered together" };
+  }
+
   return {
     ok: true,
     value: {
-      sleepTime: typeof b.sleepTime === "string" && b.sleepTime ? b.sleepTime : null,
-      wakeTime: typeof b.wakeTime === "string" && b.wakeTime ? b.wakeTime : null,
+      sleepTime,
+      wakeTime,
       wakeCrossedMidnight: Boolean(b.wakeCrossedMidnight),
       sleepLocationType:
         typeof b.sleepLocationType === "string" && b.sleepLocationType ? b.sleepLocationType : null,
@@ -1051,7 +1105,7 @@ export function validateSubsPayload(body: unknown): Result<SubsPayload> {
   return { ok: true, value: { entries } };
 }
 
-export function validatePeoplePayload(body: unknown): Result<PeoplePayload> {
+export async function validatePeoplePayload(body: unknown): Promise<Result<PeoplePayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -1083,10 +1137,15 @@ export function validatePeoplePayload(body: unknown): Result<PeoplePayload> {
     entries.push({ slot, valence: valence as PersonValence, personId });
   }
 
+  const missingPersonIds = await findMissingPersonIds(entries.map((e) => e.personId));
+  if (missingPersonIds.length > 0) {
+    return { ok: false, error: `Person not found: ${missingPersonIds.join(", ")}` };
+  }
+
   return { ok: true, value: { entries } };
 }
 
-export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
+export async function validatePlacesPayload(body: unknown): Promise<Result<PlacesPayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
@@ -1112,6 +1171,11 @@ export function validatePlacesPayload(body: unknown): Result<PlacesPayload> {
     entries.push({ slot, placeId });
   }
 
+  const missingPlaceIds = await findMissingPlaceIds(entries.map((e) => e.placeId));
+  if (missingPlaceIds.length > 0) {
+    return { ok: false, error: `Place not found: ${missingPlaceIds.join(", ")}` };
+  }
+
   return { ok: true, value: { entries } };
 }
 
@@ -1130,11 +1194,10 @@ export function validateEntertainmentPayload(body: unknown): Result<Entertainmen
     }
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
-    entries.push({
-      entertainmentId,
-      durationMinutes: typeof e.durationMinutes === "number" ? e.durationMinutes : null,
-      locationType,
-    });
+    if (!locationType) return { ok: false, error: "Location is required" };
+    const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    if (durationMinutes === null) return { ok: false, error: "Duration is required" };
+    entries.push({ entertainmentId, durationMinutes, locationType });
   }
 
   return { ok: true, value: { entries } };
@@ -1165,7 +1228,9 @@ export function validateMoviesPayload(body: unknown): Result<MoviesPayload> {
 
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    if (!locationType) return { ok: false, error: "Location is required for a movie watch" };
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    if (durationMinutes === null) return { ok: false, error: "Duration is required for a movie watch" };
     entries.push({ movieId, rating, locationType, durationMinutes });
   }
 
@@ -1187,7 +1252,9 @@ export function validateTvEpisodesPayload(body: unknown): Result<TvEpisodesPaylo
     }
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    if (!locationType) return { ok: false, error: "Location is required for an episode watch" };
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    if (durationMinutes === null) return { ok: false, error: "Duration is required for an episode watch" };
     entries.push({ episodeId, durationMinutes, locationType });
   }
 
@@ -1201,14 +1268,28 @@ function optionalIntId(value: unknown): number | null | typeof INVALID_ID {
   return Number.isInteger(n) ? n : INVALID_ID;
 }
 
-export function validateSportsPayload(body: unknown): Result<SportsPayload> {
+// sportId -> isTeamSport, for every distinct sportId referenced by a batch
+// of sports-watch entries — one query regardless of how many entries share
+// a sport. A missing map entry means the id doesn't exist.
+async function getIsTeamSportById(sportIds: number[]): Promise<Map<number, boolean>> {
+  if (sportIds.length === 0) return new Map();
+  const db = getDb();
+  const rows = await db
+    .select({ id: sports.id, isTeamSport: sports.isTeamSport })
+    .from(sports)
+    .where(inArray(sports.id, [...new Set(sportIds)]));
+  return new Map(rows.map((r) => [r.id, r.isTeamSport]));
+}
+
+export async function validateSportsPayload(body: unknown): Promise<Result<SportsPayload>> {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid request body" };
   }
   const b = body as Record<string, unknown>;
 
   const input = Array.isArray(b.entries) ? (b.entries as Record<string, unknown>[]) : [];
-  const entries: SportsPayload["entries"] = [];
+  type ParsedSportsEntry = SportsPayload["entries"][number];
+  const parsed: ParsedSportsEntry[] = [];
   for (const e of input) {
     const sportId = typeof e.sportId === "number" ? e.sportId : NaN;
     if (!Number.isInteger(sportId)) {
@@ -1229,17 +1310,32 @@ export function validateSportsPayload(body: unknown): Result<SportsPayload> {
     const watchedLive = e.watchedLive === true;
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
 
-    entries.push({
-      sportId,
-      leagueId,
-      season,
-      gameType,
-      homeTeamId,
-      awayTeamId,
-      watchedLive,
-      durationMinutes,
-      locationType,
-    });
+    parsed.push({ sportId, leagueId, season, gameType, homeTeamId, awayTeamId, watchedLive, durationMinutes, locationType });
+  }
+
+  const isTeamSportById = await getIsTeamSportById(parsed.map((p) => p.sportId));
+
+  const entries: SportsPayload["entries"] = [];
+  for (const p of parsed) {
+    const isTeamSport = isTeamSportById.get(p.sportId);
+    if (isTeamSport === undefined) {
+      return { ok: false, error: `Sport not found: ${p.sportId}` };
+    }
+    if (p.leagueId === null) return { ok: false, error: "League is required for a sports watch" };
+    if (p.season === null) return { ok: false, error: "Season is required for a sports watch" };
+    if (p.homeTeamId === null) {
+      return { ok: false, error: isTeamSport ? "Home team is required for a sports watch" : "Athlete is required for a sports watch" };
+    }
+    // Individual (non-team) sports only ever collect one competitor slot —
+    // see sports-section.tsx's TeamSelect, which doesn't render an "away
+    // team" field at all when isTeamSport is false.
+    if (isTeamSport && p.awayTeamId === null) {
+      return { ok: false, error: "Away team is required for a sports watch" };
+    }
+    if (!p.locationType) return { ok: false, error: "Location is required for a sports watch" };
+    if (p.durationMinutes === null) return { ok: false, error: "Duration is required for a sports watch" };
+
+    entries.push(p);
   }
 
   return { ok: true, value: { entries } };
@@ -1271,7 +1367,9 @@ export function validateBooksPayload(body: unknown): Result<BooksPayload> {
     const completed = e.completed === true;
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    if (!locationType) return { ok: false, error: "Location is required for a reading session" };
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    if (durationMinutes === null) return { ok: false, error: "Duration is required for a reading session" };
 
     entries.push({ bookId, startPage, endPage, completed, locationType, durationMinutes });
   }
@@ -1296,7 +1394,9 @@ export function validateGamesPayload(body: unknown): Result<GamesPayload> {
     const deviceType = typeof e.deviceType === "string" && e.deviceType.trim() ? e.deviceType.trim() : null;
     const locationType =
       typeof e.locationType === "string" && e.locationType.trim() ? e.locationType.trim() : null;
+    if (!locationType) return { ok: false, error: "Location is required for a game session" };
     const durationMinutes = typeof e.durationMinutes === "number" ? e.durationMinutes : null;
+    if (durationMinutes === null) return { ok: false, error: "Duration is required for a game session" };
 
     entries.push({ gameId, durationMinutes, deviceType, locationType });
   }

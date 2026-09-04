@@ -142,6 +142,7 @@ function BookSessionDetailModal({
 
           <Button
             type="button"
+            disabled={!locationType.trim() || durationMinutes === null}
             onClick={() => {
               const parsedStart = startPage.trim() ? Number(startPage) : null;
               const parsedEnd = endPage.trim() ? Number(endPage) : null;
