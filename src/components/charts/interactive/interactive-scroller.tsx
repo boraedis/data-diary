@@ -725,10 +725,27 @@ export function InteractiveScroller({
   const tooltipRows: TooltipRow[] = [];
   let tooltipAnchorY: number | null = null;
   let tooltipTitleDate: Date | null = null;
+  let closestTitleDistance = Infinity;
   for (const [i, s] of visibleSeries.entries()) {
     const hovered = crosshair.hoveredBySeries[i];
     if (!hovered) continue;
-    tooltipTitleDate ??= hovered.point.x;
+    // The shared crosshair snaps to ONE pixel position, but each series
+    // independently bisects to ITS OWN nearest point (useScrollerCrosshair
+    // above) — a sparse series (body fat logged every few days) and a
+    // dense one (weight logged nearly daily) can resolve to different
+    // real calendar dates at the same cursor position. The title has to
+    // reflect whichever series' point is actually closest to the cursor,
+    // not just whichever series happens to be first in the array —
+    // otherwise hovering directly over one series' own data point (an
+    // outlier spike, say) can show that point's correct VALUE under a
+    // different, merely-nearby series' DATE. Found live: an April 2020
+    // body-fat outlier, on a day weight wasn't also logged, showed the
+    // right value under the wrong (nearest weight-log) date.
+    const distance = crosshair.pixelX === null ? Infinity : Math.abs(x(hovered.point.x) - crosshair.pixelX);
+    if (distance < closestTitleDistance) {
+      closestTitleDistance = distance;
+      tooltipTitleDate = hovered.point.x;
+    }
     tooltipRows.push({ label: s.label, value: valueFormat(hovered.point.y), color: s.color });
     tooltipAnchorY = tooltipAnchorY === null ? y(hovered.point.y) : (tooltipAnchorY + y(hovered.point.y)) / 2;
     if (s.movingAverage && showAverageOverlay) {
