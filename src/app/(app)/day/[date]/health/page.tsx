@@ -24,7 +24,7 @@ export default async function HealthEntryPage({
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
-      <DayNav date={date} category="health" />
+      <DayNav date={date} category="health" manageHref="/manage/exercises" manageLabel="Manage exercises" />
       <HealthEntryForm
         date={date}
         initial={{
