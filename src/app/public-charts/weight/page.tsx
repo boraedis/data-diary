@@ -23,7 +23,7 @@ export default async function PublicWeightChartPage() {
     <ChartPage title="Weight over time" backHref="/public-charts" backLabel="Charts">
       <ChartCard
         title="Weight over time"
-        description="Drag on the strip below the chart to zoom into a range; click to reset."
+        description="Scroll or drag on the chart to zoom, or drag the strip below it; double-click to reset."
         empty={data.length === 0}
       >
         <WeightScrollerChart data={data} />
