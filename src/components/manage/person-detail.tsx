@@ -197,6 +197,27 @@ export function PersonDetail({
           )}
         </CardContent>
       </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Mentioned on</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          {usage.dates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Never mentioned on a day.</p>
+          ) : (
+            usage.dates.map((date) => (
+              <Link
+                key={date}
+                href={`/day/${date}/people`}
+                className="rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
+              >
+                {date}
+              </Link>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </>
   );
 }

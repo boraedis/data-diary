@@ -76,7 +76,7 @@ export default async function EntertainmentEntryPage({
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
-      <DayNav date={date} category="entertainment" />
+      <DayNav date={date} category="entertainment" manageHref="/manage/entertainment" manageLabel="Manage entertainment" />
       <EntertainmentDayForm
         date={date}
         initial={day}

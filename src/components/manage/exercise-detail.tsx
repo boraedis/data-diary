@@ -311,6 +311,27 @@ export function ExerciseDetail({
 
       <Card size="sm">
         <CardHeader>
+          <CardTitle>Logged on</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          {usage.dates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Never logged.</p>
+          ) : (
+            usage.dates.map((date) => (
+              <Link
+                key={date}
+                href={`/day/${date}/health`}
+                className="rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent"
+              >
+                {date}
+              </Link>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Focus tags</CardTitle>
             <Button type="button" variant="outline" size="xs" onClick={() => setAddFocusOpen(true)}>
