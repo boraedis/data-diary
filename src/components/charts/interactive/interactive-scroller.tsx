@@ -162,6 +162,13 @@ function estimateTextWidth(text: string, fontSize: number): number {
 
 export type LabelCandidate = { id: string; pixelX: number; pixelY: number; text: string; color: string };
 export type PlacedLabel = LabelCandidate & { above: boolean };
+/** A rendered line's own pixel samples (raw + average, every visible
+ * series) — what computeLabelPlacements checks a candidate box against so
+ * a label doesn't just avoid other labels but also the data itself. Dense
+ * enough (roughly one per day, per series) that checking a box against
+ * the nearest samples is a good proxy for "does the actual curve pass
+ * through here" without needing the real bezier/monotone path math. */
+export type LineSample = { pixelX: number; pixelY: number };
 
 /** Simplified stand-in for legacy's point-label placement engine
  * (vis_functions.js ~L1817-1955): that version tries 4 candidate anchors
@@ -170,19 +177,27 @@ export type PlacedLabel = LabelCandidate & { above: boolean };
  * pairwise overlap-resolution pass across all visible labels, retrying
  * each candidate's remaining options before finally hiding it. This
  * version keeps the same GOAL (show as many labels as will fit without
- * overlapping, prefer above the point) with much simpler mechanics: sort
- * candidates left-to-right, try "above" then "below" against only the
- * labels already accepted so far, hide if neither fits. Good enough for a
+ * overlapping — the line, or each other — preferring above the point)
+ * with much simpler mechanics: sort candidates left-to-right, try "above"
+ * then "below" against only the labels already accepted so far plus the
+ * line samples themselves, hide if neither fits. Good enough for a
  * personal-log's sparse "has a reason" points (this only ever runs over
  * points that actually have a `label`, not the full daily series), not a
  * pixel-identical port. */
-export function computeLabelPlacements(candidates: LabelCandidate[], fontSize: number): PlacedLabel[] {
+export function computeLabelPlacements(
+  candidates: LabelCandidate[],
+  fontSize: number,
+  lineSamples: LineSample[] = [],
+): PlacedLabel[] {
   const sorted = [...candidates].sort((a, b) => a.pixelX - b.pixelX);
   const boxes: { left: number; right: number; top: number; bottom: number }[] = [];
   const placed: PlacedLabel[] = [];
   const halfWidth = (text: string) => estimateTextWidth(text, fontSize) / 2;
   const gap = 4;
   const boxHeight = fontSize + gap;
+
+  const overlapsBox = (box: { left: number; right: number; top: number; bottom: number }, other: { left: number; right: number; top: number; bottom: number }) =>
+    !(box.right < other.left || box.left > other.right || box.bottom < other.top || box.top > other.bottom);
 
   for (const c of sorted) {
     const hw = halfWidth(c.text);
@@ -191,9 +206,11 @@ export function computeLabelPlacements(candidates: LabelCandidate[], fontSize: n
     for (const above of [true, false]) {
       const top = above ? c.pixelY - boxHeight - gap : c.pixelY + gap;
       const bottom = top + boxHeight;
-      const overlaps = boxes.some((b) => !(right < b.left || left > b.right || bottom < b.top || top > b.bottom));
-      if (!overlaps) {
-        boxes.push({ left, right, top, bottom });
+      const box = { left, right, top, bottom };
+      const overlapsOtherLabel = boxes.some((b) => overlapsBox(box, b));
+      const overlapsLine = lineSamples.some((s) => s.pixelX >= left && s.pixelX <= right && s.pixelY >= top && s.pixelY <= bottom);
+      if (!overlapsOtherLabel && !overlapsLine) {
+        boxes.push(box);
         placed.push({ ...c, above });
         break;
       }
@@ -644,11 +661,13 @@ export function InteractiveScroller({
         .curve(d3.curveMonotoneX);
 
       const labelCandidates: LabelCandidate[] = [];
+      const lineSamples: LineSample[] = [];
       const labelPadMs = (effectiveDomain[1].getTime() - effectiveDomain[0].getTime()) * 0.1;
 
       for (const s of visibleSeries) {
         const visiblePoints = visibleBySeriesId.get(s.id) ?? [];
         const showAvg = s.movingAverage && showAverageOverlay;
+        for (const p of visiblePoints) lineSamples.push({ pixelX: x(p.x), pixelY: y(p.y) });
 
         clipped
           .append("path")
@@ -685,6 +704,7 @@ export function InteractiveScroller({
             .attr("stroke-width", MARK_SPECS.line.strokeWidth)
             .attr("stroke-dasharray", "5,5")
             .attr("d", lineGen);
+          for (const p of avgVisible) lineSamples.push({ pixelX: x(p.x), pixelY: y(p.y) });
         }
 
         // Requirement #4 — gather this series' labeled points (padded
@@ -698,7 +718,7 @@ export function InteractiveScroller({
         }
       }
 
-      const placedLabels = computeLabelPlacements(labelCandidates, 11);
+      const placedLabels = computeLabelPlacements(labelCandidates, 11, lineSamples);
       for (const l of placedLabels) {
         clipped
           .append("text")

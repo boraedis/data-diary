@@ -5,6 +5,7 @@ import {
   computeRegionDepths,
   type InteractiveScrollerPoint,
   type LabelCandidate,
+  type LineSample,
 } from "./interactive-scroller";
 
 // Covers this primitive's non-trivial, easily-isolated pure logic (issue
@@ -135,5 +136,36 @@ describe("computeLabelPlacements", () => {
 
   it("handles an empty candidate list", () => {
     expect(computeLabelPlacements([], 11)).toEqual([]);
+  });
+
+  function sample(pixelX: number, pixelY: number): LineSample {
+    return { pixelX, pixelY };
+  }
+
+  it("falls back to below when the line itself passes through the 'above' box", () => {
+    // A line sample sitting right where the "above" box would go (just
+    // above and within the label's own x-span) should push the label
+    // below instead, same as another label would.
+    const lineSamples = [sample(0, 85)];
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A")], 11, lineSamples);
+    expect(result).toEqual([{ id: "a", pixelX: 0, pixelY: 100, text: "A", color: "red", above: false }]);
+  });
+
+  it("hides a label whose only two options both cross the line", () => {
+    const lineSamples = [sample(0, 85), sample(0, 115)];
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A")], 11, lineSamples);
+    expect(result).toEqual([]);
+  });
+
+  it("ignores a line sample outside the label's own horizontal span", () => {
+    // Far enough in x that it can't be under this short label's box.
+    const lineSamples = [sample(1000, 85)];
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A")], 11, lineSamples);
+    expect(result).toEqual([{ id: "a", pixelX: 0, pixelY: 100, text: "A", color: "red", above: true }]);
+  });
+
+  it("defaults to no line samples (backward compatible)", () => {
+    const result = computeLabelPlacements([candidate("a", 0, 100, "A")], 11);
+    expect(result).toHaveLength(1);
   });
 });
