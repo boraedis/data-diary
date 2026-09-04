@@ -23,12 +23,14 @@ export function PercentInput({
   id,
   value,
   onChange,
-  step = null
+  step = null,
+  autoFocus = false
 }: {
   id: string;
   value: number | null;
   onChange: (value: number | null) => void;
   step?: number | null;
+  autoFocus?: boolean;
 }) {
 
   function update(nextValue: number | null) {
@@ -50,6 +52,7 @@ export function PercentInput({
       value={value ?? ""}
       step={step ?? "any"}
       onChange={(e) => update(parseValue(e.target.value, step))}
+      autoFocus={autoFocus}
     />
   );
 }

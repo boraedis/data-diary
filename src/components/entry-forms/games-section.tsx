@@ -158,7 +158,7 @@ function GameSessionDetailModal({
           </p>
           <div className="space-y-1.5">
             <Label htmlFor="game-detail-duration">Time played</Label>
-            <DurationInput id="game-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
+            <DurationInput id="game-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} autoFocus />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="game-detail-device-type">Device type</Label>

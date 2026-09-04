@@ -72,6 +72,7 @@ export function TechnologyEntryForm({
               id="phoneUsageMinutes"
               totalMinutes={technology.phoneUsageMinutes}
               onChange={(v) => set("phoneUsageMinutes", v)}
+              autoFocus
             />
           </div>
           <div className="space-y-1.5">

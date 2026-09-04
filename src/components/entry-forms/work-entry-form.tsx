@@ -125,6 +125,7 @@ export function WorkEntryForm({ date, initial }: { date: string; initial: WorkPa
               value={work.productivity}
               onChange={(value) => set("productivity", value)}
               step={1}
+              autoFocus
             ></PercentInput>
           </div>
           <div className="space-y-1.5">

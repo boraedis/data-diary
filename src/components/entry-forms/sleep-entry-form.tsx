@@ -88,6 +88,7 @@ export function SleepEntryForm({
               type="time"
               value={sleep.sleepTime ?? ""}
               onChange={(e) => set("sleepTime", e.target.value || null)}
+              autoFocus
             />
           </div>
           <div className="space-y-1.5">

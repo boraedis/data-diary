@@ -80,6 +80,7 @@ export function SocialMediaEntryForm({
               min="0"
               value={socialMedia.instagramFollowers ?? ""}
               onChange={(e) => set("instagramFollowers", parseNumber(e.target.value))}
+              autoFocus
             />
           </div>
           <div className="space-y-1.5">

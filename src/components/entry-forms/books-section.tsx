@@ -96,6 +96,7 @@ function BookSessionDetailModal({
                 step={1}
                 value={startPage}
                 onChange={(e) => setStartPage(e.target.value)}
+                autoFocus
               />
             </div>
             <div className="space-y-1.5">

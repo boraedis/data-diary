@@ -76,6 +76,7 @@ function MovieDetailModal({
               step={1}
               value={rating}
               onChange={(e) => setRating(e.target.value)}
+              autoFocus
             />
           </div>
           <div className="space-y-1.5">
