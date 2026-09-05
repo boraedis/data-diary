@@ -74,7 +74,38 @@ export function SearchPanel({
   trailingAction?: ReactNode;
 }) {
   const [query, setQuery] = useState("");
-  const filtered = useMemo(() => items.filter((item) => matches(item, query)), [items, query]);
+  // Deduplicate items by ID to handle data with duplicate IDs (keep first occurrence)
+  const deduplicated = useMemo(() => {
+    const seen = new Set<number>();
+    const duplicates: Array<{ id: number; names: string[] }> = [];
+
+    // Track duplicates and collect unique first occurrences
+    const result = items.filter((item) => {
+      if (seen.has(item.id)) {
+        // This is a duplicate
+        const dup = duplicates.find((d) => d.id === item.id);
+        if (dup) {
+          dup.names.push(item.primary);
+        } else {
+          duplicates.push({ id: item.id, names: [item.primary] });
+        }
+        return false; // Skip this duplicate
+      } else {
+        seen.add(item.id);
+        return true; // Keep the first occurrence
+      }
+    });
+
+    if (duplicates.length > 0) {
+      console.warn(
+        "SearchPanel detected duplicate item IDs:",
+        duplicates.map((d) => `ID ${d.id}: ${d.names.join(", ")}`)
+      );
+    }
+
+    return result;
+  }, [items]);
+  const filtered = useMemo(() => deduplicated.filter((item) => matches(item, query)), [deduplicated, query]);
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>

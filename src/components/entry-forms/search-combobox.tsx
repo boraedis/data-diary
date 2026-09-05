@@ -31,7 +31,6 @@ export function SearchCombobox({
   onChange,
   placeholder,
   emptyLabel = "—",
-  autoFocus = false,
 }: {
   id: string;
   items: SearchItem[];
@@ -39,7 +38,6 @@ export function SearchCombobox({
   onChange: (id: number | null) => void;
   placeholder?: string;
   emptyLabel?: string;
-  autoFocus?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -55,9 +53,10 @@ export function SearchCombobox({
       const path =
         "composedPath" in event ? event.composedPath() : [(event as MouseEvent).target as Node];
 
-      // Check if any element in the path is our trigger or dropdown
-      const isInsideTrigger = path.some((el) => triggerRef.current?.contains(el as Node));
-      const isInsideDropdown = path.some((el) => dropdownRef.current?.contains(el as Node));
+      // Check if any element in the path is our trigger or dropdown.
+      // Filter to only actual Node instances since composedPath can include non-Node objects (Window, etc).
+      const isInsideTrigger = path.some((el) => el instanceof Node && triggerRef.current?.contains(el));
+      const isInsideDropdown = path.some((el) => el instanceof Node && dropdownRef.current?.contains(el));
 
       if (!isInsideTrigger && !isInsideDropdown) {
         setOpen(false);
@@ -143,7 +142,7 @@ export function SearchCombobox({
                   setOpen(false);
                 }}
                 placeholder={placeholder}
-                autoFocus={autoFocus}
+                autoFocus={true}
               />
               {valueId !== null ? (
                 <Button
