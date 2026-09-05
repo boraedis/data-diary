@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { attachMarkHover } from "./marks";
@@ -36,6 +36,11 @@ import { cn } from "@/lib/utils";
 //  - Added, because legacy's own gap was called out in #118: a real
 //    breadcrumb trail. Legacy zoomed with no "you are here" indicator at
 //    all, so three rings deep you could only guess where you were.
+//  - Rebuilt around a focus-windowed data join, which the Observable
+//    original (sized for a ~250-node demo tree) has no need for and this
+//    app very much does. See `isArcInPlay` for the measurements and the
+//    reasoning; the short version is that only what's on screen exists in
+//    the DOM, and the other ~1,900 nodes live purely as numbers.
 //
 // Right-click-to-exclude-a-slice (the user's own long-standing want) is
 // explicitly NOT here: the hard part isn't the interaction, it's showing
@@ -51,9 +56,13 @@ export type ArcBox = { x0: number; x1: number; y0: number; y1: number };
 type DonutNode = d3.HierarchyRectangularNode<HierarchyDatum>;
 /** The layout node plus the two mutable frames the zoom tween runs
  * between: `current` is what's on screen right now, `target` is where the
- * in-flight transition is taking it. Mutated in place (not React state) —
- * this is per-frame animation data, and `useD3`'s deps must never see it. */
-type AnimatedNode = DonutNode & { current: ArcBox; target?: ArcBox };
+ * in-flight transition is taking it. Both are mutated in place (never
+ * reallocated) — this is per-frame animation data on every node in the
+ * tree, and it must cost nothing and never reach React state.
+ *
+ * `uid` is a stable identity for the data join below; `data.key` is only
+ * unique among siblings, and the join is across the whole tree. */
+type AnimatedNode = DonutNode & { current: ArcBox; target: ArcBox; uid: number };
 
 /** Below this angular width an arc is a hairline that can't be seen or
  * clicked; it's cheaper to hide it than to render thousands of them. */
@@ -76,6 +85,36 @@ const BREADCRUMB_AREA_HEIGHT = 32;
  */
 export function isArcVisible(box: ArcBox, visibleRings: number): boolean {
   return box.y1 <= visibleRings + 1 && box.y0 >= 1 && box.x1 - box.x0 > MIN_ARC_ANGLE;
+}
+
+/**
+ * Should this node exist in the DOM at all right now?
+ *
+ * This is the whole performance story of the primitive. A real hierarchy
+ * here is ~2,100 nodes across six levels, of which about 160 arcs and a
+ * dozen labels are ever on screen — rendering all of them (as the
+ * Observable original does, sized for a ~250-node demo tree) meant 4,200
+ * SVG elements, a 1.5s mount, a zoom that dropped two thirds of its
+ * frames, and a 10ms forced layout on every single pointer move. So the
+ * arcs and labels are a keyed data join over just the nodes in play, and
+ * everything else lives purely as numbers.
+ *
+ * "In play" is the union of the current frame and the frame a zoom is
+ * heading for — a node's `[y0, y1]` span, taken across both, has to
+ * overlap the visible ring window `[1, visibleRings + 1]`. Taking the
+ * union matters for two reasons: an arc animating *into* view has to be
+ * mounted before the transition starts (it enters at its pre-zoom
+ * geometry, so it flies in from the right place), and a multi-level
+ * breadcrumb jump sweeps arcs through the window that are outside it at
+ * both ends. Because the union is always a superset of the previous
+ * frame's set, a transition never has an exit selection; stale arcs are
+ * shed by the settling redraw once it finishes.
+ */
+export function isArcInPlay(current: ArcBox, target: ArcBox, visibleRings: number): boolean {
+  const outer = Math.max(current.y1, target.y1);
+  const inner = Math.min(current.y0, target.y0);
+  if (outer <= 1 || inner >= visibleRings + 1) return false;
+  return current.x1 - current.x0 > MIN_ARC_ANGLE || target.x1 - target.x0 > MIN_ARC_ANGLE;
 }
 
 /** Font-size tiers, largest first — legacy's 1.5rem/1rem/0.75rem ladder,
@@ -178,6 +217,24 @@ function depthOpacity(depth: number): number {
   return Math.max(0.35, 0.85 - 0.16 * Math.max(0, depth - 1));
 }
 
+/** Writes `from` into `to` without allocating a new box. */
+function copyBox(from: ArcBox, to: ArcBox): void {
+  to.x0 = from.x0;
+  to.x1 = from.x1;
+  to.y0 = from.y0;
+  to.y1 = from.y1;
+}
+
+/** Join key. `data.key` is only unique among siblings; the join below is
+ * across the whole tree, so it uses the per-layout ordinal instead. */
+function keyOfNode(node: AnimatedNode): number {
+  return node.uid;
+}
+
+function pxOrNull(size: number | null): string | null {
+  return size === null ? null : `${size}px`;
+}
+
 // --- Component ------------------------------------------------------------
 
 export type InteractiveDonutProps = {
@@ -210,11 +267,29 @@ export function InteractiveDonut({
   color,
   ariaLabel = "Sunburst chart. Click a slice to zoom into it, click the center to zoom back out. Hover or focus a slice to see its value.",
 }: InteractiveDonutProps) {
-  const [hovered, setHovered] = useState<{ node: DonutNode; clientPos: { x: number; y: number } } | null>(null);
-  // A state-backed callback ref, not a plain useRef — see interactive-
-  // hist's own comment on why this has to be state, not a ref read during
-  // render.
-  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  // Container-*local* coordinates, resolved when the hover happens rather
+  // than during render — see `readContainerRect` below for why that
+  // distinction is the difference between a smooth hover and a janky one.
+  const [hovered, setHovered] = useState<{ node: DonutNode; x: number; y: number } | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  /**
+   * Cached bounding box of the plot area, invalidated on scroll and
+   * resize rather than re-measured per event.
+   *
+   * `getBoundingClientRect` forces a synchronous layout, and on a chart
+   * this size that measured at ~10ms a call — paid on every single
+   * pointermove by the obvious version of this (reading the rect during
+   * render, the way the other primitives here do). Nothing but a scroll
+   * or a resize can move the container, so those are what invalidate it.
+   */
+  const containerRectRef = useRef<DOMRect | null>(null);
+  const readContainerRect = useCallback((): DOMRect | null => {
+    if (!containerRectRef.current) {
+      containerRectRef.current = containerRef.current?.getBoundingClientRect() ?? null;
+    }
+    return containerRectRef.current;
+  }, []);
 
   // Which node the chart is currently zoomed into, as a key path.
   //
@@ -241,6 +316,26 @@ export function InteractiveDonut({
   // pixel radius is applied at draw time, so a resize reuses this layout
   // (and with it every node's in-flight `current` frame) instead of
   // resetting the view.
+  useEffect(() => {
+    const invalidate = () => {
+      containerRectRef.current = null;
+    };
+    // Capture phase, so a scroll inside any ancestor counts, not just the
+    // window's own.
+    window.addEventListener("scroll", invalidate, true);
+    window.addEventListener("resize", invalidate);
+    return () => {
+      window.removeEventListener("scroll", invalidate, true);
+      window.removeEventListener("resize", invalidate);
+    };
+  }, []);
+
+  // The chart's own size changing moves the plot area too, and that
+  // arrives as a prop rather than as a window event.
+  useEffect(() => {
+    containerRectRef.current = null;
+  }, [width, chartHeight]);
+
   const layout = useMemo(() => {
     const root = d3
       .hierarchy(data)
@@ -250,8 +345,12 @@ export function InteractiveDonut({
       // index below is its rank, not DB row order.
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0)) as DonutNode;
     const partitioned = d3.partition<HierarchyDatum>().size([2 * Math.PI, root.height + 1])(root) as DonutNode;
+    let uid = 0;
     partitioned.each((d) => {
-      (d as AnimatedNode).current = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
+      const node = d as AnimatedNode;
+      node.uid = uid++;
+      node.current = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
+      node.target = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
     });
     return partitioned;
   }, [data]);
@@ -276,6 +375,7 @@ export function InteractiveDonut({
 
       const root = layout;
       let focus = (findByKeyPath(root, focusPath) ?? root) as AnimatedNode;
+      const nodes = root.descendants().slice(1) as AnimatedNode[];
 
       const arc = d3
         .arc<ArcBox>()
@@ -298,52 +398,11 @@ export function InteractiveDonut({
         .attr("text-anchor", "middle")
         .append("g");
 
-      const nodes = root.descendants().slice(1) as AnimatedNode[];
+      const arcLayer = g.append("g");
+      const labelLayer = g.append("g").attr("pointer-events", "none").style("user-select", "none");
 
-      const paths = g
-        .append("g")
-        .selectAll<SVGPathElement, AnimatedNode>("path")
-        .data(nodes)
-        .join("path")
-        .attr("fill", (d) => resolveColor(d))
-        .attr("fill-opacity", (d) => (isArcVisible(d.current, visibleRings) ? depthOpacity(d.depth) : 0))
-        .attr("pointer-events", (d) => (isArcVisible(d.current, visibleRings) ? "auto" : "none"))
-        .attr("d", (d) => arc(d.current));
-
-      const labels = g
-        .append("g")
-        .attr("pointer-events", "none")
-        .style("user-select", "none")
-        .selectAll<SVGTextElement, AnimatedNode>("text")
-        .data(nodes)
-        .join("text")
-        .attr("dy", "0.35em")
-        .attr("fill", "var(--foreground)")
-        // A surface-colored halo behind the glyphs (stroke painted first,
-        // then fill) instead of legacy's compute-black-or-white-from-the-
-        // hex trick: fills here are `var(--chart-N)` tokens that JS can't
-        // read a brightness from, and the halo is legible over any fill in
-        // either theme anyway.
-        .attr("stroke", "var(--card)")
-        .attr("stroke-width", 3)
-        .attr("stroke-linejoin", "round")
-        .attr("paint-order", "stroke")
-        .text((d) => d.data.name)
-        .style("font-size", (d) => sizePx(d.current, d.data.name))
-        // `opacity`, not the `fill-opacity` the Observable original fades
-        // labels with: these labels carry a surface-colored halo stroke,
-        // and zeroing only the fill leaves that stroke painting a white
-        // smear over every arc too small to be labelled — which is most of
-        // them on a long-tailed hierarchy.
-        .attr("opacity", (d) => (isLabelDrawn(d.current, d.data.name) ? 1 : 0))
-        .attr("transform", (d) => labelTransform(d.current, radius));
-
-      function sizePx(box: ArcBox, name: string): string | null {
-        const size = isArcVisible(box, visibleRings) ? labelFontSize(box, radius, name.length) : null;
-        return size === null ? null : `${size}px`;
-      }
-      function isLabelDrawn(box: ArcBox, name: string): boolean {
-        return isArcVisible(box, visibleRings) && labelFontSize(box, radius, name.length) !== null;
+      function labelSize(box: ArcBox, name: string): number | null {
+        return isArcVisible(box, visibleRings) ? labelFontSize(box, radius, name.length) : null;
       }
 
       // The center disc: a real target for "zoom back out one level," and
@@ -358,23 +417,126 @@ export function InteractiveDonut({
         .style("cursor", "pointer")
         .on("click", (_event, d) => zoomTo(d as AnimatedNode));
 
-      function zoomTo(target: AnimatedNode) {
-        // A zero-width focus can't define a frame to map the tree into
-        // (every arc would divide by zero); leave the view alone.
-        if (!(target.x1 > target.x0)) return;
+      /**
+       * Renders whatever is in play (see `isArcInPlay`) as a keyed join,
+       * either snapped straight to the target frame or eased into it.
+       *
+       * Anything not in play has its `current` snapped to `target` right
+       * here: it owns no DOM, so there is nothing to animate and nothing
+       * to see, but its geometry still has to be right for the moment a
+       * later zoom brings it back on screen.
+       */
+      function draw(animate: boolean) {
+        const inPlay: AnimatedNode[] = [];
+        for (const node of nodes) {
+          if (isArcInPlay(node.current, node.target, visibleRings)) inPlay.push(node);
+          else copyBox(node.target, node.current);
+        }
 
-        focus = target;
-        setFocusPath(keyPathOf(target));
-        center.datum(target.parent ?? root);
+        const joined = arcLayer.selectAll<SVGPathElement, AnimatedNode>("path").data(inPlay, keyOfNode);
 
-        root.each((node) => {
-          (node as AnimatedNode).target = {
-            x0: Math.max(0, Math.min(1, (node.x0 - target.x0) / (target.x1 - target.x0))) * 2 * Math.PI,
-            x1: Math.max(0, Math.min(1, (node.x1 - target.x0) / (target.x1 - target.x0))) * 2 * Math.PI,
-            y0: Math.max(0, node.y0 - target.depth),
-            y1: Math.max(0, node.y1 - target.depth),
-          };
-        });
+        // Entering arcs start at their *pre-zoom* geometry, which is what
+        // lets a node that owned no DOM a moment ago still fly in from the
+        // right place instead of popping into existence at its endpoint.
+        const entered = joined
+          .enter()
+          .append("path")
+          .attr("fill", (d) => resolveColor(d))
+          .attr("d", (d) => arc(d.current) ?? "")
+          .attr("fill-opacity", (d) => (isArcVisible(d.current, visibleRings) ? depthOpacity(d.depth) : 0));
+
+        attachMarkHover<AnimatedNode>(
+          entered as unknown as d3.Selection<d3.BaseType, AnimatedNode, d3.BaseType, unknown>,
+          {
+            onHover: (node, clientPos) => {
+              const rect = readContainerRect();
+              setHovered({ node, x: clientPos.x - (rect?.left ?? 0), y: clientPos.y - (rect?.top ?? 0) });
+            },
+            onLeave: () => setHovered(null),
+          },
+        );
+
+        // Two corrections to what attachMarkHover sets by default:
+        //  - tabindex 0 on every mark would put arcs outside the visible
+        //    ring window into the tab order (they're `pointer-events:
+        //    none`, so the mouse can't reach them, but the keyboard
+        //    could) — the real value is set on the merged selection below;
+        //  - a pointer cursor promises a zoom that a childless leaf can't
+        //    deliver.
+        entered
+          .style("cursor", (d) => (d.children ? "pointer" : "default"))
+          .on("click", (event, d) => {
+            // Only a node with children has anything to zoom *into*;
+            // clicking a leaf would just re-frame the ring it's already in.
+            if (d.children) zoomTo(d);
+            // Without this the click also reaches the center disc behind
+            // the ring and immediately zooms back out.
+            event.stopPropagation();
+          })
+          .on("keydown", (event: KeyboardEvent, d) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              if (d.children) zoomTo(d);
+            } else if (event.key === "Escape" || event.key === "Backspace") {
+              event.preventDefault();
+              zoomTo((focus.parent ?? root) as AnimatedNode);
+            }
+          });
+
+        const arcs = entered.merge(joined);
+
+        // Hit-testing and keyboard reachability jump straight to the
+        // target state rather than easing: a focus ring or a click that
+        // only works once the animation settles reads as the chart being
+        // unresponsive.
+        arcs
+          .attr("pointer-events", (d) => (isArcVisible(d.target, visibleRings) ? "auto" : "none"))
+          .attr("tabindex", (d) => (isArcVisible(d.target, visibleRings) ? 0 : -1));
+
+        // Labels are joined over a second, much smaller subset. On a real
+        // hierarchy this is a dozen <text> elements rather than one per
+        // node — the single biggest saving here, since a <text> costs far
+        // more than a <path> and almost none of them are ever readable.
+        const labelData = inPlay.filter(
+          (d) => labelSize(d.current, d.data.name) !== null || labelSize(d.target, d.data.name) !== null,
+        );
+        const joinedLabels = labelLayer.selectAll<SVGTextElement, AnimatedNode>("text").data(labelData, keyOfNode);
+        const enteredLabels = joinedLabels
+          .enter()
+          .append("text")
+          .attr("dy", "0.35em")
+          .attr("fill", "var(--foreground)")
+          // A surface-colored halo behind the glyphs (stroke painted
+          // first, then fill) instead of legacy's compute-black-or-white-
+          // from-the-hex trick: fills here are `var(--chart-N)` tokens
+          // that JS can't read a brightness from, and the halo is legible
+          // over any fill in either theme anyway.
+          .attr("stroke", "var(--card)")
+          .attr("stroke-width", 3)
+          .attr("stroke-linejoin", "round")
+          .attr("paint-order", "stroke")
+          .text((d) => d.data.name)
+          .attr("transform", (d) => labelTransform(d.current, radius))
+          .style("font-size", (d) => pxOrNull(labelSize(d.current, d.data.name)))
+          // `opacity`, not the `fill-opacity` the Observable original
+          // fades labels with: these labels carry that halo stroke, and
+          // zeroing only the fill leaves it painting a white smear over
+          // every arc too small to be labelled.
+          .attr("opacity", (d) => (labelSize(d.current, d.data.name) === null ? 0 : 1));
+        const allLabels = enteredLabels.merge(joinedLabels);
+
+        if (!animate) {
+          arcs
+            .attr("d", (d) => arc(d.target) ?? "")
+            .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? depthOpacity(d.depth) : 0));
+          allLabels
+            .attr("transform", (d) => labelTransform(d.target, radius))
+            .style("font-size", (d) => pxOrNull(labelSize(d.target, d.data.name)))
+            .attr("opacity", (d) => (labelSize(d.target, d.data.name) === null ? 0 : 1));
+          joined.exit().remove();
+          joinedLabels.exit().remove();
+          return;
+        }
 
         // One transition object shared by the arcs and the labels, so
         // they're scheduled together rather than as two independently-
@@ -388,40 +550,68 @@ export function InteractiveDonut({
           unknown
         >;
 
-        // Tween every arc's data, even ones that stay invisible, so an
-        // interrupted transition leaves them somewhere coherent to start
-        // the next one from (straight from the Observable original — the
-        // alternative is arcs flying in from stale positions when you
-        // click twice quickly).
-        paths
+        arcs
           .transition(t)
+          // A hand-rolled lerp writing back into the node's existing
+          // `current`, not `d3.interpolate`: the generic interpolator
+          // allocates a fresh object per node per frame, which at 60fps
+          // across a few hundred arcs is pure garbage-collector pressure
+          // for the sake of four numbers.
           .tween("data", (d) => {
-            const interpolate = d3.interpolate(d.current, d.target as ArcBox);
-            return (time: number) => {
-              d.current = interpolate(time);
+            const from = { ...d.current };
+            const to = d.target;
+            return (k: number) => {
+              d.current.x0 = from.x0 + (to.x0 - from.x0) * k;
+              d.current.x1 = from.x1 + (to.x1 - from.x1) * k;
+              d.current.y0 = from.y0 + (to.y0 - from.y0) * k;
+              d.current.y1 = from.y1 + (to.y1 - from.y1) * k;
             };
           })
-          .filter(function (d) {
-            return Boolean(Number(this.getAttribute("fill-opacity"))) || isArcVisible(d.target as ArcBox, visibleRings);
-          })
-          .attr("fill-opacity", (d) => (isArcVisible(d.target as ArcBox, visibleRings) ? depthOpacity(d.depth) : 0))
-          .attr("pointer-events", (d) => (isArcVisible(d.target as ArcBox, visibleRings) ? "auto" : "none"))
+          .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? depthOpacity(d.depth) : 0))
           .attrTween("d", (d) => () => arc(d.current) ?? "");
 
-        // Keyboard reachability has to track visibility too, or Tab walks
-        // through arcs that aren't on screen. Set outside the transition
-        // (immediately, not eased) — a focus ring appearing mid-fade would
-        // be worse than a slightly early one.
-        paths.attr("tabindex", (d) => (isArcVisible(d.target as ArcBox, visibleRings) ? 0 : -1));
-
-        labels
-          .filter(function (d) {
-            return Boolean(Number(this.getAttribute("opacity"))) || isLabelDrawn(d.target as ArcBox, d.data.name);
-          })
+        allLabels
           .transition(t)
-          .attr("opacity", (d) => (isLabelDrawn(d.target as ArcBox, d.data.name) ? 1 : 0))
-          .style("font-size", (d) => sizePx(d.target as ArcBox, d.data.name))
+          .attr("opacity", (d) => (labelSize(d.target, d.data.name) === null ? 0 : 1))
+          .style("font-size", (d) => pxOrNull(labelSize(d.target, d.data.name)))
           .attrTween("transform", (d) => () => labelTransform(d.current, radius));
+
+        // Settle once the tween lands: snap every node onto its target and
+        // redraw without animating, which is what actually sheds the arcs
+        // and labels that were only mounted for the animation's sake.
+        // `.end()` rejects when another zoom interrupts this one — that
+        // zoom does its own settling, so there is nothing to do here.
+        t.end().then(
+          () => {
+            for (const node of nodes) copyBox(node.target, node.current);
+            draw(false);
+          },
+          () => {},
+        );
+      }
+
+      function zoomTo(target: AnimatedNode) {
+        // A zero-width focus can't define a frame to map the tree into
+        // (every arc would divide by zero); leave the view alone.
+        if (!(target.x1 > target.x0)) return;
+
+        focus = target;
+        setFocusPath(keyPathOf(target));
+        center.datum(target.parent ?? root);
+
+        // Written in place, for the same reason the tween is: this runs
+        // over every node in the tree on every zoom, and a fresh object
+        // per node is thousands of allocations for four numbers.
+        const span = target.x1 - target.x0;
+        for (const node of nodes) {
+          const box = node.target;
+          box.x0 = Math.max(0, Math.min(1, (node.x0 - target.x0) / span)) * 2 * Math.PI;
+          box.x1 = Math.max(0, Math.min(1, (node.x1 - target.x0) / span)) * 2 * Math.PI;
+          box.y0 = Math.max(0, node.y0 - target.depth);
+          box.y1 = Math.max(0, node.y1 - target.depth);
+        }
+
+        draw(true);
       }
 
       zoomToPathRef.current = (path) => {
@@ -429,47 +619,13 @@ export function InteractiveDonut({
         if (target) zoomTo(target as AnimatedNode);
       };
 
-      attachMarkHover<AnimatedNode>(
-        paths as unknown as d3.Selection<d3.BaseType, AnimatedNode, d3.BaseType, unknown>,
-        {
-          onHover: (node, clientPos) => setHovered({ node, clientPos }),
-          onLeave: () => setHovered(null),
-        },
-      );
-
-      // Two corrections to what attachMarkHover sets by default, both
-      // specific to arcs living outside the visible ring window:
-      //  - tabindex 0 on every mark would put off-screen arcs in the tab
-      //    order (they're `pointer-events: none`, so the mouse can't reach
-      //    them, but the keyboard could);
-      //  - a pointer cursor promises a zoom that a childless leaf can't
-      //    deliver.
-      paths
-        .attr("tabindex", (d) => (isArcVisible(d.current, visibleRings) ? 0 : -1))
-        .style("cursor", (d) => (d.children ? "pointer" : "default"))
-        .on("click", (event, d) => {
-          // Only a node with children has anything to zoom *into*;
-          // clicking a leaf would just re-frame the ring it's already in.
-          if (d.children) zoomTo(d);
-          // Without this the click also reaches the center disc behind the
-          // ring and immediately zooms back out.
-          event.stopPropagation();
-        })
-        .on("keydown", (event: KeyboardEvent, d) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            if (d.children) zoomTo(d);
-          } else if (event.key === "Escape" || event.key === "Backspace") {
-            event.preventDefault();
-            zoomTo((focus.parent ?? root) as AnimatedNode);
-          }
-        });
+      draw(false);
 
       return () => {
         zoomToPathRef.current = null;
       };
     },
-    [layout, width, chartHeight, radius, visibleRings, resolveColor],
+    [layout, width, chartHeight, radius, visibleRings, resolveColor, readContainerRect],
   );
 
   // --- Breadcrumb + center summary (React, deliberately outside useD3) ---
@@ -487,7 +643,6 @@ export function InteractiveDonut({
     zoomToPathRef.current?.(keyPathOf(node));
   }, []);
 
-  const containerRect = containerEl?.getBoundingClientRect();
   const hoveredNode = hovered?.node;
 
   return (
@@ -519,7 +674,7 @@ export function InteractiveDonut({
       </nav>
 
       <div
-        ref={setContainerEl}
+        ref={containerRef}
         style={{ position: "relative", width, height: chartHeight }}
         role="img"
         aria-label={ariaLabel}
@@ -552,10 +707,10 @@ export function InteractiveDonut({
           </div>
         </div>
 
-        {hovered && hoveredNode && containerRect ? (
+        {hovered && hoveredNode ? (
           <ChartTooltip
-            x={hovered.clientPos.x - containerRect.left}
-            y={hovered.clientPos.y - containerRect.top}
+            x={hovered.x}
+            y={hovered.y}
             // Full ancestry, not just the node's own name: three rings
             // deep, "Midtown" alone doesn't say which city's Midtown.
             title={hoveredNode

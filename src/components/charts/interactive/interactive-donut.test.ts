@@ -4,6 +4,7 @@ import {
   LABEL_FONT_TIERS,
   MIN_ARC_ANGLE,
   findByKeyPath,
+  isArcInPlay,
   isArcVisible,
   keyPathOf,
   labelFontSize,
@@ -47,6 +48,55 @@ describe("isArcVisible", () => {
   it("hides a hairline arc even inside the window", () => {
     expect(isArcVisible(box(0, MIN_ARC_ANGLE, 1, 2), 2)).toBe(false);
     expect(isArcVisible(box(0, MIN_ARC_ANGLE * 10, 1, 2), 2)).toBe(true);
+  });
+});
+
+describe("isArcInPlay", () => {
+  const still = (b: ArcBox) => isArcInPlay(b, b, 2);
+
+  it("mounts what the visible window covers", () => {
+    expect(still(box(0, TAU, 1, 2))).toBe(true);
+    expect(still(box(0, TAU, 2, 3))).toBe(true);
+  });
+
+  it("leaves out a ring beyond the window", () => {
+    expect(still(box(0, TAU, 3, 4))).toBe(false);
+  });
+
+  it("leaves out the focused node itself and its ancestors", () => {
+    // The focus occupies y 0-1 — that's the center disc, drawn by React.
+    expect(still(box(0, TAU, 0, 1))).toBe(false);
+  });
+
+  it("mounts a node that is only visible at the far end of a zoom", () => {
+    // Currently three rings out, heading for the first ring: it has to
+    // exist before the transition starts so it can animate inward.
+    const current = box(0, 0.5, 3, 4);
+    const target = box(0, TAU, 1, 2);
+    expect(isArcInPlay(current, target, 2)).toBe(true);
+    expect(isArcVisible(current, 2)).toBe(false);
+  });
+
+  it("mounts a node that only sweeps through the window mid-flight", () => {
+    // A multi-level breadcrumb jump: outside the window at both ends, but
+    // it crosses the visible rings on the way, so the reader sees it move.
+    expect(isArcInPlay(box(0, TAU, 4, 5), box(0, TAU, 0, 1), 2)).toBe(true);
+  });
+
+  it("leaves out a hairline that is a hairline in both frames", () => {
+    const hair = box(0, MIN_ARC_ANGLE, 1, 2);
+    expect(isArcInPlay(hair, hair, 2)).toBe(false);
+    // ...but keeps it if the zoom is about to open it up.
+    expect(isArcInPlay(hair, box(0, TAU, 1, 2), 2)).toBe(true);
+  });
+
+  it("never drops an arc that isArcVisible would draw", () => {
+    for (const y of [1, 2, 3, 4]) {
+      for (const width of [0.0005, 0.01, 1, TAU]) {
+        const b = box(0, width, y, y + 1);
+        if (isArcVisible(b, 2)) expect(isArcInPlay(b, b, 2)).toBe(true);
+      }
+    }
   });
 });
 

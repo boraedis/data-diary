@@ -35,13 +35,15 @@ function arcs(container: HTMLElement): SVGPathElement[] {
   return [...container.querySelectorAll<SVGPathElement>("svg path")];
 }
 
-/** Finds an arc by the `key` of the node d3 bound to it. Reads d3's own
- * `__data__` expando rather than a `data-*` attribute, so the test isn't
- * asking the component to carry markup it only needs for testing. */
+/** The `key` of the node d3 bound to an arc. Reads d3's own `__data__`
+ * expando rather than a `data-*` attribute, so the test isn't asking the
+ * component to carry markup it only needs for testing. */
+function keyOf(path: SVGPathElement): string | undefined {
+  return (d3.select(path).datum() as d3.HierarchyNode<HierarchyDatum> | undefined)?.data.key;
+}
+
 function arcFor(container: HTMLElement, key: string): SVGPathElement {
-  const match = arcs(container).find(
-    (path) => (d3.select(path).datum() as d3.HierarchyNode<HierarchyDatum> | undefined)?.data.key === key,
-  );
+  const match = arcs(container).find((path) => keyOf(path) === key);
   if (!match) throw new Error(`no arc bound to key "${key}"`);
   return match;
 }
@@ -69,34 +71,62 @@ function renderDonut(props: Partial<React.ComponentProps<typeof InteractiveDonut
 }
 
 describe("InteractiveDonut", () => {
-  it("draws one arc per descendant of the root", () => {
-    const { container } = renderDonut();
-    // usa, fr, ga, ny, atl — the root itself is the center disc, not a ring.
-    expect(arcs(container)).toHaveLength(5);
+  it("mounts only the arcs inside the visible ring window", () => {
+    // The whole point of isArcInPlay: a node outside the window owns no
+    // DOM at all, rather than being a hidden element the browser still has
+    // to lay out. Ring 1 only -> USA and France; Georgia, New York and
+    // Atlanta don't exist yet.
+    const oneRing = renderDonut({ visibleRings: 1 });
+    expect(arcs(oneRing.container)).toHaveLength(2);
+    expect(visibleArcs(oneRing.container)).toHaveLength(2);
+    oneRing.unmount();
+
+    // Two rings adds Georgia and New York, but still not Atlanta at depth 3.
+    const { container } = renderDonut({ visibleRings: 2 });
+    expect(arcs(container)).toHaveLength(4);
     expect(arcs(container).every((p) => (p.getAttribute("d") ?? "").startsWith("M"))).toBe(true);
   });
 
-  it("only paints arcs inside the visible ring window", () => {
-    const { container } = renderDonut({ visibleRings: 1 });
-    // Ring 1 only: USA and France. Georgia/New York/Atlanta wait for a zoom.
-    expect(visibleArcs(container)).toHaveLength(2);
-
-    const twoRings = renderDonut({ visibleRings: 2 });
-    // + Georgia and New York.
-    expect(visibleArcs(twoRings.container)).toHaveLength(4);
+  it("mounts only the labels that are actually readable", () => {
+    // One dominant slice plus a long tail of slivers — the shape a real
+    // hierarchy has, and the reason labels get their own, much smaller
+    // join: on the live places tree this is a dozen <text> nodes instead
+    // of two thousand.
+    const longTail: HierarchyDatum = {
+      key: "root",
+      name: "All",
+      children: [
+        { key: "big", name: "Dominant", value: 1000 },
+        ...Array.from({ length: 40 }, (_, i) => ({ key: `t${i}`, name: `Sliver ${i}`, value: 1 })),
+      ],
+    };
+    const { container } = renderDonut({ data: longTail, visibleRings: 1 });
+    expect(arcs(container)).toHaveLength(41);
+    expect(container.querySelectorAll("svg text").length).toBeLessThan(5);
   });
 
-  it("keeps off-screen arcs out of the tab order and out of pointer reach", () => {
+  it("makes every mounted arc keyboard-reachable", () => {
     const { container } = renderDonut({ visibleRings: 1 });
-    const hidden = arcs(container).filter((p) => Number(p.getAttribute("fill-opacity")) === 0);
-    expect(hidden.length).toBeGreaterThan(0);
-    for (const path of hidden) {
-      expect(path.getAttribute("tabindex")).toBe("-1");
-      expect(path.getAttribute("pointer-events")).toBe("none");
-    }
-    for (const path of visibleArcs(container)) {
+    for (const path of arcs(container)) {
       expect(path.getAttribute("tabindex")).toBe("0");
+      expect(path.getAttribute("pointer-events")).toBe("auto");
     }
+  });
+
+  it("mounts the newly-revealed ring when a zoom brings it into the window", () => {
+    const { container } = renderDonut({ visibleRings: 1 });
+    // Atlanta lives two levels below the root, so it is absent at rest...
+    expect(arcs(container).length).toBe(2);
+
+    act(() => {
+      arcFor(container, "usa").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // ...and exists once USA is the focus, so it has something to animate
+    // in from rather than popping into place at the end.
+    const keys = arcs(container).map(keyOf);
+    expect(keys).toContain("ga");
+    expect(keys).toContain("ny");
   });
 
   it("summarizes the root in the center before any zoom", () => {
