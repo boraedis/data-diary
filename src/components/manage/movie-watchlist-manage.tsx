@@ -80,6 +80,7 @@ export function MovieWatchlistManage({
             + Add from TMDB
           </Button>
         }
+      autoFocus
       />
       {error ? <span className="text-sm text-destructive">{error}</span> : null}
 

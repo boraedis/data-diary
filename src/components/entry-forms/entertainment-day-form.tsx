@@ -299,7 +299,8 @@ export function EntertainmentDayForm({
             items={searchItems}
             onSelect={handleSearchSelect}
             placeholder="Search movies, TV shows, sports leagues, books…"
-            emptyMessage="No matches — use a section's own “+ New”/“+ Add” button below."
+            emptyMessage={'No matches — use a section\'s own "+ New"/"+ Add" button below.'}
+            autoFocus
           />
         </CardContent>
       </Card>

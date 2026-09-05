@@ -214,7 +214,8 @@ function PersonAddPanel({
         onSelect={onAddPositive}
         secondaryAction={{ ariaLabel: "Add as negative", icon: "−", onSelect: onAddNegative }}
         placeholder="Search people…"
-        emptyMessage="No matches — try “+ New person”."
+        emptyMessage={'No matches — try "+ New person".'}
+        autoFocus
       />
       <p className="text-xs text-muted-foreground">
         Tap a result to add as positive. Tap the − to add as negative instead.
