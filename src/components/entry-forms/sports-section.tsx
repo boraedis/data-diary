@@ -541,6 +541,14 @@ function SportsWatchDetailModal({
   // true; the modal is remounted fresh per open via the `key` its parent
   // (SportsSection) passes, so there's no stale-true case to worry about.
   const [dirty, setDirty] = useState(false);
+  // A nested Modal, not window.confirm() — see confirm-link.tsx's header
+  // comment (same file, this PR) for why: window.confirm() from anywhere
+  // not a dead-simple synchronous click handler risks iOS Safari silently
+  // swallowing it. This one IS a plain onClick with no framework transition
+  // in the way, so it likely would've been fine, but there's no reason to
+  // keep two different confirm mechanisms in the same PR for the same
+  // problem.
+  const [confirmingClose, setConfirmingClose] = useState(false);
 
   function wrapChange<T>(setter: (value: T) => void) {
     return (value: T) => {
@@ -550,7 +558,10 @@ function SportsWatchDetailModal({
   }
 
   function handleClose() {
-    if (dirty && !window.confirm("You have unsaved changes. Leave anyway?")) return;
+    if (dirty) {
+      setConfirmingClose(true);
+      return;
+    }
     onClose();
   }
 
@@ -763,6 +774,27 @@ function SportsWatchDetailModal({
           setSeason(created.name);
         }}
       />
+
+      <Modal open={confirmingClose} onClose={() => setConfirmingClose(false)} title="Unsaved changes">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">You have unsaved changes. Leave anyway?</p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setConfirmingClose(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setConfirmingClose(false);
+                onClose();
+              }}
+            >
+              Leave
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

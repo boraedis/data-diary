@@ -1,31 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import type { ComponentProps } from "react";
+import type { ComponentProps, MouseEvent } from "react";
 import { useNavigationBlocker } from "@/components/navigation-blocker";
 
 /** Drop-in replacement for next/link's `Link` that confirms before leaving
- * the page if `useNavigationBlocker`'s flag is set (see
- * navigation-blocker.tsx) — used by TopNav and DayNav (issue #143) so
- * clicking any site nav away from a dirty entry form doesn't silently
- * discard it. `onNavigate` only fires for client-side, same-origin
- * navigation (Next.js Link docs) — it doesn't cover the browser's own
- * back/forward buttons or a hard reload/tab close; useUnsavedChangesGuard
- * covers the latter with a `beforeunload` listener. Back/forward is a known
- * gap with no reliable fix in the App Router without fragile history-stack
- * tricks, so it's left alone rather than hacked around. */
-export function ConfirmLink({ children, ...props }: ComponentProps<typeof Link>) {
-  const { isBlocked } = useNavigationBlocker();
+ * the page if `useNavigationBlocker`'s flag is set (issue #143) — used by
+ * TopNav and DayNav so clicking any site nav away from a dirty entry form
+ * doesn't silently discard it.
+ *
+ * `href` is narrowed to a plain string (not next/link's full `Url` union)
+ * since every real caller in this app already passes one and
+ * NavigationBlockerProvider's `requestNavigation` hands it straight to
+ * `router.push`, which only accepts a string anyway.
+ *
+ * Intercepts the click itself and calls `requestNavigation` rather than
+ * using Link's `onNavigate` — see navigation-blocker.tsx's header comment
+ * for why: onNavigate fires through Next's transition machinery, and a
+ * `window.confirm()` called from there isn't a reliable-enough "direct
+ * user gesture" for iOS Safari, which was silently suppressing it. A plain
+ * onClick handler is a real synchronous gesture, so the Modal-based
+ * confirmation in the provider works everywhere.
+ *
+ * Modifier-clicks (Cmd/Ctrl/Shift/middle-click, opening in a new tab) are
+ * left alone — those don't navigate the current tab away from the dirty
+ * page, so there's nothing to confirm. */
+export function ConfirmLink({
+  children,
+  href,
+  onClick,
+  ...props
+}: Omit<ComponentProps<typeof Link>, "href" | "onNavigate"> & { href: string }) {
+  const { requestNavigation } = useNavigationBlocker();
+
+  function handleClick(e: MouseEvent<HTMLAnchorElement>) {
+    onClick?.(e);
+    if (e.defaultPrevented) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    requestNavigation(href);
+  }
 
   return (
-    <Link
-      {...props}
-      onNavigate={(e) => {
-        if (isBlocked && !window.confirm("You have unsaved changes. Leave anyway?")) {
-          e.preventDefault();
-        }
-      }}
-    >
+    <Link href={href} onClick={handleClick} {...props}>
       {children}
     </Link>
   );
