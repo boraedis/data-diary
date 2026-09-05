@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ColorInput } from "@/components/ui/color-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -343,14 +344,7 @@ export function ProfileTimelineEditor({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="pte-color">Color</Label>
-              <Input
-                id="pte-color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                placeholder="#xxxxxx"
-                pattern="^#[0-9a-fA-F]{6}$"
-                title="Use format #xxxxxx"
-              />
+              <ColorInput id="pte-color" value={color} onChange={setColor} />
             </div>
           </div>
 

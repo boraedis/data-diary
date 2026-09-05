@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ColorInput } from "@/components/ui/color-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -366,21 +367,21 @@ export function PlaceDetail({
                     </span>
                   ) : null}
                 </Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="place-color"
-                    type="color"
-                    value={editColorValue || "#64748b"}
-                    onChange={(e) => setColor(e.target.value)}
-                    disabled={!editIsRoot}
-                    className="h-8 w-16 cursor-pointer rounded border border-input bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
+                {editIsRoot ? (
+                  <div className="flex items-center gap-2">
+                    <ColorInput id="place-color" value={color} onChange={setColor} className="flex-1" />
+                    {color ? (
+                      <Button type="button" size="xs" variant="outline" onClick={() => setColor("")}>
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div
+                    className="h-8 w-16 rounded border border-input"
+                    style={{ backgroundColor: editColorValue || undefined }}
                   />
-                  {editIsRoot && color ? (
-                    <Button type="button" size="xs" variant="outline" onClick={() => setColor("")}>
-                      Clear
-                    </Button>
-                  ) : null}
-                </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="place-metro">

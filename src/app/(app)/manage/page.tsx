@@ -10,7 +10,7 @@ import {
   listPlacesCatalog,
   listSportsCatalog,
 } from "@/lib/days";
-import { listSleepLocationTypes } from "@/lib/catalog-admin";
+import { listSavedColors, listSleepLocationTypes } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -22,25 +22,34 @@ export const dynamic = "force-dynamic";
 // see that page. "Sleep" (issue #59) only has the one location-type/subtype
 // catalog behind it, no richer sub-hierarchy the way entertainment does, so
 // its card links straight to /manage/sleep rather than an intermediate hub.
+// "Colors" (issue #45) is the same shape as Sleep — one flat catalog, no
+// sub-hierarchy — but isn't owned by any single domain (used by tags,
+// places, sports teams, genre groups, and profile timeline entries alike),
+// so it uses the neutral `border-border` rather than reusing one of the
+// five categorical chart-N accents, which are reserved for actual data
+// series (see AGENTS.md's color convention) — this tile isn't one.
 const CATALOGS = [
   { key: "people", label: "People", accent: "border-chart-1" },
   { key: "places", label: "Places", accent: "border-chart-2" },
   { key: "exercises", label: "Exercises", accent: "border-chart-3" },
   { key: "entertainment", label: "Entertainment", accent: "border-chart-4" },
   { key: "sleep", label: "Sleep", accent: "border-chart-5" },
+  { key: "colors", label: "Colors", accent: "border-border" },
 ] as const;
 
 export default async function ManagePage() {
-  const [people, places, exercises, entertainment, movies, sports, books, sleepLocationTypes] = await Promise.all([
-    listPeopleCatalog(),
-    listPlacesCatalog(),
-    listExercisesCatalog(),
-    listEntertainmentCatalog(),
-    listMoviesCatalog(),
-    listSportsCatalog(),
-    listBooksCatalog(),
-    listSleepLocationTypes(),
-  ]);
+  const [people, places, exercises, entertainment, movies, sports, books, sleepLocationTypes, colors] =
+    await Promise.all([
+      listPeopleCatalog(),
+      listPlacesCatalog(),
+      listExercisesCatalog(),
+      listEntertainmentCatalog(),
+      listMoviesCatalog(),
+      listSportsCatalog(),
+      listBooksCatalog(),
+      listSleepLocationTypes(),
+      listSavedColors(),
+    ]);
 
   const counts: Record<(typeof CATALOGS)[number]["key"], number> = {
     people: people.length,
@@ -51,6 +60,7 @@ export default async function ManagePage() {
     // "entertainment tile counts all of it" call.
     entertainment: entertainment.length + movies.length + sports.length + books.length,
     sleep: sleepLocationTypes.length,
+    colors: colors.length,
   };
 
   return (
