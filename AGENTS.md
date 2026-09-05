@@ -221,6 +221,24 @@ development. Do not attempt `drizzle-kit push` or schema validation against
 your local dev database while working on schema changes — use the PR database
 workflow instead.
 
+## Production backfills and one-time operations
+
+When development work (schema changes, new features, data transformations) requires a backfill, data migration, or one-time operation to run against the production database to be fully effective, **create a separate issue for that operation** with:
+
+- A clear `Task` section describing what needs to run and why
+- The exact command to execute (e.g., `npm run backfill:place-paths`)
+- Documentation of any safety gates in the script (e.g., confirmation prompts, production host detection)
+- Evidence the operation is safe: test results from the PR database, row counts before/after, spot-checked samples
+- Instructions that the operation must be run interactively from a user's terminal (not automated)
+
+Example: issue #154 — "Run place-paths backfill against production" documents the backfill tested and ready to deploy.
+
+**Never merge a PR whose work depends on a production operation without filing and linking that operation issue.** The operation issue serves as:
+- A record of what still needs to happen post-merge
+- Documentation for whoever runs it (often the repo owner, manually, from their terminal)
+- A checkpoint — the feature is code-complete but user-facing impact is deferred until the operation runs
+- Accountability — if the operation is never run, the incomplete feature becomes visible in the issue tracker
+
 ## Where the epic stands
 
 The original chart-rebuild epic (**#14**) is fully closed — all of #16-#25
