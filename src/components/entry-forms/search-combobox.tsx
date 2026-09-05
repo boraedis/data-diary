@@ -50,14 +50,16 @@ export function SearchCombobox({
   useEffect(() => {
     if (!open) return;
 
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      if (
-        triggerRef.current &&
-        !triggerRef.current.contains(target) &&
-        dropdownRef.current &&
-        !dropdownRef.current.contains(target)
-      ) {
+    function handleClickOutside(event: MouseEvent | TouchEvent) {
+      // Use composedPath for better compatibility with portals and Safari
+      const path =
+        "composedPath" in event ? event.composedPath() : [(event as MouseEvent).target as Node];
+
+      // Check if any element in the path is our trigger or dropdown
+      const isInsideTrigger = path.some((el) => triggerRef.current?.contains(el as Node));
+      const isInsideDropdown = path.some((el) => dropdownRef.current?.contains(el as Node));
+
+      if (!isInsideTrigger && !isInsideDropdown) {
         setOpen(false);
       }
     }
@@ -66,14 +68,28 @@ export function SearchCombobox({
       if (dropdownRef.current && event.target instanceof Node && dropdownRef.current.contains(event.target)) {
         return;
       }
+      // On mobile, focusing the search input opens the on-screen keyboard,
+      // which fires a `resize` (and sometimes `scroll`) event on `window` —
+      // whose `event.target` is `window` itself, not a Node, so the check
+      // above never catches it. That was closing the dropdown the instant
+      // you tapped into the search box. Guard against that specifically: if
+      // focus is currently inside the dropdown, treat the resize/scroll as
+      // keyboard-driven noise rather than "user scrolled/resized away".
+      if (dropdownRef.current && document.activeElement && dropdownRef.current.contains(document.activeElement)) {
+        return;
+      }
       setOpen(false);
     }
 
-    document.addEventListener("mousedown", handleClickOutside);
+    // Use capture phase to ensure we catch events early, and check specifically
+    // for clicks/touches inside the dropdown
+    document.addEventListener("mousedown", handleClickOutside as EventListener, true);
+    document.addEventListener("touchstart", handleClickOutside as EventListener, true);
     window.addEventListener("scroll", handleScrollOrResize, true);
     window.addEventListener("resize", handleScrollOrResize);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside as EventListener, true);
+      document.removeEventListener("touchstart", handleClickOutside as EventListener, true);
       window.removeEventListener("scroll", handleScrollOrResize, true);
       window.removeEventListener("resize", handleScrollOrResize);
     };
@@ -117,6 +133,8 @@ export function SearchCombobox({
               ref={dropdownRef}
               className="fixed z-50 rounded-lg border border-border bg-background p-2 shadow-lg"
               style={{ top: position.top, left: position.left, width: position.width }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
             >
               <SearchPanel
                 items={items}
