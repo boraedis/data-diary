@@ -53,9 +53,10 @@ export function SearchCombobox({
       const path =
         "composedPath" in event ? event.composedPath() : [(event as MouseEvent).target as Node];
 
-      // Check if any element in the path is our trigger or dropdown
-      const isInsideTrigger = path.some((el) => triggerRef.current?.contains(el as Node));
-      const isInsideDropdown = path.some((el) => dropdownRef.current?.contains(el as Node));
+      // Check if any element in the path is our trigger or dropdown.
+      // Filter to only actual Node instances since composedPath can include non-Node objects (Window, etc).
+      const isInsideTrigger = path.some((el) => el instanceof Node && triggerRef.current?.contains(el));
+      const isInsideDropdown = path.some((el) => el instanceof Node && dropdownRef.current?.contains(el));
 
       if (!isInsideTrigger && !isInsideDropdown) {
         setOpen(false);
