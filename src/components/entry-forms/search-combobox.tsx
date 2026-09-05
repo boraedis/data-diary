@@ -68,6 +68,16 @@ export function SearchCombobox({
       if (dropdownRef.current && event.target instanceof Node && dropdownRef.current.contains(event.target)) {
         return;
       }
+      // On mobile, focusing the search input opens the on-screen keyboard,
+      // which fires a `resize` (and sometimes `scroll`) event on `window` —
+      // whose `event.target` is `window` itself, not a Node, so the check
+      // above never catches it. That was closing the dropdown the instant
+      // you tapped into the search box. Guard against that specifically: if
+      // focus is currently inside the dropdown, treat the resize/scroll as
+      // keyboard-driven noise rather than "user scrolled/resized away".
+      if (dropdownRef.current && document.activeElement && dropdownRef.current.contains(document.activeElement)) {
+        return;
+      }
       setOpen(false);
     }
 
