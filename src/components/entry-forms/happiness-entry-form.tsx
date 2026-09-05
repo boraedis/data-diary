@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DayPayload, HappinessPayload } from "@/lib/days";
 import { PercentInput } from "../ui/percent-input";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 
 const DAY_TYPES = [
   { value: "", label: "Not set" },
@@ -27,9 +28,14 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // Journal entries are the main thing worth protecting here (issue #143) —
+  // easy to lose a paragraph of writing to an accidental nav click.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChangesGuard(dirty);
 
   function set<K extends keyof HappinessPayload>(key: K, value: HappinessPayload[K]) {
     setSavedAt(null);
+    setDirty(true);
     setHappinessState((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -58,6 +64,7 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
         journal: saved.journal,
         dayType: saved.dayType,
       });
+      setDirty(false);
       setSavedAt(Date.now());
       router.refresh();
     } catch {

@@ -534,6 +534,36 @@ function SportsWatchDetailModal({
   const [newTeamOpen, setNewTeamOpen] = useState(false);
   const [newTeamSlot, setNewTeamSlot] = useState<"home" | "away">("home");
   const [newSeasonOpen, setNewSeasonOpen] = useState(false);
+  // issue #143: this is the biggest fillout in the app (league, both teams,
+  // season, game type, duration, location) and the Modal shell closes on a
+  // single backdrop click with no confirmation — easy to lose the whole
+  // thing by missing the card. `dirty` only needs to flip once and stay
+  // true; the modal is remounted fresh per open via the `key` its parent
+  // (SportsSection) passes, so there's no stale-true case to worry about.
+  const [dirty, setDirty] = useState(false);
+  // A nested Modal, not window.confirm() — see confirm-link.tsx's header
+  // comment (same file, this PR) for why: window.confirm() from anywhere
+  // not a dead-simple synchronous click handler risks iOS Safari silently
+  // swallowing it. This one IS a plain onClick with no framework transition
+  // in the way, so it likely would've been fine, but there's no reason to
+  // keep two different confirm mechanisms in the same PR for the same
+  // problem.
+  const [confirmingClose, setConfirmingClose] = useState(false);
+
+  function wrapChange<T>(setter: (value: T) => void) {
+    return (value: T) => {
+      setDirty(true);
+      setter(value);
+    };
+  }
+
+  function handleClose() {
+    if (dirty) {
+      setConfirmingClose(true);
+      return;
+    }
+    onClose();
+  }
 
   if (!sport) return null;
 
@@ -542,7 +572,7 @@ function SportsWatchDetailModal({
 
   return (
     <>
-      <Modal open={open} onClose={onClose} title={sport.name}>
+      <Modal open={open} onClose={handleClose} title={sport.name}>
         <div className="flex flex-col gap-3">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -554,7 +584,10 @@ function SportsWatchDetailModal({
             <Select
               id="sports-detail-league"
               value={leagueId ?? ""}
-              onChange={(e) => setLeagueId(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) => {
+                setDirty(true);
+                setLeagueId(e.target.value ? Number(e.target.value) : null);
+              }}
             >
               <option value="">None</option>
               {sport.leagues.map((l) => (
@@ -569,7 +602,7 @@ function SportsWatchDetailModal({
             id="sports-detail-home"
             label={sport.isTeamSport ? "Home team" : "Athlete"}
             value={homeTeamId}
-            onChange={setHomeTeamId}
+            onChange={wrapChange(setHomeTeamId)}
             teams={sport.teams}
             leagues={sport.leagues}
             selectedLeagueId={leagueId}
@@ -584,7 +617,7 @@ function SportsWatchDetailModal({
               id="sports-detail-away"
               label="Away team"
               value={awayTeamId}
-              onChange={setAwayTeamId}
+              onChange={wrapChange(setAwayTeamId)}
               teams={sport.teams}
               leagues={sport.leagues}
               selectedLeagueId={leagueId}
@@ -608,7 +641,15 @@ function SportsWatchDetailModal({
                 + New
               </Button>
             </div>
-            <Select id="sports-detail-season" value={season} onChange={(e) => setSeason(e.target.value)} disabled={leagueId === null}>
+            <Select
+              id="sports-detail-season"
+              value={season}
+              onChange={(e) => {
+                setDirty(true);
+                setSeason(e.target.value);
+              }}
+              disabled={leagueId === null}
+            >
               <option value="">None</option>
               {hasUnlistedSeason ? <option value={season}>{season}</option> : null}
               {seasonOptions.map((s) => (
@@ -625,7 +666,10 @@ function SportsWatchDetailModal({
             <NameCatalogField
               id="sports-detail-gametype"
               value={gameType || null}
-              onChange={(value) => setGameType(value ?? "")}
+              onChange={(value) => {
+                setDirty(true);
+                setGameType(value ?? "");
+              }}
               items={gameTypes}
               onCreated={onGameTypeCreated}
               apiPath="/api/sports-game-types"
@@ -638,14 +682,21 @@ function SportsWatchDetailModal({
               type="checkbox"
               className="size-4 rounded border-input accent-primary"
               checked={watchedLive}
-              onChange={(e) => setWatchedLive(e.target.checked)}
+              onChange={(e) => {
+                setDirty(true);
+                setWatchedLive(e.target.checked);
+              }}
             />
             Watched live
           </label>
 
           <div className="space-y-1.5">
             <Label htmlFor="sports-detail-duration">Watch time</Label>
-            <DurationInput id="sports-detail-duration" totalMinutes={durationMinutes} onChange={setDurationMinutes} />
+            <DurationInput
+              id="sports-detail-duration"
+              totalMinutes={durationMinutes}
+              onChange={wrapChange(setDurationMinutes)}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -653,7 +704,10 @@ function SportsWatchDetailModal({
             <NameCatalogField
               id="sports-detail-location"
               value={locationType || null}
-              onChange={(value) => setLocationType(value ?? "")}
+              onChange={(value) => {
+                setDirty(true);
+                setLocationType(value ?? "");
+              }}
               items={locationTypes}
               onCreated={onLocationTypeCreated}
               apiPath="/api/entertainment-location-types"
@@ -720,6 +774,27 @@ function SportsWatchDetailModal({
           setSeason(created.name);
         }}
       />
+
+      <Modal open={confirmingClose} onClose={() => setConfirmingClose(false)} title="Unsaved changes">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">You have unsaved changes. Leave anyway?</p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setConfirmingClose(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setConfirmingClose(false);
+                onClose();
+              }}
+            >
+              Leave
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }
