@@ -71,6 +71,7 @@ export function BookWatchlistManage({ initial, allBooks }: { initial: BookWatchl
             + Add from Google Books
           </Button>
         }
+      autoFocus
       />
       {error ? <span className="text-sm text-destructive">{error}</span> : null}
 
