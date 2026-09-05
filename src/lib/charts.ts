@@ -580,3 +580,81 @@ export async function getCountryVisitData(): Promise<CountryVisitEntry[]> {
     .map(([country, dayCount]) => ({ country, days: dayCount }))
     .sort((a, b) => b.days - a.days);
 }
+
+// --- Place hierarchy (sunburst, #118) -------------------------------------
+
+export type PlaceHierarchyRow = {
+  id: number;
+  name: string;
+  /** The catalog's own shorthand for this place, when it has one — the
+   * sunburst substitutes it for a name too long to fit on an arc (the
+   * tooltip still spells the full name out). Legacy's `location_burst`
+   * did the same swap, just keyed off name length rather than fit. */
+  alias: string | null;
+  parentId: number | null;
+  category: string | null;
+  subcategory: string | null;
+  /** Color of this place's *root* ancestor — see getPlaceLeaderboardData's
+   * own comment on why a leaf's "country color" is its root's, not its
+   * own. Null when unset or when idPath hasn't been backfilled. */
+  rootColor: string | null;
+  /** Weighted mentions of this place *itself*, not including places
+   * beneath it in the tree — the sunburst sums a subtree's own values as
+   * it lays out, so pre-rolling them up here would double-count every
+   * ancestor. */
+  value: number;
+};
+
+/** Every place that was logged at least once, plus enough of the catalog
+ * around it to reassemble the tree, with the same 2x-slot-1 / 1x-slot-2
+ * weighting the place leaderboard uses (legacy's own scheme — see
+ * getPlaceLeaderboardData). Deliberately returns flat rows, not a tree:
+ * the chart page offers two different hierarchies over the same rows
+ * (geography via parentId, taxonomy via category/subcategory), and
+ * switching between them shouldn't cost a round trip. Tree assembly is
+ * `@/lib/viz/hierarchy`'s job.
+ *
+ * Unlogged places are kept rather than filtered in SQL, because an
+ * ancestor with no mentions of its own ("USA", when only its cities were
+ * ever logged) is still a required link in the chain; the client prunes
+ * subtrees that sum to zero once the tree exists (pruneEmptyBranches).
+ */
+export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
+  const db = getDb();
+  const hierarchyRootPlaces = alias(places, "hierarchy_root_places");
+
+  const rows = await db
+    .select({
+      id: places.id,
+      name: places.name,
+      alias: places.alias,
+      parentId: places.parentId,
+      category: places.category,
+      subcategory: places.subcategory,
+      rootColor: hierarchyRootPlaces.color,
+      value: sql<number>`
+        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
+        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
+      `.as("value"),
+    })
+    .from(places)
+    // Left, not inner (unlike the leaderboard's join): a place with no
+    // mentions still has to come back, or the tree loses its middle links.
+    .leftJoin(days, sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`)
+    .leftJoin(
+      hierarchyRootPlaces,
+      sql`${hierarchyRootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`,
+    )
+    .groupBy(places.id, hierarchyRootPlaces.color);
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    alias: r.alias,
+    parentId: r.parentId,
+    category: r.category,
+    subcategory: r.subcategory,
+    rootColor: r.rootColor,
+    value: Number(r.value),
+  }));
+}

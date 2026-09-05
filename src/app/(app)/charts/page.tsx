@@ -46,6 +46,11 @@ const CHARTS = [
     description: "Ranked by how often each place filled your day's two place slots.",
   },
   {
+    href: "/charts/place-hierarchy",
+    title: "Place hierarchy",
+    description: "A zoomable sunburst of where your days happen, by geography or category.",
+  },
+  {
     href: "/charts/people",
     title: "People network",
     description: "Who gets logged together — drag nodes to reposition.",
