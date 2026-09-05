@@ -387,8 +387,8 @@ export function PlacesEntryForm({
             <SearchPanel
               items={searchItems}
               onSelect={addPlace}
-              placeholder=”Search places…”
-              emptyMessage=”No matches — try “+ New place”.”
+              placeholder="Search places…"
+              emptyMessage={'No matches — try "+ New place".'}
               autoFocus
             />
             <NewPlaceModal
