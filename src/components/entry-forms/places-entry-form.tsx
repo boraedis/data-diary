@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
@@ -173,32 +174,33 @@ function NewPlaceModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-place-category">Category</Label>
-          <Input
+          <Select
             id="new-place-category"
-            list="new-place-category-options"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            placeholder="restaurant, gym, friend's place…"
-          />
-          <datalist id="new-place-category-options">
+          >
+            <option value="">— Select category —</option>
             {categoryNames.map((n) => (
-              <option key={n} value={n} />
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
-          </datalist>
+          </Select>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-place-subcategory">Subcategory</Label>
-          <Input
+          <Select
             id="new-place-subcategory"
-            list="new-place-subcategory-options"
             value={subcategory}
             onChange={(e) => setSubcategory(e.target.value)}
-          />
-          <datalist id="new-place-subcategory-options">
+          >
+            <option value="">— Select subcategory —</option>
             {subcategoryNames.map((n) => (
-              <option key={n} value={n} />
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
-          </datalist>
+          </Select>
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>

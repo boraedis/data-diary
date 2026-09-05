@@ -50,8 +50,11 @@ export function SearchCombobox({
   useEffect(() => {
     if (!open) return;
 
-    function handleClickOutside(event: MouseEvent) {
+    function handleClickOutside(event: MouseEvent | TouchEvent) {
       const target = event.target as Node;
+      // Close only if clicking outside both the trigger and the dropdown.
+      // The dropdown contains the SearchPanel with its input, so clicking
+      // inside it (including the search box) should not close the dropdown.
       if (
         triggerRef.current &&
         !triggerRef.current.contains(target) &&
@@ -69,11 +72,13 @@ export function SearchCombobox({
       setOpen(false);
     }
 
-    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside as EventListener);
+    document.addEventListener("touchend", handleClickOutside as EventListener);
     window.addEventListener("scroll", handleScrollOrResize, true);
     window.addEventListener("resize", handleScrollOrResize);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside as EventListener);
+      document.removeEventListener("touchend", handleClickOutside as EventListener);
       window.removeEventListener("scroll", handleScrollOrResize, true);
       window.removeEventListener("resize", handleScrollOrResize);
     };
