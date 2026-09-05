@@ -86,8 +86,16 @@ Current shape:
   | Geo/Choropleth | shipped | #24 | world map |
   | Migrate remaining chart pages onto the primitives above, delete old bespoke components | shipped | #25 | — |
   | `InteractiveScroller` | shipped | #117 | weight |
-  | `InteractiveDonut` | not started | #118 | — |
+  | `InteractiveDonut` (zoomable sunburst) | shipped | #118 | place hierarchy |
   | `InteractiveTimeline` | not started | #119 | — |
+
+  `InteractiveDonut` is the only primitive here that takes a *tree* rather
+  than a series — its input shape and the pure builders for it live in
+  **`src/lib/viz/hierarchy.ts`** (`buildTreeFromParents` for a
+  self-referencing table like `places.parentId`, `buildTreeFromLevels` for
+  a fixed category/subcategory ladder, plus `pruneEmptyBranches` and
+  `foldTailIntoOther`). Same boundary as `bin.ts`: re-shaping rows a page
+  already fetched, never bulk aggregation.
 
   Also in this folder: small shared **filter controls** built for #19
   (`PeriodPicker`, `TimeRangePicker`, `GroupByPicker`) — generic, reusable
@@ -230,8 +238,11 @@ and the migration of every legacy chart page onto those primitives.
 
 A follow-on epic, **#109** (three new primitives — Scroller, Donut,
 Timeline — plus a notes/polish pass on every primitive shipped under #14),
-is now the active one. `main` has InteractiveScroller (#117) merged. Still
-open: InteractiveDonut (#118), InteractiveTimeline (#119), the subs-chart
+is now the active one. `main` has InteractiveScroller (#117) merged, and
+InteractiveDonut (#118) shipped as a zoomable multi-ring sunburst (the
+single-ring-vs-sunburst question on that issue was resolved in favor of
+the sunburst — a plain donut is just `visibleRings={1}`). Still
+open: InteractiveTimeline (#119), the subs-chart
 rebuild onto Scroller/Line (#120), InteractiveRanked's bar-race mode
 (#103), InteractiveGeo's click-into-subdivisions drill-down (#107), and a
 per-primitive "notes & polish backlog" sub-issue for each primitive from
