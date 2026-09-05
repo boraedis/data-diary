@@ -77,14 +77,17 @@ Current shape:
 
   | Primitive | Status | Issue | Real consumer |
   |---|---|---|---|
-  | `InteractiveLine` | shipped | #18 | weight, happiness-trend |
+  | `InteractiveLine` | shipped | #18 | happiness-trend |
   | `InteractiveHist` | shipped | #20 | happiness distribution |
   | `InteractiveCalendar` | shipped | #21 | sleep calendar |
   | `InteractiveArea` | shipped | #19 | exercise mix |
-  | `InteractiveNetwork` | not started | #23 | (people network still bespoke) |
-  | `InteractiveBar`/`Ranked` | not started | #22 | (places leaderboard still bespoke) |
-  | Geo/Choropleth | not started | #24 | — |
-  | Migrate remaining chart pages onto the primitives above, delete old bespoke components | not started | #25 | — |
+  | `InteractiveNetwork` | shipped | #23 | people network |
+  | `InteractiveBar`/`Ranked` | shipped | #22 | places leaderboard |
+  | Geo/Choropleth | shipped | #24 | world map |
+  | Migrate remaining chart pages onto the primitives above, delete old bespoke components | shipped | #25 | — |
+  | `InteractiveScroller` | shipped | #117 | weight |
+  | `InteractiveDonut` | not started | #118 | — |
+  | `InteractiveTimeline` | not started | #119 | — |
 
   Also in this folder: small shared **filter controls** built for #19
   (`PeriodPicker`, `TimeRangePicker`, `GroupByPicker`) — generic, reusable
@@ -178,6 +181,27 @@ app everything else in this codebase serves. Follow-up work lives on #96.
   landed, diff trees instead: `git diff <main-tip> <branch-tip> --stat` —
   empty output means the content is fully present on `main`.
 
+## Working with GitHub issues
+
+Every issue in this repo needs **two** labels, not one: a normal type label
+(`bug`, `enhancement`, `epic`, `Epic sub-issue`, `UI improvement`, or `idea`)
+*and* an effort-size label (`LOE: xs` / `s` / `m` / `l` / `xl` / `xxl`).
+When filing a new issue, or triaging one that's missing either, add both —
+an issue with only a type label or only an LOE label is incomplete, not
+just unlabeled-by-convention.
+
+- `bug` — an existing feature is broken
+- `enhancement` — a new capability or non-trivial change
+- `UI improvement` — a small, purely visual/interface change, doesn't need
+  the weight of `enhancement`
+- `epic` — needs to be broken down into sub-issues before it's workable
+- `Epic sub-issue` — one piece of an `epic`, linked via `parent`
+- `idea` — a loose concept, not yet scoped; no LOE label until it's turned
+  into real work
+
+LOE is a rough size estimate for planning, not a hard commitment — pick the
+closest bucket rather than agonizing over precision.
+
 ## Schema changes and database testing
 
 **Before pushing schema changes and running tests:**
@@ -199,14 +223,19 @@ workflow instead.
 
 ## Where the epic stands
 
-`main` currently has #16-#21 and #19 merged (formatting/color utilities,
-shared tooltip/crosshair/legend/mark-specs, InteractiveLine, InteractiveHist,
-InteractiveCalendar, InteractiveArea, and their proving-case chart pages).
-Next up in the epic's locked build order (see #14): **#23**
-(InteractiveNetwork) → **#22** (InteractiveBar/Ranked) → **#24**
-(Geo/Choropleth, flagged as the heaviest lift) → **#25** (migrate the
-remaining bespoke chart pages onto the finished primitives and delete the
-old components). Each is workable independently — check the issue itself
-for its own scope/API-shape notes before starting.
+The original chart-rebuild epic (**#14**) is fully closed — all of #16-#25
+shipped: InteractiveLine, InteractiveHist, InteractiveCalendar,
+InteractiveArea, InteractiveNetwork, InteractiveBar/Ranked, Geo/Choropleth,
+and the migration of every legacy chart page onto those primitives.
+
+A follow-on epic, **#109** (three new primitives — Scroller, Donut,
+Timeline — plus a notes/polish pass on every primitive shipped under #14),
+is now the active one. `main` has InteractiveScroller (#117) merged. Still
+open: InteractiveDonut (#118), InteractiveTimeline (#119), the subs-chart
+rebuild onto Scroller/Line (#120), InteractiveRanked's bar-race mode
+(#103), InteractiveGeo's click-into-subdivisions drill-down (#107), and a
+per-primitive "notes & polish backlog" sub-issue for each primitive from
+the original epic (#110-#116). Each is workable independently — check the
+issue itself for its own scope/API-shape notes before starting.
 
 <!-- END:repo-development-guide -->
