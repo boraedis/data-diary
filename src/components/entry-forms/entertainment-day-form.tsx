@@ -36,6 +36,7 @@ import type {
   MovieCatalogItem,
   TvShowCatalogItem,
 } from "@/lib/days";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 
 /** The merged entertainment day-entry page (issue #61) — one unified search
  * across movies/TV/sports leagues/books/games/generic entertainment (games
@@ -143,6 +144,19 @@ export function EntertainmentDayForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // issue #143: this page spans 6 independent sections (movies/TV/sports/
+  // books/games/other), each with its own row-array setter passed straight
+  // through as `onRowsChange` — wrapChange below is what actually flips
+  // `dirty`, since none of those setters do that themselves.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChangesGuard(dirty);
+
+  function wrapChange<T>(setter: (value: T) => void) {
+    return (value: T) => {
+      setDirty(true);
+      setter(value);
+    };
+  }
 
   const sportsLeagueItems = useMemo(
     () => sportsCatalog.flatMap((sport) => sport.leagues.map((league) => ({ league, sport }))),
@@ -279,6 +293,7 @@ export function EntertainmentDayForm({
       setGameRows(
         saved.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, deviceType: s.deviceType, locationType: s.locationType }))
       );
+      setDirty(false);
       setSavedAt(Date.now());
       router.refresh();
     } catch {
@@ -310,7 +325,7 @@ export function EntertainmentDayForm({
         locationTypes={locationTypes}
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={movieRows}
-        onRowsChange={setMovieRows}
+        onRowsChange={wrapChange(setMovieRows)}
         pendingOpen={pendingOpen}
       />
 
@@ -319,7 +334,7 @@ export function EntertainmentDayForm({
         locationTypes={locationTypes}
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={tvRows}
-        onRowsChange={setTvRows}
+        onRowsChange={wrapChange(setTvRows)}
         pendingOpen={pendingOpen}
       />
 
@@ -331,7 +346,7 @@ export function EntertainmentDayForm({
         seasonsByLeague={sportsSeasonsByLeague}
         divisionsByLeague={sportsDivisionsByLeague}
         rows={sportsRows}
-        onRowsChange={setSportsRows}
+        onRowsChange={wrapChange(setSportsRows)}
         pendingOpen={pendingOpen}
       />
 
@@ -340,7 +355,7 @@ export function EntertainmentDayForm({
         locationTypes={locationTypes}
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={bookRows}
-        onRowsChange={setBookRows}
+        onRowsChange={wrapChange(setBookRows)}
         pendingOpen={pendingOpen}
       />
 
@@ -351,7 +366,7 @@ export function EntertainmentDayForm({
         locationTypes={locationTypes}
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={gameRows}
-        onRowsChange={setGameRows}
+        onRowsChange={wrapChange(setGameRows)}
         pendingOpen={pendingOpen}
       />
 
@@ -361,7 +376,7 @@ export function EntertainmentDayForm({
         locationTypes={locationTypes}
         onLocationTypeCreated={handleLocationTypeCreated}
         rows={otherRows}
-        onRowsChange={setOtherRows}
+        onRowsChange={wrapChange(setOtherRows)}
         pendingOpen={pendingOpen}
       />
 

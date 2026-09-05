@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, CircleUser, Database, LogOut } from "lucide-react";
+import { ConfirmLink } from "@/components/confirm-link";
 
 // Persistent cross-site nav (#138 ask #1) — the legacy app had a top bar
 // with tabs for its major sections; before this, the only way to move
@@ -26,12 +26,12 @@ export function TopNav() {
   return (
     <nav className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-2 px-3 md:px-4">
-        <Link
+        <ConfirmLink
           href="/home"
           className="shrink-0 py-3 font-heading text-lg font-medium tracking-tight text-primary italic transition-opacity hover:opacity-80 md:text-xl"
         >
           Data Diary
-        </Link>
+        </ConfirmLink>
         <div className="flex items-center gap-0.5 overflow-x-auto md:gap-1">
           {NAV_ITEMS.map((item) => (
             <NavLink
@@ -69,7 +69,7 @@ function NavLink({
   active: boolean;
 }) {
   return (
-    <Link
+    <ConfirmLink
       href={href}
       className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-3 text-xs font-medium transition-colors md:px-3 ${
         active ? "text-primary" : "text-muted-foreground hover:text-foreground"
@@ -77,6 +77,6 @@ function NavLink({
     >
       <Icon aria-hidden className="size-4" />
       <span className="hidden md:inline">{label}</span>
-    </Link>
+    </ConfirmLink>
   );
 }
