@@ -77,7 +77,8 @@ export function BookRankingManage({ initial, allBooks }: { initial: BookRankingI
           }}
           placeholder="Search books to add…"
           emptyMessage="No matches."
-        />
+        autoFocus
+      />
       ) : (
         <p className="text-sm text-muted-foreground">Ranking is full ({RANKING_SIZE}/{RANKING_SIZE}) — remove one to add another.</p>
       )}

@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 import type { PlaceCatalogItem } from "@/lib/days";
 import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 import { comparePlacesByMentions } from "@/lib/place-sort";
 
-type ParentOption = { id: number; name: string; namePath: string | null };
+type ParentOption = { id: number; name: string; namePath: string | null; alias?: string | null };
 
 // namePath is "USA/Georgia/Atlanta/Midtown/" (root to self, trailing
 // slash) — trim it and swap in a nicer separator for display. Shown as
@@ -76,7 +77,12 @@ export function NewPlaceModal({
     () =>
       [...parentOptions]
         .sort(comparePlacesByMentions(mentionCounts))
-        .map((p) => ({ id: p.id, primary: p.name, caption: displayPath(p.namePath) })),
+        .map((p) => ({
+          id: p.id,
+          primary: p.name,
+          caption: displayPath(p.namePath),
+          searchTerms: p.alias ? [p.alias] : undefined,
+        })),
     [parentOptions, mentionCounts]
   );
 
@@ -167,32 +173,33 @@ export function NewPlaceModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="manage-new-place-category">Category</Label>
-          <Input
+          <Select
             id="manage-new-place-category"
-            list="manage-new-place-category-options"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            placeholder="restaurant, gym, friend's place…"
-          />
-          <datalist id="manage-new-place-category-options">
+          >
+            <option value="">— Select category —</option>
             {categoryNames.map((n) => (
-              <option key={n} value={n} />
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
-          </datalist>
+          </Select>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="manage-new-place-subcategory">Subcategory</Label>
-          <Input
+          <Select
             id="manage-new-place-subcategory"
-            list="manage-new-place-subcategory-options"
             value={subcategory}
             onChange={(e) => setSubcategory(e.target.value)}
-          />
-          <datalist id="manage-new-place-subcategory-options">
+          >
+            <option value="">— Select subcategory —</option>
             {subcategoryNames.map((n) => (
-              <option key={n} value={n} />
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
-          </datalist>
+          </Select>
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>

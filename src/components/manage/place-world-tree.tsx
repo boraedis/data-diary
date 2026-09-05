@@ -222,7 +222,7 @@ export function PlaceWorldTree({
 
   const moveTarget = moveTargetId !== null ? (places.find((p) => p.id === moveTargetId) ?? null) : null;
   const parentOptionsForAdd = useMemo(
-    () => places.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath })),
+    () => places.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath, alias: p.alias })),
     [places]
   );
 
