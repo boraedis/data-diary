@@ -305,7 +305,6 @@ export function HealthEntryForm({
                       valueId={workout.exerciseId}
                       onChange={(id) => updateWorkout(wi, { exerciseId: id, locationId: null })}
                       onCreated={handleExerciseCreated}
-                      autoFocus={workout.exerciseId === null}
                     />
                   </div>
 
