@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { BarChart3, CircleUser, Database, LogOut } from "lucide-react";
+import { BarChart3, CircleUser, Database, LogOut, Sparkles } from "lucide-react";
 import { ConfirmLink } from "@/components/confirm-link";
 
 // Persistent cross-site nav (#138 ask #1) — the legacy app had a top bar
@@ -17,6 +17,7 @@ import { ConfirmLink } from "@/components/confirm-link";
 const NAV_ITEMS = [
   { href: "/manage", label: "Manage", icon: Database },
   { href: "/charts", label: "Charts", icon: BarChart3 },
+  { href: "/recap", label: "Recap", icon: Sparkles },
   { href: "/profile", label: "Profile", icon: CircleUser },
 ] as const;
 
