@@ -51,12 +51,13 @@ export function SearchCombobox({
     if (!open) return;
 
     function handleClickOutside(event: MouseEvent | TouchEvent) {
-      const target = event.target as Node;
-      // Close only if clicking outside both the trigger and the dropdown.
-      // The dropdown contains the SearchPanel with its input, so clicking
-      // inside it (including the search box) should not close the dropdown.
-      const isInsideTrigger = triggerRef.current?.contains(target);
-      const isInsideDropdown = dropdownRef.current?.contains(target);
+      // Use composedPath for better compatibility with portals and Safari
+      const path =
+        "composedPath" in event ? event.composedPath() : [(event as MouseEvent).target as Node];
+
+      // Check if any element in the path is our trigger or dropdown
+      const isInsideTrigger = path.some((el) => triggerRef.current?.contains(el as Node));
+      const isInsideDropdown = path.some((el) => dropdownRef.current?.contains(el as Node));
 
       if (!isInsideTrigger && !isInsideDropdown) {
         setOpen(false);
@@ -122,6 +123,8 @@ export function SearchCombobox({
               ref={dropdownRef}
               className="fixed z-50 rounded-lg border border-border bg-background p-2 shadow-lg"
               style={{ top: position.top, left: position.left, width: position.width }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
             >
               <SearchPanel
                 items={items}
