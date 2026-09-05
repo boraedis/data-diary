@@ -138,7 +138,7 @@ export function isArcInPlay(current: ArcBox, target: ArcBox, visibleRings: numbe
 
 /** Font-size tiers, largest first — legacy's 1.5rem/1rem/0.75rem ladder,
  * re-expressed in px so it can be compared against measured geometry. */
-export const LABEL_FONT_TIERS = [15, 12, 10] as const;
+export const LABEL_FONT_TIERS = [15, 12, 8] as const;
 /** Rough mean glyph width as a fraction of font size for the app's sans
  * stack. An estimate on purpose: measuring every label's real advance
  * width (canvas `measureText`, or an off-screen `<text>` + `getBBox`)
