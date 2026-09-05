@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ColorInput } from "@/components/ui/color-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -105,7 +106,7 @@ function GenreGroupsSection({
           ))}
           {groups.length === 0 && <p className="text-sm text-muted-foreground">No genre groups yet.</p>}
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-1.5">
             <Label htmlFor="new-genre-group-name">New group</Label>
             <Input
@@ -115,13 +116,10 @@ function GenreGroupsSection({
               placeholder="Rock, Pop, Hip-Hop…"
             />
           </div>
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            className="h-10 w-10 shrink-0 cursor-pointer rounded border border-input bg-transparent p-0"
-            aria-label="New group color"
-          />
+          <div className="space-y-1.5">
+            <Label htmlFor="new-genre-group-color">Color</Label>
+            <ColorInput id="new-genre-group-color" value={color} onChange={setColor} />
+          </div>
           <Button type="button" onClick={create} disabled={creating || !name.trim()}>
             Add
           </Button>

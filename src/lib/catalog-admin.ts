@@ -9,7 +9,7 @@
 // established there.
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { parseOptionalHexColor } from "@/lib/color";
+import { parseHexColor, parseOptionalHexColor } from "@/lib/color";
 import {
   artistGenres,
   artists,
@@ -37,6 +37,7 @@ import {
   placeSubcategories,
   podcastCategories,
   podcastShows,
+  savedColors,
   sleepLocationSubtypes,
   sleepLocationTypes,
   sportsDivisions,
@@ -135,6 +136,64 @@ export async function getTagUsage(id: number): Promise<TagUsage> {
 export async function deleteTag(id: number): Promise<void> {
   const db = getDb();
   await db.delete(tags).where(eq(tags.id, id));
+}
+
+// --- Saved colors (palette) ----------------------------------------------
+// See the `savedColors` table comment in schema.ts — a flat, non-FK "fill
+// option" list. Unlike every other catalog in this file, there's no usage
+// check on delete: nothing references a row here by id, since consumers
+// only ever copy the hex value out as plain text.
+
+export type SavedColorItem = { id: number; hex: string; name: string | null };
+
+const SAVED_COLOR_COLUMNS = { id: savedColors.id, hex: savedColors.hex, name: savedColors.name };
+
+export function validateSavedColorInput(body: unknown): Result<{ hex: string; name: string | null }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  const hex = parseHexColor(b.hex);
+  if (!hex.ok) return { ok: false, error: "Color must be in format #xxxxxx" };
+  const name = typeof b.name === "string" && b.name.trim() ? b.name.trim() : null;
+  return { ok: true, value: { hex: hex.value, name } };
+}
+
+export async function listSavedColors(): Promise<SavedColorItem[]> {
+  const db = getDb();
+  return db.select(SAVED_COLOR_COLUMNS).from(savedColors).orderBy(asc(savedColors.createdAt));
+}
+
+// Unlike createTag (which fails loudly on a duplicate name so it can never
+// silently clobber an existing color), a duplicate *hex* here is treated
+// as a no-op success — the "add whatever's currently in this field" button
+// on ColorInput should feel idempotent, not throw an error just because
+// the color you're adding happens to already be saved.
+export async function createSavedColor(input: { hex: string; name: string | null }): Promise<SavedColorItem> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(savedColors)
+    .values({ hex: input.hex, name: input.name })
+    .onConflictDoNothing({ target: savedColors.hex })
+    .returning(SAVED_COLOR_COLUMNS);
+  if (inserted) return inserted;
+  const [existing] = await db.select(SAVED_COLOR_COLUMNS).from(savedColors).where(eq(savedColors.hex, input.hex));
+  return existing;
+}
+
+export async function updateSavedColor(id: number, input: { hex: string; name: string | null }): Promise<SavedColorItem> {
+  const db = getDb();
+  const [updated] = await db
+    .update(savedColors)
+    .set({ hex: input.hex, name: input.name })
+    .where(eq(savedColors.id, id))
+    .returning(SAVED_COLOR_COLUMNS);
+  return updated;
+}
+
+export async function deleteSavedColor(id: number): Promise<void> {
+  const db = getDb();
+  await db.delete(savedColors).where(eq(savedColors.id, id));
 }
 
 // --- Entertainment kinds -------------------------------------------------

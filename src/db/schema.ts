@@ -387,6 +387,24 @@ export const tags = pgTable("tags", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// --- Saved colors (palette) --------------------------------------------
+// A flat, reusable list of hex colors, editable from Manage (issue #45) —
+// deliberately NOT a foreign key anywhere. Every color field elsewhere in
+// this schema (tags.color above, places.color, sportsTeams.color,
+// genreGroups.color, and the three profile-timeline tables' color columns)
+// stays its own independent free-text hex column, exactly as it already
+// was — this table only exists as a "recently/commonly used" fill-option
+// list that ColorInput (src/components/ui/color-input.tsx) reads from and
+// can add to. Picking a saved color just copies its hex into whichever
+// field is being edited; renaming or deleting a row here never touches any
+// row that previously copied its value out.
+export const savedColors = pgTable("saved_colors", {
+  id: serial("id").primaryKey(),
+  hex: text("hex").notNull().unique(),
+  name: text("name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- Place categories / subcategories (catalog) -----------------------------
 // Legacy's `searchs/place_categories`: {categoryName: [subcategoryName,
 // ...]} — a two-level, fully user-editable taxonomy. Subcategories are

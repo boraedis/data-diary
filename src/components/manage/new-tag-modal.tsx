@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ColorInput } from "@/components/ui/color-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -77,13 +78,7 @@ export function NewTagModal({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-tag-color">Color</Label>
-          <input
-            id="new-tag-color"
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            className="h-8 w-16 cursor-pointer rounded border border-input bg-transparent"
-          />
+          <ColorInput id="new-tag-color" value={color} onChange={setColor} />
         </div>
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
