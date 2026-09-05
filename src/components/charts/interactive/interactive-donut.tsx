@@ -127,7 +127,11 @@ export const LABEL_FONT_TIERS = [15, 12, 10] as const;
  * cost of being wrong here is only that a label is hidden slightly early
  * or clipped slightly late. */
 const AVG_GLYPH_WIDTH_RATIO = 0.55;
-const LABEL_LINE_HEIGHT_RATIO = 1.25;
+/** Arc height a line of text needs, as a multiple of its font size —
+ * the glyphs plus enough clearance that two labels on adjacent hairline
+ * arcs don't run into each other's halo strokes (1.25, just the line box,
+ * left neighbours like "Florida" and "Rhode Island" visibly touching). */
+const LABEL_LINE_HEIGHT_RATIO = 1.45;
 /** Breathing room at each end of the radial run, so a label that "fits"
  * doesn't touch the arc's two curved edges. */
 const LABEL_RADIAL_PADDING = 10;
@@ -144,14 +148,73 @@ const LABEL_RADIAL_PADDING = 10;
  * expressed indirectly and breaks the moment the center changes; testing
  * the geometry directly is both clearer and independent of what's focused.
  */
-export function labelFontSize(box: ArcBox, radius: number, labelLength: number): number | null {
-  if (labelLength <= 0 || radius <= 0) return null;
+export function labelFontSize(box: ArcBox, radius: number, labelLength: number, lineCount = 1): number | null {
+  if (labelLength <= 0 || radius <= 0 || lineCount < 1) return null;
   const radialRun = (box.y1 - box.y0) * radius - LABEL_RADIAL_PADDING;
   const arcRun = (box.x1 - box.x0) * (((box.y0 + box.y1) / 2) * radius);
   for (const size of LABEL_FONT_TIERS) {
-    if (size * LABEL_LINE_HEIGHT_RATIO > arcRun) continue;
+    // Lines stack across the arc, so a second line costs arc height, not
+    // radial run — which is exactly why wrapping helps here: the arc is
+    // usually the dimension with room to spare.
+    if (size * LABEL_LINE_HEIGHT_RATIO * lineCount > arcRun) continue;
     if (labelLength * size * AVG_GLYPH_WIDTH_RATIO > radialRun) continue;
     return size;
+  }
+  return null;
+}
+
+/** Splits at the space nearest the middle, or `null` when there's no
+ * space to split on (a single long word can't be wrapped without
+ * hyphenation, which reads worse than falling back to a short name). */
+export function splitIntoTwoLines(text: string): [string, string] | null {
+  const spaces: number[] = [];
+  for (let i = 0; i < text.length; i++) if (text[i] === " ") spaces.push(i);
+  if (spaces.length === 0) return null;
+  const middle = text.length / 2;
+  const at = spaces.reduce((best, i) => (Math.abs(i - middle) < Math.abs(best - middle) ? i : best), spaces[0]);
+  const head = text.slice(0, at).trim();
+  const tail = text.slice(at + 1).trim();
+  if (!head || !tail) return null;
+  return [head, tail];
+}
+
+export type ResolvedLabel = { lines: string[]; size: number };
+
+/**
+ * The best label this arc can actually show, or `null` for none.
+ *
+ * Two escape hatches for a name that doesn't fit on one line, tried in
+ * this order:
+ *  1. **Wrap it across two lines.** Lines stack tangentially, and on a
+ *     wide arc that's the dimension with room going spare, so this often
+ *     rescues a name the ring's thickness alone can't hold.
+ *  2. **Fall back to `shortName`** — for places that's the catalog alias,
+ *     which is what legacy used too (`location_burst.js` swapped in the
+ *     alias for any name of 15 characters or more, though it decided that
+ *     by string length rather than by whether the label actually fit).
+ *
+ * The full name always wins over the alias, even at a smaller size: an
+ * abbreviation the reader has to decode is a worse trade than a smaller
+ * font. Whichever text is chosen, the tooltip and breadcrumb still show
+ * the full name — the shorthand never becomes the only spelling on offer.
+ */
+export function resolveLabel(
+  box: ArcBox,
+  radius: number,
+  name: string,
+  shortName?: string,
+): ResolvedLabel | null {
+  const candidates = shortName && shortName !== name ? [name, shortName] : [name];
+  for (const text of candidates) {
+    const single = labelFontSize(box, radius, text.length, 1);
+    const wrapped = splitIntoTwoLines(text);
+    const double = wrapped
+      ? labelFontSize(box, radius, Math.max(wrapped[0].length, wrapped[1].length), 2)
+      : null;
+    // Bigger type wins; on a tie the single line wins, since a wrap the
+    // arc didn't need is just two short lines where one would do.
+    if (single !== null && (double === null || single >= double)) return { lines: [text], size: single };
+    if (double !== null && wrapped) return { lines: [...wrapped], size: double };
   }
   return null;
 }
@@ -210,11 +273,40 @@ function defaultColorOf(node: d3.HierarchyNode<HierarchyDatum>): string {
   return categoricalColor(Math.max(0, siblings.indexOf(branch)));
 }
 
-/** Depth's own channel, so ring 3 of a branch doesn't read as the same
- * mark as ring 1: a fixed step down in fill opacity per ring, floored so
- * the deepest ring is still clearly a filled arc and not a ghost. */
-function depthOpacity(depth: number): number {
-  return Math.max(0.35, 0.85 - 0.16 * Math.max(0, depth - 1));
+/**
+ * How much white is mixed into a branch's base color at each ring out
+ * from the center. Index 0 is the innermost visible ring, which always
+ * gets the color at full strength.
+ *
+ * This used to be a fill-opacity ramp (0.85 down to 0.35, the Observable
+ * original's idea), and on the app's dark theme that was plainly wrong:
+ * fading a fill toward a dark surface doesn't lighten it, it drains it,
+ * so the outer rings went muddy and the whole chart read as washed out.
+ * Mixing toward white instead lightens in both themes and holds far more
+ * chroma than blending against the background ever could — even in light
+ * mode, where the old ramp was effectively a 47% white mix by the third
+ * ring, this is 19%.
+ *
+ * Steps are relative to whatever is currently focused, not to absolute
+ * tree depth, so the innermost ring is full-strength at every zoom level
+ * rather than the palette draining away the deeper you drill.
+ */
+const DEPTH_TINTS = [0, 0.1, 0.19, 0.26, 0.32] as const;
+
+/**
+ * Base color for a node, tinted for its ring. Deliberately a CSS
+ * `color-mix()` string rather than a color computed in JS: the base is
+ * usually a `var(--chart-N)` token, and resolving that to real channel
+ * values would freeze the chart at whichever theme was live when it
+ * rendered. Letting CSS do the mixing keeps light/dark switching
+ * automatic, and lets a plain CSS transition interpolate the fill during
+ * a zoom (see `draw`) — d3 can't tween these strings, but the browser
+ * interpolates their computed colors natively.
+ */
+export function depthFill(base: string, ringIndex: number): string {
+  const tint = DEPTH_TINTS[Math.min(Math.max(ringIndex, 0), DEPTH_TINTS.length - 1)];
+  if (tint === 0) return base;
+  return `color-mix(in oklch, ${base}, white ${Math.round(tint * 100)}%)`;
 }
 
 /** Writes `from` into `to` without allocating a new box. */
@@ -229,10 +321,6 @@ function copyBox(from: ArcBox, to: ArcBox): void {
  * across the whole tree, so it uses the per-layout ordinal instead. */
 function keyOfNode(node: AnimatedNode): number {
   return node.uid;
-}
-
-function pxOrNull(size: number | null): string | null {
-  return size === null ? null : `${size}px`;
 }
 
 // --- Component ------------------------------------------------------------
@@ -401,8 +489,46 @@ export function InteractiveDonut({
       const arcLayer = g.append("g");
       const labelLayer = g.append("g").attr("pointer-events", "none").style("user-select", "none");
 
-      function labelSize(box: ArcBox, name: string): number | null {
-        return isArcVisible(box, visibleRings) ? labelFontSize(box, radius, name.length) : null;
+      function labelFor(box: ArcBox, d: AnimatedNode): ResolvedLabel | null {
+        return isArcVisible(box, visibleRings) ? resolveLabel(box, radius, d.data.name, d.data.shortName) : null;
+      }
+
+      /** Ring this node sits on, counting out from whatever is focused —
+       * 1 is the innermost visible ring. Ancestors of the focus clamp to
+       * 1; they're off-screen anyway. */
+      function ringIndexOf(d: AnimatedNode): number {
+        return Math.max(1, d.depth - focus.depth);
+      }
+
+      function fillFor(d: AnimatedNode): string {
+        return depthFill(resolveColor(d), ringIndexOf(d) - 1);
+      }
+
+      /** Rewrites a label's `<tspan>` lines and size for the given frame.
+       * Content is painted for the frame being animated *to*, so a label
+       * fades in already reading the way it will when the chart settles
+       * rather than re-flowing mid-flight. */
+      function paintLabels(
+        selection: d3.Selection<SVGTextElement, AnimatedNode, SVGGElement, unknown>,
+        boxOf: (d: AnimatedNode) => ArcBox,
+      ) {
+        selection.each(function (d) {
+          const resolved = labelFor(boxOf(d), d);
+          const lines = resolved?.lines ?? [];
+          const text = d3.select(this);
+          if (resolved) text.style("font-size", `${resolved.size}px`);
+          else text.style("font-size", null);
+          text
+            .selectAll<SVGTSpanElement, string>("tspan")
+            .data(lines)
+            .join("tspan")
+            .attr("x", 0)
+            // First line lifts by half a line when there are two, so the
+            // block stays centered on the arc's mid-angle; the second is
+            // one line height further round.
+            .attr("dy", (_line, i) => (i === 0 ? (lines.length > 1 ? "-0.22em" : "0.35em") : "1.15em"))
+            .text((line) => line);
+        });
       }
 
       // The center disc: a real target for "zoom back out one level," and
@@ -441,9 +567,13 @@ export function InteractiveDonut({
         const entered = joined
           .enter()
           .append("path")
-          .attr("fill", (d) => resolveColor(d))
           .attr("d", (d) => arc(d.current) ?? "")
-          .attr("fill-opacity", (d) => (isArcVisible(d.current, visibleRings) ? depthOpacity(d.depth) : 0));
+          .attr("fill-opacity", (d) => (isArcVisible(d.current, visibleRings) ? 1 : 0))
+          // A plain CSS transition on `fill`, because the tint is a
+          // `color-mix()` string d3 can't interpolate but the browser
+          // can. Harmless on a static draw (nothing changes) and on enter
+          // (no previous value to ease from).
+          .style("transition", `fill ${ZOOM_DURATION_MS}ms`);
 
         attachMarkHover<AnimatedNode>(
           entered as unknown as d3.Selection<d3.BaseType, AnimatedNode, d3.BaseType, unknown>,
@@ -491,48 +621,54 @@ export function InteractiveDonut({
         // unresponsive.
         arcs
           .attr("pointer-events", (d) => (isArcVisible(d.target, visibleRings) ? "auto" : "none"))
-          .attr("tabindex", (d) => (isArcVisible(d.target, visibleRings) ? 0 : -1));
+          .attr("tabindex", (d) => (isArcVisible(d.target, visibleRings) ? 0 : -1))
+          // Set outside any d3 transition — the CSS rule above eases it,
+          // in step with the geometry.
+          .style("fill", fillFor);
 
         // Labels are joined over a second, much smaller subset. On a real
         // hierarchy this is a dozen <text> elements rather than one per
         // node — the single biggest saving here, since a <text> costs far
         // more than a <path> and almost none of them are ever readable.
-        const labelData = inPlay.filter(
-          (d) => labelSize(d.current, d.data.name) !== null || labelSize(d.target, d.data.name) !== null,
-        );
+        const labelData = inPlay.filter((d) => labelFor(d.current, d) !== null || labelFor(d.target, d) !== null);
         const joinedLabels = labelLayer.selectAll<SVGTextElement, AnimatedNode>("text").data(labelData, keyOfNode);
         const enteredLabels = joinedLabels
           .enter()
           .append("text")
-          .attr("dy", "0.35em")
-          .attr("fill", "var(--foreground)")
-          // A surface-colored halo behind the glyphs (stroke painted
-          // first, then fill) instead of legacy's compute-black-or-white-
-          // from-the-hex trick: fills here are `var(--chart-N)` tokens
-          // that JS can't read a brightness from, and the halo is legible
-          // over any fill in either theme anyway.
-          .attr("stroke", "var(--card)")
-          .attr("stroke-width", 3)
+          // White glyphs over a dark halo (stroke painted first, then
+          // fill), and deliberately NOT theme tokens. Legacy picked black
+          // or white per arc by averaging the fill's hex channels, which
+          // can't work here — a fill may be a `var(--chart-N)` token JS
+          // can't read a brightness from. The obvious substitute,
+          // foreground-on-card, is worse than it looks: it assumes the
+          // label sits on the page's surface, when it actually sits on a
+          // saturated arc whose color owes nothing to the theme. In light
+          // mode that put near-black text on a dark navy country and left
+          // the halo doing all the work. Arc fills are always saturated
+          // mid-tones now that depth is a tint rather than a fade, and
+          // white-over-dark-outline is the standard map-label answer for
+          // exactly that: legible on any hue, in either theme.
+          .attr("fill", "#ffffff")
+          .attr("stroke", "rgba(0, 0, 0, 0.55)")
+          .attr("stroke-width", 2.5)
           .attr("stroke-linejoin", "round")
           .attr("paint-order", "stroke")
-          .text((d) => d.data.name)
           .attr("transform", (d) => labelTransform(d.current, radius))
-          .style("font-size", (d) => pxOrNull(labelSize(d.current, d.data.name)))
           // `opacity`, not the `fill-opacity` the Observable original
           // fades labels with: these labels carry that halo stroke, and
           // zeroing only the fill leaves it painting a white smear over
           // every arc too small to be labelled.
-          .attr("opacity", (d) => (labelSize(d.current, d.data.name) === null ? 0 : 1));
+          .attr("opacity", (d) => (labelFor(d.current, d) === null ? 0 : 1));
         const allLabels = enteredLabels.merge(joinedLabels);
+        paintLabels(allLabels, (d) => d.target);
 
         if (!animate) {
           arcs
             .attr("d", (d) => arc(d.target) ?? "")
-            .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? depthOpacity(d.depth) : 0));
+            .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? 1 : 0));
           allLabels
             .attr("transform", (d) => labelTransform(d.target, radius))
-            .style("font-size", (d) => pxOrNull(labelSize(d.target, d.data.name)))
-            .attr("opacity", (d) => (labelSize(d.target, d.data.name) === null ? 0 : 1));
+            .attr("opacity", (d) => (labelFor(d.target, d) === null ? 0 : 1));
           joined.exit().remove();
           joinedLabels.exit().remove();
           return;
@@ -567,13 +703,12 @@ export function InteractiveDonut({
               d.current.y1 = from.y1 + (to.y1 - from.y1) * k;
             };
           })
-          .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? depthOpacity(d.depth) : 0))
+          .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? 1 : 0))
           .attrTween("d", (d) => () => arc(d.current) ?? "");
 
         allLabels
           .transition(t)
-          .attr("opacity", (d) => (labelSize(d.target, d.data.name) === null ? 0 : 1))
-          .style("font-size", (d) => pxOrNull(labelSize(d.target, d.data.name)))
+          .attr("opacity", (d) => (labelFor(d.target, d) === null ? 0 : 1))
           .attrTween("transform", (d) => () => labelTransform(d.current, radius));
 
         // Settle once the tween lands: snap every node onto its target and
@@ -642,6 +777,13 @@ export function InteractiveDonut({
   const navigate = useCallback((node: d3.HierarchyNode<HierarchyDatum>) => {
     zoomToPathRef.current?.(keyPathOf(node));
   }, []);
+
+  /** The swatch has to match the arc the pointer is actually over, tint
+   * and all — the same ring-relative shading the fill uses, so the key in
+   * the tooltip isn't a slightly different color from the thing it keys. */
+  const hoveredSwatch = hovered
+    ? depthFill(resolveColor(hovered.node), Math.max(0, hovered.node.depth - focusNode.depth - 1))
+    : "";
 
   const hoveredNode = hovered?.node;
 
@@ -723,7 +865,7 @@ export function InteractiveDonut({
               {
                 label: valueLabel,
                 value: formatValue(hoveredNode.value ?? 0),
-                color: resolveColor(hoveredNode),
+                color: hoveredSwatch,
                 variant: "swatch",
               },
               {
@@ -738,7 +880,7 @@ export function InteractiveDonut({
                     : 0,
                   1,
                 ),
-                color: resolveColor(hoveredNode),
+                color: hoveredSwatch,
                 variant: "swatch",
               },
             ]}

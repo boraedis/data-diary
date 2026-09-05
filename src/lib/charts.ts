@@ -586,6 +586,11 @@ export async function getCountryVisitData(): Promise<CountryVisitEntry[]> {
 export type PlaceHierarchyRow = {
   id: number;
   name: string;
+  /** The catalog's own shorthand for this place, when it has one — the
+   * sunburst substitutes it for a name too long to fit on an arc (the
+   * tooltip still spells the full name out). Legacy's `location_burst`
+   * did the same swap, just keyed off name length rather than fit. */
+  alias: string | null;
   parentId: number | null;
   category: string | null;
   subcategory: string | null;
@@ -622,6 +627,7 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     .select({
       id: places.id,
       name: places.name,
+      alias: places.alias,
       parentId: places.parentId,
       category: places.category,
       subcategory: places.subcategory,
@@ -644,6 +650,7 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
+    alias: r.alias,
     parentId: r.parentId,
     category: r.category,
     subcategory: r.subcategory,

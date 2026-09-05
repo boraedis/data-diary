@@ -64,6 +64,7 @@ function buildGeographyTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
       key: String(row.id),
       name: row.name,
       value: row.value,
+      ...(row.alias ? { shortName: row.alias } : {}),
       // Only meaningful on a root place (see PlaceHierarchyRow.rootColor),
       // and only read there — InteractiveDonut looks the color up on a
       // node's depth-1 ancestor, so setting it on every row is harmless
@@ -87,7 +88,12 @@ function buildCategoryTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
       { of: (row) => row.category, fallback: "Uncategorized" },
       { of: (row) => row.subcategory, fallback: "Unspecified" },
     ],
-    toLeaf: (row) => ({ key: String(row.id), name: row.name, value: row.value }),
+    toLeaf: (row) => ({
+      key: String(row.id),
+      name: row.name,
+      value: row.value,
+      ...(row.alias ? { shortName: row.alias } : {}),
+    }),
   });
   const pruned = pruneEmptyBranches(tree);
   return pruned ? foldTailIntoOther(pruned, { keep: CATEGORY_BRANCHES_KEPT }) : null;
@@ -121,7 +127,14 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
         }
         empty={tree === null}
       >
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={240}>
+        {/* Taller than the h-[min(62vh,640px)] every other chart page in
+            this app uses, and deliberately so. That class is tuned for
+            charts that spend width on a time axis; a sunburst's radius is
+            min(width, height), so on any normal desktop it was pinned by
+            the shorter dimension and left a third of the card as empty
+            margin either side. Going taller grows the circle in both
+            directions at once. */}
+        <ResponsiveChart className="h-[min(82vh,900px)] min-h-[360px]" minWidth={240}>
           {({ width, height }) =>
             tree ? (
               <InteractiveDonut

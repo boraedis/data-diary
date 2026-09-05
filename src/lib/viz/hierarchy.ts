@@ -31,6 +31,12 @@ export type HierarchyDatum = {
    * `hierarchy.sum` does exactly this). Omit or 0 for a pure grouping
    * node that was never itself logged. */
   value?: number;
+  /** A shorter stand-in a chart may substitute when the full `name`
+   * won't fit — a place's catalog alias, an abbreviation. Only ever used
+   * for a cramped on-chart label; tooltips, breadcrumbs and any readout
+   * still show `name`, so the shorthand never becomes the only spelling
+   * the reader can get at. */
+  shortName?: string;
   /** Explicit color for the branch rooted at this node, when the entity
    * genuinely owns a color in the data (`places.color`, a tag's color).
    * Omit to let the chart assign one from the categorical palette. */

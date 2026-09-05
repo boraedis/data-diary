@@ -3,12 +3,15 @@ import * as d3 from "d3";
 import {
   LABEL_FONT_TIERS,
   MIN_ARC_ANGLE,
+  depthFill,
   findByKeyPath,
   isArcInPlay,
   isArcVisible,
   keyPathOf,
   labelFontSize,
   labelTransform,
+  resolveLabel,
+  splitIntoTwoLines,
   type ArcBox,
 } from "./interactive-donut";
 import type { HierarchyDatum } from "@/lib/viz/hierarchy";
@@ -134,6 +137,94 @@ describe("labelFontSize", () => {
       const size = labelFontSize(box(0, TAU / 4, 1, 2), radius, length);
       if (size !== null) expect(LABEL_FONT_TIERS).toContain(size);
     }
+  });
+});
+
+describe("splitIntoTwoLines", () => {
+  it("splits at the space nearest the middle", () => {
+    expect(splitIntoTwoLines("Kennesaw Mountain Park")).toEqual(["Kennesaw", "Mountain Park"]);
+    expect(splitIntoTwoLines("Bailey's Crossroads")).toEqual(["Bailey's", "Crossroads"]);
+  });
+
+  it("refuses a single word rather than hyphenating it", () => {
+    expect(splitIntoTwoLines("Fayetteville")).toBeNull();
+  });
+
+  it("refuses a split that would leave a blank line", () => {
+    expect(splitIntoTwoLines(" Atlanta")).toBeNull();
+    expect(splitIntoTwoLines("Atlanta ")).toBeNull();
+  });
+});
+
+describe("resolveLabel", () => {
+  const radius = 120;
+  // A wide, thin arc: plenty of room across the arc, not much along the
+  // radius — exactly where wrapping pays off.
+  const wide = box(0, TAU / 2, 1, 1.75);
+
+  it("uses the full name on one line whenever it fits", () => {
+    expect(resolveLabel(box(0, TAU, 1, 2), radius, "Atlanta")).toEqual({ lines: ["Atlanta"], size: 15 });
+  });
+
+  it("wraps to two lines rather than shrinking or giving up", () => {
+    const resolved = resolveLabel(wide, radius, "Kennesaw Mountain Park");
+    expect(resolved?.lines).toEqual(["Kennesaw", "Mountain Park"]);
+  });
+
+  it("prefers the full name over a short name, even at a smaller size", () => {
+    // An abbreviation the reader has to decode is a worse trade than
+    // smaller type, so the alias is a last resort, not a first choice.
+    const resolved = resolveLabel(wide, radius, "Kennesaw Mountain Park", "KMP");
+    expect(resolved?.lines.join(" ")).toBe("Kennesaw Mountain Park");
+  });
+
+  it("falls back to the short name when the full name can't fit at all", () => {
+    const cramped = box(0, TAU / 3, 1, 1.35);
+    const withoutAlias = resolveLabel(cramped, radius, "Historic Fourth Ward Skatepark");
+    const withAlias = resolveLabel(cramped, radius, "Historic Fourth Ward Skatepark", "H4W Skate");
+    expect(withoutAlias).toBeNull();
+    // The alias gets the same treatment as any other candidate — here it
+    // only fits once it wraps, which is fine; what matters is that a label
+    // appears at all where there previously was none.
+    expect(withAlias?.lines.join(" ")).toBe("H4W Skate");
+  });
+
+  it("prefers one line on a tie", () => {
+    // "New York" fits either way at the top tier; a wrap the arc didn't
+    // need is just two short lines where one would do.
+    expect(resolveLabel(box(0, TAU, 1, 2), radius, "New York")?.lines).toHaveLength(1);
+  });
+
+  it("still hides a label when neither the name nor the short name fits", () => {
+    const sliver = box(0, 0.004, 1, 2);
+    expect(resolveLabel(sliver, radius, "Anywhere", "AW")).toBeNull();
+  });
+
+  it("ignores a short name identical to the name", () => {
+    const sliver = box(0, 0.004, 1, 2);
+    expect(resolveLabel(sliver, radius, "Same", "Same")).toBeNull();
+  });
+});
+
+describe("depthFill", () => {
+  it("leaves the innermost visible ring at full strength", () => {
+    expect(depthFill("var(--chart-1)", 0)).toBe("var(--chart-1)");
+  });
+
+  it("mixes progressively more white going outward", () => {
+    expect(depthFill("var(--chart-1)", 1)).toBe("color-mix(in oklch, var(--chart-1), white 10%)");
+    expect(depthFill("var(--chart-1)", 2)).toBe("color-mix(in oklch, var(--chart-1), white 19%)");
+  });
+
+  it("caps the tint rather than fading a deep ring out entirely", () => {
+    // The old fill-opacity ramp bottomed out at 0.35, which against a dark
+    // card is most of the color gone. This tops out at a third white.
+    expect(depthFill("#3b7dd8", 4)).toBe(depthFill("#3b7dd8", 99));
+    expect(depthFill("#3b7dd8", 99)).toBe("color-mix(in oklch, #3b7dd8, white 32%)");
+  });
+
+  it("passes a raw hex through the same way as a token", () => {
+    expect(depthFill("#3b7dd8", 1)).toBe("color-mix(in oklch, #3b7dd8, white 10%)");
   });
 });
 
