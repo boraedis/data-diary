@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { CatalogPicker } from "@/components/entry-forms/catalog-picker";
 import { ExercisePicker, type ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type {
   DayPayload,
   HealthPayload,
@@ -95,14 +96,24 @@ export function HealthEntryForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // issue #143: workouts especially are tedious to re-enter (exercise,
+  // sets, reps, weight per set) — worth guarding against an accidental nav
+  // click losing them.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChangesGuard(dirty);
+
+  function markDirty() {
+    setSavedAt(null);
+    setDirty(true);
+  }
 
   function set<K extends keyof typeof health>(key: K, value: (typeof health)[K]) {
-    setSavedAt(null);
+    markDirty();
     setHealth((prev) => ({ ...prev, [key]: value }));
   }
 
   function updateWorkout(index: number, patch: Partial<WorkoutDraft>) {
-    setSavedAt(null);
+    markDirty();
     setWorkouts((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], ...patch };
@@ -111,7 +122,7 @@ export function HealthEntryForm({
   }
 
   function updateSet(workoutIndex: number, setIndex: number, patch: Partial<WorkoutSetPayload>) {
-    setSavedAt(null);
+    markDirty();
     setWorkouts((prev) => {
       const next = [...prev];
       const workout = next[workoutIndex];
@@ -123,17 +134,17 @@ export function HealthEntryForm({
   }
 
   function addWorkout() {
-    setSavedAt(null);
+    markDirty();
     setWorkouts((prev) => [...prev, emptyWorkout()]);
   }
 
   function removeWorkout(index: number) {
-    setSavedAt(null);
+    markDirty();
     setWorkouts((prev) => prev.filter((_, i) => i !== index));
   }
 
   function addSet(workoutIndex: number) {
-    setSavedAt(null);
+    markDirty();
     setWorkouts((prev) => {
       const next = [...prev];
       const workout = next[workoutIndex];
@@ -149,7 +160,7 @@ export function HealthEntryForm({
   }
 
   function removeSet(workoutIndex: number, setIndex: number) {
-    setSavedAt(null);
+    markDirty();
     setWorkouts((prev) => {
       const next = [...prev];
       const workout = next[workoutIndex];
@@ -216,6 +227,7 @@ export function HealthEntryForm({
         sick: saved.sick,
       });
       setWorkouts(toDrafts(saved.workouts));
+      setDirty(false);
       setSavedAt(Date.now());
       router.refresh();
     } catch {
