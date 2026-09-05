@@ -31,14 +31,12 @@ export function ExercisePicker({
   valueId,
   onChange,
   onCreated,
-  autoFocus = false,
 }: {
   id: string;
   items: ExerciseCatalogItem[];
   valueId: number | null;
   onChange: (id: number | null) => void;
   onCreated: (item: ExerciseCatalogItem) => void;
-  autoFocus?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [category, setCategory] = useState<ExerciseCategory>("distance");
@@ -88,7 +86,6 @@ export function ExercisePicker({
           valueId={valueId}
           onChange={onChange}
           placeholder="Search exercises…"
-          autoFocus={autoFocus}
         />
         <Button type="button" variant="outline" size="sm" onClick={() => setModalOpen(true)}>
           + New
