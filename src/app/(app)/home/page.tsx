@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TodayLink } from "@/components/today-link";
 import { GoToDate } from "@/components/go-to-date";
 import { getHomeDashboardData, type BirthdayEntry, type RecentDay } from "@/lib/home";
 
@@ -121,7 +120,6 @@ export default async function HomePage() {
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
               <GoToDate />
-              <TodayLink />
             </CardContent>
           </Card>
 
