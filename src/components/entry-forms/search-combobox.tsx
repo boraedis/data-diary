@@ -55,12 +55,10 @@ export function SearchCombobox({
       // Close only if clicking outside both the trigger and the dropdown.
       // The dropdown contains the SearchPanel with its input, so clicking
       // inside it (including the search box) should not close the dropdown.
-      if (
-        triggerRef.current &&
-        !triggerRef.current.contains(target) &&
-        dropdownRef.current &&
-        !dropdownRef.current.contains(target)
-      ) {
+      const isInsideTrigger = triggerRef.current?.contains(target);
+      const isInsideDropdown = dropdownRef.current?.contains(target);
+
+      if (!isInsideTrigger && !isInsideDropdown) {
         setOpen(false);
       }
     }
@@ -72,13 +70,15 @@ export function SearchCombobox({
       setOpen(false);
     }
 
-    document.addEventListener("mousedown", handleClickOutside as EventListener);
-    document.addEventListener("touchend", handleClickOutside as EventListener);
+    // Use capture phase to ensure we catch events early, and check specifically
+    // for clicks/touches inside the dropdown
+    document.addEventListener("mousedown", handleClickOutside as EventListener, true);
+    document.addEventListener("touchstart", handleClickOutside as EventListener, true);
     window.addEventListener("scroll", handleScrollOrResize, true);
     window.addEventListener("resize", handleScrollOrResize);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside as EventListener);
-      document.removeEventListener("touchend", handleClickOutside as EventListener);
+      document.removeEventListener("mousedown", handleClickOutside as EventListener, true);
+      document.removeEventListener("touchstart", handleClickOutside as EventListener, true);
       window.removeEventListener("scroll", handleScrollOrResize, true);
       window.removeEventListener("resize", handleScrollOrResize);
     };
