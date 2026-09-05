@@ -127,14 +127,22 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
         }
         empty={tree === null}
       >
-        {/* Taller than the h-[min(62vh,640px)] every other chart page in
-            this app uses, and deliberately so. That class is tuned for
-            charts that spend width on a time axis; a sunburst's radius is
-            min(width, height), so on any normal desktop it was pinned by
-            the shorter dimension and left a third of the card as empty
-            margin either side. Going taller grows the circle in both
-            directions at once. */}
-        <ResponsiveChart className="h-[min(82vh,900px)] min-h-[360px]" minWidth={240}>
+        {/* Not the h-[min(62vh,640px)] every other chart page here uses.
+            A sunburst's radius is min(width, height), so height and width
+            have to be spent together — which cuts both ways:
+
+            - A fixed tall box wastes everything past the width on a
+              phone. At 375px wide the circle can't exceed 375px across,
+              so 82vh of height is a third of the card left empty.
+            - A box sized only to the viewport height wastes width on a
+              desktop, which is what the shared class did here.
+
+            `aspect-square` makes height track width, so the box is only
+            ever as tall as the circle can actually use; the max-height
+            then stops a wide desktop card from turning into a 1200px-tall
+            one. Between them the circle grows in both directions at once
+            and there is no dead margin at either size. */}
+        <ResponsiveChart className="aspect-square max-h-[min(82vh,900px)] min-h-[320px]" minWidth={240}>
           {({ width, height }) =>
             tree ? (
               <InteractiveDonut

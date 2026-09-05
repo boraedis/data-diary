@@ -60,6 +60,15 @@ function centerLines(): string[] {
   return [...center.children].map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim());
 }
 
+/** Only the center lines a sighted reader actually sees. The rest stay in
+ * the DOM as screen-reader text, which `centerLines` still picks up. */
+function visibleCenterLines(): string[] {
+  const center = screen.getByRole("status", { name: /current selection/i });
+  return [...center.children]
+    .filter((el) => !el.classList.contains("sr-only"))
+    .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim());
+}
+
 function crumbs(): string[] {
   return [...screen.getByRole("navigation", { name: /drill-down path/i }).querySelectorAll("button")].map(
     (b) => b.textContent ?? "",
@@ -169,6 +178,41 @@ describe("InteractiveDonut", () => {
       screen.getByRole("button", { name: "All places" }).click();
     });
     expect(crumbs()).toEqual(["All places"]);
+  });
+
+  describe("center summary density", () => {
+    // The hole is min(width, height) / (2 * (rings + 1)), so these sizes
+    // pick the tier by geometry the same way a real viewport does.
+    it("shows the full summary when the hole is big enough", () => {
+      renderDonut({ width: 900, height: 900, visibleRings: 2 });
+      expect(visibleCenterLines()).toEqual(["All places", "100", "visits"]);
+    });
+
+    it("drops the unit caption once the hole tightens", () => {
+      renderDonut({ width: 560, height: 560, visibleRings: 2 });
+      expect(visibleCenterLines()).toEqual(["All places", "100"]);
+    });
+
+    it("shows the name alone on a phone-sized chart", () => {
+      // ~375px portrait at two rings — the case that prompted this.
+      renderDonut({ width: 375, height: 375, visibleRings: 2 });
+      expect(visibleCenterLines()).toEqual(["All places"]);
+    });
+
+    it("tightens for extra rings too, not just for narrow screens", () => {
+      // Same width that gets the full summary at two rings; four rings
+      // shrinks the hole past the threshold on its own.
+      renderDonut({ width: 900, height: 900, visibleRings: 4 });
+      expect(visibleCenterLines()).toEqual(["All places", "100"]);
+    });
+
+    it("keeps the omitted lines available to a screen reader", () => {
+      renderDonut({ width: 375, height: 375, visibleRings: 2 });
+      // Visually just the name, but the live region still announces the
+      // whole summary when the focus changes.
+      expect(visibleCenterLines()).toEqual(["All places"]);
+      expect(centerLines()).toEqual(["All places", "100", "visits"]);
+    });
   });
 
   it("renders nothing but the shell for a root with no children", () => {

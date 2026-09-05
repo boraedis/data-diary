@@ -75,6 +75,25 @@ const ZOOM_DURATION_MS = 750;
  * cap on the whole component, not just the drawing). */
 const BREADCRUMB_AREA_HEIGHT = 32;
 
+/**
+ * Center-hole radii, in px, at which the summary drops a line.
+ *
+ * Keyed off the radius rather than off a "is this a phone" check, because
+ * the radius *is* the constraint — the hole is
+ * `min(width, height) / (2 * (visibleRings + 1))`, so it shrinks with the
+ * viewport and again with every extra ring. A phone in portrait at two
+ * rings lands around 57px and gets the name alone; three rings on a
+ * laptop hits the same wall and gets the same treatment, which a
+ * user-agent check would have missed entirely. It also can't go stale on
+ * rotation or a window resize the way a load-time check would.
+ *
+ * Nothing is actually lost at the smaller tiers: the omitted lines stay
+ * in the DOM as screen-reader text, so the live region still announces
+ * the full summary when the focus changes.
+ */
+const CENTER_FULL_RADIUS = 96;
+const CENTER_VALUE_RADIUS = 68;
+
 // --- Pure geometry helpers (exported for tests) ---------------------------
 
 /**
@@ -786,6 +805,11 @@ export function InteractiveDonut({
     : "";
 
   const hoveredNode = hovered?.node;
+  const shareOfWhole = formatPercent(grandTotal > 0 ? focusTotal / grandTotal : 0, 1);
+  /** How much of the summary the center hole can hold — see
+   * CENTER_FULL_RADIUS. */
+  const centerDetail: "full" | "value" | "name" =
+    radius >= CENTER_FULL_RADIUS ? "full" : radius >= CENTER_VALUE_RADIUS ? "value" : "name";
 
   return (
     <div style={{ width, height }} className="flex flex-col">
@@ -833,18 +857,39 @@ export function InteractiveDonut({
             role="status"
             aria-live="polite"
             aria-label="Current selection"
-            className="text-center"
-            style={{ maxWidth: radius * 1.7 }}
+            className="overflow-hidden text-center"
+            style={{ maxWidth: radius * 1.7, maxHeight: radius * 1.6 }}
           >
-            <div className="text-sm leading-tight font-medium break-words text-foreground">{focusNode.data.name}</div>
-            <div className="mt-0.5 text-lg leading-none font-semibold tabular-nums text-foreground">
-              {formatValue(focusTotal)}
+            <div
+              className={cn(
+                "leading-tight font-medium break-words text-foreground",
+                centerDetail === "name" ? "line-clamp-3 text-xs" : "text-sm",
+              )}
+            >
+              {focusNode.data.name}
             </div>
-            <div className="text-[10px] text-muted-foreground">{valueLabel}</div>
-            {focusNode.parent ? (
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                {formatPercent(grandTotal > 0 ? focusTotal / grandTotal : 0, 1)} of {layout.data.name}
+            {centerDetail === "name" ? (
+              <span className="sr-only">{formatValue(focusTotal)}</span>
+            ) : (
+              <div className="mt-0.5 text-lg leading-none font-semibold tabular-nums text-foreground">
+                {formatValue(focusTotal)}
               </div>
+            )}
+            {centerDetail === "full" ? (
+              <div className="text-[10px] text-muted-foreground">{valueLabel}</div>
+            ) : (
+              <span className="sr-only">{valueLabel}</span>
+            )}
+            {focusNode.parent ? (
+              centerDetail === "full" ? (
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  {shareOfWhole} of {layout.data.name}
+                </div>
+              ) : (
+                <span className="sr-only">
+                  {shareOfWhole} of {layout.data.name}
+                </span>
+              )
             ) : null}
           </div>
         </div>

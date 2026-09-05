@@ -24,7 +24,13 @@ export function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="w-full">
+    // Half the usual card padding below sm — `--card-spacing` is the one
+    // knob Card exposes for this, and it moves the header, the content and
+    // the vertical rhythm together, so the title still lines up with the
+    // chart's left edge. Combined with ChartPage's narrower mobile gutter
+    // this hands roughly 40px back to the plot on a 375px screen, which is
+    // over 13% more width for every chart in the app.
+    <Card className="w-full [--card-spacing:--spacing(3)] sm:[--card-spacing:--spacing(6)]">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}

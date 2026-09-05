@@ -39,7 +39,11 @@ export function ChartPage({
   children: React.ReactNode;
 }) {
   return (
-    <main className="mx-auto flex w-full flex-col gap-4 px-4 py-8 md:gap-6 md:px-8 md:py-12 lg:px-10">
+    // px-2 below sm, not px-4: on a phone every pixel of width is chart,
+    // and 16px of gutter either side is ~9% of a 375px screen spent on
+    // nothing. Still enough to keep the card reading as a card rather than
+    // a full-bleed band. Desktop padding is unchanged.
+    <main className="mx-auto flex w-full flex-col gap-4 px-2 py-8 sm:px-4 md:gap-6 md:px-8 md:py-12 lg:px-10">
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">{title}</h1>
         <Link href={backHref} className="text-xs text-muted-foreground hover:text-foreground">
