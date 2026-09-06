@@ -3,7 +3,7 @@ import { DayNav } from "@/components/day-nav";
 import { PlacesEntryForm } from "@/components/entry-forms/places-entry-form";
 import { isValidDateString } from "@/lib/date";
 import { getPlaceMentionCounts, getRawPlaceMentionCounts, listPlacesCatalog, loadDay } from "@/lib/days";
-import { listPlaceCategories } from "@/lib/catalog-admin";
+import { listMetros, listPlaceCategories } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +17,13 @@ export default async function PlacesEntryPage({
     notFound();
   }
 
-  const [day, catalog, mentionCounts, rawMentionCounts, categories] = await Promise.all([
+  const [day, catalog, mentionCounts, rawMentionCounts, categories, metros] = await Promise.all([
     loadDay(date),
     listPlacesCatalog(),
     getPlaceMentionCounts(),
     getRawPlaceMentionCounts(),
     listPlaceCategories(),
+    listMetros(),
   ]);
 
   return (
@@ -35,6 +36,7 @@ export default async function PlacesEntryPage({
         mentionCounts={mentionCounts}
         rawMentionCounts={rawMentionCounts}
         categories={categories}
+        metros={metros}
       />
     </main>
   );

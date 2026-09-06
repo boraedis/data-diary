@@ -11,8 +11,21 @@ import { Select } from "@/components/ui/select";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { PLACE_SLOTS, type DayPayload, type PlacesPayload, type PlaceCatalogItem } from "@/lib/days";
-import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+import type { MetroItem, PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 import { comparePlacesByMentions } from "@/lib/place-sort";
+
+// Mirrors assertValidRoot/isColorEligible/isMetroEligible in
+// src/lib/days.ts and src/components/manage/place-detail.tsx — a place's
+// own color only ever lives at the country level (Region → Country), and
+// a metro area only at the city level (Region → Municipality). Checked
+// here too so the right field pops up while creating a place, not just
+// after saving and reopening it in Edit.
+function isRegionCountry(category: string, subcategory: string): boolean {
+  return category === "Region" && subcategory === "Country";
+}
+function isRegionMunicipality(category: string, subcategory: string): boolean {
+  return category === "Region" && subcategory === "Municipality";
+}
 
 function hydrate(entries: { slot: number; placeId: number }[]): (number | null)[] {
   const arr: (number | null)[] = Array(PLACE_SLOTS).fill(null);
@@ -52,8 +65,9 @@ function toSearchItem(place: PlaceCatalogItem): SearchItem {
  * only changes what the input suggests, not the column type.
  *
  * Parent IS a real picker here (not free text) — a place can only be
- * top-level with category "Region" (assertValidRoot in src/lib/days.ts),
- * and virtually everything logged from a day entry is a leaf venue, so
+ * top-level with category/subcategory "Region" → "Country" (which also
+ * then requires a color) — assertValidRoot in src/lib/days.ts — and
+ * virtually everything logged from a day entry is a leaf venue, so
  * defaulting to "no parent" would fail validation on almost every save. */
 function NewPlaceModal({
   open,
@@ -62,6 +76,7 @@ function NewPlaceModal({
   parentOptions,
   mentionCounts,
   categories,
+  metros,
 }: {
   open: boolean;
   onClose: () => void;
@@ -69,6 +84,7 @@ function NewPlaceModal({
   parentOptions: { id: number; name: string; namePath: string | null }[];
   mentionCounts: Map<number, number>;
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
+  metros: MetroItem[];
 }) {
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
@@ -76,8 +92,13 @@ function NewPlaceModal({
   const [category, setCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
   const [parentId, setParentId] = useState<number | null>(null);
+  const [color, setColor] = useState("");
+  const [metroId, setMetroId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isCountry = isRegionCountry(category, subcategory);
+  const isMunicipality = isRegionMunicipality(category, subcategory);
 
   const categoryNames = categories.map((c) => c.name);
   // Scoped to the selected category — an unfiltered flatMap of every
@@ -103,14 +124,26 @@ function NewPlaceModal({
     setCategory("");
     setSubcategory("");
     setParentId(null);
+    setColor("");
+    setMetroId(null);
     setError(null);
   }
 
   async function handleCreate() {
     if (!name.trim()) return;
-    if (parentId === null && category.trim() !== "Region") {
-      setError('Only a "Region" place can be top-level — pick a parent, or set category to "Region".');
-      return;
+    // Mirrors assertValidRoot in src/lib/days.ts — checked here too so a
+    // bad combination shows inline instead of costing a round trip.
+    if (parentId === null) {
+      if (!isCountry) {
+        setError(
+          'Only a "Region" → "Country" place can be top-level — pick a parent, or set category to "Region" and subcategory to "Country".'
+        );
+        return;
+      }
+      if (!color) {
+        setError('A top-level ("Region" → "Country") place must have a color.');
+        return;
+      }
     }
     setCreating(true);
     setError(null);
@@ -125,6 +158,8 @@ function NewPlaceModal({
           category: category.trim() || null,
           subcategory: subcategory.trim() || null,
           parentId,
+          color: isCountry && color ? color : null,
+          metroId: isMunicipality ? metroId : null,
         }),
       });
       const body = await res.json();
@@ -174,6 +209,12 @@ function NewPlaceModal({
             placeholder="Search places…"
             emptyLabel="No parent"
           />
+          {parentId === null && !isCountry ? (
+            <p className="text-xs text-muted-foreground">
+              Only a &ldquo;Region&rdquo; → &ldquo;Country&rdquo; place can be top-level — pick a parent, or set
+              category to &ldquo;Region&rdquo; and subcategory to &ldquo;Country&rdquo;.
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="new-place-category">Category</Label>
@@ -183,6 +224,8 @@ function NewPlaceModal({
             onChange={(e) => {
               setCategory(e.target.value);
               setSubcategory("");
+              setColor("");
+              setMetroId(null);
             }}
           >
             <option value="">— Select category —</option>
@@ -198,7 +241,11 @@ function NewPlaceModal({
           <Select
             id="new-place-subcategory"
             value={subcategory}
-            onChange={(e) => setSubcategory(e.target.value)}
+            onChange={(e) => {
+              setSubcategory(e.target.value);
+              setColor("");
+              setMetroId(null);
+            }}
             disabled={!category}
           >
             <option value="">{category ? "— Select subcategory —" : "— Select a category first —"}</option>
@@ -209,6 +256,42 @@ function NewPlaceModal({
             ))}
           </Select>
         </div>
+        {isCountry ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="new-place-color">Color</Label>
+            <div className="flex items-center gap-2">
+              <input
+                id="new-place-color"
+                type="color"
+                value={color || "#64748b"}
+                onChange={(e) => setColor(e.target.value)}
+                className="h-8 w-16 cursor-pointer rounded border border-input bg-transparent"
+              />
+              {color ? (
+                <Button type="button" size="xs" variant="outline" onClick={() => setColor("")}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {isMunicipality ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="new-place-metro">Metro</Label>
+            <Select
+              id="new-place-metro"
+              value={metroId ?? ""}
+              onChange={(e) => setMetroId(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">No metro</option>
+              {metros.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : null}
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
         <Button type="button" onClick={handleCreate} disabled={creating || !name.trim()}>
           {creating ? "Adding…" : "Add"}
@@ -268,6 +351,7 @@ export function PlacesEntryForm({
   mentionCounts,
   rawMentionCounts,
   categories,
+  metros,
 }: {
   date: string;
   initial: PlacesPayload;
@@ -275,6 +359,7 @@ export function PlacesEntryForm({
   mentionCounts: Map<number, number>;
   rawMentionCounts: Map<number, number>;
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
+  metros: MetroItem[];
 }) {
   const router = useRouter();
   const [items, setItems] = useState<PlaceCatalogItem[]>(catalog);
@@ -404,6 +489,7 @@ export function PlacesEntryForm({
               parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
               mentionCounts={mentionCounts}
               categories={categories}
+              metros={metros}
               onCreated={(item) => {
                 handleCreated(item);
                 addPlace(item.id);

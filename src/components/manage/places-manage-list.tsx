@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CatalogBrowser } from "@/components/manage/catalog-browser";
 import { NewPlaceModal } from "@/components/manage/new-place-modal";
 import type { PlaceCatalogItem } from "@/lib/days";
-import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+import type { MetroItem, PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 import type { SearchItem } from "@/components/entry-forms/search-panel";
 
 // namePath is "USA/Georgia/Atlanta/Midtown/" (root to self, trailing
@@ -30,10 +30,12 @@ export function PlacesManageList({
   initial,
   categories,
   mentionCounts,
+  metros,
 }: {
   initial: PlaceCatalogItem[];
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
   mentionCounts: Map<number, number>;
+  metros: MetroItem[];
 }) {
   const [items, setItems] = useState(initial);
   const [modalOpen, setModalOpen] = useState(false);
@@ -60,6 +62,7 @@ export function PlacesManageList({
         // page's parentOptions, which excludes self + descendants).
         parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath, alias: p.alias }))}
         mentionCounts={mentionCounts}
+        metros={metros}
         // `initial` is already sorted most-mentioned-first (see
         // ManagePlacesPage) — a brand-new place has zero mentions, so it
         // belongs at the end, not re-sorted alphabetically into the middle.
