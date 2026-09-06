@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { SportsWatchHistoryList } from "@/components/manage/sports-watch-history-list";
 import type { SportsGameTypeItem, SportsGameTypeUsage } from "@/lib/catalog-admin";
 
 export function SportsGameTypeDetail({
@@ -119,6 +120,15 @@ export function SportsGameTypeDetail({
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Watch history</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <SportsWatchHistoryList watches={usage.watches} />
         </CardContent>
       </Card>
     </>

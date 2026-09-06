@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import type {
   GameCategoryItem,
   GameCategoryUsage,
@@ -296,6 +297,19 @@ export function GameCategoryDetail({
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Session history</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <CatalogUsageHistory
+            history={usage.sessions.map((s) => ({ date: s.date, label: s.gameName }))}
+            daySegment="entertainment"
+            emptyText="No sessions logged."
+          />
         </CardContent>
       </Card>
 

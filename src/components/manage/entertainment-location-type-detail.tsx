@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import type { EntertainmentLocationTypeItem, EntertainmentLocationTypeUsage } from "@/lib/catalog-admin";
 
 export function EntertainmentLocationTypeDetail({
@@ -124,6 +125,18 @@ export function EntertainmentLocationTypeDetail({
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>History</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <CatalogUsageHistory
+            history={usage.history.map((h) => ({ date: h.date, label: h.label, secondary: h.kind }))}
+            daySegment="entertainment"
+          />
         </CardContent>
       </Card>
     </>

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import type { GameDeviceTypeItem, GameDeviceTypeUsage } from "@/lib/catalog-admin";
 
 export function GameDeviceTypeDetail({
@@ -121,6 +122,19 @@ export function GameDeviceTypeDetail({
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Session history</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <CatalogUsageHistory
+            history={usage.sessions.map((s) => ({ date: s.date, label: s.gameName }))}
+            daySegment="entertainment"
+            emptyText="No sessions logged."
+          />
         </CardContent>
       </Card>
     </>
