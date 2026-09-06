@@ -150,6 +150,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `TMDB_API_KEY` | For movie/TV metadata lookup | [TMDB](https://www.themoviedb.org/documentation/api) API key, used by `/api/tmdb/*`. |
 | `GOOGLE_BOOKS_API_KEY` | For book metadata lookup | Google Books API key, used by `/api/google-books/*`. |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | For artist genre lookup on music import | Spotify [Client Credentials](https://developer.spotify.com/documentation/web-api/tutorials/client-credentials-flow) app keys, used by `/api/music/import` to resolve a newly-seen artist's genre tags. Without these, import still works — new artists just get no genres. |
+| `BLOB_READ_WRITE_TOKEN` | For serving binary media | [Vercel Blob](https://vercel.com/docs/vercel-blob) read/write token, used to store images and video (see `AGENTS.md`'s static asset strategy section for what goes here vs. what's committed to the repo). Auto-populated on Vercel once a Blob store is connected to the project; for local dev, pull it with `vercel env pull`. |
 
 ### Scripts
 

@@ -152,6 +152,44 @@ app everything else in this codebase serves. Follow-up work lives on #96.
   redirect instead of a normal 404, which reads as "why is this asking me
   to log in" to a visitor who was never meant to authenticate at all.
 
+## Static asset strategy
+
+Decided on GitHub issue #163, after `public/` sat empty long enough to block
+both #15 (facelapse) and #24/#107 (geo). The previous repo's mistake was
+committing every multi-MB media revision straight to git, which balloons
+`.git` permanently and can't be undone without a history rewrite — so the
+question was where each *kind* of binary/geo asset should actually live.
+
+The threshold isn't file size — it's **text/structured vs. binary-encoded**,
+because that's what determines whether git's delta compression actually
+helps:
+
+- **Custom, hand-edited geo data** (e.g. future per-city neighborhood
+  polygons for #177) is committed straight to the repo as TopoJSON and
+  imported directly by the chart that uses it — the same pattern
+  `world-visits-chart.tsx` already uses for the `world-atlas` npm package,
+  just with a hand-maintained file instead of a published one. GeoJSON/
+  TopoJSON is text with highly repetitive numeric structure; a real test on
+  #163 showed a year of monthly-edited polygon files costing *less* in
+  `.git` than the raw file on disk. Standard/published geo (world borders,
+  future US states/counties) stays on the existing npm-package path
+  (`world-atlas`, `us-atlas`) — that part was never the open question.
+- **Binary media** (images, the facelapse video from #15) goes to **Vercel
+  Blob** (`@vercel/blob`, `BLOB_READ_WRITE_TOKEN`) instead. A re-encoded
+  video or replaced photo produces a wholly new blob every time — no delta
+  benefit — which is exactly the failure mode that bloated the legacy repo.
+  Vercel Blob was picked over Cloudinary/S3/R2/Git LFS because it needs no
+  new account (same platform as hosting) and is free at this app's scale
+  (Hobby plan: 5GB storage / 100GB transfer / 100K simple + 10K advanced
+  ops per month included — see `README.md`'s env var table). `next.config.ts`
+  allows `*.public.blob.vercel-storage.com` in `images.remotePatterns` so
+  `next/image` can optimize blobs directly.
+
+Nothing here is public by default just because it's on Blob — the
+public/private split from #12 (`src/proxy.ts`'s `PUBLIC_PATHS`) still
+governs which *pages* are unauthenticated; a public Blob URL is only a
+concern if something private ends up served from one by accident.
+
 ## Conventions this codebase leans on
 
 - **Comments explain *why*, not just *what*.** Nearly every non-obvious
