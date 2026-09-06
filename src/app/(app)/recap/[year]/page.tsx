@@ -5,9 +5,11 @@ import { RecapEntertainmentSection } from "@/components/recap/recap-entertainmen
 import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
 import { RecapPeoplePlacesSection } from "@/components/recap/recap-people-places-section";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
+import { RecapSubsSection } from "@/components/recap/recap-subs-section";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
 import { getRecapPeoplePlaces } from "@/lib/recap-people-places";
+import { getRecapSubs } from "@/lib/recap-subs";
 import {
   MIN_DAYS_FOR_TOTAL,
   countLoggedDays,
@@ -35,9 +37,9 @@ export const dynamic = "force-dynamic";
  * domain sub-issue is a fill-in rather than a layout negotiation. */
 const PENDING_SECTIONS = [
   {
-    title: "Mood & wellbeing",
-    description: "Happiness trend and average, best and worst day, sleep, biggest-moving sub, longest good-day streak.",
-    issue: 170,
+    title: "Mood & sleep",
+    description: "Happiness trend and average, best and worst day, sleep duration and consistency.",
+    issue: 201,
   },
   {
     title: "Moments",
@@ -56,11 +58,12 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
 
   const period = yearPeriod(year);
   const prior = previousPeriod(period);
-  const [loggedDays, priorLoggedDays, entertainment, peoplePlaces, lifeEvents] = await Promise.all([
+  const [loggedDays, priorLoggedDays, entertainment, peoplePlaces, subs, lifeEvents] = await Promise.all([
     countLoggedDays(period),
     countLoggedDays(prior),
     getRecapEntertainment(period, prior),
     getRecapPeoplePlaces(period, prior),
+    getRecapSubs(period, prior),
     listRecapLifeEvents(period),
   ]);
 
@@ -77,6 +80,8 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <RecapStatCard label="Days logged" stat={daysLogged} priorLabel={prior.label} />
       </div>
+
+      <RecapSubsSection subs={subs} periodLabel={period.label} priorLabel={prior.label} />
 
       <RecapEntertainmentSection
         entertainment={entertainment}
