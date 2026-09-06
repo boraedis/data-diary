@@ -55,6 +55,36 @@ describe("searchArtist", () => {
     expect(searchCallHeaders.Authorization).toBe("Bearer tok");
   });
 
+  it("rejects a top result whose name doesn't actually match the query (#225)", async () => {
+    // Confirmed on real production data: searching "Hanz" or "DR" returned
+    // an unrelated artist as the #1 (and only, in this shape) result.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ access_token: "tok", expires_in: 3600 }))
+      .mockResolvedValueOnce(
+        jsonResponse({ artists: { items: [{ id: "wrong", name: "Sam Florian", genres: ["indie"] }] } })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const { searchArtist } = await freshSpotifyModule();
+    expect(await searchArtist("Hanz")).toBeNull();
+  });
+
+  it("matches case-insensitively and looks past the top result for the real match", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ access_token: "tok", expires_in: 3600 })).mockResolvedValueOnce(
+      jsonResponse({
+        artists: {
+          items: [
+            { id: "wrong", name: "Someone Else", genres: ["pop"] },
+            { id: "right", name: "radiohead", genres: ["art rock"] },
+          ],
+        },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { searchArtist } = await freshSpotifyModule();
+    expect(await searchArtist("Radiohead")).toEqual({ spotifyId: "right", name: "radiohead", genres: ["art rock"] });
+  });
+
   it("returns null when the search has no matches, rather than throwing", async () => {
     const fetchMock = vi
       .fn()
@@ -90,7 +120,7 @@ describe("searchArtist", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { searchArtist } = await freshSpotifyModule();
 
-    const resultPromise = searchArtist("x");
+    const resultPromise = searchArtist("Retried");
     // Let the token fetch and the first (429) search fetch resolve, then
     // fast-forward past the (Retry-After + 1)s backoff before asserting.
     await vi.advanceTimersByTimeAsync(3000);

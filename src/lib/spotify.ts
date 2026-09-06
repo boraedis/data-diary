@@ -78,18 +78,32 @@ type SpotifySearchResponse = {
   artists: { items: { id: string; name: string; genres: string[] }[] };
 };
 
+function normalizeArtistName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 /** Best-effort artist lookup by name, used once per newly-seen artist
  * during import. Returns null on no match rather than throwing — an
- * unmatched artist just gets no genres, not a failed import. */
+ * unmatched artist just gets no genres, not a failed import.
+ *
+ * Only trusts a candidate whose own name is actually the name being
+ * searched for, checked across the top 10 results rather than assuming
+ * index 0 is right. Confirmed on real data (#225) that Spotify's fuzzy
+ * search can return a wholly unrelated top result for a short/ambiguous/
+ * misspelled query — "Hanz" and "DR" both returned other real artists'
+ * IDs, which then got that unrelated artist's genres silently attached.
+ * Missing genres for a genuine non-match is fine (see above); silently
+ * attaching a wrong artist's genres is not. */
 export async function searchArtist(name: string): Promise<SpotifyArtistMatch | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
   const data = await spotifyFetch<SpotifySearchResponse>("/search", {
     q: trimmed,
     type: "artist",
-    limit: "1",
+    limit: "10",
   });
-  const match = data.artists.items[0];
+  const normalizedQuery = normalizeArtistName(trimmed);
+  const match = data.artists.items.find((item) => normalizeArtistName(item.name) === normalizedQuery);
   if (!match) return null;
   return { spotifyId: match.id, name: match.name, genres: match.genres };
 }
