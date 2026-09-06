@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
+import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
+import { listRecapLifeEvents } from "@/lib/recap-life-events";
 import {
   MIN_DAYS_FOR_TOTAL,
   countLoggedDays,
@@ -44,11 +46,6 @@ const PENDING_SECTIONS = [
     issue: 172,
   },
   {
-    title: "Life events",
-    description: "Jobs, homes and relationships that started, ended, or ran through the year.",
-    issue: 173,
-  },
-  {
     title: "Moments",
     description: "Automatically detected highs, lows and firsts.",
     issue: 174,
@@ -65,9 +62,10 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
 
   const period = yearPeriod(year);
   const prior = previousPeriod(period);
-  const [loggedDays, priorLoggedDays] = await Promise.all([
+  const [loggedDays, priorLoggedDays, lifeEvents] = await Promise.all([
     countLoggedDays(period),
     countLoggedDays(prior),
+    listRecapLifeEvents(period),
   ]);
 
   const daysLogged = toRecapStat({
@@ -83,6 +81,8 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <RecapStatCard label="Days logged" stat={daysLogged} priorLabel={prior.label} />
       </div>
+
+      <RecapLifeEventsCard events={lifeEvents} periodLabel={period.label} />
 
       {PENDING_SECTIONS.map((section) => (
         <ChartCard key={section.title} title={section.title} description={section.description}>
