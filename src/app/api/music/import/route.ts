@@ -7,34 +7,32 @@ export const dynamic = "force-dynamic";
 // new artist, see src/lib/spotify.ts) — well past Vercel's default 10s.
 export const maxDuration = 300;
 
-// One file per request, not a batch — the client (src/app/manage/
-// entertainment/music/page.tsx) uploads a multi-file selection as
-// sequential requests instead. Spotify's own export already splits large
-// account histories into several files; keeping each request to one of
-// them keeps the request body well under typical serverless body-size
-// limits and means a failure partway through a big backlog only has to be
-// retried for the one file that failed, not the whole upload.
+// One entry-array slice per request, not a whole file — Vercel Functions
+// hard-cap request bodies at 4.5MB (vercel.com/docs/functions/limitations
+// #request-body-size), and Spotify's own export splitting produces files
+// well above that (~12MB observed, see #192). The client (music-upload-
+// panel.tsx) reads and JSON.parses each file itself so it can split one
+// big file into several requests sized to stay under that limit, merging
+// the per-slice summaries back into one result per original file.
 //
-// The uploaded file is read into memory (`file.text()`) and handed
-// straight to importSpotifyExport — never written to disk or any storage
-// layer. See the `musicListens` table comment in schema.ts for why.
+// Nothing here is written to disk or any storage layer — entries are held
+// in memory just long enough to extract the fields importSpotifyExport
+// writes to musicListens. See that table's comment in schema.ts for why.
 export async function POST(request: Request) {
-  let formData: FormData;
+  let body: unknown;
   try {
-    formData = await request.formData();
+    body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Missing file" }, { status: 400 });
+  const { name, entries } = (body ?? {}) as { name?: unknown; entries?: unknown };
+  if (typeof name !== "string" || !Array.isArray(entries)) {
+    return NextResponse.json({ error: "Expected { name: string, entries: array }" }, { status: 400 });
   }
-
-  const text = await file.text();
 
   try {
-    const summary = await importSpotifyExport([{ name: file.name, text }]);
+    const summary = await importSpotifyExport([{ name, entries }]);
     return NextResponse.json(summary);
   } catch (error) {
     return NextResponse.json(

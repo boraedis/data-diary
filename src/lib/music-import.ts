@@ -1,8 +1,12 @@
-// Parses and imports Spotify "Extended Streaming History" export files
+// Imports Spotify "Extended Streaming History" export entries
 // (src/app/api/music/import/route.ts is the only caller). See the
 // `musicListens` table comment in schema.ts for why the uploaded file
-// itself is never persisted — this module reads it once, in memory, and
-// only the extracted fields ever reach the database.
+// itself is never persisted — only the extracted fields ever reach the
+// database. Entries arrive already parsed: the client (music-upload-
+// panel.tsx) reads and JSON.parses each export file itself so it can split
+// a file that's too big for one request into several smaller ones (see
+// that file's own comment, and #192) — by the time this module sees them,
+// each "file" here may really be one slice of a larger export file.
 import { eq, or, sql } from "drizzle-orm";
 import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
@@ -22,7 +26,6 @@ type SpotifyExportEntry = {
 
 export type MusicImportSummary = {
   filesProcessed: number;
-  filesSkipped: number;
   entriesRead: number;
   listensInserted: number;
   listensSkipped: number;
@@ -149,11 +152,10 @@ function asNumber(value: unknown): number | null {
 
 const INSERT_CHUNK_SIZE = 500;
 
-export async function importSpotifyExport(files: { name: string; text: string }[]): Promise<MusicImportSummary> {
+export async function importSpotifyExport(files: { name: string; entries: unknown[] }[]): Promise<MusicImportSummary> {
   const db = getDb();
   const summary: MusicImportSummary = {
     filesProcessed: 0,
-    filesSkipped: 0,
     entriesRead: 0,
     listensInserted: 0,
     listensSkipped: 0,
@@ -167,17 +169,7 @@ export async function importSpotifyExport(files: { name: string; text: string }[
   const rows: (typeof musicListens.$inferInsert)[] = [];
 
   for (const file of files) {
-    let entries: SpotifyExportEntry[];
-    try {
-      const parsed: unknown = JSON.parse(file.text);
-      if (!Array.isArray(parsed)) throw new Error("not an array");
-      entries = parsed as SpotifyExportEntry[];
-    } catch {
-      summary.filesSkipped++;
-      summary.errors.push(`${file.name}: could not parse as a Spotify export JSON array — skipped`);
-      continue;
-    }
-
+    const entries = file.entries as SpotifyExportEntry[];
     summary.filesProcessed++;
     summary.entriesRead += entries.length;
 

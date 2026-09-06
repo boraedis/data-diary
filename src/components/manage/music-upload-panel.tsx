@@ -18,15 +18,50 @@ function emptyTotal() {
   };
 }
 
-// Uploads Spotify "Extended Streaming History" export files one request per
-// file (see the route's own comment for why: it keeps each request body
-// small and means a failure only has to be retried for the file that
-// failed). The files themselves never leave this request cycle — read into
-// memory here, sent as multipart form data, parsed and discarded server-side.
+function mergeSummaries(a: MusicImportSummary | null, b: MusicImportSummary): MusicImportSummary {
+  if (!a) return b;
+  return {
+    filesProcessed: a.filesProcessed, // one original file, no matter how many slices it took
+    entriesRead: a.entriesRead + b.entriesRead,
+    listensInserted: a.listensInserted + b.listensInserted,
+    listensSkipped: a.listensSkipped + b.listensSkipped,
+    artistsCreated: a.artistsCreated + b.artistsCreated,
+    podcastShowsCreated: a.podcastShowsCreated + b.podcastShowsCreated,
+    errors: [...a.errors, ...b.errors],
+  };
+}
+
+// Vercel Functions hard-cap request bodies at 4.5MB, but Spotify's own
+// export splitting produces files well above that (~12MB observed, see
+// #192) — a file this size sent whole used to fail with a generic
+// "Network error" once the platform rejected the oversized request before
+// a clean response came back. Sized well under the real limit to leave
+// headroom for JSON-array overhead (brackets/commas) around the estimate,
+// which is based on the *whole* file's average bytes-per-entry and can run
+// a bit high for any single slice.
+const MAX_CHUNK_BYTES = 3_500_000;
+
+function chunkEntries(entries: unknown[], fileByteLength: number): unknown[][] {
+  if (entries.length === 0) return [[]];
+  const bytesPerEntry = fileByteLength / entries.length;
+  const perChunk = Math.max(1, Math.floor(MAX_CHUNK_BYTES / bytesPerEntry));
+  const chunks: unknown[][] = [];
+  for (let i = 0; i < entries.length; i += perChunk) {
+    chunks.push(entries.slice(i, i + perChunk));
+  }
+  return chunks;
+}
+
+// Uploads Spotify "Extended Streaming History" export files. Each file is
+// read and JSON.parsed here in the browser, then its entries are sent as
+// one or more requests (chunkEntries splits large files, see its comment)
+// rather than the whole file in one request — the files themselves never
+// leave this request cycle either way, parsed and discarded server-side.
 export function MusicUploadPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [currentChunk, setCurrentChunk] = useState<{ fileName: string; index: number; total: number } | null>(null);
   const [results, setResults] = useState<FileResult[]>([]);
 
   async function handleFiles(files: FileList) {
@@ -37,19 +72,44 @@ export function MusicUploadPanel() {
     const collected: FileResult[] = [];
 
     for (const file of list) {
-      const formData = new FormData();
-      formData.append("file", file);
+      let entries: unknown[];
       try {
-        const res = await fetch("/api/music/import", { method: "POST", body: formData });
-        const body = await res.json();
-        if (!res.ok) {
-          collected.push({ fileName: file.name, error: typeof body?.error === "string" ? body.error : "Import failed" });
-        } else {
-          collected.push({ fileName: file.name, summary: body as MusicImportSummary });
-        }
+        const parsed: unknown = JSON.parse(await file.text());
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        entries = parsed;
       } catch {
-        collected.push({ fileName: file.name, error: "Network error" });
+        collected.push({ fileName: file.name, error: "Could not parse as a Spotify export JSON array" });
+        setProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+        setResults([...collected]);
+        continue;
       }
+
+      const chunks = chunkEntries(entries, file.size);
+      let merged: MusicImportSummary | null = null;
+      let error: string | null = null;
+
+      for (let i = 0; i < chunks.length; i++) {
+        setCurrentChunk(chunks.length > 1 ? { fileName: file.name, index: i + 1, total: chunks.length } : null);
+        try {
+          const res = await fetch("/api/music/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: file.name, entries: chunks[i] }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            error = typeof body?.error === "string" ? body.error : "Import failed";
+            break;
+          }
+          merged = mergeSummaries(merged, body as MusicImportSummary);
+        } catch {
+          error = chunks.length > 1 ? `Network error (part ${i + 1}/${chunks.length})` : "Network error";
+          break;
+        }
+      }
+
+      collected.push(error ? { fileName: file.name, error } : { fileName: file.name, summary: merged! });
+      setCurrentChunk(null);
       setProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
       setResults([...collected]);
     }
@@ -93,6 +153,7 @@ export function MusicUploadPanel() {
           {progress && (
             <span className="text-sm text-muted-foreground">
               {progress.done} / {progress.total} files
+              {currentChunk && ` (part ${currentChunk.index}/${currentChunk.total})`}
             </span>
           )}
         </div>
