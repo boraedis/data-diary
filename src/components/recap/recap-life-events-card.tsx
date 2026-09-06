@@ -79,7 +79,7 @@ export function RecapLifeEventsCard({ events, periodLabel }: { events: RecapLife
               </span>
               <span className="text-xs text-muted-foreground">
                 {KIND_LABELS[event.kind]}
-                {event.framing === "throughout" ? "" : ` · ${formatDate(dateShown(event))}`}
+                {datePart(event) ? ` · ${datePart(event)}` : ""}
               </span>
             </div>
           </li>
@@ -89,8 +89,20 @@ export function RecapLifeEventsCard({ events, periodLabel }: { events: RecapLife
   );
 }
 
-/** The date the framing refers to — an entry that only ended in this
- * period should show when it ended, not when it began years earlier. */
-function dateShown(event: RecapLifeEvent): string {
-  return event.framing === "ended" ? (event.end as string) : event.start;
+/** The date(s) the framing refers to. An entry that only ended in this
+ * period shows when it ended, not when it began years earlier; one that
+ * both began and ended shows the span, since either date alone leaves half
+ * the sentence unanswered. An entry that spanned the whole period has no
+ * date to report — that's what "all year" means. */
+function datePart(event: RecapLifeEvent): string | null {
+  switch (event.framing) {
+    case "throughout":
+      return null;
+    case "ended":
+      return formatDate(event.end as string);
+    case "started-and-ended":
+      return `${formatDate(event.start)} – ${formatDate(event.end as string)}`;
+    case "started":
+      return formatDate(event.start);
+  }
 }
