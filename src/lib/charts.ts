@@ -1,5 +1,5 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
@@ -656,5 +656,110 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     subcategory: r.subcategory,
     rootColor: r.rootColor,
     value: Number(r.value),
+  }));
+}
+
+// --- Health & activity (#218) --------------------------------------------
+//
+// Five charts from the legacy inventory (#209), all on primitives that
+// already shipped: coffee and distance as both a monthly trend and a raw
+// daily view, plus monthly training volume. The new work is the data
+// layer, not the visualization — which is why these are a handful of small
+// fetchers rather than new chart components.
+
+/** A single value per calendar day, the shape both InteractiveCalendar and
+ * InteractiveScroller consume. Deliberately generic: most of the remaining
+ * chart backlog is "this one `days` column, by day" and doesn't deserve a
+ * bespoke type each. */
+export type DailyValue = { date: string; value: number };
+
+/**
+ * Monthly average of one nullable numeric `days` column, with each month's
+ * own min/max for the range band.
+ *
+ * Buckets in JS via `groupByPeriod`/`summarizePeriods` rather than in SQL.
+ * That follows `getHappinessAveragerData` directly above — every averager
+ * in this file works this way, the row counts are personal-scale, and one
+ * averager disagreeing with the others about how a month is computed would
+ * be worse than the aggregation being pushed down.
+ */
+async function monthlyAveragesOf(column: AnyPgColumn): Promise<MonthlyAverage[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, value: column })
+    .from(days)
+    .where(isNotNull(column))
+    .orderBy(asc(days.date));
+
+  const typed = rows.map((r) => ({ date: r.date, value: Number(r.value) }));
+  const buckets = groupByPeriod(typed, "month", (r) => r.date);
+  const summaries = summarizePeriods(buckets, (r) => r.value);
+  return buckets.map((bucket, i) => {
+    const values = bucket.items.map((r) => r.value);
+    return {
+      month: bucket.key,
+      avg: summaries[i].avg,
+      count: summaries[i].count,
+      min: Math.min(...values),
+      max: Math.max(...values),
+    };
+  });
+}
+
+/** Every logged value of one nullable numeric `days` column, oldest first. */
+async function dailyValuesOf(column: AnyPgColumn): Promise<DailyValue[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, value: column })
+    .from(days)
+    .where(isNotNull(column))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, value: Number(r.value) }));
+}
+
+export function getCoffeeAveragerData(): Promise<MonthlyAverage[]> {
+  return monthlyAveragesOf(days.coffees);
+}
+
+export function getCoffeeCalendarData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.coffees);
+}
+
+export function getDistanceAveragerData(): Promise<MonthlyAverage[]> {
+  return monthlyAveragesOf(days.distanceWalkedKm);
+}
+
+export function getDistanceScrollerData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.distanceWalkedKm);
+}
+
+/** Training volume per month: days trained, plus how many individual
+ * exercises those days held. */
+export type TrainingMonth = { month: string; daysTrained: number; exercises: number };
+
+/**
+ * Monthly training volume.
+ *
+ * **Counts days trained, not `workouts` rows.** That table holds one row
+ * per exercise performed, so a single session of eight exercises is eight
+ * rows — "412 workouts" and "180 days trained" are both derivable from it
+ * and only one is what a person means by "how much did I train". The recap
+ * epic settled this the same way in #205, and the two disagreeing would be
+ * worse than either choice.
+ *
+ * The exercise count rides along for the tooltip rather than as a second
+ * plotted series: it lives on a completely different scale (tens per month
+ * against a hard ceiling of ~31 days), so plotting both would either need
+ * a second y-axis — which this repo's charts don't do — or squash the days
+ * line flat.
+ */
+export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
+  const db = getDb();
+  const rows = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date));
+
+  return groupByPeriod(rows, "month", (r) => r.date).map(({ key, items }) => ({
+    month: key,
+    daysTrained: new Set(items.map((r) => r.date)).size,
+    exercises: items.length,
   }));
 }

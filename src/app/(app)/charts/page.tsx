@@ -26,6 +26,31 @@ const CHARTS = [
     description: "Zoomable line — drag the strip below to zoom into a range.",
   },
   {
+    href: "/charts/coffee-trend",
+    title: "Coffee trend",
+    description: "Monthly average cups per day, with each month's range.",
+  },
+  {
+    href: "/charts/coffee-calendar",
+    title: "Coffee calendar",
+    description: "A year-by-year heatmap of cups per day.",
+  },
+  {
+    href: "/charts/distance-trend",
+    title: "Distance walked trend",
+    description: "Monthly average kilometres per day.",
+  },
+  {
+    href: "/charts/distance-daily",
+    title: "Daily distance walked",
+    description: "Every logged day — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/training-volume",
+    title: "Training volume",
+    description: "Days trained each month, with exercise counts on hover.",
+  },
+  {
     href: "/charts/sleep",
     title: "Sleep calendar",
     description: "A year-by-year heatmap of nightly sleep duration.",
