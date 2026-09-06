@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import type {
   ExerciseFocusItem,
   ExerciseFocusUsage,
@@ -315,6 +316,19 @@ export function ExerciseFocusDetail({
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Logged on</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <CatalogUsageHistory
+            history={usage.workouts.map((w) => ({ date: w.date, label: w.exerciseName }))}
+            daySegment="health"
+            emptyText="No workouts logged."
+          />
         </CardContent>
       </Card>
 
