@@ -1,14 +1,14 @@
 /**
- * One-time remap of game_sessions.device_type from the two ad-hoc values
- * the legacy Firestore migration produced ("Iphone", "Macbook") to the
- * small, generic set actually wanted (#137): "Mobile" and "Computer"
+ * One-time remap of game_sessions.device_type from the ad-hoc values the
+ * legacy Firestore migration produced ("MacBook Air 2020", "PS4") to the
+ * small, generic set actually wanted (#137): "Computer" and "Console"
  * respectively.
  *
  * game_sessions.device_type is plain free text matched by name against the
  * game_device_types catalog (see schema.ts's comment on gameDeviceTypes) —
  * there's no foreign key, so renaming a catalog row via the manage UI's
  * "+ New device type" picker only changes the catalog label; it never
- * touches text already stored on existing session rows. These two legacy
+ * touches text already stored on existing session rows. These legacy
  * values had no way to move over without touching the rows directly.
  *
  * Also upserts every catalog row in the target set ("Mobile", "Console",
@@ -26,8 +26,8 @@ import { guardAgainstProd } from "./lib/prod-guard.mjs";
 
 const TARGET_CATALOG = ["Mobile", "Console", "Computer", "Board", "Other"];
 const REMAP = {
-  Iphone: "Mobile",
-  Macbook: "Computer",
+  "MacBook Air 2020": "Computer",
+  PS4: "Console",
 };
 
 if (!process.env.DATABASE_URL) {
@@ -68,12 +68,12 @@ async function main() {
   const unexpected = values.filter((v) => !TARGET_CATALOG.includes(v));
   if (unexpected.length > 0) {
     console.log(
-      `\n${unexpected.length} value(s) outside the target set (${TARGET_CATALOG.join("/")}): ${unexpected.join(", ")} — review manually, this script only knew about "Iphone" and "Macbook".`
+      `\n${unexpected.length} value(s) outside the target set (${TARGET_CATALOG.join("/")}): ${unexpected.join(", ")} — review manually, this script only knew about ${Object.keys(REMAP).map((v) => `"${v}"`).join(" and ")}.`
     );
   } else {
     console.log("\nEvery game session now uses one of the generic device types.");
     console.log(
-      'The old "Iphone"/"Macbook" catalog rows are unused now — delete them via the manage UI\'s device type page if you want them gone.'
+      `The old ${Object.keys(REMAP).map((v) => `"${v}"`).join("/")} catalog rows are unused now — delete them via the manage UI's device type page if you want them gone.`
     );
   }
 }
