@@ -228,6 +228,50 @@ export async function countLoggedDays(period: RecapPeriod): Promise<number> {
   return row?.value ?? 0;
 }
 
+
+// --- First appearances -----------------------------------------------------
+
+/**
+ * Keys whose *earliest* appearance anywhere in the supplied history falls
+ * inside the period, in discovery order — with the date each was first
+ * seen.
+ *
+ * Callers pass every appearance they know about, across all time, not just
+ * the period's, because the whole question is whether anything earlier
+ * exists. Feeding this only the period's own rows would report every key in
+ * it as new.
+ *
+ * Lives in the foundation rather than in one domain module because three
+ * sections now ask the identical question of different tables: new artists
+ * and movie genres (#171), new people, places and countries (#172), and
+ * first-time moments (#174). Its one non-obvious constraint is shared by
+ * all of them — first appearance comes from the usage tables, never a
+ * catalog's `createdAt`, which for migrated rows is import day and would
+ * report a decade of discoveries as happening at once.
+ */
+export function firstSeenInPeriodWithDates(
+  period: RecapPeriod,
+  appearances: { key: string; date: string }[]
+): { key: string; date: string }[] {
+  const earliest = new Map<string, string>();
+  for (const { key, date } of appearances) {
+    const seen = earliest.get(key);
+    if (seen === undefined || date < seen) earliest.set(key, date);
+  }
+  return [...earliest.entries()]
+    .filter(([, date]) => date >= period.start && date <= period.end)
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([key, date]) => ({ key, date }));
+}
+
+/** `firstSeenInPeriodWithDates` when only the keys are wanted. */
+export function firstSeenInPeriod(
+  period: RecapPeriod,
+  appearances: { key: string; date: string }[]
+): string[] {
+  return firstSeenInPeriodWithDates(period, appearances).map((entry) => entry.key);
+}
+
 /** Parses a `/recap/[year]` route segment, rejecting anything that isn't a
  * plausible four-digit year — the route is user-typeable, and a bad segment
  * should 404 rather than reach a query. */
