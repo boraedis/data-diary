@@ -79,7 +79,7 @@ export function RecapStatCard({
               <span className="text-3xl font-semibold md:text-4xl">{format(stat.value)}</span>
               {unit ? <span className="text-sm text-muted-foreground">{unit}</span> : null}
             </p>
-            <Delta value={stat.value} prior={stat.prior} priorLabel={priorLabel} />
+            <Delta value={stat.value} prior={stat.prior} priorLabel={priorLabel} format={format} />
             {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
           </>
         )}
@@ -95,10 +95,12 @@ function Delta({
   value,
   prior,
   priorLabel,
+  format,
 }: {
   value: number;
   prior: number | null;
   priorLabel?: string;
+  format: (value: number) => string;
 }) {
   if (prior === null) {
     return <p className="text-xs text-muted-foreground">No earlier period to compare</p>;
@@ -113,17 +115,26 @@ function Delta({
     return <p className="text-xs text-muted-foreground">Same as {named}</p>;
   }
 
+  // If the two values render identically at this card's own precision, the
+  // change isn't visible on the card that states it — an average happiness
+  // of 88.28 against 88.05 both read "88", and "0.228 less than 2024" is
+  // noise dressed up as a finding. Precision-aware rather than a fixed
+  // epsilon, so a card showing whole days and one showing hours each get
+  // the right answer.
+  if (format(value) === format(prior)) {
+    return <p className="text-xs text-muted-foreground">About the same as {named}</p>;
+  }
+
   // A percentage needs a non-zero base to mean anything (going from 0 to 12
   // is not "+1200%", it's "12 more"), and it also has to survive rounding:
   // 365 days logged against a 366-day leap year is a real one-day
   // difference that renders as "0% less", which reads as a bug rather than
-  // as a small change. Below whole-percent resolution, the absolute
-  // difference is the honest number.
+  // as a small change. Below whole-percent resolution the absolute
+  // difference is the honest number — formatted the same way the value is,
+  // so a duration card says "12m more" and not "12".
   const share = Math.abs(difference) / Math.abs(prior);
   const magnitude =
-    prior !== 0 && share >= 0.005
-      ? formatPercent(share)
-      : formatThousandsNumber(Math.abs(difference));
+    prior !== 0 && share >= 0.005 ? formatPercent(share) : format(Math.abs(difference));
   const direction = difference > 0 ? "more" : "less";
 
   return (

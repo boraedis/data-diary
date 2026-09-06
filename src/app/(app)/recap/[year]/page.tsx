@@ -2,12 +2,14 @@ import { notFound } from "next/navigation";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { RecapEntertainmentSection } from "@/components/recap/recap-entertainment-section";
+import { RecapHealthSection } from "@/components/recap/recap-health-section";
 import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
 import { RecapPeoplePlacesSection } from "@/components/recap/recap-people-places-section";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { RecapSubsSection } from "@/components/recap/recap-subs-section";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
+import { getRecapHealth } from "@/lib/recap-health";
 import { getRecapPeoplePlaces } from "@/lib/recap-people-places";
 import { getRecapSubs } from "@/lib/recap-subs";
 import {
@@ -37,11 +39,6 @@ export const dynamic = "force-dynamic";
  * domain sub-issue is a fill-in rather than a layout negotiation. */
 const PENDING_SECTIONS = [
   {
-    title: "Health & wellness",
-    description: "Happiness trend and average, best and worst day, sleep, and how much you moved.",
-    issue: 201,
-  },
-  {
     title: "Moments",
     description: "Automatically detected highs, lows and firsts.",
     issue: 174,
@@ -58,12 +55,13 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
 
   const period = yearPeriod(year);
   const prior = previousPeriod(period);
-  const [loggedDays, priorLoggedDays, entertainment, peoplePlaces, subs, lifeEvents] = await Promise.all([
+  const [loggedDays, priorLoggedDays, entertainment, peoplePlaces, subs, health, lifeEvents] = await Promise.all([
     countLoggedDays(period),
     countLoggedDays(prior),
     getRecapEntertainment(period, prior),
     getRecapPeoplePlaces(period, prior),
     getRecapSubs(period, prior),
+    getRecapHealth(period, prior),
     listRecapLifeEvents(period),
   ]);
 
@@ -80,6 +78,8 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <RecapStatCard label="Days logged" stat={daysLogged} priorLabel={prior.label} />
       </div>
+
+      <RecapHealthSection health={health} periodLabel={period.label} priorLabel={prior.label} />
 
       <RecapSubsSection subs={subs} periodLabel={period.label} priorLabel={prior.label} />
 
