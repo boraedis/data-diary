@@ -95,10 +95,12 @@ function Delta({
   }
 
   const difference = value - prior;
-  const against = priorLabel ? ` than ${priorLabel}` : " than the period before";
+  const named = priorLabel ?? "the period before";
 
+  // "Same as", not "same than" — the comparative and the equality case take
+  // different prepositions, so they can't share one suffix string.
   if (difference === 0) {
-    return <p className="text-xs text-muted-foreground">Same{against}</p>;
+    return <p className="text-xs text-muted-foreground">Same as {named}</p>;
   }
 
   // A percentage needs a non-zero base to mean anything (going from 0 to 12
@@ -116,8 +118,7 @@ function Delta({
 
   return (
     <p className="text-xs text-muted-foreground">
-      {magnitude} {direction}
-      {against}
+      {magnitude} {direction} than {named}
     </p>
   );
 }

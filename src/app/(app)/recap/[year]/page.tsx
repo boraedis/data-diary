@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
+import { RecapEntertainmentSection } from "@/components/recap/recap-entertainment-section";
 import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
+import { getRecapEntertainment } from "@/lib/recap-entertainment";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
 import {
   MIN_DAYS_FOR_TOTAL,
@@ -36,11 +38,6 @@ const PENDING_SECTIONS = [
     issue: 170,
   },
   {
-    title: "Entertainment",
-    description: "Totals per medium, top-rated movie and book, favorite genre and artist, firsts.",
-    issue: 171,
-  },
-  {
     title: "People & places",
     description: "Most-logged person, new people met, top places, and the year's travel footprint.",
     issue: 172,
@@ -62,9 +59,10 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
 
   const period = yearPeriod(year);
   const prior = previousPeriod(period);
-  const [loggedDays, priorLoggedDays, lifeEvents] = await Promise.all([
+  const [loggedDays, priorLoggedDays, entertainment, lifeEvents] = await Promise.all([
     countLoggedDays(period),
     countLoggedDays(prior),
+    getRecapEntertainment(period, prior),
     listRecapLifeEvents(period),
   ]);
 
@@ -81,6 +79,12 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <RecapStatCard label="Days logged" stat={daysLogged} priorLabel={prior.label} />
       </div>
+
+      <RecapEntertainmentSection
+        entertainment={entertainment}
+        periodLabel={period.label}
+        priorLabel={prior.label}
+      />
 
       <RecapLifeEventsCard events={lifeEvents} periodLabel={period.label} />
 
