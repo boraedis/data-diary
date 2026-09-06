@@ -78,6 +78,16 @@ const MAX_EXAMPLES = 3;
 
 const PLACE_SLOT_WEIGHTS = [2, 1];
 
+/** Ten, where the standalone places chart shows thirty.
+ *
+ * That chart is the whole point of its own page, so a long tail is the
+ * feature. Here the leaderboard is one block inside a report that already
+ * has several sections above and below it, and thirty rows of places
+ * visited six times each stops being a highlight and starts being a table
+ * to scroll past. The underlying scores are unchanged — this is only how
+ * many get shown. */
+const LEADERBOARD_SIZE = 10;
+
 /**
  * The whole section, computed from all-time slot data.
  *
@@ -172,7 +182,7 @@ export function buildRecapPeoplePlaces(
   }
   const leaderboard = [...placeScores.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 30)
+    .slice(0, LEADERBOARD_SIZE)
     .map(([id, value]) => ({
       name: input.placeNames.get(id) ?? "Unknown",
       value,
