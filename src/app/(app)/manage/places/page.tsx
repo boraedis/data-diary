@@ -2,16 +2,17 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { PlacesManageList } from "@/components/manage/places-manage-list";
 import { getPlaceMentionCounts, listPlacesCatalog } from "@/lib/days";
-import { listPlaceCategories } from "@/lib/catalog-admin";
+import { listMetros, listPlaceCategories } from "@/lib/catalog-admin";
 import { comparePlacesByMentions } from "@/lib/place-sort";
 
 export const dynamic = "force-dynamic";
 
 export default async function ManagePlacesPage() {
-  const [places, categories, mentionCounts] = await Promise.all([
+  const [places, categories, mentionCounts, metros] = await Promise.all([
     listPlacesCatalog(),
     listPlaceCategories(),
     getPlaceMentionCounts(),
+    listMetros(),
   ]);
 
   // Most-mentioned first (own + every descendant's, see getPlaceMentionCounts
@@ -29,7 +30,7 @@ export default async function ManagePlacesPage() {
           Manage Home
         </Link>
       </div>
-      <PlacesManageList initial={sortedPlaces} categories={categories} mentionCounts={mentionCounts} />
+      <PlacesManageList initial={sortedPlaces} categories={categories} mentionCounts={mentionCounts} metros={metros} />
       <div className="flex justify-end gap-2">
         <Link href="/manage/places/world" className={buttonVariants({ variant: "outline", size: "xs" })}>
           World View

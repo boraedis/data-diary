@@ -2,15 +2,16 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { PlaceWorldTree } from "@/components/manage/place-world-tree";
 import { getPlaceMentionCounts, listPlacesCatalog } from "@/lib/days";
-import { listPlaceCategories } from "@/lib/catalog-admin";
+import { listMetros, listPlaceCategories } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function PlacesWorldPage() {
-  const [places, categories, mentionCounts] = await Promise.all([
+  const [places, categories, mentionCounts, metros] = await Promise.all([
     listPlacesCatalog(),
     listPlaceCategories(),
     getPlaceMentionCounts(),
+    listMetros(),
   ]);
 
   return (
@@ -21,7 +22,7 @@ export default async function PlacesWorldPage() {
           &larr; Places
         </Link>
       </div>
-      <PlaceWorldTree initial={places} categories={categories} mentionCounts={mentionCounts} />
+      <PlaceWorldTree initial={places} categories={categories} mentionCounts={mentionCounts} metros={metros} />
     </main>
   );
 }

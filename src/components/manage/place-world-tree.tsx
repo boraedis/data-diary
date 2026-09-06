@@ -10,7 +10,7 @@ import { buildPlaceForest, findMatchingAndAncestorIds, type PlaceNode } from "@/
 import { comparePlacesByMentions } from "@/lib/place-sort";
 import { cn } from "@/lib/utils";
 import type { PlaceCatalogItem } from "@/lib/days";
-import type { PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+import type { MetroItem, PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
 
 function collectIds(nodes: PlaceNode<PlaceCatalogItem>[], out: Set<number>) {
   for (const n of nodes) {
@@ -152,10 +152,12 @@ export function PlaceWorldTree({
   initial,
   categories,
   mentionCounts,
+  metros,
 }: {
   initial: PlaceCatalogItem[];
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
   mentionCounts: Map<number, number>;
+  metros: MetroItem[];
 }) {
   const [places, setPlaces] = useState(initial);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -279,6 +281,7 @@ export function PlaceWorldTree({
           categories={categories}
           parentOptions={parentOptionsForAdd}
           mentionCounts={mentionCounts}
+          metros={metros}
           initialParentId={addChildTarget === "root" ? null : addChildTarget}
         />
       ) : null}
