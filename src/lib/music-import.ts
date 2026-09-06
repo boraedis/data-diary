@@ -103,7 +103,22 @@ async function resolveArtist(
             .values(genreIds.map((genreId) => ({ artistId, genreId })))
             .onConflictDoNothing({ target: [artistGenres.artistId, artistGenres.genreId] });
         }
-        await db.update(artists).set({ spotifyId: match.spotifyId }).where(eq(artists.id, artistId));
+        // artists.spotifyId is unique, but two different free-text names in
+        // the user's own history (a typo, an alternate spelling, "DRAM" vs
+        // "DR") can both legitimately resolve to the same real Spotify
+        // artist — the second row to claim it would otherwise throw a
+        // unique-violation on a plain UPDATE (see #223). Guarding with NOT
+        // EXISTS makes that a benign no-op instead: genres above are still
+        // attached to this row either way, only the canonical spotifyId
+        // link is skipped since another row already legitimately holds it.
+        await db
+          .update(artists)
+          .set({ spotifyId: match.spotifyId })
+          .where(
+            sql`${artists.id} = ${artistId} and not exists (
+              select 1 from artists as existing where existing.spotify_id = ${match.spotifyId}
+            )`
+          );
       }
     } catch (error) {
       // Spotify lookup failures shouldn't fail the whole import — the
