@@ -37,8 +37,8 @@ export const dynamic = "force-dynamic";
  * domain sub-issue is a fill-in rather than a layout negotiation. */
 const PENDING_SECTIONS = [
   {
-    title: "Mood & sleep",
-    description: "Happiness trend and average, best and worst day, sleep duration and consistency.",
+    title: "Health & wellness",
+    description: "Happiness trend and average, best and worst day, sleep, and how much you moved.",
     issue: 201,
   },
   {

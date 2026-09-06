@@ -24,10 +24,14 @@ export function RecapSubsSection({
 }) {
   const tracked = subs.summaries.filter((s) => s.daysLogged > 0 || s.priorDaysLogged > 0);
 
+  // The "fewer is better" claim in the description is scoped to the nine
+  // subs on purpose. Clean days and the streak run the other way, and a
+  // blanket header would have a reader parse a drop in clean days as good
+  // news — the one place mixing directions inside a section can mislead.
   return (
     <ChartCard
       title="Subs"
-      description={`How the nine tracked subs went in ${periodLabel}. Fewer days is better.`}
+      description={`How the nine tracked subs went in ${periodLabel} — for each of them, fewer days is better.`}
       empty={subs.daysWithSubData === 0}
     >
       <div className="flex flex-col gap-6">
