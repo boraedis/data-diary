@@ -382,31 +382,31 @@ export function PlaceDetail({
                   ) : null}
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="place-metro">
-                  Metro{" "}
-                  {!editIsMetroEligible ? (
-                    <span className="font-normal text-muted-foreground">
-                      {metroSourceAncestor
-                        ? `(inherited from ${metroSourceAncestor.name})`
-                        : "(only Region → Municipality places have their own)"}
-                    </span>
-                  ) : null}
-                </Label>
-                <Select
-                  id="place-metro"
-                  value={editMetroValue ?? ""}
-                  onChange={(e) => setMetroId(e.target.value ? Number(e.target.value) : null)}
-                  disabled={!editIsMetroEligible}
-                >
-                  <option value="">No metro</option>
-                  {metros.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              {editIsMetroEligible || metroSourceAncestor ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="place-metro">
+                    Metro{" "}
+                    {!editIsMetroEligible ? (
+                      <span className="font-normal text-muted-foreground">
+                        (inherited from {metroSourceAncestor?.name})
+                      </span>
+                    ) : null}
+                  </Label>
+                  <Select
+                    id="place-metro"
+                    value={editMetroValue ?? ""}
+                    onChange={(e) => setMetroId(e.target.value ? Number(e.target.value) : null)}
+                    disabled={!editIsMetroEligible}
+                  >
+                    <option value="">No metro</option>
+                    {metros.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ) : null}
               {error ? <span className="text-sm text-destructive">{error}</span> : null}
               <div className="flex gap-2">
                 <Button type="button" onClick={handleSave} disabled={saving}>

@@ -68,7 +68,10 @@ export function NewPlaceModal({
   const [error, setError] = useState<string | null>(null);
 
   const categoryNames = categories.map((c) => c.name);
-  const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
+  // Scoped to the selected category — an unfiltered flatMap of every
+  // category's subcategories let you pick a subcategory that belongs to a
+  // different category than the one chosen above.
+  const subcategoryNames = categories.find((c) => c.name === category)?.subcategories.map((s) => s.name) ?? [];
   // Most-mentioned first, then shallower before deeper, then name — same
   // ordering as everywhere else the app sorts places (see
   // src/lib/place-sort.ts) — regardless of the order the caller happened to
@@ -176,7 +179,10 @@ export function NewPlaceModal({
           <Select
             id="manage-new-place-category"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setSubcategory("");
+            }}
           >
             <option value="">— Select category —</option>
             {categoryNames.map((n) => (
@@ -192,8 +198,9 @@ export function NewPlaceModal({
             id="manage-new-place-subcategory"
             value={subcategory}
             onChange={(e) => setSubcategory(e.target.value)}
+            disabled={!category}
           >
-            <option value="">— Select subcategory —</option>
+            <option value="">{category ? "— Select subcategory —" : "— Select a category first —"}</option>
             {subcategoryNames.map((n) => (
               <option key={n} value={n}>
                 {n}
