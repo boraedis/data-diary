@@ -33,6 +33,7 @@ export function RecapStatCard({
   unit,
   priorLabel,
   detail,
+  preserveLabelCase = false,
 }: {
   /** Sentence case, no trailing colon (dataviz stat-tile contract). */
   label: string;
@@ -48,11 +49,20 @@ export function RecapStatCard({
   priorLabel?: string;
   /** Optional supporting line under the delta (a date, a name). */
   detail?: string;
+  /** Keeps the label's own capitalization instead of the small-caps
+   * treatment. For labels that are names rather than prose: the tracked
+   * subs are written "Ni", "NO" and "Ad", and uppercasing them throws away
+   * a distinction the user actually made. */
+  preserveLabelCase?: boolean;
 }) {
   return (
     <Card className="h-full">
       <CardHeader className="pb-1">
-        <CardTitle className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+        <CardTitle
+          className={`text-xs font-medium tracking-widest text-muted-foreground ${
+            preserveLabelCase ? "" : "uppercase"
+          }`}
+        >
           {label}
         </CardTitle>
       </CardHeader>
