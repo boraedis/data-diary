@@ -3,9 +3,11 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { RecapEntertainmentSection } from "@/components/recap/recap-entertainment-section";
 import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
+import { RecapPeoplePlacesSection } from "@/components/recap/recap-people-places-section";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
+import { getRecapPeoplePlaces } from "@/lib/recap-people-places";
 import {
   MIN_DAYS_FOR_TOTAL,
   countLoggedDays,
@@ -38,11 +40,6 @@ const PENDING_SECTIONS = [
     issue: 170,
   },
   {
-    title: "People & places",
-    description: "Most-logged person, new people met, top places, and the year's travel footprint.",
-    issue: 172,
-  },
-  {
     title: "Moments",
     description: "Automatically detected highs, lows and firsts.",
     issue: 174,
@@ -59,10 +56,11 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
 
   const period = yearPeriod(year);
   const prior = previousPeriod(period);
-  const [loggedDays, priorLoggedDays, entertainment, lifeEvents] = await Promise.all([
+  const [loggedDays, priorLoggedDays, entertainment, peoplePlaces, lifeEvents] = await Promise.all([
     countLoggedDays(period),
     countLoggedDays(prior),
     getRecapEntertainment(period, prior),
+    getRecapPeoplePlaces(period, prior),
     listRecapLifeEvents(period),
   ]);
 
@@ -82,6 +80,12 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
 
       <RecapEntertainmentSection
         entertainment={entertainment}
+        periodLabel={period.label}
+        priorLabel={prior.label}
+      />
+
+      <RecapPeoplePlacesSection
+        data={peoplePlaces}
         periodLabel={period.label}
         priorLabel={prior.label}
       />
