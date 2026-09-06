@@ -2311,22 +2311,47 @@ async function geocodeOrNull(address: string | null): Promise<{ lat: number | nu
 }
 
 // Legacy's own root-creation flow only ever produced places with
-// category "Region" at the top of the tree (new_place_form.ejs's "Add New
-// Country" button opens a modal literally titled "New Region" — country
-// and top-level region are the same category, just different UI labels for
-// the same action; migrate-history.mjs's `category === "Region"` address
-// computation reflects the same convention). Unlike the color/metro
-// inheritance rules below (deliberately UI-only, per the `places`/`metros`
-// comments in schema.ts), this is enforced here so a stray venue or city
-// can't accidentally end up parentless.
-function assertValidRoot(category: string | null, parentId: number | null): void {
-  if (parentId === null && category !== "Region") {
-    throw new Error('Only a "Region" place can be top-level (no parent) — set a parent, or set category to "Region".');
+// category "Region", subcategory "Country" at the top of the tree
+// (new_place_form.ejs's "Add New Country" button opens a modal literally
+// titled "New Region" — country and top-level region are the same
+// category, just different UI labels for the same action;
+// migrate-history.mjs's `category === "Region"` address computation
+// reflects the same convention). Unlike the metro inheritance rule below
+// (deliberately UI-only, per the `metros` table comment in schema.ts),
+// this is enforced here so a stray venue or city can't accidentally end
+// up parentless — and a root place always needs its own color (nothing
+// above it to inherit from) rather than silently falling back to a
+// default swatch everywhere it's used.
+function assertValidRoot(category: string | null, subcategory: string | null, parentId: number | null, color: string | null): void {
+  if (parentId !== null) return;
+  if (category !== "Region" || subcategory !== "Country") {
+    throw new Error(
+      'Only a "Region" → "Country" place can be top-level (no parent) — set a parent, or set category to "Region" and subcategory to "Country".'
+    );
+  }
+  if (!color) {
+    throw new Error('A top-level ("Region" → "Country") place must have a color.');
+  }
+}
+
+// Mirrors isMetroEligible in src/components/manage/place-detail.tsx — a
+// metro area is only ever assigned at the city level of the hierarchy
+// (category Region, subcategory Municipality). Checked on every write
+// (not just when metroId is first set) so a place can't be re-categorized
+// away from Region/Municipality while it still carries a metro — the
+// metro has to be cleared first, same trip as changing category/
+// subcategory itself.
+function assertValidMetro(category: string | null, subcategory: string | null, metroId: number | null): void {
+  if (metroId !== null && !(category === "Region" && subcategory === "Municipality")) {
+    throw new Error(
+      'Only a "Region" → "Municipality" place can have a metro — clear the metro before changing category/subcategory.'
+    );
   }
 }
 
 export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
-  assertValidRoot(input.category, input.parentId);
+  assertValidRoot(input.category, input.subcategory, input.parentId, input.color);
+  assertValidMetro(input.category, input.subcategory, input.metroId);
   const db = getDb();
   const trimmed = input.name.trim();
   const { lat, lng } = await geocodeOrNull(input.address);
@@ -2491,7 +2516,8 @@ export async function getPlaceChildren(id: number): Promise<PlaceCatalogItem[]> 
 }
 
 export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
-  assertValidRoot(input.category, input.parentId);
+  assertValidRoot(input.category, input.subcategory, input.parentId, input.color);
+  assertValidMetro(input.category, input.subcategory, input.metroId);
   const db = getDb();
 
   if (input.parentId !== null) {

@@ -26,6 +26,17 @@ function isMetroEligible(category: string | null, subcategory: string | null): b
   return category === "Region" && subcategory === "Municipality";
 }
 
+// A place's own color is only ever set at the country level (category
+// Region, subcategory Country) — mirrors assertValidRoot in
+// src/lib/days.ts, which also requires exactly this combination for any
+// top-level (parentless) place. Same shape as isMetroEligible above:
+// gated by category/subcategory, not by parentId directly, so the field
+// pops up as soon as those are set rather than only once the place is
+// already saved as root.
+function isColorEligible(category: string | null, subcategory: string | null): boolean {
+  return category === "Region" && subcategory === "Country";
+}
+
 // Root-to-self path, human-readable ("USA / Georgia / Atlanta / Midtown").
 function displayNamePath(namePath: string): string {
   return namePath.replace(/\/$/, "").split("/").join(" / ");
@@ -159,9 +170,17 @@ export function PlaceDetail({
     }
     // Mirrors assertValidRoot in src/lib/days.ts — checked here too so a
     // bad combination shows inline instead of costing a round trip.
-    if (parentId === null && category.trim() !== "Region") {
-      setError('Only a "Region" place can be top-level (no parent) — set a parent, or set category to "Region".');
-      return;
+    if (parentId === null) {
+      if (category.trim() !== "Region" || subcategory.trim() !== "Country") {
+        setError(
+          'Only a "Region" → "Country" place can be top-level (no parent) — set a parent, or set category to "Region" and subcategory to "Country".'
+        );
+        return;
+      }
+      if (!color.trim()) {
+        setError('A top-level ("Region" → "Country") place must have a color.');
+        return;
+      }
     }
     setError(null);
     // Re-parenting cascades to every descendant's stored path (see
@@ -216,17 +235,21 @@ export function PlaceDetail({
     };
   }, [hasRelatedPlaces, editing]);
 
-  // --- color inheritance (root-only field — see the `places` table
-  // comment in schema.ts) ---------------------------------------------
-  const rootAncestor = ancestry.length > 0 ? ancestry[0] : null; // ancestry[0] IS `place` itself when place is root
-  const viewIsRoot = place.parentId === null;
-  const viewColor = viewIsRoot ? place.color : (rootAncestor?.color ?? null);
-  const editIsRoot = parentId === null;
-  // While editing, the color input stays live for a root place; for a
-  // non-root place it just displays the (fixed, as-loaded) root color,
-  // disabled — reflecting the CURRENT position, not a pending unsaved
-  // parent change, same simplification the metro inheritance below makes.
-  const editColorValue = editIsRoot ? color : (rootAncestor?.color ?? "");
+  // --- color inheritance (Region + Country-only field — see
+  // isColorEligible above and assertValidRoot in src/lib/days.ts) --------
+  // Same shape as the metro inheritance below: nearest ancestor (including
+  // self) with its own color, found by category/subcategory rather than
+  // by parentId directly.
+  const colorSourceAncestor =
+    [...ancestry].reverse().find((a) => isColorEligible(a.category, a.subcategory)) ?? null;
+  const viewIsColorEligible = colorSourceAncestor?.id === place.id;
+  const viewColor = viewIsColorEligible ? place.color : (colorSourceAncestor?.color ?? null);
+  const editIsColorEligible = isColorEligible(category.trim() || null, subcategory.trim() || null);
+  // While editing, the color input stays live once eligible; otherwise it
+  // just displays the (fixed, as-loaded) inherited color, disabled —
+  // reflecting the CURRENT position, not a pending unsaved category/parent
+  // change, same simplification the metro inheritance below makes.
+  const editColorValue = editIsColorEligible ? color : (colorSourceAncestor?.color ?? "");
 
   // --- metro inheritance (Region + Municipality-only field — see the
   // `metros` table comment in schema.ts) -------------------------------
@@ -313,10 +336,10 @@ export function PlaceDetail({
                   placeholder="Search places…"
                   emptyLabel="No parent"
                 />
-                {parentId === null && category.trim() !== "Region" ? (
+                {parentId === null && (category.trim() !== "Region" || subcategory.trim() !== "Country") ? (
                   <p className="text-xs text-muted-foreground">
-                    Only a &ldquo;Region&rdquo; place can be top-level — pick a parent, or set category to
-                    &ldquo;Region&rdquo;.
+                    Only a &ldquo;Region&rdquo; → &ldquo;Country&rdquo; place can be top-level — pick a parent, or
+                    set category to &ldquo;Region&rdquo; and subcategory to &ldquo;Country&rdquo;.
                   </p>
                 ) : null}
               </div>
@@ -357,31 +380,33 @@ export function PlaceDetail({
                   placeholder="neighborhood, borough…"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="place-color">
-                  Color{" "}
-                  {!editIsRoot ? (
-                    <span className="font-normal text-muted-foreground">
-                      (inherited from {rootAncestor?.name ?? "root"})
-                    </span>
-                  ) : null}
-                </Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="place-color"
-                    type="color"
-                    value={editColorValue || "#64748b"}
-                    onChange={(e) => setColor(e.target.value)}
-                    disabled={!editIsRoot}
-                    className="h-8 w-16 cursor-pointer rounded border border-input bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                  {editIsRoot && color ? (
-                    <Button type="button" size="xs" variant="outline" onClick={() => setColor("")}>
-                      Clear
-                    </Button>
-                  ) : null}
+              {editIsColorEligible || colorSourceAncestor ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="place-color">
+                    Color{" "}
+                    {!editIsColorEligible ? (
+                      <span className="font-normal text-muted-foreground">
+                        (inherited from {colorSourceAncestor?.name})
+                      </span>
+                    ) : null}
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="place-color"
+                      type="color"
+                      value={editColorValue || "#64748b"}
+                      onChange={(e) => setColor(e.target.value)}
+                      disabled={!editIsColorEligible}
+                      className="h-8 w-16 cursor-pointer rounded border border-input bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                    {editIsColorEligible && color ? (
+                      <Button type="button" size="xs" variant="outline" onClick={() => setColor("")}>
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               {editIsMetroEligible || metroSourceAncestor ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="place-metro">
@@ -441,8 +466,8 @@ export function PlaceDetail({
                     />
                   ) : null}
                   {viewColor ?? "—"}
-                  {!viewIsRoot && viewColor ? (
-                    <span className="text-xs text-muted-foreground">(from {rootAncestor?.name})</span>
+                  {!viewIsColorEligible && viewColor ? (
+                    <span className="text-xs text-muted-foreground">(from {colorSourceAncestor?.name})</span>
                   ) : null}
                 </dd>
                 <dt className="text-muted-foreground">Metro</dt>
