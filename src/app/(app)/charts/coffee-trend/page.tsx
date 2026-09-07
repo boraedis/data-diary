@@ -1,22 +1,12 @@
-import { ChartCard } from "@/components/charts/chart-card";
-import { ChartPage } from "@/components/charts/chart-page";
 import { CoffeeTrendChart } from "@/components/charts/coffee-charts";
-import { getCoffeeAveragerData } from "@/lib/charts";
+import { getCoffeeDailyData } from "@/lib/charts";
 
 export const dynamic = "force-dynamic";
 
-export default async function CoffeeTrendChartPage() {
-  const data = await getCoffeeAveragerData();
-
-  return (
-    <ChartPage title="Coffee trend">
-      <ChartCard
-        title="Coffee trend"
-        description="Monthly average cups per day; marker size shows how many days fed each point, and the band shows that month's range."
-        empty={data.length === 0}
-      >
-        <CoffeeTrendChart data={data} />
-      </ChartCard>
-    </ChartPage>
-  );
+// The chart component owns the page shell (ChartPage + filters + card), the
+// same way /charts/weight does: the filters row and the chart share state,
+// and only plain data can cross the server/client boundary.
+export default async function Page() {
+  const data = await getCoffeeDailyData();
+  return <CoffeeTrendChart data={data} />;
 }

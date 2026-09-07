@@ -1,38 +1,42 @@
 "use client";
 
-import { DailyValueScroller } from "@/components/charts/daily-value-scroller";
-import { MonthlyAverageChart } from "@/components/charts/monthly-average-chart";
+import { DailyExplorer } from "@/components/charts/daily-explorer";
+import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { categoricalColor } from "@/lib/viz/color";
-import type { DailyValue, MonthlyAverage } from "@/lib/charts";
+import type { DailyValue } from "@/lib/charts";
 
-// See coffee-charts.tsx for why this thin client layer exists: the generic
-// chart components take formatter functions, which a server-component page
-// cannot pass across the boundary.
+// See coffee-charts.tsx for why this thin client layer exists.
 
 const DISTANCE_COLOR = categoricalColor(3);
-const formatKm = (v: number) => `${v.toFixed(1)} km`;
+const km = (v: number) => `${v.toFixed(1)} km`;
 
-export function DistanceTrendChart({ data }: { data: MonthlyAverage[] }) {
+export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
   return (
-    <MonthlyAverageChart
+    <TrendExplorer
       data={data}
+      title="Distance walked trend"
+      description="Average kilometres per day. Marker size shows how many days fed each point; the band shows that bucket's range."
       seriesId="distance"
       label="Distance walked"
       color={DISTANCE_COLOR}
-      valueFormat={formatKm}
-      ariaLabel="Monthly average distance walked per day. Use arrow keys to inspect individual months, or hover a point."
+      getValue={(d) => d.value}
+      aggregate="mean"
+      valueFormat={km}
+      ariaLabel="Average distance walked per day over time. Use arrow keys to inspect individual buckets, or hover a point."
     />
   );
 }
 
 export function DistanceDailyChart({ data }: { data: DailyValue[] }) {
   return (
-    <DailyValueScroller
+    <DailyExplorer
       data={data}
+      title="Daily distance walked"
+      description="Every logged day. Scroll or drag to zoom, and use the strip below to move through the range."
       seriesId="distance"
       label="Distance walked"
       color={DISTANCE_COLOR}
-      valueFormat={formatKm}
+      valueFormat={km}
       ariaLabel="Daily distance walked. Scroll or pinch to zoom, drag to pan, hover a day for its exact distance."
     />
   );

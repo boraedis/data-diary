@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import { parseDate } from "@/lib/date";
+import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 
@@ -662,49 +662,18 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
 // --- Health & activity (#218) --------------------------------------------
 //
 // Five charts from the legacy inventory (#209), all on primitives that
-// already shipped: coffee and distance as both a monthly trend and a raw
-// daily view, plus monthly training volume. The new work is the data
-// layer, not the visualization — which is why these are a handful of small
-// fetchers rather than new chart components.
+// already shipped. Every fetcher here returns a **daily** series, never a
+// pre-bucketed one: the charts carry a period picker, so the bucketing has
+// to happen client-side where the selection lives. That's exactly the split
+// `src/lib/viz/bin.ts` documents — re-bucketing an already-fetched series
+// is its job, and pushing the aggregation into SQL here would freeze the
+// bucket size at query time and make the picker impossible.
 
-/** A single value per calendar day, the shape both InteractiveCalendar and
- * InteractiveScroller consume. Deliberately generic: most of the remaining
- * chart backlog is "this one `days` column, by day" and doesn't deserve a
- * bespoke type each. */
+/** A single value per calendar day — the shape InteractiveCalendar and
+ * InteractiveScroller consume directly, and the input the trend charts
+ * re-bucket. Deliberately generic: most of the remaining chart backlog is
+ * "this one `days` column, by day". */
 export type DailyValue = { date: string; value: number };
-
-/**
- * Monthly average of one nullable numeric `days` column, with each month's
- * own min/max for the range band.
- *
- * Buckets in JS via `groupByPeriod`/`summarizePeriods` rather than in SQL.
- * That follows `getHappinessAveragerData` directly above — every averager
- * in this file works this way, the row counts are personal-scale, and one
- * averager disagreeing with the others about how a month is computed would
- * be worse than the aggregation being pushed down.
- */
-async function monthlyAveragesOf(column: AnyPgColumn): Promise<MonthlyAverage[]> {
-  const db = getDb();
-  const rows = await db
-    .select({ date: days.date, value: column })
-    .from(days)
-    .where(isNotNull(column))
-    .orderBy(asc(days.date));
-
-  const typed = rows.map((r) => ({ date: r.date, value: Number(r.value) }));
-  const buckets = groupByPeriod(typed, "month", (r) => r.date);
-  const summaries = summarizePeriods(buckets, (r) => r.value);
-  return buckets.map((bucket, i) => {
-    const values = bucket.items.map((r) => r.value);
-    return {
-      month: bucket.key,
-      avg: summaries[i].avg,
-      count: summaries[i].count,
-      min: Math.min(...values),
-      max: Math.max(...values),
-    };
-  });
-}
 
 /** Every logged value of one nullable numeric `days` column, oldest first. */
 async function dailyValuesOf(column: AnyPgColumn): Promise<DailyValue[]> {
@@ -717,53 +686,48 @@ async function dailyValuesOf(column: AnyPgColumn): Promise<DailyValue[]> {
   return rows.map((r) => ({ date: r.date, value: Number(r.value) }));
 }
 
-export function getCoffeeAveragerData(): Promise<MonthlyAverage[]> {
-  return monthlyAveragesOf(days.coffees);
-}
-
-export function getCoffeeCalendarData(): Promise<DailyValue[]> {
+export function getCoffeeDailyData(): Promise<DailyValue[]> {
   return dailyValuesOf(days.coffees);
 }
 
-export function getDistanceAveragerData(): Promise<MonthlyAverage[]> {
-  return monthlyAveragesOf(days.distanceWalkedKm);
-}
-
-export function getDistanceScrollerData(): Promise<DailyValue[]> {
+export function getDistanceDailyData(): Promise<DailyValue[]> {
   return dailyValuesOf(days.distanceWalkedKm);
 }
 
-/** Training volume per month: total time trained, plus the context needed
- * to read it — how many days that time was spread over, and how many
- * individual exercises those days held. */
-export type TrainingMonth = {
-  month: string;
-  minutes: number;
-  daysTrained: number;
-  exercises: number;
-};
+/** A day's training: minutes trained and how many exercises made them up. */
+export type TrainingDay = { date: string; minutes: number; exercises: number };
 
 /**
- * Monthly training volume, measured as **total time trained**.
+ * Training per day, measured as **time trained**.
  *
- * Time is the honest measure of volume here. Counting `workouts` rows
- * counts one row per exercise performed, so a session of eight movements
- * outweighs a two-hour hike logged as one; counting days trained treats a
- * ten-minute session and a three-hour one alike. Summed duration is the
- * only one of the three that answers "how much did I actually train".
+ * Time is the honest measure of volume. Counting `workouts` rows counts one
+ * per exercise performed, so a session of eight movements outweighs a
+ * two-hour hike logged as one; counting days treats a ten-minute session
+ * and a three-hour one alike. Summed duration is the only one of the three
+ * that answers "how much did I actually train".
  *
  * `durationMinutes` is nullable, so this is worth stating: in practice
  * 1,371 of 1,376 rows carry one, and the five that don't contribute zero.
  * At that coverage a sum is safe. If duration ever became sparse — a new
- * category logged without it, say — this would quietly understate, and
- * the fix would be to fall back rather than to keep summing.
+ * category logged without it — this would quietly understate, and the fix
+ * would be to fall back rather than keep summing.
  *
- * Days trained and exercise count ride along for the tooltip rather than
- * as extra plotted series: they sit on completely different scales (tens
- * of hours against ~31 days against hundreds of exercises), and a second
- * y-axis is the one thing these charts never do.
+ * **Days with no training are returned as explicit zeros**, across the span
+ * from the first logged workout to the last. Leaving them out makes any
+ * bucketing of this series jump the gap, drawing a slope across months
+ * where nothing happened — the real data has exactly one such month
+ * (2023-01) between two active ones. Zero is the honest value because
+ * exercise was being actively logged either side of it: nothing recorded
+ * means nothing done, not nothing known. That reasoning is specific to a
+ * count-like measure over a period that was otherwise being tracked, and
+ * deliberately does not transfer to the `days`-column series above, where
+ * an absent day means nothing was recorded and a zero would be a
+ * fabricated measurement.
+ *
+ * Padding at day granularity rather than by month means the zero-filling
+ * survives whatever bucket size the reader picks.
  */
-export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
+export async function getTrainingDailyData(): Promise<TrainingDay[]> {
   const db = getDb();
   const rows = await db
     .select({ date: workouts.date, durationMinutes: workouts.durationMinutes })
@@ -771,48 +735,19 @@ export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
     .orderBy(asc(workouts.date));
   if (rows.length === 0) return [];
 
-  const byMonth = new Map(
-    groupByPeriod(rows, "month", (r) => r.date).map(({ key, items }) => [
-      key,
-      {
-        minutes: items.reduce((total, r) => total + (r.durationMinutes ?? 0), 0),
-        daysTrained: new Set(items.map((r) => r.date)).size,
-        exercises: items.length,
-      },
-    ])
-  );
-
-  // Months with no workouts are filled with zero rather than left out.
-  // Omitting them makes the line jump straight from the month before to
-  // the month after, drawing a slope across a gap and implying training
-  // that didn't happen — the real data has exactly one such month
-  // (2023-01) sitting between two active ones.
-  //
-  // Zero is the honest value here specifically because exercise was being
-  // actively logged either side of it: nothing recorded means nothing
-  // done, not nothing known. That reasoning does not transfer to the
-  // averagers above, where an absent month means nothing was recorded and
-  // a zero would be a fabricated measurement.
-  //
-  // Only the span between the first and last workout is filled — no
-  // history is invented before tracking began.
-  const months: TrainingMonth[] = [];
-  const keys = [...byMonth.keys()].sort();
-  const [first, last] = [keys[0], keys[keys.length - 1]];
-  for (let month = first; month <= last; month = nextMonth(month)) {
-    const found = byMonth.get(month);
-    months.push({
-      month,
-      minutes: found?.minutes ?? 0,
-      daysTrained: found?.daysTrained ?? 0,
-      exercises: found?.exercises ?? 0,
-    });
+  const byDate = new Map<string, { minutes: number; exercises: number }>();
+  for (const row of rows) {
+    const existing = byDate.get(row.date) ?? { minutes: 0, exercises: 0 };
+    existing.minutes += row.durationMinutes ?? 0;
+    existing.exercises += 1;
+    byDate.set(row.date, existing);
   }
-  return months;
-}
 
-/** "YYYY-MM" plus one month, rolling the year over. */
-function nextMonth(month: string): string {
-  const [year, m] = month.split("-").map(Number);
-  return m === 12 ? `${year + 1}-01` : `${year}-${String(m + 1).padStart(2, "0")}`;
+  const out: TrainingDay[] = [];
+  const last = rows[rows.length - 1].date;
+  for (let date = rows[0].date; date <= last; date = addDays(date, 1)) {
+    const found = byDate.get(date);
+    out.push({ date, minutes: found?.minutes ?? 0, exercises: found?.exercises ?? 0 });
+  }
+  return out;
 }
