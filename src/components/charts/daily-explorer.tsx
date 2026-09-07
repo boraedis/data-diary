@@ -42,6 +42,8 @@ export function DailyExplorer({
   label,
   color,
   valueFormat,
+  extraFilters,
+  initialWindow = 30,
   ariaLabel,
 }: {
   data: DailyValue[];
@@ -51,9 +53,18 @@ export function DailyExplorer({
   label: string;
   color: string;
   valueFormat: (value: number) => string;
+  /** Extra controls rendered before the window picker. The caller owns
+   * their state and reshapes `data` accordingly. */
+  extraFilters?: React.ReactNode;
+  /** Starting rolling-average window in days, or 0 for none. A cumulative
+   * series (a follower count, say) wants none — smoothing a line that only
+   * ever rises says nothing the line doesn't. */
+  initialWindow?: number;
   ariaLabel: string;
 }) {
-  const [windowId, setWindowId] = useState<WindowId>("30");
+  const [windowId, setWindowId] = useState<WindowId>(
+    initialWindow === 0 ? "none" : (String(initialWindow) as WindowId),
+  );
   const window = windowId === "none" ? 0 : Number(windowId);
 
   const points = useMemo<InteractiveScrollerPoint[]>(
@@ -65,12 +76,15 @@ export function DailyExplorer({
     <ChartPage
       title={title}
       filters={
-        <GroupByPicker
+        <>
+          {extraFilters}
+          <GroupByPicker
           value={windowId}
           onChange={setWindowId}
           options={WINDOW_OPTIONS}
-          label="Rolling average"
-        />
+            label="Rolling average"
+          />
+        </>
       }
     >
       <ChartCard title={title} description={description} empty={points.length === 0}>

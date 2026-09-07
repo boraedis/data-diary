@@ -91,6 +91,26 @@ const CHARTS = [
     description: "Workout count by category, exercise, or subtype, over any time range.",
   },
   {
+    href: "/charts/screen-time",
+    title: "Screen time",
+    description: "Phone against laptop, and how the balance has shifted.",
+  },
+  {
+    href: "/charts/screen-time-daily",
+    title: "Daily screen time",
+    description: "Every logged day — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/screen-time-calendar",
+    title: "Screen time calendar",
+    description: "Both devices on one grid, coloured by which dominated.",
+  },
+  {
+    href: "/charts/instagram",
+    title: "Instagram followers",
+    description: "Follower count over time.",
+  },
+  {
     href: "/charts/places",
     title: "Most-visited places",
     description: "Ranked by how often each place filled your day's two place slots.",

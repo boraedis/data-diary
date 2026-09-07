@@ -961,4 +961,38 @@ export async function getCountryHistoryData(): Promise<CountryDay[]> {
     if (countries.size > 0) out.push({ date: row.date, countries: [...countries] });
   }
   return out;
+// --- Technology (#219) ----------------------------------------------------
+
+/** A day's screen time, split by device. Either side may be null on a day
+ * where only one was recorded. */
+export type DeviceDay = {
+  date: string;
+  phoneMinutes: number | null;
+  laptopMinutes: number | null;
+};
+
+/** Days with at least one device recorded, oldest first. */
+export async function getDeviceUsageData(): Promise<DeviceDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: days.date,
+      phoneMinutes: days.phoneUsageMinutes,
+      laptopMinutes: days.laptopUsageMinutes,
+    })
+    .from(days)
+    .where(or(isNotNull(days.phoneUsageMinutes), isNotNull(days.laptopUsageMinutes)))
+    .orderBy(asc(days.date));
+  return rows;
+}
+
+/**
+ * Instagram follower count per day.
+ *
+ * Cumulative rather than a daily rate — it's a running total, so it only
+ * moves when it moves and never resets. Charts of it should say so: a
+ * rolling average over a monotone series smooths nothing worth smoothing.
+ */
+export function getInstagramFollowersData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.instagramFollowers);
 }
