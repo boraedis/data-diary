@@ -37,6 +37,7 @@ export function TrendExplorer<T extends { date: string }>({
   aggregate,
   valueFormat,
   tooltipLabel,
+  extraFilters,
   ariaLabel,
 }: {
   data: T[];
@@ -53,6 +54,11 @@ export function TrendExplorer<T extends { date: string }>({
   valueFormat: (value: number) => string;
   /** Secondary tooltip line for a bucket, given the rows behind it. */
   tooltipLabel?: (items: T[]) => string;
+  /** Extra controls for the filters row, rendered before the period and
+   * range pickers. The caller owns their state and pre-filters `data`
+   * accordingly — this component only lays them out, so a chart can add a
+   * dimension without this one growing a mode for it. */
+  extraFilters?: React.ReactNode;
   ariaLabel: string;
 }) {
   const [period, setPeriod] = useState<Period>("month");
@@ -114,6 +120,7 @@ export function TrendExplorer<T extends { date: string }>({
       filters={
         domain ? (
           <>
+            {extraFilters}
             <PeriodPicker value={period} onChange={setPeriod} />
             <TimeRangePicker domain={domain} value={range} onChange={setRange} />
           </>

@@ -167,6 +167,25 @@ export async function getProfileRegionGroups(until: Date = new Date()): Promise<
 
 export type SleepDay = { date: string; durationMinutes: number };
 
+/**
+ * A night plus where it was spent — the private-only superset of `SleepDay`.
+ *
+ * Kept as its own type rather than widening `SleepDay`, because `SleepDay`
+ * is what the **public** sleep chart renders
+ * (`src/lib/public-charts.ts` -> `/public-charts/sleep`). Adding a field
+ * there would have quietly required the public data layer to supply where
+ * the user sleeps — precisely the leak the boundary in AGENTS.md exists to
+ * stop, and the sort that arrives by type inference rather than by anyone
+ * deciding it. The narrow type stays narrow; only private callers see this
+ * one.
+ */
+export type SleepNight = SleepDay & {
+  /** `days.sleepLocationType`, or null when it wasn't recorded — which is
+   * most nights, so anything grouping on this must treat null as its own
+   * group rather than dropping it. */
+  locationType: string | null;
+};
+
 function hhmmToMinutes(hhmm: string): number | null {
   const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
@@ -182,6 +201,13 @@ function hhmmToMinutes(hhmm: string): number | null {
  * for historical data too). Days missing either time are skipped rather
  * than guessed at. */
 export async function getSleepCalendarData(): Promise<SleepDay[]> {
+  const nights = await getSleepNightsData();
+  return nights.map(({ date, durationMinutes }) => ({ date, durationMinutes }));
+}
+
+/** The same derivation, keeping the sleep location. Private callers only —
+ * see `SleepNight`. */
+export async function getSleepNightsData(): Promise<SleepNight[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -189,19 +215,20 @@ export async function getSleepCalendarData(): Promise<SleepDay[]> {
       sleepTime: days.sleepTime,
       wakeTime: days.wakeTime,
       wakeCrossedMidnight: days.wakeCrossedMidnight,
+      locationType: days.sleepLocationType,
     })
     .from(days)
     .where(sql`${days.sleepTime} is not null and ${days.wakeTime} is not null`)
     .orderBy(asc(days.date));
 
-  const out: SleepDay[] = [];
+  const out: SleepNight[] = [];
   for (const r of rows) {
     const sleepMin = hhmmToMinutes(r.sleepTime as string);
     const wakeMin = hhmmToMinutes(r.wakeTime as string);
     if (sleepMin === null || wakeMin === null) continue;
     const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
     if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
-    out.push({ date: r.date, durationMinutes });
+    out.push({ date: r.date, durationMinutes, locationType: r.locationType });
   }
   return out;
 }

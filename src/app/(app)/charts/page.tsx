@@ -56,6 +56,16 @@ const CHARTS = [
     description: "A year-by-year heatmap of nightly sleep duration.",
   },
   {
+    href: "/charts/sleep-trend",
+    title: "Sleep trend",
+    description: "Average time asleep per night, filterable by where you slept.",
+  },
+  {
+    href: "/charts/sleep-daily",
+    title: "Nightly sleep",
+    description: "Every logged night — zoom and pan through the range.",
+  },
+  {
     href: "/charts/gym",
     title: "Weight & training volume",
     description: "Body weight against how many workouts you logged each month.",
