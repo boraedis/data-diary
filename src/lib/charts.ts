@@ -861,3 +861,24 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
   }
   return out;
 }
+
+// --- Mood calendars (#216) ------------------------------------------------
+
+/** Every logged happiness score, oldest first. */
+export function getHappinessCalendarData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.happiness);
+}
+
+/** A day and how it was classified (`days.dayType`), oldest first. Days with
+ * no type are omitted rather than given one. */
+export type DayTypeDay = { date: string; dayType: string };
+
+export async function getDayTypeCalendarData(): Promise<DayTypeDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, dayType: days.dayType })
+    .from(days)
+    .where(isNotNull(days.dayType))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, dayType: r.dayType as string }));
+}

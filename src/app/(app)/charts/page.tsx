@@ -21,6 +21,16 @@ const CHARTS = [
     description: "Zoomable line of every logged day's happiness score.",
   },
   {
+    href: "/charts/happiness-calendar",
+    title: "Happiness calendar",
+    description: "A year-by-year heatmap of daily happiness.",
+  },
+  {
+    href: "/charts/day-types",
+    title: "Day types",
+    description: "Work, days off, vacation and travel across the years.",
+  },
+  {
     href: "/charts/weight",
     title: "Weight over time",
     description: "Zoomable line — drag the strip below to zoom into a range.",
