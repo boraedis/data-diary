@@ -6,6 +6,14 @@ import { count, countDistinct, desc, eq, max, min, sum } from "drizzle-orm";
 import { genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
 
+// Below this, a listen was a skip, not a play — 30 seconds is Spotify's own
+// threshold for counting a play as a stream, the least arbitrary line
+// available and the one the source data was built around (#244).
+// music-import.ts never inserts a listen this short in the first place;
+// recap-entertainment.ts reuses the same constant for its count-based
+// stats rather than trusting a second copy of the number.
+export const MIN_LISTEN_MS = 30_000;
+
 export type MusicListenStats = {
   totalListens: number;
   uniqueArtists: number;
