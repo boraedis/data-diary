@@ -17,6 +17,7 @@ import {
 } from "@/db/schema";
 import { addDays, parseDate, toDateString } from "@/lib/date";
 import { getDb } from "@/lib/db";
+import { MIN_LISTEN_MS } from "@/lib/music";
 import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
 
 // The recap's entertainment section (issue #171, epic #130).
@@ -55,20 +56,15 @@ function inMusicWindow(period: RecapPeriod) {
   );
 }
 
-/**
- * Below this, a listen was a skip, not a play.
- *
- * 30 seconds is Spotify's own threshold for counting a play as a stream,
- * which makes it the least arbitrary line available and the one that
- * matches what the source data was built around. It's applied only to
- * *counts* ("tracks played"), where a skipped track would otherwise inflate
- * a headline number by a lot. Rankings by listening time deliberately skip
- * this filter: time already weights itself, since a three-second skip
- * contributes three seconds. Note this means the recap's track count is
- * intentionally stricter than the raw counts on the music pages
- * (`src/lib/music.ts`), which count every imported row.
- */
-const MIN_LISTEN_MS = 30_000;
+// MIN_LISTEN_MS (imported from src/lib/music.ts) is applied below only to
+// *counts* ("tracks played"), where a skipped track would otherwise
+// inflate a headline number. Rankings by listening time deliberately skip
+// this filter: time already weights itself, since a three-second skip
+// contributes three seconds. This used to also be the only place this
+// threshold was enforced — music-import.ts now filters at import time too
+// (#244), so raw counts on the music pages (`src/lib/music.ts`) and this
+// filtered count should agree going forward; this filter stays as a
+// defensive floor rather than the sole mechanism.
 
 // --- Totals per medium -----------------------------------------------------
 
