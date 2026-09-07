@@ -7,19 +7,23 @@
 // growing without bound — every function here follows the exact same
 // "upsert-by-unique-key on create, get/update/delete + usage check" shape
 // established there.
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { parseOptionalHexColor } from "@/lib/color";
+import type { SportsWatchHistoryEntry } from "@/lib/days";
 import {
   artistGenres,
   artists,
   bookReadingSessions,
+  books,
   days,
   entertainmentCatalog,
   entertainmentKinds,
   entertainmentLocationTypes,
   exerciseFocusLinks,
   exerciseFocuses,
+  exercises,
   exerciseSubfocuses,
   exerciseSubtypes,
   gameCategories,
@@ -30,6 +34,7 @@ import {
   genreGroups,
   genres,
   metros,
+  movies,
   movieWatches,
   people,
   placeCategories,
@@ -45,9 +50,18 @@ import {
   sportsTeams,
   sportsWatches,
   tags,
+  tvEpisodes,
   tvEpisodeWatches,
+  tvShows,
+  workouts,
   type ExerciseCategory,
 } from "@/db/schema";
+
+// Aliased twice for sportsWatches' home/away team join — same pattern as
+// src/lib/days.ts's own homeSportsTeams/awaySportsTeams (kept separate
+// per-module rather than shared, same as every other helper here).
+const homeSportsTeams = alias(sportsTeams, "catalog_home_sports_teams");
+const awaySportsTeams = alias(sportsTeams, "catalog_away_sports_teams");
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -359,11 +373,33 @@ export async function updateExerciseSubtype(
   return updated;
 }
 
-// No usage check — workouts.subtype is (deliberately) free text, not an FK
-// into this catalog, so removing a subtype here can't orphan a reference.
+// workouts.subtype is a free-text soft reference (like every other flat
+// catalog value here), not an FK — deletion can't fail at the DB level.
+// getExerciseSubtypeUsage below still surfaces it, for the same reason
+// every sibling catalog detail page does: so deleting doesn't silently
+// strand already-logged workouts with no way to find them again (#196 —
+// the exact problem #137 hit with legacy game-device-type values).
 export async function deleteExerciseSubtype(id: number): Promise<void> {
   const db = getDb();
   await db.delete(exerciseSubtypes).where(eq(exerciseSubtypes.id, id));
+}
+
+// Matched by name AND category — exerciseSubtypes is unique per (category,
+// name), so the same subtype name can exist under two categories (see the
+// table's own comment in schema.ts) and only one of them is this row.
+export type ExerciseSubtypeUsage = { workoutCount: number; workouts: { date: string; exerciseName: string }[] };
+
+export async function getExerciseSubtypeUsage(id: number): Promise<ExerciseSubtypeUsage> {
+  const db = getDb();
+  const subtype = await getExerciseSubtype(id);
+  if (!subtype) return { workoutCount: 0, workouts: [] };
+  const rows = await db
+    .select({ date: workouts.date, exerciseName: exercises.name })
+    .from(workouts)
+    .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+    .where(and(eq(workouts.subtype, subtype.name), eq(exercises.category, subtype.category)))
+    .orderBy(desc(workouts.date));
+  return { workoutCount: rows.length, workouts: rows };
 }
 
 // --- Exercise focus / subfocus (catalog + many-to-many tagging) -----------
@@ -445,15 +481,28 @@ export async function updateExerciseFocus(id: number, name: string): Promise<Exe
 // and exerciseFocusLinks.focusId are both onDelete: "restrict" — so the DB
 // would refuse this delete on its own if either exists; surfaced here so
 // the caller can explain why before hitting that error.
-export type ExerciseFocusUsage = { subfocusCount: number; linkCount: number };
+export type ExerciseFocusUsage = {
+  subfocusCount: number;
+  linkCount: number;
+  // A focus tags exercises, not workouts directly — "when was this focus
+  // trained" means every logged workout of a tagged exercise (#196).
+  workouts: { date: string; exerciseName: string }[];
+};
 
 export async function getExerciseFocusUsage(id: number): Promise<ExerciseFocusUsage> {
   const db = getDb();
-  const [subfocusRows, linkRows] = await Promise.all([
+  const [subfocusRows, linkRows, workoutRows] = await Promise.all([
     db.select({ id: exerciseSubfocuses.id }).from(exerciseSubfocuses).where(eq(exerciseSubfocuses.focusId, id)),
     db.select({ id: exerciseFocusLinks.id }).from(exerciseFocusLinks).where(eq(exerciseFocusLinks.focusId, id)),
+    db
+      .select({ date: workouts.date, exerciseName: exercises.name })
+      .from(exerciseFocusLinks)
+      .innerJoin(exercises, eq(exerciseFocusLinks.exerciseId, exercises.id))
+      .innerJoin(workouts, eq(workouts.exerciseId, exercises.id))
+      .where(eq(exerciseFocusLinks.focusId, id))
+      .orderBy(desc(workouts.date)),
   ]);
-  return { subfocusCount: subfocusRows.length, linkCount: linkRows.length };
+  return { subfocusCount: subfocusRows.length, linkCount: linkRows.length, workouts: workoutRows };
 }
 
 export async function deleteExerciseFocus(id: number): Promise<void> {
@@ -767,17 +816,30 @@ export async function updateGameCategory(id: number, name: string): Promise<Game
 // level — same reasoning as getPlaceCategoryUsage. subcategoryCount also
 // doubles as a real DB guard: gameSubcategories.categoryId is onDelete:
 // "restrict".
-export type GameCategoryUsage = { gameCount: number; subcategoryCount: number };
+export type GameCategoryUsage = {
+  gameCount: number;
+  subcategoryCount: number;
+  // Sessions of any game tagged with this category — a category has no
+  // date of its own, so "when was this category played" means "when was a
+  // game of this category's `type` logged" (#196).
+  sessions: { date: string; gameName: string }[];
+};
 
 export async function getGameCategoryUsage(id: number): Promise<GameCategoryUsage> {
   const db = getDb();
   const category = await getGameCategory(id);
-  if (!category) return { gameCount: 0, subcategoryCount: 0 };
-  const [gameRows, subcategoryRows] = await Promise.all([
+  if (!category) return { gameCount: 0, subcategoryCount: 0, sessions: [] };
+  const [gameRows, subcategoryRows, sessionRows] = await Promise.all([
     db.select({ id: games.id }).from(games).where(eq(games.type, category.name)),
     db.select({ id: gameSubcategories.id }).from(gameSubcategories).where(eq(gameSubcategories.categoryId, id)),
+    db
+      .select({ date: gameSessions.date, gameName: games.name })
+      .from(gameSessions)
+      .innerJoin(games, eq(gameSessions.gameId, games.id))
+      .where(eq(games.type, category.name))
+      .orderBy(desc(gameSessions.date)),
   ]);
-  return { gameCount: gameRows.length, subcategoryCount: subcategoryRows.length };
+  return { gameCount: gameRows.length, subcategoryCount: subcategoryRows.length, sessions: sessionRows };
 }
 
 export async function deleteGameCategory(id: number): Promise<void> {
@@ -875,17 +937,22 @@ export async function updateGameDeviceType(id: number, name: string): Promise<Ga
 // gameSessions.deviceType is a plain free-text string, not an FK — same
 // soft-reference check as getEntertainmentLocationTypeUsage, just scoped to
 // the one table that has a deviceType column.
-export type GameDeviceTypeUsage = { sessionCount: number };
+export type GameDeviceTypeUsage = {
+  sessionCount: number;
+  sessions: { date: string; gameName: string }[];
+};
 
 export async function getGameDeviceTypeUsage(id: number): Promise<GameDeviceTypeUsage> {
   const db = getDb();
   const deviceType = await getGameDeviceType(id);
-  if (!deviceType) return { sessionCount: 0 };
+  if (!deviceType) return { sessionCount: 0, sessions: [] };
   const rows = await db
-    .select({ id: gameSessions.id })
+    .select({ date: gameSessions.date, gameName: games.name })
     .from(gameSessions)
-    .where(eq(gameSessions.deviceType, deviceType.name));
-  return { sessionCount: rows.length };
+    .innerJoin(games, eq(gameSessions.gameId, games.id))
+    .where(eq(gameSessions.deviceType, deviceType.name))
+    .orderBy(desc(gameSessions.date));
+  return { sessionCount: rows.length, sessions: rows };
 }
 
 export async function deleteGameDeviceType(id: number): Promise<void> {
@@ -1138,25 +1205,75 @@ export type EntertainmentLocationTypeUsage = {
   bookCount: number;
   sportsCount: number;
   gameCount: number;
+  // Merged across all five tables and re-sorted by date — the only usage
+  // history here that spans more than one source table (#196), since a
+  // location type is shared across every entertainment kind rather than
+  // scoped to one.
+  history: { date: string; kind: string; label: string | null }[];
 };
 
 export async function getEntertainmentLocationTypeUsage(id: number): Promise<EntertainmentLocationTypeUsage> {
   const db = getDb();
   const type = await getEntertainmentLocationType(id);
-  if (!type) return { movieCount: 0, tvEpisodeCount: 0, bookCount: 0, sportsCount: 0, gameCount: 0 };
+  if (!type) return { movieCount: 0, tvEpisodeCount: 0, bookCount: 0, sportsCount: 0, gameCount: 0, history: [] };
   const [movieRows, tvRows, bookRows, sportsRows, gameRows] = await Promise.all([
-    db.select({ id: movieWatches.id }).from(movieWatches).where(eq(movieWatches.locationType, type.name)),
-    db.select({ id: tvEpisodeWatches.id }).from(tvEpisodeWatches).where(eq(tvEpisodeWatches.locationType, type.name)),
-    db.select({ id: bookReadingSessions.id }).from(bookReadingSessions).where(eq(bookReadingSessions.locationType, type.name)),
-    db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.locationType, type.name)),
-    db.select({ id: gameSessions.id }).from(gameSessions).where(eq(gameSessions.locationType, type.name)),
+    db
+      .select({ date: movieWatches.date, label: movies.title })
+      .from(movieWatches)
+      .innerJoin(movies, eq(movieWatches.movieId, movies.id))
+      .where(eq(movieWatches.locationType, type.name)),
+    // tvEpisodeWatches.date is nullable (a legacy "watched at some point,
+    // exact date unknown" bulk mark, see the table's schema.ts comment) —
+    // there's no day page to link a null date to, so those rows are
+    // excluded from history but still counted below.
+    db
+      .select({
+        date: tvEpisodeWatches.date,
+        showTitle: tvShows.title,
+        season: tvEpisodes.season,
+        episode: tvEpisodes.episode,
+      })
+      .from(tvEpisodeWatches)
+      .innerJoin(tvEpisodes, eq(tvEpisodeWatches.episodeId, tvEpisodes.id))
+      .innerJoin(tvShows, eq(tvEpisodes.showId, tvShows.id))
+      .where(and(eq(tvEpisodeWatches.locationType, type.name), isNotNull(tvEpisodeWatches.date))),
+    db
+      .select({ date: bookReadingSessions.date, label: books.title })
+      .from(bookReadingSessions)
+      .innerJoin(books, eq(bookReadingSessions.bookId, books.id))
+      .where(eq(bookReadingSessions.locationType, type.name)),
+    db
+      .select({ date: sportsWatches.date, homeTeamName: homeSportsTeams.name, awayTeamName: awaySportsTeams.name })
+      .from(sportsWatches)
+      .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+      .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+      .where(eq(sportsWatches.locationType, type.name)),
+    db
+      .select({ date: gameSessions.date, label: games.name })
+      .from(gameSessions)
+      .innerJoin(games, eq(gameSessions.gameId, games.id))
+      .where(eq(gameSessions.locationType, type.name)),
   ]);
+
+  const history = [
+    ...movieRows.map((r) => ({ date: r.date, kind: "Movie", label: r.label as string | null })),
+    ...tvRows.map((r) => ({ date: r.date as string, kind: "TV", label: `${r.showTitle} S${r.season}E${r.episode}` })),
+    ...bookRows.map((r) => ({ date: r.date, kind: "Book", label: r.label as string | null })),
+    ...sportsRows.map((r) => ({
+      date: r.date,
+      kind: "Sports",
+      label: r.homeTeamName && r.awayTeamName ? `${r.homeTeamName} vs ${r.awayTeamName}` : null,
+    })),
+    ...gameRows.map((r) => ({ date: r.date, kind: "Game", label: r.label as string | null })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
   return {
     movieCount: movieRows.length,
     tvEpisodeCount: tvRows.length,
     bookCount: bookRows.length,
     sportsCount: sportsRows.length,
     gameCount: gameRows.length,
+    history,
   };
 }
 
@@ -1329,14 +1446,29 @@ export async function updateSportsGameType(id: number, name: string): Promise<Sp
   return updated;
 }
 
-export type SportsGameTypeUsage = { watchCount: number };
+export type SportsGameTypeUsage = { watchCount: number; watches: SportsWatchHistoryEntry[] };
 
 export async function getSportsGameTypeUsage(id: number): Promise<SportsGameTypeUsage> {
   const db = getDb();
   const gameType = await getSportsGameType(id);
-  if (!gameType) return { watchCount: 0 };
-  const rows = await db.select({ id: sportsWatches.id }).from(sportsWatches).where(eq(sportsWatches.gameType, gameType.name));
-  return { watchCount: rows.length };
+  if (!gameType) return { watchCount: 0, watches: [] };
+  const rows = await db
+    .select({
+      date: sportsWatches.date,
+      season: sportsWatches.season,
+      gameType: sportsWatches.gameType,
+      homeTeamName: homeSportsTeams.name,
+      awayTeamName: awaySportsTeams.name,
+      watchedLive: sportsWatches.watchedLive,
+      durationMinutes: sportsWatches.durationMinutes,
+      locationType: sportsWatches.locationType,
+    })
+    .from(sportsWatches)
+    .leftJoin(homeSportsTeams, eq(sportsWatches.homeTeamId, homeSportsTeams.id))
+    .leftJoin(awaySportsTeams, eq(sportsWatches.awayTeamId, awaySportsTeams.id))
+    .where(eq(sportsWatches.gameType, gameType.name))
+    .orderBy(desc(sportsWatches.date));
+  return { watchCount: rows.length, watches: rows };
 }
 
 export async function deleteSportsGameType(id: number): Promise<void> {

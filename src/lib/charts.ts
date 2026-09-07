@@ -1,10 +1,10 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import { parseDate } from "@/lib/date";
+import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 
@@ -167,6 +167,25 @@ export async function getProfileRegionGroups(until: Date = new Date()): Promise<
 
 export type SleepDay = { date: string; durationMinutes: number };
 
+/**
+ * A night plus where it was spent — the private-only superset of `SleepDay`.
+ *
+ * Kept as its own type rather than widening `SleepDay`, because `SleepDay`
+ * is what the **public** sleep chart renders
+ * (`src/lib/public-charts.ts` -> `/public-charts/sleep`). Adding a field
+ * there would have quietly required the public data layer to supply where
+ * the user sleeps — precisely the leak the boundary in AGENTS.md exists to
+ * stop, and the sort that arrives by type inference rather than by anyone
+ * deciding it. The narrow type stays narrow; only private callers see this
+ * one.
+ */
+export type SleepNight = SleepDay & {
+  /** `days.sleepLocationType`, or null when it wasn't recorded — which is
+   * most nights, so anything grouping on this must treat null as its own
+   * group rather than dropping it. */
+  locationType: string | null;
+};
+
 function hhmmToMinutes(hhmm: string): number | null {
   const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
@@ -182,6 +201,13 @@ function hhmmToMinutes(hhmm: string): number | null {
  * for historical data too). Days missing either time are skipped rather
  * than guessed at. */
 export async function getSleepCalendarData(): Promise<SleepDay[]> {
+  const nights = await getSleepNightsData();
+  return nights.map(({ date, durationMinutes }) => ({ date, durationMinutes }));
+}
+
+/** The same derivation, keeping the sleep location. Private callers only —
+ * see `SleepNight`. */
+export async function getSleepNightsData(): Promise<SleepNight[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -189,19 +215,20 @@ export async function getSleepCalendarData(): Promise<SleepDay[]> {
       sleepTime: days.sleepTime,
       wakeTime: days.wakeTime,
       wakeCrossedMidnight: days.wakeCrossedMidnight,
+      locationType: days.sleepLocationType,
     })
     .from(days)
     .where(sql`${days.sleepTime} is not null and ${days.wakeTime} is not null`)
     .orderBy(asc(days.date));
 
-  const out: SleepDay[] = [];
+  const out: SleepNight[] = [];
   for (const r of rows) {
     const sleepMin = hhmmToMinutes(r.sleepTime as string);
     const wakeMin = hhmmToMinutes(r.wakeTime as string);
     if (sleepMin === null || wakeMin === null) continue;
     const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
     if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
-    out.push({ date: r.date, durationMinutes });
+    out.push({ date: r.date, durationMinutes, locationType: r.locationType });
   }
   return out;
 }
@@ -657,4 +684,317 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     rootColor: r.rootColor,
     value: Number(r.value),
   }));
+}
+
+// --- Health & activity (#218) --------------------------------------------
+//
+// Five charts from the legacy inventory (#209), all on primitives that
+// already shipped. Every fetcher here returns a **daily** series, never a
+// pre-bucketed one: the charts carry a period picker, so the bucketing has
+// to happen client-side where the selection lives. That's exactly the split
+// `src/lib/viz/bin.ts` documents — re-bucketing an already-fetched series
+// is its job, and pushing the aggregation into SQL here would freeze the
+// bucket size at query time and make the picker impossible.
+
+/** A single value per calendar day — the shape InteractiveCalendar and
+ * InteractiveScroller consume directly, and the input the trend charts
+ * re-bucket. Deliberately generic: most of the remaining chart backlog is
+ * "this one `days` column, by day". */
+export type DailyValue = { date: string; value: number };
+
+/** Every logged value of one nullable numeric `days` column, oldest first. */
+async function dailyValuesOf(column: AnyPgColumn): Promise<DailyValue[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, value: column })
+    .from(days)
+    .where(isNotNull(column))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, value: Number(r.value) }));
+}
+
+export function getCoffeeDailyData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.coffees);
+}
+
+export function getDistanceDailyData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.distanceWalkedKm);
+}
+
+/** A day's training: minutes trained and how many exercises made them up. */
+export type TrainingDay = { date: string; minutes: number; exercises: number };
+
+/**
+ * Training per day, measured as **time trained**.
+ *
+ * Time is the honest measure of volume. Counting `workouts` rows counts one
+ * per exercise performed, so a session of eight movements outweighs a
+ * two-hour hike logged as one; counting days treats a ten-minute session
+ * and a three-hour one alike. Summed duration is the only one of the three
+ * that answers "how much did I actually train".
+ *
+ * `durationMinutes` is nullable, so this is worth stating: in practice
+ * 1,371 of 1,376 rows carry one, and the five that don't contribute zero.
+ * At that coverage a sum is safe. If duration ever became sparse — a new
+ * category logged without it — this would quietly understate, and the fix
+ * would be to fall back rather than keep summing.
+ *
+ * **Days with no training are returned as explicit zeros**, across the span
+ * from the first logged workout to the last. Leaving them out makes any
+ * bucketing of this series jump the gap, drawing a slope across months
+ * where nothing happened — the real data has exactly one such month
+ * (2023-01) between two active ones. Zero is the honest value because
+ * exercise was being actively logged either side of it: nothing recorded
+ * means nothing done, not nothing known. That reasoning is specific to a
+ * count-like measure over a period that was otherwise being tracked, and
+ * deliberately does not transfer to the `days`-column series above, where
+ * an absent day means nothing was recorded and a zero would be a
+ * fabricated measurement.
+ *
+ * Padding at day granularity rather than by month means the zero-filling
+ * survives whatever bucket size the reader picks.
+ */
+export async function getTrainingDailyData(): Promise<TrainingDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: workouts.date, durationMinutes: workouts.durationMinutes })
+    .from(workouts)
+    .orderBy(asc(workouts.date));
+  if (rows.length === 0) return [];
+
+  const byDate = new Map<string, { minutes: number; exercises: number }>();
+  for (const row of rows) {
+    const existing = byDate.get(row.date) ?? { minutes: 0, exercises: 0 };
+    existing.minutes += row.durationMinutes ?? 0;
+    existing.exercises += 1;
+    byDate.set(row.date, existing);
+  }
+
+  const out: TrainingDay[] = [];
+  const last = rows[rows.length - 1].date;
+  for (let date = rows[0].date; date <= last; date = addDays(date, 1)) {
+    const found = byDate.get(date);
+    out.push({ date, minutes: found?.minutes ?? 0, exercises: found?.exercises ?? 0 });
+  }
+  return out;
+}
+
+// --- People over time (#220) ----------------------------------------------
+
+/** One day's people, with the tag each belongs to and the day's own
+ * happiness — the latter because the impact score (`src/lib/impact.ts`) is
+ * a function of both the person's slot and how the day went. */
+export type PeopleDay = { date: string; happiness: number | null; people: PersonOnDay[] };
+
+/** `tagName`/`tagColor` are null for anyone untagged — most people have a
+ * tag, but nothing requires one, so a consumer grouping by tag has to
+ * handle the ungrouped case rather than assuming. */
+export type PersonOnDay = {
+  name: string;
+  tagName: string | null;
+  tagColor: string | null;
+  /** 1-7, the positive slot they occupied. Slot order carries a soft
+   * ranking that the impact score reads — see `src/lib/impact.ts`. */
+  slot: number;
+};
+
+/**
+ * Who was logged on each day, oldest first.
+ *
+ * **Positive slots only.** `getPeopleNetworkData` unions the negative slots
+ * too, because a co-occurrence graph asks who appears in your days at all.
+ * Here it would add nothing: the negative slots hold **5 appearances in the
+ * entire history**, against 17,954 positive ones. Three people, five days.
+ * Carrying them through the fold, the palette and the legend to draw
+ * something invisible isn't a trade worth making — and unlike the recap's
+ * exclusion (#199), which was a judgment about tone, this one is just
+ * arithmetic.
+ *
+ * Names rather than ids because that's what a chart legend needs, and
+ * because `people.name` is unique — so it identifies a person as well as
+ * the id does, without a second lookup at every call site. Each person
+ * carries their tag's name and color too, so a consumer can colour by
+ * group without re-joining.
+ */
+export async function getPeopleDailyData(): Promise<PeopleDay[]> {
+  const db = getDb();
+  const slots = [
+    days.positivePerson1Id,
+    days.positivePerson2Id,
+    days.positivePerson3Id,
+    days.positivePerson4Id,
+    days.positivePerson5Id,
+    days.positivePerson6Id,
+    days.positivePerson7Id,
+  ];
+
+  const [dayRows, personRows] = await Promise.all([
+    db
+      .select({
+        date: days.date,
+        happiness: days.happiness,
+        p1: slots[0],
+        p2: slots[1],
+        p3: slots[2],
+        p4: slots[3],
+        p5: slots[4],
+        p6: slots[5],
+        p7: slots[6],
+      })
+      .from(days)
+      .orderBy(asc(days.date)),
+    db
+      .select({ id: people.id, name: people.name, tagName: tags.name, tagColor: tags.color })
+      .from(people)
+      .leftJoin(tags, eq(tags.id, people.tagId)),
+  ]);
+
+  const byId = new Map(personRows.map((p) => [p.id, p]));
+  const out: PeopleDay[] = [];
+  for (const row of dayRows) {
+    // Deduplicated by person, keeping their *earliest* slot: nothing stops
+    // one person filling two slots on a day, "who was I with" counts them
+    // once, and the earliest slot is the one the impact score should read
+    // since earlier slots weigh more.
+    const present: PersonOnDay[] = [];
+    const seen = new Set<number>();
+    [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7].forEach((id, index) => {
+      if (id === null || seen.has(id)) return;
+      seen.add(id);
+      const person = byId.get(id);
+      if (person) {
+        present.push({
+          name: person.name,
+          tagName: person.tagName,
+          tagColor: person.tagColor,
+          slot: index + 1,
+        });
+      }
+    });
+    if (present.length > 0) out.push({ date: row.date, happiness: row.happiness, people: present });
+  }
+  return out;
+}
+
+// --- Mood calendars (#216) ------------------------------------------------
+
+/** Every logged happiness score, oldest first. */
+export function getHappinessCalendarData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.happiness);
+}
+
+/** A day and how it was classified (`days.dayType`), oldest first. Days with
+ * no type are omitted rather than given one. */
+export type DayTypeDay = { date: string; dayType: string };
+
+export async function getDayTypeCalendarData(): Promise<DayTypeDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, dayType: days.dayType })
+    .from(days)
+    .where(isNotNull(days.dayType))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, dayType: r.dayType as string }));
+}
+
+// --- Technology (#219) ----------------------------------------------------
+
+/** A day's screen time, split by device. Either side may be null on a day
+ * where only one was recorded. */
+export type DeviceDay = {
+  date: string;
+  phoneMinutes: number | null;
+  laptopMinutes: number | null;
+};
+
+/** Days with at least one device recorded, oldest first. */
+export async function getDeviceUsageData(): Promise<DeviceDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: days.date,
+      phoneMinutes: days.phoneUsageMinutes,
+      laptopMinutes: days.laptopUsageMinutes,
+    })
+    .from(days)
+    .where(or(isNotNull(days.phoneUsageMinutes), isNotNull(days.laptopUsageMinutes)))
+    .orderBy(asc(days.date));
+  return rows;
+}
+
+/**
+ * Instagram follower count per day.
+ *
+ * Cumulative rather than a daily rate — it's a running total, so it only
+ * moves when it moves and never resets. Charts of it should say so: a
+ * rolling average over a monotone series smooths nothing worth smoothing.
+ */
+export function getInstagramFollowersData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.instagramFollowers);
+}
+
+// --- Where you were, over time (#221) --------------------------------------
+
+/** One day and the countries it touched. Deduplicated: a day whose two
+ * place slots are both in France counts France once, matching
+ * `getCountryVisitData`'s "was I there that day" reading rather than the
+ * leaderboard's weighted slot tally. */
+export type CountryDay = { date: string; countries: string[] };
+
+/**
+ * Countries per day, oldest first.
+ *
+ * Resolves a place to its country the same way `getCountryVisitData` does —
+ * a day's place slots hold specific venues, so the country is the root of
+ * each one's `idPath`, never an assumed depth. Names are normalized here so
+ * the categories a chart folds and colours match the map's own.
+ *
+ * Country rather than a finer level on purpose: it's the one level of this
+ * tree with few enough members to sit inside a categorical palette. Metro
+ * or venue would need the "which ancestor is the neighbourhood" question
+ * settled first — see #214.
+ */
+export async function getCountryHistoryData(): Promise<CountryDay[]> {
+  const db = getDb();
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)))
+    .orderBy(asc(days.date));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return [];
+
+  const placeRows = await db
+    .select({ id: places.id, idPath: places.idPath })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+  const rootIdByPlaceId = new Map<number, number | null>();
+  for (const p of placeRows) {
+    const rootIdStr = p.idPath?.split("/")[0];
+    rootIdByPlaceId.set(p.id, rootIdStr ? Number(rootIdStr) : null);
+  }
+
+  const rootIds = [...new Set([...rootIdByPlaceId.values()].filter((id): id is number => id !== null))];
+  const rootRows = rootIds.length
+    ? await db.select({ id: places.id, name: places.name }).from(places).where(inArray(places.id, rootIds))
+    : [];
+  const nameByRootId = new Map(rootRows.map((r) => [r.id, r.name]));
+
+  const out: CountryDay[] = [];
+  for (const row of dayRows) {
+    const countries = new Set<string>();
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const rootId = rootIdByPlaceId.get(placeId);
+      const name = rootId != null ? nameByRootId.get(rootId) : undefined;
+      if (name) countries.add(normalizeCountryName(name));
+    }
+    if (countries.size > 0) out.push({ date: row.date, countries: [...countries] });
+  }
+  return out;
 }

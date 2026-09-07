@@ -9,11 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import { EXERCISE_CATEGORY_LABELS } from "@/components/manage/new-exercise-modal";
-import type { ExerciseSubtypeItem } from "@/lib/catalog-admin";
+import type { ExerciseSubtypeItem, ExerciseSubtypeUsage } from "@/lib/catalog-admin";
 import type { ExerciseCategory } from "@/db/schema";
 
-export function ExerciseSubtypeDetail({ subtype: initial }: { subtype: ExerciseSubtypeItem }) {
+export function ExerciseSubtypeDetail({
+  subtype: initial,
+  usage,
+}: {
+  subtype: ExerciseSubtypeItem;
+  usage: ExerciseSubtypeUsage;
+}) {
   const router = useRouter();
   const [subtype, setSubtype] = useState(initial);
   const [editing, setEditing] = useState(false);
@@ -116,17 +123,34 @@ export function ExerciseSubtypeDetail({ subtype: initial }: { subtype: ExerciseS
                 </Button>
                 <DeleteCatalogItem
                   itemLabel={subtype.name}
-                  isBlocked={false}
+                  isBlocked={usage.workoutCount > 0}
                   afterDeleteHref="/manage/exercises/subtypes"
                   onDelete={async () => {
                     const res = await fetch(`/api/exercise-subtypes/${subtype.id}`, { method: "DELETE" });
                     if (!res.ok) throw new Error("Failed to delete");
                   }}
-                  blockedContent={null}
+                  blockedContent={
+                    <p>
+                      {usage.workoutCount} workout{usage.workoutCount === 1 ? "" : "s"} still use this subtype.
+                    </p>
+                  }
                 />
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Logged on</CardTitle>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <CatalogUsageHistory
+            history={usage.workouts.map((w) => ({ date: w.date, label: w.exerciseName }))}
+            daySegment="health"
+            emptyText="No workouts logged."
+          />
         </CardContent>
       </Card>
     </>

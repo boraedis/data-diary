@@ -21,14 +21,64 @@ const CHARTS = [
     description: "Zoomable line of every logged day's happiness score.",
   },
   {
+    href: "/charts/happiness-calendar",
+    title: "Happiness calendar",
+    description: "A year-by-year heatmap of daily happiness.",
+  },
+  {
+    href: "/charts/day-types",
+    title: "Day types",
+    description: "Work, days off, vacation and travel across the years.",
+  },
+  {
     href: "/charts/weight",
     title: "Weight over time",
     description: "Zoomable line — drag the strip below to zoom into a range.",
   },
   {
+    href: "/charts/coffee-trend",
+    title: "Coffee trend",
+    description: "Monthly average cups per day, with each month's range.",
+  },
+  {
+    href: "/charts/coffee-calendar",
+    title: "Coffee calendar",
+    description: "A year-by-year heatmap of cups per day.",
+  },
+  {
+    href: "/charts/distance-trend",
+    title: "Distance walked trend",
+    description: "Monthly average kilometres per day.",
+  },
+  {
+    href: "/charts/distance-daily",
+    title: "Daily distance walked",
+    description: "Every logged day — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/training-volume",
+    title: "Training volume",
+    description: "Total hours trained each month, with session detail on hover.",
+  },
+  {
     href: "/charts/sleep",
     title: "Sleep calendar",
     description: "A year-by-year heatmap of nightly sleep duration.",
+  },
+  {
+    href: "/charts/sleep-trend",
+    title: "Sleep trend",
+    description: "Average time asleep per night, at any bucket size."
+  },
+  {
+    href: "/charts/sleep-daily",
+    title: "Nightly sleep",
+    description: "Every logged night — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/sleep-locations",
+    title: "Sleep locations",
+    description: "Where you slept, as a share of nights over time.",
   },
   {
     href: "/charts/gym",
@@ -41,6 +91,26 @@ const CHARTS = [
     description: "Workout count by category, exercise, or subtype, over any time range.",
   },
   {
+    href: "/charts/screen-time",
+    title: "Screen time",
+    description: "Phone against laptop, and how the balance has shifted.",
+  },
+  {
+    href: "/charts/screen-time-daily",
+    title: "Daily screen time",
+    description: "Every logged day — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/screen-time-calendar",
+    title: "Screen time calendar",
+    description: "Both devices on one grid, coloured by which dominated.",
+  },
+  {
+    href: "/charts/instagram",
+    title: "Instagram followers",
+    description: "Follower count over time.",
+  },
+  {
     href: "/charts/places",
     title: "Most-visited places",
     description: "Ranked by how often each place filled your day's two place slots.",
@@ -51,9 +121,29 @@ const CHARTS = [
     description: "A zoomable sunburst of where your days happen, by geography or category.",
   },
   {
+    href: "/charts/place-history",
+    title: "Where you were",
+    description: "Days spent in each country, as a share over time.",
+  },
+  {
     href: "/charts/people",
     title: "People network",
     description: "Who gets logged together — drag nodes to reposition.",
+  },
+  {
+    href: "/charts/people-over-time",
+    title: "Who you saw",
+    description: "Days logged with each person, as a share over time.",
+  },
+  {
+    href: "/charts/people-calendar",
+    title: "People calendar",
+    description: "How many people you logged each day.",
+  },
+  {
+    href: "/charts/people-impact",
+    title: "People impact",
+    description: "Who contributed most to how your days went, week by week.",
   },
   {
     href: "/charts/world",
