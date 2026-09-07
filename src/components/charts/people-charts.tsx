@@ -213,9 +213,10 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
  * Legacy's `people_table` showed trailing *counts* for week/month/year;
  * this shows the count and the **rank movement** alongside it, which is
  * what the counts were really being read for. See `src/lib/ranking.ts` for
- * the definition — each window is compared against the window immediately
- * before it, not against an all-time position, because everyone loses
- * against all-time and nothing would ever look like it was rising.
+ * the definition — each window is a *point in time*, so the week column
+ * asks where someone stood a week ago and compares it with now. Both sides
+ * are all-time standings; only the moment differs, which is what keeps the
+ * movement column consistent with the total it sits beside.
  *
  * Anchored on the latest logged day rather than today: a gap in logging
  * would otherwise empty the recent windows and report everyone as having
@@ -297,7 +298,7 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
     >
       <ChartCard
         title="People table"
-        description="Everyone ranked by days logged. Each window shows days in that period and how the ranking moved against the period before it."
+        description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
         empty={shown.length === 0}
       >
         <InteractiveRanked
@@ -306,7 +307,7 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
           detail={(entry) => byName.get(entry.label)?.tag.name ?? null}
           columns={columns}
           color={(entry) => byName.get(entry.label)?.tag.color ?? categoricalColor(0)}
-          ariaLabel="People ranked by days logged, with rank movement over the last week, month and year."
+          ariaLabel="People ranked by days logged, with how their ranking has moved since a week, a month and a year ago."
         />
       </ChartCard>
     </ChartPage>
