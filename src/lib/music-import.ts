@@ -10,6 +10,7 @@
 import { eq, or, sql } from "drizzle-orm";
 import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
+import { MIN_LISTEN_MS } from "@/lib/music";
 import { getArtistForTrack, parseSpotifyTrackId, searchArtist } from "@/lib/spotify";
 
 // Only the fields this import actually uses — Spotify's export has several
@@ -205,6 +206,13 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
       const msPlayed = asNumber(entry.ms_played);
       const playedAt = ts ? new Date(ts) : null;
       if (!playedAt || Number.isNaN(playedAt.getTime()) || msPlayed === null) {
+        summary.listensSkipped++;
+        continue;
+      }
+      // Below MIN_LISTEN_MS this was a skip, not a play (#244) — checked
+      // before any artist/podcast resolution so a track only ever clicked
+      // through never creates a catalog row for it either.
+      if (msPlayed < MIN_LISTEN_MS) {
         summary.listensSkipped++;
         continue;
       }
