@@ -75,8 +75,14 @@ export type InteractiveCalendarPoint = {
    * tagged groups of people reads as a mix of their colors, not as the
    * number 2. The value is still required and still drives the tooltip's
    * numeric row, so a blended calendar keeps its magnitude reading too.
+   *
+   * `weight` biases the mix. Omit it where each category counts the same
+   * (tagged groups of people: one entry per group, present or not), and
+   * pass it where the split itself is the point (minutes on phone against
+   * minutes on laptop — a day spent mostly on one should look mostly like
+   * that one, not like an even mix).
    */
-  categories?: { label: string; color: string }[];
+  categories?: { label: string; color: string; weight?: number }[];
 };
 
 export type InteractiveCalendarProps = {
@@ -189,13 +195,15 @@ export function InteractiveCalendar({
    * everything" is a true thing to say about it, and the tooltip carries
    * the exact breakdown regardless.
    */
-  const blendColors = (colors: string[]): string => {
-    const labs = colors.map((c) => d3.lab(c)).filter((c) => !Number.isNaN(c.l));
+  const blendColors = (entries: { color: string; weight?: number }[]): string => {
+    const labs = entries
+      .map((e) => ({ lab: d3.lab(e.color), weight: e.weight ?? 1 }))
+      .filter((e) => !Number.isNaN(e.lab.l) && e.weight > 0);
     if (labs.length === 0) return "var(--muted)";
-    const l = d3.mean(labs, (c) => c.l) as number;
-    const a = d3.mean(labs, (c) => c.a) as number;
-    const b = d3.mean(labs, (c) => c.b) as number;
-    return d3.lab(l, a, b).formatHex();
+    const total = labs.reduce((sum, e) => sum + e.weight, 0);
+    const mix = (get: (lab: d3.LabColor) => number) =>
+      labs.reduce((sum, e) => sum + get(e.lab) * e.weight, 0) / total;
+    return d3.lab(mix((c) => c.l), mix((c) => c.a), mix((c) => c.b)).formatHex();
   };
 
   /**
@@ -223,7 +231,7 @@ export function InteractiveCalendar({
   const cellFill = useCallback(
     (value: number, categories: DayCategories): string => {
       if (!categories || categories.length === 0) return colorScale(value);
-      const blend = blendColors(categories.map((c) => c.color));
+      const blend = blendColors(categories);
       const span = domain[1] - domain[0];
       const t = span > 0 ? (value - domain[0]) / span : 1;
       const intensity = MIN_INTENSITY + (1 - MIN_INTENSITY) * Math.min(1, Math.max(0, t));

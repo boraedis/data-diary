@@ -15,7 +15,7 @@ import type { DailyValue } from "@/lib/charts";
 /** A `DailyValue` optionally carrying the categories that made up the day,
  * which the primitive blends into one cell colour. */
 export type CalendarDay = DailyValue & {
-  categories?: { label: string; color: string }[];
+  categories?: { label: string; color: string; weight?: number }[];
 };
 
 /**
