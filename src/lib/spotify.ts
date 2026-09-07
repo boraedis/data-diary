@@ -50,12 +50,6 @@ async function getAccessToken(): Promise<string> {
   return cachedToken.value;
 }
 
-// Thrown for a 404 specifically so callers that treat "not found" as a
-// normal, non-fatal outcome (getArtistForTrack — a track from the user's
-// history can since have been taken down) can catch just that case rather
-// than string-matching the generic failure message.
-class SpotifyNotFoundError extends Error {}
-
 async function spotifyFetch<T>(path: string, params: Record<string, string>): Promise<T> {
   const token = await getAccessToken();
   const url = new URL(`${API_BASE_URL}${path}`);
@@ -71,9 +65,6 @@ async function spotifyFetch<T>(path: string, params: Record<string, string>): Pr
     const retryAfter = Number(res.headers.get("Retry-After") ?? "1");
     await new Promise((resolve) => setTimeout(resolve, (retryAfter + 1) * 1000));
     return spotifyFetch<T>(path, params);
-  }
-  if (res.status === 404) {
-    throw new SpotifyNotFoundError(`Spotify request 404: ${path}`);
   }
   if (!res.ok) {
     throw new Error(`Spotify request failed (${res.status}): ${path}`);
@@ -104,38 +95,71 @@ export function parseSpotifyTrackId(uri: unknown): string | null {
   return id || null;
 }
 
-type SpotifyTrack = { artists: { id: string }[] };
+type SpotifyTrack = { id: string; artists: { id: string }[] };
 type SpotifyArtist = { id: string; name: string; genres: string[] };
 
-/** Exact artist lookup via the track the user actually played, rather than
- * guessing from a free-text name (see #225 — name search can silently
- * return an unrelated artist for a short/ambiguous query). The export's
- * own `spotify_track_uri` is Spotify's authoritative link from a real
- * listen to its catalog, so this is preferred over `searchArtist` whenever
- * a track id is available; `music-import.ts` falls back to `searchArtist`
- * only when it isn't (e.g. an older export format).
- *
- * Returns null — not an error — if the track (or, in principle, its
- * artist) has since been taken down from Spotify; a real listen from years
- * ago pointing at a now-removed track isn't a failure worth surfacing. */
-export async function getArtistForTrack(trackId: string): Promise<SpotifyArtistMatch | null> {
-  try {
-    const track = await spotifyFetch<SpotifyTrack>(`/tracks/${trackId}`, {});
-    const primaryArtistId = track.artists[0]?.id;
-    if (!primaryArtistId) return null;
-    const artist = await spotifyFetch<SpotifyArtist>(`/artists/${primaryArtistId}`, {});
-    return { spotifyId: artist.id, name: artist.name, genres: artist.genres };
-  } catch (error) {
-    if (error instanceof SpotifyNotFoundError) return null;
-    throw error;
-  }
+const BATCH_SIZE = 50; // Spotify's max ids per "get several X" request.
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
 }
 
-/** Best-effort artist lookup by name — the fallback `resolveArtist` in
- * music-import.ts uses when no `spotify_track_uri` is available for the
- * entry (see `getArtistForTrack` above for the preferred, exact path).
- * Returns null on no match rather than throwing — an unmatched artist just
- * gets no genres, not a failed import.
+/** Exact artist lookup via the tracks the user actually played, rather
+ * than guessing from a free-text name (see #225 — name search can
+ * silently return an unrelated artist for a short/ambiguous query). The
+ * export's own `spotify_track_uri` is Spotify's authoritative link from a
+ * real listen to its catalog, so this is preferred over `searchArtist`
+ * whenever a track id is available; `music-import.ts` falls back to
+ * `searchArtist` only for entries with no usable track id, or a track id
+ * this function couldn't resolve.
+ *
+ * Batches both the track lookup and the follow-up artist lookup (50 ids
+ * per request, Spotify's max) rather than resolving one track at a time —
+ * a historical import can have hundreds of never-seen artists, and two
+ * sequential requests each was enough to push a single request past
+ * Vercel's 300s function limit in production (#249). A track id that
+ * can't be resolved (removed from Spotify, or an artist with no primary
+ * artist for some reason) is simply absent from the returned map, not an
+ * error — same "missing is fine, wrong is not" contract as the rest of
+ * this module. */
+export async function getArtistsForTracks(trackIds: string[]): Promise<Map<string, SpotifyArtistMatch>> {
+  const result = new Map<string, SpotifyArtistMatch>();
+  if (trackIds.length === 0) return result;
+
+  const trackToArtistId = new Map<string, string>();
+  for (const batch of chunk(trackIds, BATCH_SIZE)) {
+    const data = await spotifyFetch<{ tracks: (SpotifyTrack | null)[] }>("/tracks", { ids: batch.join(",") });
+    for (const track of data.tracks) {
+      // Spotify returns a null slot (not a 404) for an id it can't resolve
+      // in a batch request — no SpotifyNotFoundError to catch here.
+      if (!track) continue;
+      const primaryArtistId = track.artists[0]?.id;
+      if (primaryArtistId) trackToArtistId.set(track.id, primaryArtistId);
+    }
+  }
+
+  const distinctArtistIds = [...new Set(trackToArtistId.values())];
+  const artistById = new Map<string, SpotifyArtist>();
+  for (const batch of chunk(distinctArtistIds, BATCH_SIZE)) {
+    const data = await spotifyFetch<{ artists: (SpotifyArtist | null)[] }>("/artists", { ids: batch.join(",") });
+    for (const artist of data.artists) {
+      if (artist) artistById.set(artist.id, artist);
+    }
+  }
+
+  for (const [trackId, artistId] of trackToArtistId) {
+    const artist = artistById.get(artistId);
+    if (artist) result.set(trackId, { spotifyId: artist.id, name: artist.name, genres: artist.genres });
+  }
+  return result;
+}
+
+/** Best-effort artist lookup by name — the fallback music-import.ts uses
+ * for an entry with no usable `spotify_track_uri`, or one `getArtistsForTracks`
+ * above couldn't resolve. Returns null on no match rather than throwing —
+ * an unmatched artist just gets no genres, not a failed import.
  *
  * Only trusts a candidate whose own name is actually the name being
  * searched for, checked across the top 10 results rather than assuming

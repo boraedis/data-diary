@@ -11,13 +11,13 @@ import { eq, or, sql } from "drizzle-orm";
 import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import { MIN_LISTEN_MS } from "@/lib/music";
-import { getArtistForTrack, parseSpotifyTrackId, searchArtist } from "@/lib/spotify";
+import { getArtistsForTracks, parseSpotifyTrackId, searchArtist, type SpotifyArtistMatch } from "@/lib/spotify";
 
 // Only the fields this import actually uses — Spotify's export has several
 // more (platform, conn_country, shuffle, skipped, ...) nobody reads here.
 // spotify_track_uri specifically lets artist resolution below use an exact
 // track lookup instead of guessing from the free-text artist name — see
-// resolveArtist's own comment.
+// resolveArtistGenres's own comment.
 type SpotifyExportEntry = {
   ts: unknown;
   ms_played: unknown;
@@ -41,24 +41,29 @@ export type MusicImportSummary = {
 
 type Db = ReturnType<typeof getDb>;
 
+// One entry per artist still needing a Spotify identity/genre lookup,
+// keyed by artistId so the same artist is only ever queued once per import
+// even if it appears in many entries (see getOrCreateArtistId's cache).
+// `trackId` is a representative track for that artist — whichever entry
+// first triggered the lookup — used to attempt the exact lookup before
+// falling back to a name search; see resolveArtistGenres.
+type PendingArtistGenreLookup = { name: string; trackId: string | null };
+
 // Resolves an artist name to a catalog row, matching against both `name`
 // and `aliases` (so a manually-added alias catches an alternate spelling
-// Spotify's export uses without creating a duplicate artist). Brand new
-// rows get a best-effort Spotify genre lookup; an existing row missing
-// genres (spotifyId still null — e.g. a previous lookup failed or found no
-// match) gets one retry per import rather than being skipped forever.
-//
-// Prefers an exact lookup via the entry's own `spotify_track_uri` (the
-// track the user actually played) over guessing from the free-text artist
-// name — see getArtistForTrack's comment for why. `trackId` is only
-// available for the specific entry that first triggers this artist's
-// lookup, so a name-only fallback still matters for older export rows
-// with no track URI at all.
-async function resolveArtist(
+// Spotify's export uses without creating a duplicate artist), WITHOUT
+// doing any Spotify network call itself. An existing row missing genres
+// (spotifyId still null — e.g. a previous lookup failed or found no
+// match) gets one retry per import rather than being skipped forever; a
+// brand new row always needs one. Either case is queued into `pending`
+// rather than resolved inline — see resolveArtistGenres's comment for why
+// deferring every lookup to one batched pass at the end matters.
+async function getOrCreateArtistId(
   db: Db,
   cache: Map<string, number>,
   rawName: string,
   trackId: string | null,
+  pending: Map<number, PendingArtistGenreLookup>,
   summary: MusicImportSummary
 ): Promise<number | null> {
   const name = rawName.trim();
@@ -97,50 +102,7 @@ async function resolveArtist(
   }
 
   if (needsGenreLookup) {
-    try {
-      const match = (trackId ? await getArtistForTrack(trackId) : null) ?? (await searchArtist(name));
-      if (match) {
-        const genreIds: number[] = [];
-        for (const genreName of match.genres) {
-          const [inserted] = await db
-            .insert(genres)
-            .values({ name: genreName })
-            .onConflictDoNothing({ target: genres.name })
-            .returning({ id: genres.id });
-          const genreId = inserted?.id ?? (await db.select({ id: genres.id }).from(genres).where(eq(genres.name, genreName)))[0].id;
-          genreIds.push(genreId);
-        }
-        if (genreIds.length > 0) {
-          await db
-            .insert(artistGenres)
-            .values(genreIds.map((genreId) => ({ artistId, genreId })))
-            .onConflictDoNothing({ target: [artistGenres.artistId, artistGenres.genreId] });
-        }
-        // artists.spotifyId is unique, but two different free-text names in
-        // the user's own history (a typo, an alternate spelling, "DRAM" vs
-        // "DR") can both legitimately resolve to the same real Spotify
-        // artist — the second row to claim it would otherwise throw a
-        // unique-violation on a plain UPDATE (see #223). Guarding with NOT
-        // EXISTS makes that a benign no-op instead: genres above are still
-        // attached to this row either way, only the canonical spotifyId
-        // link is skipped since another row already legitimately holds it.
-        await db
-          .update(artists)
-          .set({ spotifyId: match.spotifyId })
-          .where(
-            sql`${artists.id} = ${artistId} and not exists (
-              select 1 from artists as existing where existing.spotify_id = ${match.spotifyId}
-            )`
-          );
-      }
-    } catch (error) {
-      // Spotify lookup failures shouldn't fail the whole import — the
-      // artist row still gets created/matched, just without genres for
-      // now; spotifyId stays null so the next import retries it.
-      summary.errors.push(
-        `Spotify genre lookup failed for "${name}": ${error instanceof Error ? error.message : "unknown error"}`
-      );
-    }
+    pending.set(artistId, { name, trackId });
   }
 
   cache.set(cacheKey, artistId);
@@ -170,6 +132,119 @@ async function resolvePodcastShow(db: Db, cache: Map<string, number>, rawName: s
   return showId;
 }
 
+async function applyArtistMatch(db: Db, artistId: number, match: SpotifyArtistMatch): Promise<void> {
+  const genreIds: number[] = [];
+  for (const genreName of match.genres) {
+    const [inserted] = await db
+      .insert(genres)
+      .values({ name: genreName })
+      .onConflictDoNothing({ target: genres.name })
+      .returning({ id: genres.id });
+    const genreId = inserted?.id ?? (await db.select({ id: genres.id }).from(genres).where(eq(genres.name, genreName)))[0].id;
+    genreIds.push(genreId);
+  }
+  if (genreIds.length > 0) {
+    await db
+      .insert(artistGenres)
+      .values(genreIds.map((genreId) => ({ artistId, genreId })))
+      .onConflictDoNothing({ target: [artistGenres.artistId, artistGenres.genreId] });
+  }
+  // artists.spotifyId is unique, but two different free-text names in the
+  // user's own history (a typo, an alternate spelling, "DRAM" vs "DR") can
+  // both legitimately resolve to the same real Spotify artist — the
+  // second row to claim it would otherwise throw a unique-violation on a
+  // plain UPDATE (see #223). Guarding with NOT EXISTS makes that a benign
+  // no-op instead: genres above are still attached to this row either
+  // way, only the canonical spotifyId link is skipped since another row
+  // already legitimately holds it.
+  await db
+    .update(artists)
+    .set({ spotifyId: match.spotifyId })
+    .where(
+      sql`${artists.id} = ${artistId} and not exists (
+        select 1 from artists as existing where existing.spotify_id = ${match.spotifyId}
+      )`
+    );
+}
+
+// Resolves every artist queued by getOrCreateArtistId in one batched pass,
+// after the main entry loop finishes (that loop only needs artist *ids* to
+// build listen rows, not genres, so nothing about it depends on this
+// happening first or interleaved).
+//
+// A historical import can have hundreds of never-seen artists. Resolving
+// each one individually — the exact track lookup is 2 sequential Spotify
+// requests, tried before the 1-request name-search fallback — was enough
+// to push a single request past Vercel's 300s function limit in
+// production (#249). Spotify's "get several tracks"/"get several artists"
+// endpoints (50 ids per request) turn that into roughly N/25 requests
+// instead of up to 2N, which is what actually fixes the timeout rather
+// than just working around it.
+//
+// If the batched track/artist lookup itself fails outright (a real
+// network error, not just some ids not resolving — Spotify returns a null
+// slot for those, not an error), every artist that would have used it
+// falls through to the same one-by-one name-search path this used before
+// — slower, but the existing "missing genres beats a failed import"
+// contract stays intact either way.
+async function resolveArtistGenres(
+  db: Db,
+  pending: Map<number, PendingArtistGenreLookup>,
+  summary: MusicImportSummary
+): Promise<void> {
+  if (pending.size === 0) return;
+
+  const withTrackId: { artistId: number; name: string; trackId: string }[] = [];
+  const needsNameSearch: { artistId: number; name: string }[] = [];
+  for (const [artistId, { name, trackId }] of pending) {
+    if (trackId) {
+      withTrackId.push({ artistId, name, trackId });
+    } else {
+      needsNameSearch.push({ artistId, name });
+    }
+  }
+
+  let matchByTrackId = new Map<string, SpotifyArtistMatch>();
+  if (withTrackId.length > 0) {
+    try {
+      matchByTrackId = await getArtistsForTracks([...new Set(withTrackId.map((a) => a.trackId))]);
+    } catch (error) {
+      summary.errors.push(
+        `Batch Spotify track lookup failed for ${withTrackId.length} artist(s): ${error instanceof Error ? error.message : "unknown error"} — falling back to name search.`
+      );
+    }
+  }
+
+  for (const { artistId, name, trackId } of withTrackId) {
+    const match = matchByTrackId.get(trackId);
+    if (!match) {
+      needsNameSearch.push({ artistId, name });
+      continue;
+    }
+    try {
+      await applyArtistMatch(db, artistId, match);
+    } catch (error) {
+      summary.errors.push(
+        `Spotify genre lookup failed for "${name}": ${error instanceof Error ? error.message : "unknown error"}`
+      );
+    }
+  }
+
+  for (const { artistId, name } of needsNameSearch) {
+    try {
+      const match = await searchArtist(name);
+      if (match) await applyArtistMatch(db, artistId, match);
+    } catch (error) {
+      // Spotify lookup failures shouldn't fail the whole import — the
+      // artist row still gets created/matched, just without genres for
+      // now; spotifyId stays null so the next import retries it.
+      summary.errors.push(
+        `Spotify genre lookup failed for "${name}": ${error instanceof Error ? error.message : "unknown error"}`
+      );
+    }
+  }
+}
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -194,6 +269,7 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
 
   const artistIdCache = new Map<string, number>();
   const podcastShowIdCache = new Map<string, number>();
+  const pendingArtistGenreLookups = new Map<number, PendingArtistGenreLookup>();
   const rows: (typeof musicListens.$inferInsert)[] = [];
 
   for (const file of files) {
@@ -226,7 +302,7 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
         podcastShowId = await resolvePodcastShow(db, podcastShowIdCache, podcastShowName, summary);
       } else if (artistName) {
         const trackId = parseSpotifyTrackId(entry.spotify_track_uri);
-        artistId = await resolveArtist(db, artistIdCache, artistName, trackId, summary);
+        artistId = await getOrCreateArtistId(db, artistIdCache, artistName, trackId, pendingArtistGenreLookups, summary);
       }
 
       rows.push({
@@ -240,6 +316,8 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
       });
     }
   }
+
+  await resolveArtistGenres(db, pendingArtistGenreLookups, summary);
 
   for (let i = 0; i < rows.length; i += INSERT_CHUNK_SIZE) {
     const chunk = rows.slice(i, i + INSERT_CHUNK_SIZE);
