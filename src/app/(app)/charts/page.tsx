@@ -58,12 +58,17 @@ const CHARTS = [
   {
     href: "/charts/sleep-trend",
     title: "Sleep trend",
-    description: "Average time asleep per night, filterable by where you slept.",
+    description: "Average time asleep per night, at any bucket size."
   },
   {
     href: "/charts/sleep-daily",
     title: "Nightly sleep",
     description: "Every logged night — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/sleep-locations",
+    title: "Sleep locations",
+    description: "Where you slept, as a share of nights over time.",
   },
   {
     href: "/charts/gym",
