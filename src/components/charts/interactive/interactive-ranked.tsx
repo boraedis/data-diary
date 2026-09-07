@@ -19,6 +19,24 @@ import { categoricalColor } from "@/lib/viz/color";
 
 export type RankedEntry = { label: string; value: number };
 
+/**
+ * An extra column in table mode.
+ *
+ * Passing any turns the ranked list into a real table with a header row.
+ * The list form stays the default because most consumers only want
+ * "label, bar, number" — the places leaderboard has no use for columns and
+ * shouldn't grow a header to say so.
+ */
+export type RankedColumn = {
+  id: string;
+  label: string;
+  render: (entry: RankedEntry, index: number) => React.ReactNode;
+  /** Dropped below the `sm` breakpoint. Three movement columns plus a
+   * name and a count is more than a phone can hold, and the week is the
+   * one worth keeping when something has to go. */
+  secondary?: boolean;
+};
+
 export type InteractiveRankedProps = {
   entries: RankedEntry[];
   /** Formats each row's displayed value — defaults to
@@ -37,18 +55,152 @@ export type InteractiveRankedProps = {
    * function keying color off each entry (e.g. a per-category color),
    * mirroring InteractiveNetwork's own `color` prop shape. */
   color?: string | ((entry: RankedEntry, index: number) => string);
+  /** Supporting line under the label — a tag, a category. Kept separate
+   * from `columns` because it belongs *with* the name rather than in its
+   * own cell, and it survives on narrow screens where columns don't. */
+  detail?: (entry: RankedEntry, index: number) => string | null;
+  /** Extra columns. Presence of this switches the primitive into table
+   * mode; see `RankedColumn`. */
+  columns?: RankedColumn[];
+  /** Header above the value column in table mode. */
+  valueLabel?: string;
   ariaLabel?: string;
 };
+
+/**
+ * A rank change, drawn the same way everywhere it appears.
+ *
+ * Direction is carried by the glyph and the accessible label, never by
+ * colour alone — this app has no validated status palette (`--chart-1..5`
+ * are the fixed categorical slots, `--destructive` means error), and the
+ * recap epic hit the same wall twice before settling on words and shapes.
+ */
+export function RankMovementCell({ delta, isNew }: { delta: number | null; isNew: boolean }) {
+  if (isNew) {
+    return (
+      <span className="text-xs text-muted-foreground" title="New this period">
+        new
+      </span>
+    );
+  }
+  if (delta === null) {
+    return (
+      <span className="text-xs text-muted-foreground" title="Not present this period">
+        —
+      </span>
+    );
+  }
+  if (delta === 0) {
+    return (
+      <span className="text-xs text-muted-foreground" title="Unchanged">
+        ·
+      </span>
+    );
+  }
+  const up = delta > 0;
+  return (
+    <span
+      className="text-xs text-muted-foreground tabular-nums"
+      title={`${up ? "Up" : "Down"} ${Math.abs(delta)} ${Math.abs(delta) === 1 ? "place" : "places"}`}
+    >
+      <span aria-hidden>{up ? "▲" : "▼"}</span> {Math.abs(delta)}
+    </span>
+  );
+}
 
 export function InteractiveRanked({
   entries,
   formatValue = formatThousandsNumber,
   exactValue = formatThousandsNumber,
   color = categoricalColor(0),
+  detail,
+  columns,
+  valueLabel = "Days",
   ariaLabel = "Ranked list",
 }: InteractiveRankedProps) {
   const max = Math.max(1, ...entries.map((e) => e.value));
   const resolveColor = (entry: RankedEntry, index: number) => (typeof color === "function" ? color(entry, index) : color);
+
+  if (columns && columns.length > 0) {
+    return (
+      // overflow-x-auto rather than shrinking columns past legibility —
+      // same tradeoff the calendar makes on a narrow viewport.
+      <div className="overflow-x-auto">
+        <table className="w-full text-left" aria-label={ariaLabel}>
+          <thead>
+            <tr className="border-b border-border/60 text-xs text-muted-foreground">
+              <th scope="col" className="w-8 py-1.5 pr-2 text-right font-medium">
+                #
+              </th>
+              <th scope="col" className="py-1.5 pr-3 font-medium">
+                Name
+              </th>
+              <th scope="col" className="py-1.5 pr-3 text-right font-medium tabular-nums">
+                {valueLabel}
+              </th>
+              {columns.map((column) => (
+                <th
+                  key={column.id}
+                  scope="col"
+                  className={`py-1.5 pr-3 text-right font-medium ${column.secondary ? "hidden sm:table-cell" : ""}`}
+                >
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry, i) => (
+              <tr key={entry.label} className="border-b border-border/40 last:border-0 hover:bg-accent">
+                <td className="py-1.5 pr-2 text-right text-xs text-muted-foreground tabular-nums">
+                  {i + 1}
+                </td>
+                <td className="py-1.5 pr-3">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="truncate text-sm" title={entry.label}>
+                      {entry.label}
+                    </span>
+                    {detail?.(entry, i) ? (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {detail(entry, i)}
+                      </span>
+                    ) : null}
+                    {/* The bar survives into table mode: a column of
+                        numbers is precise but slow to scan, and the bar is
+                        what makes the shape of a ranking readable at a
+                        glance. */}
+                    <div className="mt-0.5 h-1 w-full max-w-40 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${(entry.value / max) * 100}%`,
+                          backgroundColor: resolveColor(entry, i),
+                        }}
+                      />
+                    </div>
+                  </div>
+                </td>
+                <td
+                  className="py-1.5 pr-3 text-right text-sm tabular-nums"
+                  title={exactValue(entry.value)}
+                >
+                  {formatValue(entry.value)}
+                </td>
+                {columns.map((column) => (
+                  <td
+                    key={column.id}
+                    className={`py-1.5 pr-3 text-right ${column.secondary ? "hidden sm:table-cell" : ""}`}
+                  >
+                    {column.render(entry, i)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     // No space-y here — each row's own py-1 (below) provides the gap now
