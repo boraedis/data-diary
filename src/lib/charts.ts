@@ -756,10 +756,46 @@ export type TrainingMonth = { month: string; daysTrained: number; exercises: num
 export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
   const db = getDb();
   const rows = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date));
+  if (rows.length === 0) return [];
 
-  return groupByPeriod(rows, "month", (r) => r.date).map(({ key, items }) => ({
-    month: key,
-    daysTrained: new Set(items.map((r) => r.date)).size,
-    exercises: items.length,
-  }));
+  const byMonth = new Map(
+    groupByPeriod(rows, "month", (r) => r.date).map(({ key, items }) => [
+      key,
+      { daysTrained: new Set(items.map((r) => r.date)).size, exercises: items.length },
+    ])
+  );
+
+  // Months with no workouts are filled with zero rather than left out.
+  // Omitting them makes the line jump straight from the month before to
+  // the month after, drawing a slope across a gap and implying training
+  // that didn't happen — the real data has exactly one such month
+  // (2023-01) sitting between two active ones.
+  //
+  // Zero is the honest value here specifically because this is a *count*
+  // over a period that was otherwise being logged: a month with day rows
+  // and no workouts is a month you didn't train, not a month with no
+  // data. That reasoning does not transfer to the averagers above, where
+  // an absent month means "nothing was recorded" and a zero would be a
+  // fabricated measurement.
+  //
+  // Only the span between the first and last workout is filled — no
+  // history is invented before tracking began.
+  const months: TrainingMonth[] = [];
+  const keys = [...byMonth.keys()].sort();
+  const [first, last] = [keys[0], keys[keys.length - 1]];
+  for (let month = first; month <= last; month = nextMonth(month)) {
+    const found = byMonth.get(month);
+    months.push({
+      month,
+      daysTrained: found?.daysTrained ?? 0,
+      exercises: found?.exercises ?? 0,
+    });
+  }
+  return months;
+}
+
+/** "YYYY-MM" plus one month, rolling the year over. */
+function nextMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  return m === 12 ? `${year + 1}-01` : `${year}-${String(m + 1).padStart(2, "0")}`;
 }
