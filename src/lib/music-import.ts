@@ -207,8 +207,21 @@ async function applyArtistMatch(db: Db, artistId: number, match: SpotifyArtistMa
 // to push a single request past Vercel's 300s function limit in
 // production (#249). Spotify's "get several tracks"/"get several artists"
 // endpoints (50 ids per request) turn that into roughly N/25 requests
-// instead of up to 2N, which is what actually fixes the timeout rather
-// than just working around it.
+// instead of up to 2N (#250) — but batching only reduces the *count* of
+// requests, not the *time* they can take. Spotify's 429 backoff
+// (spotifyFetch) does a real sleep for Retry-After seconds on every rate
+// limit hit, which still consumes the function's execution budget however
+// few requests it took to get there — confirmed in production (#260): a
+// chunk with ~740 never-seen artists still hit the 300s timeout even after
+// batching. `deadline` bounds this loop's own wall-clock time regardless
+// of how slow or rate-limited Spotify is being: once passed, remaining
+// artists are simply left unresolved (spotifyId stays null, same as any
+// other non-match) rather than the function risking getting killed
+// mid-response. This never costs a listen — artist *ids* are already
+// resolved via the bulk catalog step before this function is even called,
+// so a listen is saved either way; only its artist's genre tags wait for
+// the next import, exactly like an artist Spotify genuinely has no match
+// for today.
 //
 // If the batched track/artist lookup itself fails outright (a real
 // network error, not just some ids not resolving — Spotify returns a null
@@ -219,6 +232,7 @@ async function applyArtistMatch(db: Db, artistId: number, match: SpotifyArtistMa
 async function resolveArtistGenres(
   db: Db,
   pending: Map<number, PendingArtistGenreLookup>,
+  deadline: number,
   summary: MusicImportSummary
 ): Promise<void> {
   if (pending.size === 0) return;
@@ -234,7 +248,7 @@ async function resolveArtistGenres(
   }
 
   let matchByTrackId = new Map<string, SpotifyArtistMatch>();
-  if (withTrackId.length > 0) {
+  if (withTrackId.length > 0 && Date.now() < deadline) {
     try {
       matchByTrackId = await getArtistsForTracks([...new Set(withTrackId.map((a) => a.trackId))]);
     } catch (error) {
@@ -244,10 +258,15 @@ async function resolveArtistGenres(
     }
   }
 
+  let skippedForTime = 0;
   for (const { artistId, name, trackId } of withTrackId) {
     const match = matchByTrackId.get(trackId);
     if (!match) {
       needsNameSearch.push({ artistId, name });
+      continue;
+    }
+    if (Date.now() > deadline) {
+      skippedForTime++;
       continue;
     }
     try {
@@ -260,6 +279,10 @@ async function resolveArtistGenres(
   }
 
   for (const { artistId, name } of needsNameSearch) {
+    if (Date.now() > deadline) {
+      skippedForTime++;
+      continue;
+    }
     try {
       const match = await searchArtist(name);
       if (match) await applyArtistMatch(db, artistId, match);
@@ -271,6 +294,12 @@ async function resolveArtistGenres(
         `Spotify genre lookup failed for "${name}": ${error instanceof Error ? error.message : "unknown error"}`
       );
     }
+  }
+
+  if (skippedForTime > 0) {
+    summary.errors.push(
+      `Stopped Spotify genre lookups after running low on time — ${skippedForTime} artist(s) will be retried on the next import.`
+    );
   }
 }
 
@@ -284,7 +313,16 @@ function asNumber(value: unknown): number | null {
 
 const INSERT_CHUNK_SIZE = 500;
 
+// Vercel's maxDuration for this route (route.ts) is 300s, its hard
+// maximum on this plan. Leaves 40s of margin under that for the database
+// work around resolveArtistGenres (parsing, the bulk catalog resolve, the
+// final listens insert) — see that function's own comment for why the
+// remaining budget goes specifically to bounding Spotify's response time,
+// not to the rest of the import.
+const IMPORT_TIME_BUDGET_MS = 260_000;
+
 export async function importSpotifyExport(files: { name: string; entries: unknown[] }[]): Promise<MusicImportSummary> {
+  const importStartedAt = Date.now();
   const db = getDb();
   const summary: MusicImportSummary = {
     filesProcessed: 0,
@@ -372,7 +410,7 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
     bulkResolvePodcastShows(db, [...distinctPodcastShowNames], summary),
   ]);
 
-  await resolveArtistGenres(db, pendingArtistGenreLookups, summary);
+  await resolveArtistGenres(db, pendingArtistGenreLookups, importStartedAt + IMPORT_TIME_BUDGET_MS, summary);
 
   const rows: (typeof musicListens.$inferInsert)[] = parsedEntries.map((entry) => ({
     playedAt: entry.playedAt,
