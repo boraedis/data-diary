@@ -68,10 +68,14 @@ export function DayTypeCalendarChart({ data }: { data: DayTypeDay[] }) {
     () =>
       data.map((day) => ({
         date: day.date,
-        // The numeric value is unused for colour here but still drives the
-        // tooltip's value row, so it carries the slot index rather than a
-        // meaningless zero.
-        value: DAY_TYPE_ORDER.indexOf(day.dayType as (typeof DAY_TYPE_ORDER)[number]),
+        // A constant, deliberately. The primitive scales a blended cell's
+        // intensity by its value so a calendar keeps saying "how much"
+        // alongside "which kinds" — but a day has exactly one type, so
+        // there is no magnitude here to show. Passing anything varying
+        // (a slot index, say) would make `work` and `sick` differ in
+        // strength for no reason a reader could interpret. Equal values
+        // render every day at full intensity.
+        value: 1,
         categories: [
           { label: DAY_TYPE_LABELS[day.dayType] ?? day.dayType, color: dayTypeColor(day.dayType) },
         ],
@@ -90,7 +94,7 @@ export function DayTypeCalendarChart({ data }: { data: DayTypeDay[] }) {
       title="Day types"
       description="How each day was classified. Days with no type set are left blank."
       formatValue={() => ""}
-      valueLabel="type"
+      valueLabel=""
       extraFilters={
         <Legend
           series={present.map((t) => ({

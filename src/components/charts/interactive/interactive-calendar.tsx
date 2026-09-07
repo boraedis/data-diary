@@ -198,12 +198,38 @@ export function InteractiveCalendar({
     return d3.lab(l, a, b).formatHex();
   };
 
+  /**
+   * How much of the blended hue a cell shows, from its own value.
+   *
+   * A flat blend would throw away magnitude: a day with one person and a
+   * day with seven from the same group would look identical, and the
+   * calendar would stop answering "how much" entirely. Legacy got this for
+   * free — stacking one translucent rect per person meant more people
+   * literally painted more colour over the background — and blending to a
+   * single fill loses it unless it's put back deliberately.
+   *
+   * So the hue says *which kinds*, and the intensity still says *how many*.
+   * The cell is interpolated from the sequential ramp's own low end toward
+   * the blend, which keeps a quiet day in a blended calendar at the same
+   * visual weight as a quiet day in a plain one.
+   *
+   * The floor matters: at zero the hue would be invisible and the whole
+   * point of the mode lost on exactly the days that have only one category
+   * to show. Starting at 40% keeps a single-person day clearly coloured
+   * while leaving real headroom above it.
+   */
+  const MIN_INTENSITY = 0.4;
+
   const cellFill = useCallback(
-    (value: number, categories: DayCategories): string =>
-      categories && categories.length > 0
-        ? blendColors(categories.map((c) => c.color))
-        : colorScale(value),
-    [colorScale],
+    (value: number, categories: DayCategories): string => {
+      if (!categories || categories.length === 0) return colorScale(value);
+      const blend = blendColors(categories.map((c) => c.color));
+      const span = domain[1] - domain[0];
+      const t = span > 0 ? (value - domain[0]) / span : 1;
+      const intensity = MIN_INTENSITY + (1 - MIN_INTENSITY) * Math.min(1, Math.max(0, t));
+      return d3.interpolateLab(colorScale(domain[0]), blend)(intensity);
+    },
+    [colorScale, domain],
   );
 
   const [hovered, setHovered] = useState<Hovered | null>(null);
