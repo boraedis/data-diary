@@ -7,7 +7,7 @@
 // a file that's too big for one request into several smaller ones (see
 // that file's own comment, and #192) — by the time this module sees them,
 // each "file" here may really be one slice of a larger export file.
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, or, sql } from "drizzle-orm";
 import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import { MIN_LISTEN_MS } from "@/lib/music";
@@ -75,10 +75,20 @@ async function bulkResolveArtists(
   const idByLowerName = new Map<string, number>();
   if (names.length === 0) return idByLowerName;
 
+  // A plain `sql\`${names}\`` interpolates a JS array as a parenthesized
+  // parameter list ($1, $2, ...) — valid for `IN (...)`, but not a real
+  // Postgres array value, so it can't be used with the `&&` overlap
+  // operator below (see #255 — this broke every import in production).
+  // `sql.join` over individually-bound elements wrapped in `array[...]`
+  // builds an actual array literal instead.
+  const namesArrayLiteral = sql`array[${sql.join(
+    names.map((name) => sql`${name}`),
+    sql`, `
+  )}]::text[]`;
   const existingRows = await db
     .select({ id: artists.id, name: artists.name, aliases: artists.aliases, spotifyId: artists.spotifyId })
     .from(artists)
-    .where(sql`${artists.name} = any(${names}) or ${artists.aliases} && ${names}::text[]`);
+    .where(or(inArray(artists.name, names), sql`${artists.aliases} && ${namesArrayLiteral}`));
 
   const unmatchedNames: string[] = [];
   for (const name of names) {
