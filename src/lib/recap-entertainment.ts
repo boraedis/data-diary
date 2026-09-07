@@ -17,7 +17,7 @@ import {
 } from "@/db/schema";
 import { addDays, parseDate, toDateString } from "@/lib/date";
 import { getDb } from "@/lib/db";
-import type { RecapPeriod } from "@/lib/recap";
+import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
 
 // The recap's entertainment section (issue #171, epic #130).
 //
@@ -333,34 +333,6 @@ async function firsts(period: RecapPeriod): Promise<RecapFirsts> {
     newArtists: { total: newArtists.length, examples: newArtists.slice(0, 3) },
     newMovieGenres,
   };
-}
-
-/**
- * Keys whose *earliest* appearance anywhere in the supplied history falls
- * inside the period, in discovery order.
- *
- * Callers pass every appearance they know about, across all time — not
- * just the period's — because the whole question is whether anything
- * earlier exists. Feeding this only the period's own rows would report
- * every key in it as new.
- *
- * Exported because #172 (new people and places) and #174 (first-time
- * moments) ask the identical question of different tables; this is the
- * shared helper those should use rather than each writing the rule again.
- */
-export function firstSeenInPeriod(
-  period: RecapPeriod,
-  appearances: { key: string; date: string }[]
-): string[] {
-  const earliest = new Map<string, string>();
-  for (const { key, date } of appearances) {
-    const seen = earliest.get(key);
-    if (seen === undefined || date < seen) earliest.set(key, date);
-  }
-  return [...earliest.entries()]
-    .filter(([, date]) => date >= period.start && date <= period.end)
-    .sort((a, b) => a[1].localeCompare(b[1]))
-    .map(([key]) => key);
 }
 
 // --- The section -----------------------------------------------------------

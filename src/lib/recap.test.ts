@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MIN_DAYS_FOR_AVERAGE,
+  firstSeenInPeriod,
   MIN_DAYS_FOR_TOTAL,
   parseYearSegment,
   periodLengthDays,
@@ -104,5 +105,62 @@ describe("parseYearSegment", () => {
     for (const segment of ["25", "20255", "2o25", "", "-2025", "2025-01"]) {
       expect(parseYearSegment(segment)).toBeNull();
     }
+  });
+});
+
+const firstSeenPeriod = yearPeriod(2025);
+
+describe("firstSeenInPeriod", () => {
+  it("reports a key whose only appearances are inside the period", () => {
+    expect(
+      firstSeenInPeriod(firstSeenPeriod, [
+        { key: "Portishead", date: "2025-04-02" },
+        { key: "Portishead", date: "2025-09-30" },
+      ])
+    ).toEqual(["Portishead"]);
+  });
+
+  it("does not report a key that appeared before the period, even if it also appears inside it", () => {
+    // The whole point: seeing something this year doesn't make it new.
+    expect(
+      firstSeenInPeriod(firstSeenPeriod, [
+        { key: "Radiohead", date: "2019-01-05" },
+        { key: "Radiohead", date: "2025-06-01" },
+      ])
+    ).toEqual([]);
+  });
+
+  it("does not report a key whose first appearance is after the period", () => {
+    expect(firstSeenInPeriod(firstSeenPeriod, [{ key: "Later", date: "2026-02-01" }])).toEqual([]);
+  });
+
+  it("orders results by when they were discovered", () => {
+    expect(
+      firstSeenInPeriod(firstSeenPeriod, [
+        { key: "Third", date: "2025-11-01" },
+        { key: "First", date: "2025-01-09" },
+        { key: "Second", date: "2025-06-15" },
+      ])
+    ).toEqual(["First", "Second", "Third"]);
+  });
+
+  it("counts appearances on the period's own boundary days", () => {
+    expect(
+      firstSeenInPeriod(firstSeenPeriod, [
+        { key: "Opener", date: "2025-01-01" },
+        { key: "Closer", date: "2025-12-31" },
+      ])
+    ).toEqual(["Opener", "Closer"]);
+  });
+
+  it("handles a key appearing many times out of order", () => {
+    // Order of the input says nothing about which appearance was first.
+    expect(
+      firstSeenInPeriod(firstSeenPeriod, [
+        { key: "Shuffled", date: "2025-08-01" },
+        { key: "Shuffled", date: "2024-12-31" },
+        { key: "Shuffled", date: "2025-01-02" },
+      ])
+    ).toEqual([]);
   });
 });

@@ -2,8 +2,7 @@ import { inArray } from "drizzle-orm";
 import { days, people, places } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import { firstSeenInPeriod } from "@/lib/recap-entertainment";
-import type { RecapPeriod } from "@/lib/recap";
+import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
 import type { CountryVisitEntry, PlaceLeaderboardEntry } from "@/lib/charts";
 
 // The recap's people & places section (issue #172, epic #130).
@@ -235,6 +234,21 @@ export async function getRecapPeoplePlaces(
   period: RecapPeriod,
   prior: RecapPeriod
 ): Promise<RecapPeoplePlaces> {
+  return buildRecapPeoplePlaces(await loadRecapPeoplePlacesInput(), period, prior);
+}
+
+/**
+ * The all-time read behind this section, exported separately because the
+ * moments engine (#174) needs the same place-to-country resolution for its
+ * first-visit signal.
+ *
+ * Resolving a leaf place to its country means walking `idPath` to the root
+ * and normalizing the name — subtle enough that a second copy would drift.
+ * Sharing the loader means the moments list and the countries-visited count
+ * can never disagree about what counts as a country or when you first went
+ * there.
+ */
+export async function loadRecapPeoplePlacesInput(): Promise<RecapPeoplePlacesInput> {
   const db = getDb();
   const dayRows = await db
     .select({
@@ -300,17 +314,13 @@ export async function getRecapPeoplePlaces(
     colorByPlaceId.set(placeId, root?.color ?? null);
   }
 
-  return buildRecapPeoplePlaces(
-    {
-      days: slots,
-      personNames: new Map(personRows.map((r) => [r.id, r.name])),
-      placeNames: new Map(placeRows.map((r) => [r.id, r.name])),
-      countryByPlaceId,
-      colorByPlaceId,
-    },
-    period,
-    prior
-  );
+  return {
+    days: slots,
+    personNames: new Map(personRows.map((r) => [r.id, r.name])),
+    placeNames: new Map(placeRows.map((r) => [r.id, r.name])),
+    countryByPlaceId,
+    colorByPlaceId,
+  };
 }
 
 function isId(value: number | null): value is number {
