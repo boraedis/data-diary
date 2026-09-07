@@ -21,6 +21,16 @@ const CHARTS = [
     description: "Zoomable line of every logged day's happiness score.",
   },
   {
+    href: "/charts/happiness-calendar",
+    title: "Happiness calendar",
+    description: "A year-by-year heatmap of daily happiness.",
+  },
+  {
+    href: "/charts/day-types",
+    title: "Day types",
+    description: "Work, days off, vacation and travel across the years.",
+  },
+  {
     href: "/charts/weight",
     title: "Weight over time",
     description: "Zoomable line — drag the strip below to zoom into a range.",
@@ -94,6 +104,21 @@ const CHARTS = [
     href: "/charts/people",
     title: "People network",
     description: "Who gets logged together — drag nodes to reposition.",
+  },
+  {
+    href: "/charts/people-over-time",
+    title: "Who you saw",
+    description: "Days logged with each person, as a share over time.",
+  },
+  {
+    href: "/charts/people-calendar",
+    title: "People calendar",
+    description: "How many people you logged each day.",
+  },
+  {
+    href: "/charts/people-impact",
+    title: "People impact",
+    description: "Who contributed most to how your days went, week by week.",
   },
   {
     href: "/charts/world",

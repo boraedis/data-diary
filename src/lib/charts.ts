@@ -778,3 +778,121 @@ export async function getTrainingDailyData(): Promise<TrainingDay[]> {
   }
   return out;
 }
+
+// --- People over time (#220) ----------------------------------------------
+
+/** One day's people, with the tag each belongs to and the day's own
+ * happiness — the latter because the impact score (`src/lib/impact.ts`) is
+ * a function of both the person's slot and how the day went. */
+export type PeopleDay = { date: string; happiness: number | null; people: PersonOnDay[] };
+
+/** `tagName`/`tagColor` are null for anyone untagged — most people have a
+ * tag, but nothing requires one, so a consumer grouping by tag has to
+ * handle the ungrouped case rather than assuming. */
+export type PersonOnDay = {
+  name: string;
+  tagName: string | null;
+  tagColor: string | null;
+  /** 1-7, the positive slot they occupied. Slot order carries a soft
+   * ranking that the impact score reads — see `src/lib/impact.ts`. */
+  slot: number;
+};
+
+/**
+ * Who was logged on each day, oldest first.
+ *
+ * **Positive slots only.** `getPeopleNetworkData` unions the negative slots
+ * too, because a co-occurrence graph asks who appears in your days at all.
+ * Here it would add nothing: the negative slots hold **5 appearances in the
+ * entire history**, against 17,954 positive ones. Three people, five days.
+ * Carrying them through the fold, the palette and the legend to draw
+ * something invisible isn't a trade worth making — and unlike the recap's
+ * exclusion (#199), which was a judgment about tone, this one is just
+ * arithmetic.
+ *
+ * Names rather than ids because that's what a chart legend needs, and
+ * because `people.name` is unique — so it identifies a person as well as
+ * the id does, without a second lookup at every call site. Each person
+ * carries their tag's name and color too, so a consumer can colour by
+ * group without re-joining.
+ */
+export async function getPeopleDailyData(): Promise<PeopleDay[]> {
+  const db = getDb();
+  const slots = [
+    days.positivePerson1Id,
+    days.positivePerson2Id,
+    days.positivePerson3Id,
+    days.positivePerson4Id,
+    days.positivePerson5Id,
+    days.positivePerson6Id,
+    days.positivePerson7Id,
+  ];
+
+  const [dayRows, personRows] = await Promise.all([
+    db
+      .select({
+        date: days.date,
+        happiness: days.happiness,
+        p1: slots[0],
+        p2: slots[1],
+        p3: slots[2],
+        p4: slots[3],
+        p5: slots[4],
+        p6: slots[5],
+        p7: slots[6],
+      })
+      .from(days)
+      .orderBy(asc(days.date)),
+    db
+      .select({ id: people.id, name: people.name, tagName: tags.name, tagColor: tags.color })
+      .from(people)
+      .leftJoin(tags, eq(tags.id, people.tagId)),
+  ]);
+
+  const byId = new Map(personRows.map((p) => [p.id, p]));
+  const out: PeopleDay[] = [];
+  for (const row of dayRows) {
+    // Deduplicated by person, keeping their *earliest* slot: nothing stops
+    // one person filling two slots on a day, "who was I with" counts them
+    // once, and the earliest slot is the one the impact score should read
+    // since earlier slots weigh more.
+    const present: PersonOnDay[] = [];
+    const seen = new Set<number>();
+    [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7].forEach((id, index) => {
+      if (id === null || seen.has(id)) return;
+      seen.add(id);
+      const person = byId.get(id);
+      if (person) {
+        present.push({
+          name: person.name,
+          tagName: person.tagName,
+          tagColor: person.tagColor,
+          slot: index + 1,
+        });
+      }
+    });
+    if (present.length > 0) out.push({ date: row.date, happiness: row.happiness, people: present });
+  }
+  return out;
+}
+
+// --- Mood calendars (#216) ------------------------------------------------
+
+/** Every logged happiness score, oldest first. */
+export function getHappinessCalendarData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.happiness);
+}
+
+/** A day and how it was classified (`days.dayType`), oldest first. Days with
+ * no type are omitted rather than given one. */
+export type DayTypeDay = { date: string; dayType: string };
+
+export async function getDayTypeCalendarData(): Promise<DayTypeDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, dayType: days.dayType })
+    .from(days)
+    .where(isNotNull(days.dayType))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, dayType: r.dayType as string }));
+}
