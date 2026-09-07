@@ -161,44 +161,84 @@ describe("parseSpotifyTrackId", () => {
   });
 });
 
-describe("getArtistForTrack", () => {
-  it("resolves the track's primary artist and their genres — the exact path #225 prefers over name search", async () => {
+describe("getArtistsForTracks", () => {
+  it("returns an empty map without calling fetch at all for an empty input", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { getArtistsForTracks } = await freshSpotifyModule();
+    expect(await getArtistsForTracks([])).toEqual(new Map());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves each track's primary artist and genres in one batched track request + one batched artist request", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ access_token: "tok", expires_in: 3600 }))
-      .mockResolvedValueOnce(jsonResponse({ artists: [{ id: "artist1" }, { id: "artist2" }] }))
-      .mockResolvedValueOnce(jsonResponse({ id: "artist1", name: "Radiohead", genres: ["art rock"] }));
+      .mockResolvedValueOnce(
+        jsonResponse({
+          tracks: [
+            { id: "trackA", artists: [{ id: "artist1" }, { id: "artist2" }] },
+            { id: "trackB", artists: [{ id: "artist3" }] },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          artists: [
+            { id: "artist1", name: "Radiohead", genres: ["art rock"] },
+            { id: "artist3", name: "Boards of Canada", genres: ["idm"] },
+          ],
+        })
+      );
     vi.stubGlobal("fetch", fetchMock);
-    const { getArtistForTrack } = await freshSpotifyModule();
+    const { getArtistsForTracks } = await freshSpotifyModule();
 
-    expect(await getArtistForTrack("track123")).toEqual({
-      spotifyId: "artist1",
-      name: "Radiohead",
-      genres: ["art rock"],
-    });
-    // token + track lookup + artist lookup, and the artist lookup targets
-    // the track's first (primary) artist, not any other collaborator.
+    const result = await getArtistsForTracks(["trackA", "trackB"]);
+    expect(result.get("trackA")).toEqual({ spotifyId: "artist1", name: "Radiohead", genres: ["art rock"] });
+    expect(result.get("trackB")).toEqual({ spotifyId: "artist3", name: "Boards of Canada", genres: ["idm"] });
+    // token + one tracks batch + one artists batch — never one request per track.
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect((fetchMock.mock.calls[2][0] as string)).toContain("/artists/artist1");
+    // Only the track's *primary* (first) artist is looked up — "artist2"
+    // (a featured collaborator) never gets queried.
+    expect((fetchMock.mock.calls[2][0] as string)).toContain("ids=artist1%2Cartist3");
   });
 
-  it("returns null (not a thrown error) when the track has been removed from Spotify", async () => {
+  it("omits a track id Spotify returns a null slot for, rather than throwing", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ access_token: "tok", expires_in: 3600 }))
-      .mockResolvedValueOnce(jsonResponse({}, false, 404));
+      .mockResolvedValueOnce(jsonResponse({ tracks: [null, { id: "trackB", artists: [{ id: "artist3" }] }] }))
+      .mockResolvedValueOnce(jsonResponse({ artists: [{ id: "artist3", name: "Boards of Canada", genres: ["idm"] }] }));
     vi.stubGlobal("fetch", fetchMock);
-    const { getArtistForTrack } = await freshSpotifyModule();
-    await expect(getArtistForTrack("gone")).resolves.toBeNull();
+    const { getArtistsForTracks } = await freshSpotifyModule();
+
+    const result = await getArtistsForTracks(["gone", "trackB"]);
+    expect(result.has("gone")).toBe(false);
+    expect(result.get("trackB")).toEqual({ spotifyId: "artist3", name: "Boards of Canada", genres: ["idm"] });
   });
 
-  it("still throws on a non-404 failure", async () => {
+  it("splits into multiple requests once past Spotify's 50-id batch limit", async () => {
+    const trackIds = Array.from({ length: 60 }, (_, i) => `track${i}`);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ access_token: "tok", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getArtistsForTracks } = await freshSpotifyModule();
+
+    await getArtistsForTracks(trackIds);
+    // token + 2 track batches (50 + 10) — no artist batch since nothing resolved.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("propagates a genuine request failure rather than swallowing it", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ access_token: "tok", expires_in: 3600 }))
       .mockResolvedValueOnce(jsonResponse({}, false, 500));
     vi.stubGlobal("fetch", fetchMock);
-    const { getArtistForTrack } = await freshSpotifyModule();
-    await expect(getArtistForTrack("track123")).rejects.toThrow("500");
+    const { getArtistsForTracks } = await freshSpotifyModule();
+    await expect(getArtistsForTracks(["track123"])).rejects.toThrow("500");
   });
 });
