@@ -1,10 +1,10 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import { parseDate } from "@/lib/date";
+import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 
@@ -657,4 +657,97 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     rootColor: r.rootColor,
     value: Number(r.value),
   }));
+}
+
+// --- Health & activity (#218) --------------------------------------------
+//
+// Five charts from the legacy inventory (#209), all on primitives that
+// already shipped. Every fetcher here returns a **daily** series, never a
+// pre-bucketed one: the charts carry a period picker, so the bucketing has
+// to happen client-side where the selection lives. That's exactly the split
+// `src/lib/viz/bin.ts` documents — re-bucketing an already-fetched series
+// is its job, and pushing the aggregation into SQL here would freeze the
+// bucket size at query time and make the picker impossible.
+
+/** A single value per calendar day — the shape InteractiveCalendar and
+ * InteractiveScroller consume directly, and the input the trend charts
+ * re-bucket. Deliberately generic: most of the remaining chart backlog is
+ * "this one `days` column, by day". */
+export type DailyValue = { date: string; value: number };
+
+/** Every logged value of one nullable numeric `days` column, oldest first. */
+async function dailyValuesOf(column: AnyPgColumn): Promise<DailyValue[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: days.date, value: column })
+    .from(days)
+    .where(isNotNull(column))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, value: Number(r.value) }));
+}
+
+export function getCoffeeDailyData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.coffees);
+}
+
+export function getDistanceDailyData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.distanceWalkedKm);
+}
+
+/** A day's training: minutes trained and how many exercises made them up. */
+export type TrainingDay = { date: string; minutes: number; exercises: number };
+
+/**
+ * Training per day, measured as **time trained**.
+ *
+ * Time is the honest measure of volume. Counting `workouts` rows counts one
+ * per exercise performed, so a session of eight movements outweighs a
+ * two-hour hike logged as one; counting days treats a ten-minute session
+ * and a three-hour one alike. Summed duration is the only one of the three
+ * that answers "how much did I actually train".
+ *
+ * `durationMinutes` is nullable, so this is worth stating: in practice
+ * 1,371 of 1,376 rows carry one, and the five that don't contribute zero.
+ * At that coverage a sum is safe. If duration ever became sparse — a new
+ * category logged without it — this would quietly understate, and the fix
+ * would be to fall back rather than keep summing.
+ *
+ * **Days with no training are returned as explicit zeros**, across the span
+ * from the first logged workout to the last. Leaving them out makes any
+ * bucketing of this series jump the gap, drawing a slope across months
+ * where nothing happened — the real data has exactly one such month
+ * (2023-01) between two active ones. Zero is the honest value because
+ * exercise was being actively logged either side of it: nothing recorded
+ * means nothing done, not nothing known. That reasoning is specific to a
+ * count-like measure over a period that was otherwise being tracked, and
+ * deliberately does not transfer to the `days`-column series above, where
+ * an absent day means nothing was recorded and a zero would be a
+ * fabricated measurement.
+ *
+ * Padding at day granularity rather than by month means the zero-filling
+ * survives whatever bucket size the reader picks.
+ */
+export async function getTrainingDailyData(): Promise<TrainingDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({ date: workouts.date, durationMinutes: workouts.durationMinutes })
+    .from(workouts)
+    .orderBy(asc(workouts.date));
+  if (rows.length === 0) return [];
+
+  const byDate = new Map<string, { minutes: number; exercises: number }>();
+  for (const row of rows) {
+    const existing = byDate.get(row.date) ?? { minutes: 0, exercises: 0 };
+    existing.minutes += row.durationMinutes ?? 0;
+    existing.exercises += 1;
+    byDate.set(row.date, existing);
+  }
+
+  const out: TrainingDay[] = [];
+  const last = rows[rows.length - 1].date;
+  for (let date = rows[0].date; date <= last; date = addDays(date, 1)) {
+    const found = byDate.get(date);
+    out.push({ date, minutes: found?.minutes ?? 0, exercises: found?.exercises ?? 0 });
+  }
+  return out;
 }
