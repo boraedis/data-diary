@@ -96,6 +96,16 @@ const CHARTS = [
     description: "Who gets logged together — drag nodes to reposition.",
   },
   {
+    href: "/charts/people-over-time",
+    title: "Who you saw",
+    description: "Days logged with each person, as a share over time.",
+  },
+  {
+    href: "/charts/people-calendar",
+    title: "People calendar",
+    description: "How many people you logged each day.",
+  },
+  {
     href: "/charts/world",
     title: "Days per country",
     description: "A world map colored by how many days you've logged in each country.",

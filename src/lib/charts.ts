@@ -778,3 +778,70 @@ export async function getTrainingDailyData(): Promise<TrainingDay[]> {
   }
   return out;
 }
+
+// --- People over time (#220) ----------------------------------------------
+
+/** One day's people, by name. */
+export type PeopleDay = { date: string; names: string[] };
+
+/**
+ * Who was logged on each day, oldest first.
+ *
+ * **Positive slots only.** `getPeopleNetworkData` unions the negative slots
+ * too, because a co-occurrence graph asks who appears in your days at all.
+ * Here it would add nothing: the negative slots hold **5 appearances in the
+ * entire history**, against 17,954 positive ones. Three people, five days.
+ * Carrying them through the fold, the palette and the legend to draw
+ * something invisible isn't a trade worth making — and unlike the recap's
+ * exclusion (#199), which was a judgment about tone, this one is just
+ * arithmetic.
+ *
+ * Names rather than ids because that's what a chart legend needs, and
+ * because `people.name` is unique — so it identifies a person as well as
+ * the id does, without a second lookup at every call site.
+ */
+export async function getPeopleDailyData(): Promise<PeopleDay[]> {
+  const db = getDb();
+  const slots = [
+    days.positivePerson1Id,
+    days.positivePerson2Id,
+    days.positivePerson3Id,
+    days.positivePerson4Id,
+    days.positivePerson5Id,
+    days.positivePerson6Id,
+    days.positivePerson7Id,
+  ];
+
+  const [dayRows, personRows] = await Promise.all([
+    db
+      .select({
+        date: days.date,
+        p1: slots[0],
+        p2: slots[1],
+        p3: slots[2],
+        p4: slots[3],
+        p5: slots[4],
+        p6: slots[5],
+        p7: slots[6],
+      })
+      .from(days)
+      .orderBy(asc(days.date)),
+    db.select({ id: people.id, name: people.name }).from(people),
+  ]);
+
+  const nameById = new Map(personRows.map((p) => [p.id, p.name]));
+  const out: PeopleDay[] = [];
+  for (const row of dayRows) {
+    // Deduplicated: nothing stops one person filling two slots on a day,
+    // and "who was I with" counts them once.
+    const ids = new Set(
+      [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7].filter(
+        (id): id is number => id !== null,
+      ),
+    );
+    if (ids.size === 0) continue;
+    const names = [...ids].map((id) => nameById.get(id)).filter((n): n is string => n !== undefined);
+    if (names.length > 0) out.push({ date: row.date, names });
+  }
+  return out;
+}
