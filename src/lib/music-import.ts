@@ -10,16 +10,20 @@
 import { eq, or, sql } from "drizzle-orm";
 import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
-import { searchArtist } from "@/lib/spotify";
+import { getArtistForTrack, parseSpotifyTrackId, searchArtist } from "@/lib/spotify";
 
 // Only the fields this import actually uses — Spotify's export has several
 // more (platform, conn_country, shuffle, skipped, ...) nobody reads here.
+// spotify_track_uri specifically lets artist resolution below use an exact
+// track lookup instead of guessing from the free-text artist name — see
+// resolveArtist's own comment.
 type SpotifyExportEntry = {
   ts: unknown;
   ms_played: unknown;
   master_metadata_track_name: unknown;
   master_metadata_album_artist_name: unknown;
   master_metadata_album_album_name: unknown;
+  spotify_track_uri: unknown;
   episode_name: unknown;
   episode_show_name: unknown;
 };
@@ -42,10 +46,18 @@ type Db = ReturnType<typeof getDb>;
 // rows get a best-effort Spotify genre lookup; an existing row missing
 // genres (spotifyId still null — e.g. a previous lookup failed or found no
 // match) gets one retry per import rather than being skipped forever.
+//
+// Prefers an exact lookup via the entry's own `spotify_track_uri` (the
+// track the user actually played) over guessing from the free-text artist
+// name — see getArtistForTrack's comment for why. `trackId` is only
+// available for the specific entry that first triggers this artist's
+// lookup, so a name-only fallback still matters for older export rows
+// with no track URI at all.
 async function resolveArtist(
   db: Db,
   cache: Map<string, number>,
   rawName: string,
+  trackId: string | null,
   summary: MusicImportSummary
 ): Promise<number | null> {
   const name = rawName.trim();
@@ -85,7 +97,7 @@ async function resolveArtist(
 
   if (needsGenreLookup) {
     try {
-      const match = await searchArtist(name);
+      const match = (trackId ? await getArtistForTrack(trackId) : null) ?? (await searchArtist(name));
       if (match) {
         const genreIds: number[] = [];
         for (const genreName of match.genres) {
@@ -103,7 +115,22 @@ async function resolveArtist(
             .values(genreIds.map((genreId) => ({ artistId, genreId })))
             .onConflictDoNothing({ target: [artistGenres.artistId, artistGenres.genreId] });
         }
-        await db.update(artists).set({ spotifyId: match.spotifyId }).where(eq(artists.id, artistId));
+        // artists.spotifyId is unique, but two different free-text names in
+        // the user's own history (a typo, an alternate spelling, "DRAM" vs
+        // "DR") can both legitimately resolve to the same real Spotify
+        // artist — the second row to claim it would otherwise throw a
+        // unique-violation on a plain UPDATE (see #223). Guarding with NOT
+        // EXISTS makes that a benign no-op instead: genres above are still
+        // attached to this row either way, only the canonical spotifyId
+        // link is skipped since another row already legitimately holds it.
+        await db
+          .update(artists)
+          .set({ spotifyId: match.spotifyId })
+          .where(
+            sql`${artists.id} = ${artistId} and not exists (
+              select 1 from artists as existing where existing.spotify_id = ${match.spotifyId}
+            )`
+          );
       }
     } catch (error) {
       // Spotify lookup failures shouldn't fail the whole import — the
@@ -190,7 +217,8 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
       if (podcastShowName) {
         podcastShowId = await resolvePodcastShow(db, podcastShowIdCache, podcastShowName, summary);
       } else if (artistName) {
-        artistId = await resolveArtist(db, artistIdCache, artistName, summary);
+        const trackId = parseSpotifyTrackId(entry.spotify_track_uri);
+        artistId = await resolveArtist(db, artistIdCache, artistName, trackId, summary);
       }
 
       rows.push({
