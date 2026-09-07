@@ -53,6 +53,7 @@ export function CompositionExplorer({
   description,
   valueFormat,
   extraFilters,
+  initialPeriod = "month",
   ariaLabel,
 }: {
   rows: CompositionRow[];
@@ -63,10 +64,13 @@ export function CompositionExplorer({
   /** Extra controls rendered before the built-in ones. The caller owns
    * their state and reshapes `rows` accordingly. */
   extraFilters?: React.ReactNode;
+  /** Starting bucket size. Month suits most of these; a chart whose signal
+   * is week-to-week says so. */
+  initialPeriod?: Period;
   ariaLabel: string;
 }) {
   const [mode, setMode] = useState<InteractiveAreaMode>("proportional");
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>(initialPeriod);
 
   const points = useMemo<InteractiveAreaPoint[]>(
     () =>

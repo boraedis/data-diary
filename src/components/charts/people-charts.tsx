@@ -9,6 +9,7 @@ import {
   OTHER_ID,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
+import { personImpact } from "@/lib/impact";
 import type { PeopleDay } from "@/lib/charts";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
@@ -128,6 +129,69 @@ export function PeopleCalendarChart({ data }: { data: PeopleDay[] }) {
           ? "Calendar heatmap of how many people were logged each day."
           : "Calendar of which tagged groups of people were logged each day, shown as a colour mix."
       }
+    />
+  );
+}
+
+/**
+ * How much each person contributed to how your days went, over time.
+ *
+ * The score is legacy's, ported verbatim — see `src/lib/impact.ts` and
+ * #232 for why it stays as-is despite a shape nobody would derive today.
+ *
+ * **Positive slots only**, for two reasons that happen to agree: the
+ * negative branch produces negative scores, which a stacked area can't
+ * represent (`InteractiveArea` assumes a zero baseline), and the negative
+ * slots hold five appearances in the entire history anyway. Excluding them
+ * costs nothing real.
+ *
+ * Days with no happiness score are skipped rather than scored as zero — the
+ * formula is a function of the day's score, so without one there is no
+ * impact to compute, and a zero would read as "they were there and it
+ * counted for nothing".
+ *
+ * Weekly by default, per the selection on #209: impact is a week-to-week
+ * signal, and monthly buckets flatten exactly the variation worth seeing.
+ */
+export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
+  const scored = useMemo(
+    () => data.filter((day) => day.happiness !== null),
+    [data],
+  );
+
+  const { categories, keep } = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const day of scored) {
+      for (const person of day.people) {
+        const score = personImpact(day.happiness as number, person.slot);
+        totals.set(person.name, (totals.get(person.name) ?? 0) + score);
+      }
+    }
+    return foldToTopCategories(totals, MAX_PEOPLE);
+  }, [scored]);
+
+  const rows = useMemo<CompositionRow[]>(
+    () =>
+      scored.map((day) => {
+        const values: Record<string, number> = {};
+        for (const person of day.people) {
+          const id = keep.has(person.name) ? person.name : OTHER_ID;
+          values[id] = (values[id] ?? 0) + personImpact(day.happiness as number, person.slot);
+        }
+        return { date: day.date, values };
+      }),
+    [scored, keep],
+  );
+
+  return (
+    <CompositionExplorer
+      rows={rows}
+      categories={categories}
+      title="People impact"
+      description="How much each person contributed to how your days went, using the original scoring from the legacy app. Everyone outside the top five is folded into Other."
+      valueFormat={(v) => v.toFixed(1)}
+      initialPeriod="week"
+      ariaLabel="How much each person contributed to how your days went, over time."
     />
   );
 }

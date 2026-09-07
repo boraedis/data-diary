@@ -781,13 +781,22 @@ export async function getTrainingDailyData(): Promise<TrainingDay[]> {
 
 // --- People over time (#220) ----------------------------------------------
 
-/** One day's people, with the tag each belongs to. */
-export type PeopleDay = { date: string; people: PersonOnDay[] };
+/** One day's people, with the tag each belongs to and the day's own
+ * happiness — the latter because the impact score (`src/lib/impact.ts`) is
+ * a function of both the person's slot and how the day went. */
+export type PeopleDay = { date: string; happiness: number | null; people: PersonOnDay[] };
 
 /** `tagName`/`tagColor` are null for anyone untagged — most people have a
  * tag, but nothing requires one, so a consumer grouping by tag has to
  * handle the ungrouped case rather than assuming. */
-export type PersonOnDay = { name: string; tagName: string | null; tagColor: string | null };
+export type PersonOnDay = {
+  name: string;
+  tagName: string | null;
+  tagColor: string | null;
+  /** 1-7, the positive slot they occupied. Slot order carries a soft
+   * ranking that the impact score reads — see `src/lib/impact.ts`. */
+  slot: number;
+};
 
 /**
  * Who was logged on each day, oldest first.
@@ -823,6 +832,7 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
     db
       .select({
         date: days.date,
+        happiness: days.happiness,
         p1: slots[0],
         p2: slots[1],
         p3: slots[2],
@@ -842,22 +852,26 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
   const byId = new Map(personRows.map((p) => [p.id, p]));
   const out: PeopleDay[] = [];
   for (const row of dayRows) {
-    // Deduplicated: nothing stops one person filling two slots on a day,
-    // and "who was I with" counts them once.
-    const ids = new Set(
-      [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7].filter(
-        (id): id is number => id !== null,
-      ),
-    );
-    if (ids.size === 0) continue;
+    // Deduplicated by person, keeping their *earliest* slot: nothing stops
+    // one person filling two slots on a day, "who was I with" counts them
+    // once, and the earliest slot is the one the impact score should read
+    // since earlier slots weigh more.
     const present: PersonOnDay[] = [];
-    for (const id of ids) {
+    const seen = new Set<number>();
+    [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7].forEach((id, index) => {
+      if (id === null || seen.has(id)) return;
+      seen.add(id);
       const person = byId.get(id);
       if (person) {
-        present.push({ name: person.name, tagName: person.tagName, tagColor: person.tagColor });
+        present.push({
+          name: person.name,
+          tagName: person.tagName,
+          tagColor: person.tagColor,
+          slot: index + 1,
+        });
       }
-    }
-    if (present.length > 0) out.push({ date: row.date, people: present });
+    });
+    if (present.length > 0) out.push({ date: row.date, happiness: row.happiness, people: present });
   }
   return out;
 }

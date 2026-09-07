@@ -116,6 +116,11 @@ const CHARTS = [
     description: "How many people you logged each day.",
   },
   {
+    href: "/charts/people-impact",
+    title: "People impact",
+    description: "Who contributed most to how your days went, week by week.",
+  },
+  {
     href: "/charts/world",
     title: "Days per country",
     description: "A world map colored by how many days you've logged in each country.",
