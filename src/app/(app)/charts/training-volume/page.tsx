@@ -12,7 +12,7 @@ export default async function TrainingVolumeChartPage() {
     <ChartPage title="Training volume">
       <ChartCard
         title="Training volume"
-        description="Days trained each month. Hover a month to see how many individual exercises those days held."
+        description="Total hours trained each month. Hover a month for the days, exercises and average session length behind it."
         empty={data.length === 0}
       >
         <TrainingVolumeChart data={data} />

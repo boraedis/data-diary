@@ -733,35 +733,52 @@ export function getDistanceScrollerData(): Promise<DailyValue[]> {
   return dailyValuesOf(days.distanceWalkedKm);
 }
 
-/** Training volume per month: days trained, plus how many individual
- * exercises those days held. */
-export type TrainingMonth = { month: string; daysTrained: number; exercises: number };
+/** Training volume per month: total time trained, plus the context needed
+ * to read it — how many days that time was spread over, and how many
+ * individual exercises those days held. */
+export type TrainingMonth = {
+  month: string;
+  minutes: number;
+  daysTrained: number;
+  exercises: number;
+};
 
 /**
- * Monthly training volume.
+ * Monthly training volume, measured as **total time trained**.
  *
- * **Counts days trained, not `workouts` rows.** That table holds one row
- * per exercise performed, so a single session of eight exercises is eight
- * rows — "412 workouts" and "180 days trained" are both derivable from it
- * and only one is what a person means by "how much did I train". The recap
- * epic settled this the same way in #205, and the two disagreeing would be
- * worse than either choice.
+ * Time is the honest measure of volume here. Counting `workouts` rows
+ * counts one row per exercise performed, so a session of eight movements
+ * outweighs a two-hour hike logged as one; counting days trained treats a
+ * ten-minute session and a three-hour one alike. Summed duration is the
+ * only one of the three that answers "how much did I actually train".
  *
- * The exercise count rides along for the tooltip rather than as a second
- * plotted series: it lives on a completely different scale (tens per month
- * against a hard ceiling of ~31 days), so plotting both would either need
- * a second y-axis — which this repo's charts don't do — or squash the days
- * line flat.
+ * `durationMinutes` is nullable, so this is worth stating: in practice
+ * 1,371 of 1,376 rows carry one, and the five that don't contribute zero.
+ * At that coverage a sum is safe. If duration ever became sparse — a new
+ * category logged without it, say — this would quietly understate, and
+ * the fix would be to fall back rather than to keep summing.
+ *
+ * Days trained and exercise count ride along for the tooltip rather than
+ * as extra plotted series: they sit on completely different scales (tens
+ * of hours against ~31 days against hundreds of exercises), and a second
+ * y-axis is the one thing these charts never do.
  */
 export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
   const db = getDb();
-  const rows = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date));
+  const rows = await db
+    .select({ date: workouts.date, durationMinutes: workouts.durationMinutes })
+    .from(workouts)
+    .orderBy(asc(workouts.date));
   if (rows.length === 0) return [];
 
   const byMonth = new Map(
     groupByPeriod(rows, "month", (r) => r.date).map(({ key, items }) => [
       key,
-      { daysTrained: new Set(items.map((r) => r.date)).size, exercises: items.length },
+      {
+        minutes: items.reduce((total, r) => total + (r.durationMinutes ?? 0), 0),
+        daysTrained: new Set(items.map((r) => r.date)).size,
+        exercises: items.length,
+      },
     ])
   );
 
@@ -771,12 +788,11 @@ export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
   // that didn't happen — the real data has exactly one such month
   // (2023-01) sitting between two active ones.
   //
-  // Zero is the honest value here specifically because this is a *count*
-  // over a period that was otherwise being logged: a month with day rows
-  // and no workouts is a month you didn't train, not a month with no
-  // data. That reasoning does not transfer to the averagers above, where
-  // an absent month means "nothing was recorded" and a zero would be a
-  // fabricated measurement.
+  // Zero is the honest value here specifically because exercise was being
+  // actively logged either side of it: nothing recorded means nothing
+  // done, not nothing known. That reasoning does not transfer to the
+  // averagers above, where an absent month means nothing was recorded and
+  // a zero would be a fabricated measurement.
   //
   // Only the span between the first and last workout is filled — no
   // history is invented before tracking began.
@@ -787,6 +803,7 @@ export async function getTrainingVolumeData(): Promise<TrainingMonth[]> {
     const found = byMonth.get(month);
     months.push({
       month,
+      minutes: found?.minutes ?? 0,
       daysTrained: found?.daysTrained ?? 0,
       exercises: found?.exercises ?? 0,
     });

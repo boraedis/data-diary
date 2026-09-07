@@ -48,7 +48,7 @@ const CHARTS = [
   {
     href: "/charts/training-volume",
     title: "Training volume",
-    description: "Days trained each month, with exercise counts on hover.",
+    description: "Total hours trained each month, with session detail on hover.",
   },
   {
     href: "/charts/sleep",
