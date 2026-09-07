@@ -781,8 +781,13 @@ export async function getTrainingDailyData(): Promise<TrainingDay[]> {
 
 // --- People over time (#220) ----------------------------------------------
 
-/** One day's people, by name. */
-export type PeopleDay = { date: string; names: string[] };
+/** One day's people, with the tag each belongs to. */
+export type PeopleDay = { date: string; people: PersonOnDay[] };
+
+/** `tagName`/`tagColor` are null for anyone untagged — most people have a
+ * tag, but nothing requires one, so a consumer grouping by tag has to
+ * handle the ungrouped case rather than assuming. */
+export type PersonOnDay = { name: string; tagName: string | null; tagColor: string | null };
 
 /**
  * Who was logged on each day, oldest first.
@@ -798,7 +803,9 @@ export type PeopleDay = { date: string; names: string[] };
  *
  * Names rather than ids because that's what a chart legend needs, and
  * because `people.name` is unique — so it identifies a person as well as
- * the id does, without a second lookup at every call site.
+ * the id does, without a second lookup at every call site. Each person
+ * carries their tag's name and color too, so a consumer can colour by
+ * group without re-joining.
  */
 export async function getPeopleDailyData(): Promise<PeopleDay[]> {
   const db = getDb();
@@ -826,10 +833,13 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
       })
       .from(days)
       .orderBy(asc(days.date)),
-    db.select({ id: people.id, name: people.name }).from(people),
+    db
+      .select({ id: people.id, name: people.name, tagName: tags.name, tagColor: tags.color })
+      .from(people)
+      .leftJoin(tags, eq(tags.id, people.tagId)),
   ]);
 
-  const nameById = new Map(personRows.map((p) => [p.id, p.name]));
+  const byId = new Map(personRows.map((p) => [p.id, p]));
   const out: PeopleDay[] = [];
   for (const row of dayRows) {
     // Deduplicated: nothing stops one person filling two slots on a day,
@@ -840,8 +850,14 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
       ),
     );
     if (ids.size === 0) continue;
-    const names = [...ids].map((id) => nameById.get(id)).filter((n): n is string => n !== undefined);
-    if (names.length > 0) out.push({ date: row.date, names });
+    const present: PersonOnDay[] = [];
+    for (const id of ids) {
+      const person = byId.get(id);
+      if (person) {
+        present.push({ name: person.name, tagName: person.tagName, tagColor: person.tagColor });
+      }
+    }
+    if (present.length > 0) out.push({ date: row.date, people: present });
   }
   return out;
 }
