@@ -21,6 +21,16 @@ const CHARTS = [
     description: "Zoomable line of every logged day's happiness score.",
   },
   {
+    href: "/charts/happiness-calendar",
+    title: "Happiness calendar",
+    description: "A year-by-year heatmap of daily happiness.",
+  },
+  {
+    href: "/charts/day-types",
+    title: "Day types",
+    description: "Work, days off, vacation and travel across the years.",
+  },
+  {
     href: "/charts/weight",
     title: "Weight over time",
     description: "Zoomable line — drag the strip below to zoom into a range.",
@@ -56,6 +66,21 @@ const CHARTS = [
     description: "A year-by-year heatmap of nightly sleep duration.",
   },
   {
+    href: "/charts/sleep-trend",
+    title: "Sleep trend",
+    description: "Average time asleep per night, at any bucket size."
+  },
+  {
+    href: "/charts/sleep-daily",
+    title: "Nightly sleep",
+    description: "Every logged night — zoom and pan through the range.",
+  },
+  {
+    href: "/charts/sleep-locations",
+    title: "Sleep locations",
+    description: "Where you slept, as a share of nights over time.",
+  },
+  {
     href: "/charts/gym",
     title: "Weight & training volume",
     description: "Body weight against how many workouts you logged each month.",
@@ -79,6 +104,21 @@ const CHARTS = [
     href: "/charts/people",
     title: "People network",
     description: "Who gets logged together — drag nodes to reposition.",
+  },
+  {
+    href: "/charts/people-over-time",
+    title: "Who you saw",
+    description: "Days logged with each person, as a share over time.",
+  },
+  {
+    href: "/charts/people-calendar",
+    title: "People calendar",
+    description: "How many people you logged each day.",
+  },
+  {
+    href: "/charts/people-impact",
+    title: "People impact",
+    description: "Who contributed most to how your days went, week by week.",
   },
   {
     href: "/charts/world",

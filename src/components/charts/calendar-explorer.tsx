@@ -12,6 +12,12 @@ import { TimeRangePicker } from "@/components/charts/interactive/time-range-pick
 import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
 
+/** A `DailyValue` optionally carrying the categories that made up the day,
+ * which the primitive blends into one cell colour. */
+export type CalendarDay = DailyValue & {
+  categories?: { label: string; color: string }[];
+};
+
 /**
  * Legacy's "calendar" shape with a range control.
  *
@@ -31,13 +37,20 @@ export function CalendarExplorer({
   description,
   formatValue,
   valueLabel,
+  extraFilters,
   ariaLabel,
 }: {
-  data: DailyValue[];
+  /** Days to draw. A day may carry a `categories` breakdown, in which case
+   * the primitive blends those colours for that cell instead of using the
+   * sequential ramp — see `InteractiveCalendarPoint`. */
+  data: CalendarDay[];
   title: string;
   description: string;
   formatValue: (value: number) => string;
   valueLabel: string;
+  /** Extra controls rendered before the range picker. The caller owns
+   * their state and reshapes `data` accordingly. */
+  extraFilters?: React.ReactNode;
   ariaLabel: string;
 }) {
   const [range, setRange] = useState<[Date, Date] | null>(null);
@@ -56,14 +69,19 @@ export function CalendarExplorer({
             return date >= from && date <= to;
           })
         : data;
-    return scoped.map((d) => ({ date: d.date, value: d.value }));
+    return scoped.map((d) => ({ date: d.date, value: d.value, categories: d.categories }));
   }, [data, range]);
 
   return (
     <ChartPage
       title={title}
       filters={
-        domain ? <TimeRangePicker domain={domain} value={range} onChange={setRange} /> : null
+        domain ? (
+          <>
+            {extraFilters}
+            <TimeRangePicker domain={domain} value={range} onChange={setRange} />
+          </>
+        ) : null
       }
     >
       <ChartCard title={title} description={description} empty={points.length === 0}>

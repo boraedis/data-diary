@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { MARK_SPECS, attachMarkHover } from "./marks";
@@ -65,6 +65,18 @@ const MAX_CELL_SIZE = 18;
 export type InteractiveCalendarPoint = {
   date: string; // "YYYY-MM-DD"
   value: number;
+  /**
+   * Optional per-category breakdown for the day. When present and
+   * non-empty, the cell is filled with the perceptual blend of these
+   * colors instead of the sequential ramp, and the tooltip lists them.
+   *
+   * This is what lets a calendar answer "which *kinds* of thing was this
+   * day made of" rather than only "how much" — a day shared between two
+   * tagged groups of people reads as a mix of their colors, not as the
+   * number 2. The value is still required and still drives the tooltip's
+   * numeric row, so a blended calendar keeps its magnitude reading too.
+   */
+  categories?: { label: string; color: string }[];
 };
 
 export type InteractiveCalendarProps = {
@@ -84,9 +96,15 @@ export type InteractiveCalendarProps = {
   ariaLabel?: string;
 };
 
-type YearGroup = { year: number; days: Map<string, number> };
-type CellDatum = { dateStr: string; value: number; week: number; dow: number };
-type Hovered = { dateStr: string; value: number; clientPos: { x: number; y: number } };
+type YearGroup = { year: number; days: Map<string, { value: number; categories: DayCategories }> };
+type DayCategories = { label: string; color: string }[] | undefined;
+type CellDatum = { dateStr: string; value: number; categories: DayCategories; week: number; dow: number };
+type Hovered = {
+  dateStr: string;
+  value: number;
+  categories: DayCategories;
+  clientPos: { x: number; y: number };
+};
 type MonthTick = { label: string; week: number };
 
 export function InteractiveCalendar({
@@ -98,11 +116,11 @@ export function InteractiveCalendar({
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
-    const byYear = new Map<number, Map<string, number>>();
+    const byYear = new Map<number, Map<string, { value: number; categories: DayCategories }>>();
     for (const p of points) {
       const year = parseInt(p.date.slice(0, 4), 10);
       if (!byYear.has(year)) byYear.set(year, new Map());
-      byYear.get(year)!.set(p.date, p.value);
+      byYear.get(year)!.set(p.date, { value: p.value, categories: p.categories });
     }
     // Most recent year first (top of the stack) — per user feedback; a
     // reader scanning down wants "now" first, not the oldest year on file.
@@ -144,6 +162,75 @@ export function InteractiveCalendar({
   }, [points]);
 
   const colorScale = useMemo(() => sequentialScale(domain, colorMode), [domain, colorMode]);
+
+  // A calendar is in blend mode as soon as any day carries a breakdown.
+  // It's all-or-nothing rather than per-cell because the legend below has
+  // to describe one encoding or the other — a grid where some cells mean
+  // "how much" and others mean "which kinds" can't be read.
+  const blended = useMemo(() => points.some((p) => (p.categories?.length ?? 0) > 0), [points]);
+
+  /**
+   * Averages colors in CIELAB rather than sRGB.
+   *
+   * Averaging hex channels directly is what makes mixed colors look muddy:
+   * sRGB isn't perceptually uniform, so the midpoint of two vivid hues
+   * lands darker and duller than either. Lab averages roughly the way
+   * seeing does. (OKLab would be marginally better still, but d3-color
+   * ships Lab and is already a dependency — not worth a new one here.)
+   *
+   * Legacy did this differently, by painting one translucent rect per
+   * person and letting the browser composite them, with a recursive alpha
+   * sequence so each contributed equally. Same intent; this version is one
+   * rect instead of N, doesn't depend on draw order, and doesn't drift
+   * toward the background as the count grows.
+   *
+   * A day mixing many categories does trend toward a neutral mid-tone.
+   * That's left as-is rather than capped: "this day was a bit of
+   * everything" is a true thing to say about it, and the tooltip carries
+   * the exact breakdown regardless.
+   */
+  const blendColors = (colors: string[]): string => {
+    const labs = colors.map((c) => d3.lab(c)).filter((c) => !Number.isNaN(c.l));
+    if (labs.length === 0) return "var(--muted)";
+    const l = d3.mean(labs, (c) => c.l) as number;
+    const a = d3.mean(labs, (c) => c.a) as number;
+    const b = d3.mean(labs, (c) => c.b) as number;
+    return d3.lab(l, a, b).formatHex();
+  };
+
+  /**
+   * How much of the blended hue a cell shows, from its own value.
+   *
+   * A flat blend would throw away magnitude: a day with one person and a
+   * day with seven from the same group would look identical, and the
+   * calendar would stop answering "how much" entirely. Legacy got this for
+   * free — stacking one translucent rect per person meant more people
+   * literally painted more colour over the background — and blending to a
+   * single fill loses it unless it's put back deliberately.
+   *
+   * So the hue says *which kinds*, and the intensity still says *how many*.
+   * The cell is interpolated from the sequential ramp's own low end toward
+   * the blend, which keeps a quiet day in a blended calendar at the same
+   * visual weight as a quiet day in a plain one.
+   *
+   * The floor matters: at zero the hue would be invisible and the whole
+   * point of the mode lost on exactly the days that have only one category
+   * to show. Starting at 40% keeps a single-person day clearly coloured
+   * while leaving real headroom above it.
+   */
+  const MIN_INTENSITY = 0.4;
+
+  const cellFill = useCallback(
+    (value: number, categories: DayCategories): string => {
+      if (!categories || categories.length === 0) return colorScale(value);
+      const blend = blendColors(categories.map((c) => c.color));
+      const span = domain[1] - domain[0];
+      const t = span > 0 ? (value - domain[0]) / span : 1;
+      const intensity = MIN_INTENSITY + (1 - MIN_INTENSITY) * Math.min(1, Math.max(0, t));
+      return d3.interpolateLab(colorScale(domain[0]), blend)(intensity);
+    },
+    [colorScale, domain],
+  );
 
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // State-backed callback ref, not a plain useRef — see interactive-hist.tsx's
@@ -217,14 +304,14 @@ export function InteractiveCalendar({
           .style("font-size", "9px")
           .text((d) => d);
 
-        const cells: CellDatum[] = [...yearGroup.days.entries()].map(([dateStr, value]) => {
+        const cells: CellDatum[] = [...yearGroup.days.entries()].map(([dateStr, day]) => {
           const date = parseDate(dateStr);
           const week = d3.timeMonday.count(yearStart, date);
           // Monday-first row order: getDay() is Sunday=0..Saturday=6, so
           // shift by 6 mod 7 to land Monday=0..Sunday=6, matching
           // DAY_LABELS's top-to-bottom "M,T,W,T,F,S,S" order.
           const dow = (date.getDay() + 6) % 7;
-          return { dateStr, value, week, dow };
+          return { dateStr, value: day.value, categories: day.categories, week, dow };
         });
 
         // Two rects per cell, not one: the small visible one (cellSize can
@@ -241,7 +328,7 @@ export function InteractiveCalendar({
           .attr("width", cellSize)
           .attr("height", cellSize)
           .attr("rx", 2)
-          .attr("fill", (d) => colorScale(d.value));
+          .attr("fill", (d) => cellFill(d.value, d.categories));
 
         const hitSize = Math.max(cellSize, MARK_SPECS.hover.minHitTarget);
         const hitTargets = g
@@ -256,16 +343,17 @@ export function InteractiveCalendar({
           .attr("fill", "transparent");
 
         attachMarkHover<CellDatum>(hitTargets, {
-          onHover: (d, clientPos) => setHovered({ dateStr: d.dateStr, value: d.value, clientPos }),
+          onHover: (d, clientPos) =>
+            setHovered({ dateStr: d.dateStr, value: d.value, categories: d.categories, clientPos }),
           onLeave: () => setHovered(null),
         });
       });
     },
-    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, gridLeft, colorScale],
+    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, gridLeft, cellFill],
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
-  const hoveredColor = hovered ? colorScale(hovered.value) : undefined;
+  const hoveredColor = hovered ? cellFill(hovered.value, hovered.categories) : undefined;
 
   // Where the hovered cell's value falls on the low->high legend, as a
   // 0-1 fraction — drives the hover indicator line below. Clamped in case
@@ -291,7 +379,17 @@ export function InteractiveCalendar({
             x={hovered.clientPos.x - containerRect.left}
             y={hovered.clientPos.y - containerRect.top}
             title={formatDate(hovered.dateStr, "weekdayYear")}
-            rows={[{ label: valueLabel, value: formatValue(hovered.value), color: hoveredColor ?? "" }]}
+            rows={[
+              { label: valueLabel, value: formatValue(hovered.value), color: hoveredColor ?? "" },
+              // The breakdown is what makes a blended cell readable: its
+              // mixed color deliberately matches no legend entry, so the
+              // categories behind it have to be nameable on hover.
+              ...(hovered.categories ?? []).map((c) => ({
+                label: c.label,
+                value: "",
+                color: c.color,
+              })),
+            ]}
             containerWidth={width}
           />
         ) : null}
@@ -330,7 +428,13 @@ export function InteractiveCalendar({
           the gradient) answers "where does this cell's value sit on the
           scale" directly, rather than making the reader eyeball a color
           match against the swatch. */}
-      {containerRect ? (
+      {/* Suppressed in blend mode: a low->high ramp describes an encoding
+          the cells are no longer using, and a legend that confidently
+          explains the wrong thing is worse than none. The categories are
+          named per-day in the tooltip instead, and a blended calendar's
+          caller is expected to render its own category key alongside the
+          chart. */}
+      {containerRect && !blended ? (
         <SequentialLegend
           domain={domain}
           colorScale={colorScale}
