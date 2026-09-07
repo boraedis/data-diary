@@ -896,3 +896,69 @@ export async function getDayTypeCalendarData(): Promise<DayTypeDay[]> {
     .orderBy(asc(days.date));
   return rows.map((r) => ({ date: r.date, dayType: r.dayType as string }));
 }
+
+// --- Where you were, over time (#221) --------------------------------------
+
+/** One day and the countries it touched. Deduplicated: a day whose two
+ * place slots are both in France counts France once, matching
+ * `getCountryVisitData`'s "was I there that day" reading rather than the
+ * leaderboard's weighted slot tally. */
+export type CountryDay = { date: string; countries: string[] };
+
+/**
+ * Countries per day, oldest first.
+ *
+ * Resolves a place to its country the same way `getCountryVisitData` does —
+ * a day's place slots hold specific venues, so the country is the root of
+ * each one's `idPath`, never an assumed depth. Names are normalized here so
+ * the categories a chart folds and colours match the map's own.
+ *
+ * Country rather than a finer level on purpose: it's the one level of this
+ * tree with few enough members to sit inside a categorical palette. Metro
+ * or venue would need the "which ancestor is the neighbourhood" question
+ * settled first — see #214.
+ */
+export async function getCountryHistoryData(): Promise<CountryDay[]> {
+  const db = getDb();
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)))
+    .orderBy(asc(days.date));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return [];
+
+  const placeRows = await db
+    .select({ id: places.id, idPath: places.idPath })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+  const rootIdByPlaceId = new Map<number, number | null>();
+  for (const p of placeRows) {
+    const rootIdStr = p.idPath?.split("/")[0];
+    rootIdByPlaceId.set(p.id, rootIdStr ? Number(rootIdStr) : null);
+  }
+
+  const rootIds = [...new Set([...rootIdByPlaceId.values()].filter((id): id is number => id !== null))];
+  const rootRows = rootIds.length
+    ? await db.select({ id: places.id, name: places.name }).from(places).where(inArray(places.id, rootIds))
+    : [];
+  const nameByRootId = new Map(rootRows.map((r) => [r.id, r.name]));
+
+  const out: CountryDay[] = [];
+  for (const row of dayRows) {
+    const countries = new Set<string>();
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const rootId = rootIdByPlaceId.get(placeId);
+      const name = rootId != null ? nameByRootId.get(rootId) : undefined;
+      if (name) countries.add(normalizeCountryName(name));
+    }
+    if (countries.size > 0) out.push({ date: row.date, countries: [...countries] });
+  }
+  return out;
+}

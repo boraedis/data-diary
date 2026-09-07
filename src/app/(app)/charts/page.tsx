@@ -101,6 +101,11 @@ const CHARTS = [
     description: "A zoomable sunburst of where your days happen, by geography or category.",
   },
   {
+    href: "/charts/place-history",
+    title: "Where you were",
+    description: "Days spent in each country, as a share over time.",
+  },
+  {
     href: "/charts/people",
     title: "People network",
     description: "Who gets logged together — drag nodes to reposition.",

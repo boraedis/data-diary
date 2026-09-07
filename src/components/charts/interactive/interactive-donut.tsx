@@ -355,6 +355,16 @@ export type InteractiveDonutProps = {
    * legacy's own hardcoded window; 1 makes this a plain donut. Deeper
    * levels aren't dropped — they're off-screen until you zoom in. */
   visibleRings?: number;
+  /**
+   * Whether clicking an arc re-centres the sunburst on it.
+   *
+   * Off turns this into a static, read-the-whole-thing view — which is
+   * what a full-depth rendering wants: if every ring is already on screen
+   * there is nothing to zoom *to*, and a click that reframes the chart
+   * just loses the overview the reader came for. Hover and the tooltip are
+   * unaffected either way.
+   */
+  zoomable?: boolean;
   formatValue?: (value: number) => string;
   /** Noun for the value in the tooltip and center, e.g. "days". */
   valueLabel?: string;
@@ -369,6 +379,7 @@ export function InteractiveDonut({
   width,
   height,
   visibleRings = 2,
+  zoomable = true,
   formatValue = formatThousandsNumber,
   valueLabel = "total",
   color,
@@ -560,7 +571,9 @@ export function InteractiveDonut({
         .attr("fill", "none")
         .attr("pointer-events", "all")
         .style("cursor", "pointer")
-        .on("click", (_event, d) => zoomTo(d as AnimatedNode));
+        .on("click", (_event, d) => {
+          if (zoomable) zoomTo(d as AnimatedNode);
+        });
 
       /**
        * Renders whatever is in play (see `isArcInPlay`) as a keyed join,
@@ -615,6 +628,7 @@ export function InteractiveDonut({
         entered
           .style("cursor", (d) => (d.children ? "pointer" : "default"))
           .on("click", (event, d) => {
+            if (!zoomable) return;
             // Only a node with children has anything to zoom *into*;
             // clicking a leaf would just re-frame the ring it's already in.
             if (d.children) zoomTo(d);
@@ -779,7 +793,7 @@ export function InteractiveDonut({
         zoomToPathRef.current = null;
       };
     },
-    [layout, width, chartHeight, radius, visibleRings, resolveColor, readContainerRect],
+    [layout, width, chartHeight, radius, visibleRings, zoomable, resolveColor, readContainerRect],
   );
 
   // --- Breadcrumb + center summary (React, deliberately outside useD3) ---

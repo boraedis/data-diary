@@ -43,12 +43,30 @@ const GROUPING_OPTIONS: GroupByOption<PlaceGrouping>[] = [
   { id: "category", label: "Category" },
 ];
 
-type RingCount = "1" | "2" | "3";
+type RingCount = "1" | "2" | "3" | "all";
 
+/**
+ * "All" is legacy's `location_sequence` view (#209/#221): every depth of
+ * the hierarchy on screen at once.
+ *
+ * It's a mode here rather than its own page because the data, the
+ * groupings and the fetch are identical — the only difference is how much
+ * is drawn — and a second page would be the same chart with one prop
+ * changed. Selecting it also turns **zoom off**: when every ring is already
+ * visible there is nothing to zoom to, and a click that reframes the chart
+ * only costs the reader the overview they picked this mode for.
+ *
+ * Worth knowing before using it: `InteractiveDonut` sizes rings as
+ * `min(width, height) / (2 * (visibleRings + 1))`, so each extra depth
+ * makes every ring thinner and labels start dropping out below the
+ * primitive's visibility threshold. Deep trees will read as shape rather
+ * than as text.
+ */
 const RING_OPTIONS: GroupByOption<RingCount>[] = [
   { id: "1", label: "1" },
   { id: "2", label: "2" },
   { id: "3", label: "3" },
+  { id: "all", label: "All" },
 ];
 
 /** Top-level branches kept before the tail folds into "Other" in category
@@ -108,6 +126,18 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
     [rows, grouping],
   );
 
+  /** Depth of the deepest branch, so "All" draws exactly as many rings as
+   * the tree actually has rather than a guessed ceiling. Measured from the
+   * data because the geography tree is arbitrary-depth by design. */
+  const maxDepth = useMemo(() => {
+    if (!tree) return 1;
+    const depthOf = (node: HierarchyDatum): number =>
+      node.children && node.children.length > 0
+        ? 1 + Math.max(...node.children.map(depthOf))
+        : 0;
+    return Math.max(1, depthOf(tree));
+  }, [tree]);
+
   return (
     <ChartPage
       title="Place hierarchy"
@@ -149,7 +179,8 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
                 data={tree}
                 width={width}
                 height={height}
-                visibleRings={Number(rings)}
+                visibleRings={rings === "all" ? maxDepth : Number(rings)}
+                zoomable={rings !== "all"}
                 valueLabel="visit score"
                 ariaLabel="Sunburst of logged places, nested by the selected breakdown. Click a slice to zoom into it, click the center or press Escape on a slice to zoom back out."
               />
