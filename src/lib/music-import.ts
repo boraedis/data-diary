@@ -7,7 +7,7 @@
 // a file that's too big for one request into several smaller ones (see
 // that file's own comment, and #192) — by the time this module sees them,
 // each "file" here may really be one slice of a larger export file.
-import { eq, or, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import { MIN_LISTEN_MS } from "@/lib/music";
@@ -42,94 +42,113 @@ export type MusicImportSummary = {
 type Db = ReturnType<typeof getDb>;
 
 // One entry per artist still needing a Spotify identity/genre lookup,
-// keyed by artistId so the same artist is only ever queued once per import
-// even if it appears in many entries (see getOrCreateArtistId's cache).
-// `trackId` is a representative track for that artist — whichever entry
-// first triggered the lookup — used to attempt the exact lookup before
-// falling back to a name search; see resolveArtistGenres.
+// keyed by artistId. `trackId` is a representative track for that artist
+// — whichever entry in this import first carried one — used to attempt
+// the exact lookup before falling back to a name search; see
+// resolveArtistGenres.
 type PendingArtistGenreLookup = { name: string; trackId: string | null };
 
-// Resolves an artist name to a catalog row, matching against both `name`
-// and `aliases` (so a manually-added alias catches an alternate spelling
-// Spotify's export uses without creating a duplicate artist), WITHOUT
-// doing any Spotify network call itself. An existing row missing genres
-// (spotifyId still null — e.g. a previous lookup failed or found no
-// match) gets one retry per import rather than being skipped forever; a
-// brand new row always needs one. Either case is queued into `pending`
-// rather than resolved inline — see resolveArtistGenres's comment for why
-// deferring every lookup to one batched pass at the end matters.
-async function getOrCreateArtistId(
+// Resolves every distinct artist name in one bulk pass instead of one
+// query per name — src/lib/db.ts uses Neon's HTTP driver, where every
+// query is its own separate HTTPS round-trip with no persistent
+// connection to amortize it over. A historical import's first chunk can
+// have hundreds of never-seen artists; resolving them one at a time (a
+// SELECT then an INSERT each) was enough on its own to push a request
+// past Vercel's 300s function limit even after #250 batched the Spotify
+// side of this same loop (#252) — cutting Spotify calls didn't help
+// because the database calls were the larger cost for this file.
+//
+// Matches against both `name` and `aliases` (so a manually-added alias
+// catches an alternate spelling Spotify's export uses without creating a
+// duplicate artist) — `&&` is Postgres's array-overlap operator, the bulk
+// equivalent of the old per-name `name = any(aliases)` check. Returns a
+// map from `name.toLowerCase()` to artist id; `pending` is filled in with
+// every artist (existing with spotifyId still null, or brand new) that
+// still needs a Spotify genre lookup.
+async function bulkResolveArtists(
   db: Db,
-  cache: Map<string, number>,
-  rawName: string,
-  trackId: string | null,
+  names: string[],
+  firstTrackIdByName: Map<string, string | null>,
   pending: Map<number, PendingArtistGenreLookup>,
   summary: MusicImportSummary
-): Promise<number | null> {
-  const name = rawName.trim();
-  if (!name) return null;
-  const cacheKey = name.toLowerCase();
-  const cached = cache.get(cacheKey);
-  if (cached !== undefined) return cached;
+): Promise<Map<string, number>> {
+  const idByLowerName = new Map<string, number>();
+  if (names.length === 0) return idByLowerName;
 
-  const [existing] = await db
-    .select({ id: artists.id, spotifyId: artists.spotifyId })
+  const existingRows = await db
+    .select({ id: artists.id, name: artists.name, aliases: artists.aliases, spotifyId: artists.spotifyId })
     .from(artists)
-    .where(or(eq(artists.name, name), sql`${name} = any(${artists.aliases})`));
+    .where(sql`${artists.name} = any(${names}) or ${artists.aliases} && ${names}::text[]`);
 
-  let artistId: number;
-  let needsGenreLookup: boolean;
-  if (existing) {
-    artistId = existing.id;
-    needsGenreLookup = existing.spotifyId === null;
-  } else {
-    const [inserted] = await db
-      .insert(artists)
-      .values({ name })
-      .onConflictDoNothing({ target: artists.name })
-      .returning({ id: artists.id });
-    if (inserted) {
-      artistId = inserted.id;
-      summary.artistsCreated++;
-    } else {
-      // Lost a race against another row inserted between the select and
-      // insert above (or matches an existing name we didn't catch via the
-      // alias search) — re-select by name.
-      const [row] = await db.select({ id: artists.id }).from(artists).where(eq(artists.name, name));
-      artistId = row.id;
+  const unmatchedNames: string[] = [];
+  for (const name of names) {
+    const match = existingRows.find((row) => row.name === name || row.aliases.includes(name));
+    if (!match) {
+      unmatchedNames.push(name);
+      continue;
     }
-    needsGenreLookup = true;
+    idByLowerName.set(name.toLowerCase(), match.id);
+    if (match.spotifyId === null) pending.set(match.id, { name, trackId: firstTrackIdByName.get(name) ?? null });
   }
 
-  if (needsGenreLookup) {
-    pending.set(artistId, { name, trackId });
+  if (unmatchedNames.length > 0) {
+    const inserted = await db
+      .insert(artists)
+      .values(unmatchedNames.map((name) => ({ name })))
+      .onConflictDoNothing({ target: artists.name })
+      .returning({ id: artists.id, name: artists.name });
+    for (const row of inserted) {
+      idByLowerName.set(row.name.toLowerCase(), row.id);
+      pending.set(row.id, { name: row.name, trackId: firstTrackIdByName.get(row.name) ?? null });
+    }
+    summary.artistsCreated += inserted.length;
+
+    // Any name still unresolved lost a race against another row inserted
+    // between the select and insert above — re-select those by name.
+    const stillMissing = unmatchedNames.filter((name) => !idByLowerName.has(name.toLowerCase()));
+    if (stillMissing.length > 0) {
+      const rows = await db
+        .select({ id: artists.id, name: artists.name, spotifyId: artists.spotifyId })
+        .from(artists)
+        .where(inArray(artists.name, stillMissing));
+      for (const row of rows) {
+        idByLowerName.set(row.name.toLowerCase(), row.id);
+        if (row.spotifyId === null) pending.set(row.id, { name: row.name, trackId: firstTrackIdByName.get(row.name) ?? null });
+      }
+    }
   }
 
-  cache.set(cacheKey, artistId);
-  return artistId;
+  return idByLowerName;
 }
 
-async function resolvePodcastShow(db: Db, cache: Map<string, number>, rawName: string, summary: MusicImportSummary): Promise<number | null> {
-  const name = rawName.trim();
-  if (!name) return null;
-  const cacheKey = name.toLowerCase();
-  const cached = cache.get(cacheKey);
-  if (cached !== undefined) return cached;
+// Same bulk-instead-of-one-at-a-time reasoning as bulkResolveArtists — no
+// alias matching here, podcastShows.name is the only thing entries match
+// against.
+async function bulkResolvePodcastShows(db: Db, names: string[], summary: MusicImportSummary): Promise<Map<string, number>> {
+  const idByLowerName = new Map<string, number>();
+  if (names.length === 0) return idByLowerName;
 
-  const [inserted] = await db
-    .insert(podcastShows)
-    .values({ name })
-    .onConflictDoNothing({ target: podcastShows.name })
-    .returning({ id: podcastShows.id });
-  let showId: number;
-  if (inserted) {
-    showId = inserted.id;
-    summary.podcastShowsCreated++;
-  } else {
-    showId = (await db.select({ id: podcastShows.id }).from(podcastShows).where(eq(podcastShows.name, name)))[0].id;
+  const existingRows = await db.select({ id: podcastShows.id, name: podcastShows.name }).from(podcastShows).where(inArray(podcastShows.name, names));
+  for (const row of existingRows) idByLowerName.set(row.name.toLowerCase(), row.id);
+
+  const unmatchedNames = names.filter((name) => !idByLowerName.has(name.toLowerCase()));
+  if (unmatchedNames.length > 0) {
+    const inserted = await db
+      .insert(podcastShows)
+      .values(unmatchedNames.map((name) => ({ name })))
+      .onConflictDoNothing({ target: podcastShows.name })
+      .returning({ id: podcastShows.id, name: podcastShows.name });
+    for (const row of inserted) idByLowerName.set(row.name.toLowerCase(), row.id);
+    summary.podcastShowsCreated += inserted.length;
+
+    const stillMissing = unmatchedNames.filter((name) => !idByLowerName.has(name.toLowerCase()));
+    if (stillMissing.length > 0) {
+      const rows = await db.select({ id: podcastShows.id, name: podcastShows.name }).from(podcastShows).where(inArray(podcastShows.name, stillMissing));
+      for (const row of rows) idByLowerName.set(row.name.toLowerCase(), row.id);
+    }
   }
-  cache.set(cacheKey, showId);
-  return showId;
+
+  return idByLowerName;
 }
 
 async function applyArtistMatch(db: Db, artistId: number, match: SpotifyArtistMatch): Promise<void> {
@@ -267,10 +286,25 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
     errors: [],
   };
 
-  const artistIdCache = new Map<string, number>();
-  const podcastShowIdCache = new Map<string, number>();
-  const pendingArtistGenreLookups = new Map<number, PendingArtistGenreLookup>();
-  const rows: (typeof musicListens.$inferInsert)[] = [];
+  // First pass: parse and filter every entry, but don't touch the database
+  // yet — just collect what artist/podcast names actually need resolving
+  // (see bulkResolveArtists/bulkResolvePodcastShows for why bulk beats
+  // resolving as we go here) plus, per artist name, a representative
+  // track id (upgraded from null to a real one if a later entry for the
+  // same name has one) for the exact-match Spotify lookup.
+  type ParsedListenEntry = {
+    playedAt: Date;
+    msPlayed: number;
+    trackName: string | null;
+    albumName: string | null;
+    episodeName: string | null;
+    podcastShowName: string | null;
+    artistName: string | null;
+  };
+  const parsedEntries: ParsedListenEntry[] = [];
+  const distinctArtistNames = new Set<string>();
+  const distinctPodcastShowNames = new Set<string>();
+  const firstTrackIdByArtistName = new Map<string, string | null>();
 
   for (const file of files) {
     const entries = file.entries as SpotifyExportEntry[];
@@ -293,31 +327,52 @@ export async function importSpotifyExport(files: { name: string; entries: unknow
         continue;
       }
 
-      const podcastShowName = asString(entry.episode_show_name);
-      const artistName = asString(entry.master_metadata_album_artist_name);
+      // Trimmed here (not just non-empty-checked) since this is the name
+      // that gets compared/inserted downstream — matches the old
+      // per-entry resolve functions' own `rawName.trim()`.
+      const podcastShowName = asString(entry.episode_show_name)?.trim() || null;
+      const artistName = asString(entry.master_metadata_album_artist_name)?.trim() || null;
 
-      let artistId: number | null = null;
-      let podcastShowId: number | null = null;
       if (podcastShowName) {
-        podcastShowId = await resolvePodcastShow(db, podcastShowIdCache, podcastShowName, summary);
+        distinctPodcastShowNames.add(podcastShowName);
       } else if (artistName) {
+        distinctArtistNames.add(artistName);
         const trackId = parseSpotifyTrackId(entry.spotify_track_uri);
-        artistId = await getOrCreateArtistId(db, artistIdCache, artistName, trackId, pendingArtistGenreLookups, summary);
+        const current = firstTrackIdByArtistName.get(artistName);
+        if (current === undefined || (current === null && trackId)) {
+          firstTrackIdByArtistName.set(artistName, trackId);
+        }
       }
 
-      rows.push({
+      parsedEntries.push({
         playedAt,
         msPlayed,
         trackName: asString(entry.master_metadata_track_name),
-        artistId,
         albumName: asString(entry.master_metadata_album_album_name),
         episodeName: asString(entry.episode_name),
-        podcastShowId,
+        podcastShowName,
+        artistName,
       });
     }
   }
 
+  const pendingArtistGenreLookups = new Map<number, PendingArtistGenreLookup>();
+  const [artistIdByLowerName, podcastShowIdByLowerName] = await Promise.all([
+    bulkResolveArtists(db, [...distinctArtistNames], firstTrackIdByArtistName, pendingArtistGenreLookups, summary),
+    bulkResolvePodcastShows(db, [...distinctPodcastShowNames], summary),
+  ]);
+
   await resolveArtistGenres(db, pendingArtistGenreLookups, summary);
+
+  const rows: (typeof musicListens.$inferInsert)[] = parsedEntries.map((entry) => ({
+    playedAt: entry.playedAt,
+    msPlayed: entry.msPlayed,
+    trackName: entry.trackName,
+    artistId: entry.artistName ? (artistIdByLowerName.get(entry.artistName.toLowerCase()) ?? null) : null,
+    albumName: entry.albumName,
+    episodeName: entry.episodeName,
+    podcastShowId: entry.podcastShowName ? (podcastShowIdByLowerName.get(entry.podcastShowName.toLowerCase()) ?? null) : null,
+  }));
 
   for (let i = 0; i < rows.length; i += INSERT_CHUNK_SIZE) {
     const chunk = rows.slice(i, i + INSERT_CHUNK_SIZE);
