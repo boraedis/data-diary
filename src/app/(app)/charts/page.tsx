@@ -136,6 +136,11 @@ const CHARTS = [
     description: "Days logged with each person, as a share over time.",
   },
   {
+    href: "/charts/people-table",
+    title: "People table",
+    description: "Everyone ranked by days logged, with recent rank movement.",
+  },
+  {
     href: "/charts/people-calendar",
     title: "People calendar",
     description: "How many people you logged each day.",

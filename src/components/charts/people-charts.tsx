@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartCard } from "@/components/charts/chart-card";
+import { ChartPage } from "@/components/charts/chart-page";
 import { CalendarExplorer } from "@/components/charts/calendar-explorer";
+import {
+  InteractiveRanked,
+  RankMovementCell,
+  type RankedColumn,
+  type RankedEntry,
+} from "@/components/charts/interactive/interactive-ranked";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import {
   CompositionExplorer,
@@ -10,6 +18,8 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { personImpact } from "@/lib/impact";
+import { computeRankings, type RankWindow } from "@/lib/ranking";
+import { categoricalColor } from "@/lib/viz/color";
 import type { PeopleDay } from "@/lib/charts";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
@@ -195,3 +205,119 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
     />
   );
 }
+
+/**
+ * The people table: everyone ranked by days logged, with how their standing
+ * has moved lately.
+ *
+ * Legacy's `people_table` showed trailing *counts* for week/month/year;
+ * this shows the count and the **rank movement** alongside it, which is
+ * what the counts were really being read for. See `src/lib/ranking.ts` for
+ * the definition — each window is a *point in time*, so the week column
+ * asks where someone stood a week ago and compares it with now. Both sides
+ * are all-time standings; only the moment differs, which is what keeps the
+ * movement column consistent with the total it sits beside.
+ *
+ * Anchored on the latest logged day rather than today: a gap in logging
+ * would otherwise empty the recent windows and report everyone as having
+ * vanished at once.
+ */
+const RANK_WINDOWS: RankWindow[] = [
+  { id: "week", label: "Week", days: 7 },
+  { id: "month", label: "Month", days: 31 },
+  { id: "year", label: "Year", days: 365 },
+];
+
+export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
+  const [limit, setLimit] = useState<TableLimit>("50");
+
+  const { entries, byName } = useMemo(() => {
+    const appearances = data.flatMap((day) =>
+      day.people.map((person) => ({ key: person.name, date: day.date })),
+    );
+    const asOf = data.length > 0 ? data[data.length - 1].date : "";
+    const ranked = asOf ? computeRankings(appearances, asOf, RANK_WINDOWS) : [];
+
+    // Latest tag wins where someone has been retagged — the table is a
+    // "who are they now" view, not a history of their tagging. The colour
+    // travels with the tag from the data rather than being assigned here,
+    // so it matches the people calendar's groups mode.
+    const tags = new Map<string, { name: string | null; color: string | null }>();
+    for (const day of data) {
+      for (const person of day.people) {
+        tags.set(person.name, { name: person.tagName, color: person.tagColor });
+      }
+    }
+
+    return {
+      entries: ranked.map((item) => ({ label: item.key, value: item.total })),
+      byName: new Map(
+        ranked.map((item) => [
+          item.key,
+          { item, tag: tags.get(item.key) ?? { name: null, color: null } },
+        ]),
+      ),
+    };
+  }, [data]);
+
+  const shown = useMemo(
+    () => (limit === "all" ? entries : entries.slice(0, Number(limit))),
+    [entries, limit],
+  );
+
+  const columns = useMemo<RankedColumn[]>(
+    () =>
+      RANK_WINDOWS.map((window) => ({
+        id: window.id,
+        label: window.label,
+        // Week stays on a phone; month and year are the first to go.
+        secondary: window.id !== "week",
+        render: (entry: RankedEntry) => {
+          const found = byName.get(entry.label);
+          if (!found) return null;
+          const movement = found.item.movements[window.id];
+          return (
+            <span className="flex items-baseline justify-end gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {found.item.counts[window.id]}
+              </span>
+              <RankMovementCell delta={movement.delta} isNew={movement.isNew} />
+            </span>
+          );
+        },
+      })),
+    [byName],
+  );
+
+  return (
+    <ChartPage
+      title="People table"
+      filters={
+        <GroupByPicker value={limit} onChange={setLimit} options={LIMIT_OPTIONS} label="Show" />
+      }
+    >
+      <ChartCard
+        title="People table"
+        description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
+        empty={shown.length === 0}
+      >
+        <InteractiveRanked
+          entries={shown}
+          valueLabel="Days"
+          detail={(entry) => byName.get(entry.label)?.tag.name ?? null}
+          columns={columns}
+          color={(entry) => byName.get(entry.label)?.tag.color ?? categoricalColor(0)}
+          ariaLabel="People ranked by days logged, with how their ranking has moved since a week, a month and a year ago."
+        />
+      </ChartCard>
+    </ChartPage>
+  );
+}
+
+type TableLimit = "25" | "50" | "all";
+
+const LIMIT_OPTIONS: GroupByOption<TableLimit>[] = [
+  { id: "25", label: "Top 25" },
+  { id: "50", label: "Top 50" },
+  { id: "all", label: "Everyone" },
+];
