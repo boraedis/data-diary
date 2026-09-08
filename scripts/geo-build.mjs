@@ -35,33 +35,18 @@ import pg from "pg";
 import { topology } from "topojson-server";
 import { presimplify, simplify } from "topojson-simplify";
 import { quantize } from "topojson-client";
-import { CITIES } from "./lib/geo-cities.mjs";
 import { fixWinding } from "./lib/geo-winding.mjs";
-import { normalizeAtlantaName } from "../src/lib/geo/atlanta-names.ts";
-import { normalizeDcMetroName } from "../src/lib/geo/dc-metro-names.ts";
-import { normalizeDubaiName } from "../src/lib/geo/dubai-names.ts";
-import { normalizeNycName } from "../src/lib/geo/nyc-names.ts";
-import { normalizeIstanbulName } from "../src/lib/geo/istanbul-names.ts";
+import { CITIES } from "../src/lib/geo/city-config.ts";
+import { resolveCityFeatureName } from "../src/lib/geo/resolve-city-place.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GEO_DIR = path.join(__dirname, "..", "src", "data", "geo");
 const SOURCES_DIR = path.join(GEO_DIR, "sources");
 
-// Same normalize-per-city dispatch a consumer chart will eventually need
-// (#266) — centralized here too so the cross-check below exercises the
-// exact same alias tables a real chart page will.
-const NORMALIZERS = {
-  atlanta: (root, name) => normalizeAtlantaName(name),
-  "dc-metro": (root, name) => normalizeDcMetroName(root, name),
-  dubai: (root, name) => normalizeDubaiName(name),
-  nyc: (root, name) => normalizeNycName(name),
-  istanbul: (root, name) => normalizeIstanbulName(name),
-};
-
 function loadCitySource(cityKey, city) {
   const features = [];
   for (const source of city.sources) {
-    const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, source.file), "utf8"));
+    const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, source.sourceFile), "utf8"));
     for (const feature of raw.features) {
       features.push({
         ...feature,
@@ -82,7 +67,7 @@ async function checkCatalogCoverage(cityKey, city, pool) {
     console.warn(
       `  [${cityKey}] configured rootId(s) not found in the catalog: ${missingRoots
         .map((s) => `${s.root}=${s.rootId}`)
-        .join(", ")} — geo-cities.mjs's rootId is probably stale, see its own comment`,
+        .join(", ")} — city-config.ts's rootId is probably stale, see its own comment`,
     );
   }
   if (rootNameById.size === 0) return;
@@ -92,35 +77,38 @@ async function checkCatalogCoverage(cityKey, city, pool) {
   // names happen to collide.
   const geometryNamesByRoot = new Map();
   for (const source of city.sources) {
-    const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, source.file), "utf8"));
+    const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, source.sourceFile), "utf8"));
     geometryNamesByRoot.set(source.root, new Set(raw.features.map((f) => f.properties.name)));
   }
 
   const { rows: allPlaces } = await pool.query("SELECT id, parent_id, name_path, id_path FROM places");
   const hasChildren = new Set(allPlaces.map((p) => p.parent_id).filter((id) => id != null));
-  const normalize = NORMALIZERS[cityKey];
 
   let uncovered = 0;
   let checked = 0;
   for (const place of allPlaces) {
     if (hasChildren.has(place.id)) continue; // only leaves are ever "the thing that needs a polygon"
     if (!place.id_path || !place.name_path) continue;
+    // Skip a leaf that IS one of this city's own roots (namePath has no
+    // segments left after it) — resolveCityFeatureName correctly returns
+    // null for that (a root has no single feature it maps to), but that's
+    // not a coverage gap worth warning about.
     const idSegments = place.id_path.split("/").filter(Boolean);
-    const nameSegments = place.name_path.split("/").filter(Boolean);
+    const isBareRoot = city.sources.some((s) => idSegments.at(-1) === String(s.rootId));
+    if (isBareRoot) continue;
 
-    for (const source of city.sources) {
-      const rootIndex = idSegments.indexOf(String(source.rootId));
-      if (rootIndex === -1) continue;
-      const localSegments = nameSegments.slice(rootIndex + 1);
-      if (localSegments.length === 0) continue; // this leaf IS the root itself
-      checked++;
-      const geometryNames = geometryNamesByRoot.get(source.root);
-      const matches = localSegments.some((seg) => geometryNames.has(normalize(source.root, seg)));
-      if (!matches) {
-        console.warn(`  [${cityKey}] "${place.name_path}" doesn't resolve to any geometry feature`);
-        uncovered++;
-      }
-      break; // a leaf's idPath only passes through one of this city's roots
+    const resolved = resolveCityFeatureName(
+      { idPath: place.id_path, namePath: place.name_path },
+      city.sources,
+      geometryNamesByRoot,
+      city.normalize,
+    );
+    const inThisCity = city.sources.some((s) => idSegments.includes(String(s.rootId)));
+    if (!inThisCity) continue;
+    checked++;
+    if (!resolved) {
+      console.warn(`  [${cityKey}] "${place.name_path}" doesn't resolve to any geometry feature`);
+      uncovered++;
     }
   }
   if (checked === 0) {
@@ -157,9 +145,9 @@ function buildCity(cityKey, city) {
   // size reduction, not the simplify() step itself.
   topo = quantize(topo, 1e5);
 
-  const outPath = path.join(GEO_DIR, city.outFile);
-  writeFileSync(outPath, JSON.stringify(topo));
-  console.log(`  [${cityKey}] ${collection.features.length} features -> ${city.outFile}`);
+  const outFile = `${cityKey}.topo.json`;
+  writeFileSync(path.join(GEO_DIR, outFile), JSON.stringify(topo));
+  console.log(`  [${cityKey}] ${collection.features.length} features -> ${outFile}`);
 }
 
 async function main() {
