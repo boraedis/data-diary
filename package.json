@@ -16,6 +16,8 @@
     "migrate:watchlist-rankings": "node scripts/migrate-watchlist-rankings.mjs",
     "diagnose:place-cycles": "node scripts/diagnose-place-cycles.mjs",
     "split:duplicate-places": "node scripts/split-duplicate-places.mjs",
+    "geo:build": "tsx scripts/geo-build.mjs",
+    "geo:add-feature": "tsx scripts/geo-add-feature.mjs",
     "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs"
   },
   "dependencies": {
@@ -52,6 +54,9 @@
     "jsdom": "^25.0.1",
     "pg": "^8.23.0",
     "tailwindcss": "^4",
+    "topojson-server": "^3.0.1",
+    "topojson-simplify": "^3.0.3",
+    "tsx": "^4.23.13",
     "typescript": "^5",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.7"
