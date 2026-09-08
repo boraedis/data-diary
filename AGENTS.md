@@ -248,6 +248,33 @@ just unlabeled-by-convention.
 LOE is a rough size estimate for planning, not a hard commitment — pick the
 closest bucket rather than agonizing over precision.
 
+### Project board
+
+Issues are tracked on the **Data Diary** GitHub Project (user project #3:
+`gh project view 3 --owner boraedis --web`), not just the flat issues list.
+It reuses the labels above rather than duplicating them, plus two fields
+that don't exist as labels:
+
+- **Status** — `Backlog` → `Todo` → `In Progress` → `Done`. New issues land
+  in `Backlog` by default; move to `Todo` once actually scoped/ready to
+  pick up.
+- **Priority** — `Urgent` / `High` / `Medium` / `Low`.
+- **LOE** — mirrors the `LOE: *` label (kept in sync manually, not by
+  automation — set both when filing or triaging an issue).
+
+When filing a new issue via `gh issue create`, also add it to the project
+and set these fields, e.g.:
+
+```bash
+gh project item-add 3 --owner boraedis --url <issue-url>
+```
+
+then set `Status`/`Priority`/`LOE` with `gh project item-edit` (or just
+ask the user which values to use if it's not obvious from the issue body).
+Epics/sub-issues still use GitHub's native parent/sub-issue linking, not a
+project field — the board's `Parent issue` / `Sub-issues progress` columns
+read that relationship automatically.
+
 ## Schema changes and database testing
 
 **Before pushing schema changes and running tests:**
