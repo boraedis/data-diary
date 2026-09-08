@@ -16,7 +16,10 @@ export default async function ManageMusicPage() {
   const [stats, curation] = await Promise.all([getMusicListenStats(), getMusicCurationStats()]);
 
   const needsReview =
-    curation.totalGenres - curation.groupedGenres + (curation.totalPodcastShows - curation.categorizedPodcastShows);
+    curation.totalGenres -
+    curation.groupedGenres +
+    (curation.totalPodcastShows - curation.categorizedPodcastShows) +
+    (curation.totalArtists - curation.artistsWithGenres);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8 md:py-12">
@@ -101,6 +104,14 @@ export default async function ManageMusicPage() {
                 href="/manage/entertainment/music/podcasts"
                 done={curation.categorizedPodcastShows}
                 total={curation.totalPodcastShows}
+              />
+            )}
+            {curation.totalArtists - curation.artistsWithGenres > 0 && (
+              <ReviewProgressRow
+                label="Artists with a genre"
+                href="/manage/entertainment/music/artists"
+                done={curation.artistsWithGenres}
+                total={curation.totalArtists}
               />
             )}
           </CardContent>
