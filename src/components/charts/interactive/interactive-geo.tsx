@@ -4,10 +4,10 @@ import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 import { useD3 } from "@/hooks/use-d3";
-import { attachMarkHover } from "./marks";
+import { attachMarkHover, MARK_SPECS } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { sequentialLogScale, type ColorMode } from "@/lib/viz/color";
+import { categoricalColor, sequentialLogScale, type ColorMode } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 
 // InteractiveGeo (#24) — the shared choropleth primitive. Generic over any
@@ -33,6 +33,23 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // being drilled into, which doesn't exist yet for any consumer of this
 // primitive. Click-to-zoom-to-bounds (below) is as far as this issue's
 // own click behavior goes.
+//
+// Projection is a caller-supplied factory (#264), not hardcoded — this
+// primitive's own default stays geoNaturalEarth1 (area-accurate at global
+// scale, see its own comment below, and what every current consumer
+// already renders), but a city-scale consumer (#177's per-city
+// neighborhood heatmaps, via #266) should pass geoAzimuthalEqualArea
+// instead. geoMercator was the obvious first guess for "local map" — it's
+// what every web map uses at city zoom — but it's still not area-true
+// anywhere, purely a scale-familiarity choice; this codebase already
+// prefers projections that don't visually lie about size (see below).
+// geoAzimuthalEqualArea is the better fit for a single small region: true
+// equal-area at (and near) its own center, and — unlike
+// geoConicEqualArea/Albers, which is tuned for an east-west-elongated
+// mid-latitude extent like the US — it doesn't assume any particular
+// shape or latitude, so the same choice works for a compact city
+// regardless of where on the globe it sits.
+const DEFAULT_PROJECTION = () => d3.geoNaturalEarth1();
 
 // Module-level, not inline default parameter values — see
 // interactive-network.tsx's own comment on why an array-literal default
@@ -42,6 +59,12 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // pointermove). Learned the hard way there; applied here from the start.
 const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 8];
 
+// Smaller than interactive-network.tsx's own [3, 16] node range — a geo
+// marker sits on top of an already-busy choropleth fill + legend, where
+// network's nodes are the entire drawing; keeping the range modest here
+// leaves the region fill underneath legible instead of paving over it.
+const DEFAULT_MARKER_RADIUS_RANGE: [number, number] = [3, 10];
+
 // Reserved, in px, out of the caller-given `height` for the legend row
 // below the map — a caller like ResponsiveChart's fixed h-[...] class
 // gives this component a hard-capped total height (unlike
@@ -50,6 +73,18 @@ const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 8];
 // at the *reduced* height below, not the full one, keeps map + legend
 // together within that same budget instead of the legend overflowing it.
 const LEGEND_AREA_HEIGHT = 36;
+
+/** A point overlay drawn on top of the choropleth (#264) — e.g. a
+ * visited-place marker on a city heatmap. Positioned in real geographic
+ * coordinates, not pixels, so it pans/zooms in lockstep with the region
+ * paths under the same d3.zoom transform. */
+export type GeoMarker = {
+  id: string | number;
+  /** [longitude, latitude], same order GeoJSON itself uses. */
+  position: [number, number];
+  /** Tooltip title — typically the place's name. */
+  label: string;
+};
 
 export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties> = {
   features: FeatureCollection<Geometry, P>;
@@ -67,8 +102,37 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   valueLabel?: string;
   colorMode?: ColorMode;
   zoomExtent?: [number, number];
+  /** `d3.geoProjection` factory — fitSize is applied to it here, so pass
+   * an un-fit projection (e.g. `() => d3.geoAzimuthalEqualArea()`, not
+   * `.fitSize(...)` already called). Defaults to geoNaturalEarth1, the
+   * right call at world scale; see this module's own comment above for
+   * why a city-scale caller should pass geoAzimuthalEqualArea instead. */
+  projection?: () => d3.GeoProjection;
+  /** Optional point overlay (e.g. visited-place markers) drawn above the
+   * region fill, panning/zooming with it. Omit for a plain choropleth. */
+  markers?: GeoMarker[];
+  /** Marker radius scales by this if provided (bubble-map style, same
+   * d3.scaleSqrt pattern interactive-network.tsx uses for node size) —
+   * omit for every marker at a flat MARK_SPECS.marker.radius instead. */
+  getMarkerValue?: (marker: GeoMarker) => number | null | undefined;
+  markerRadiusRange?: [number, number];
+  /** Marker fill — defaults to categoricalColor(0), distinct from the
+   * region fill's sequential scale since a marker and a region encode two
+   * different things (a specific visited place vs. an aggregate value). */
+  markerColor?: string;
+  formatMarkerValue?: (value: number) => string;
+  /** Label for a marker's tooltip value row, e.g. "visits". Only shown
+   * when getMarkerValue is also given. */
+  markerValueLabel?: string;
   ariaLabel?: string;
 };
+
+/** Discriminated union so one hover state serves both layers — a marker
+ * sits on top of a region and should win the tooltip while hovered, not
+ * show two overlapping readouts. */
+type Hovered<P extends GeoJsonProperties> =
+  | { kind: "region"; feature: Feature<Geometry, P>; clientPos: { x: number; y: number } }
+  | { kind: "marker"; marker: GeoMarker; clientPos: { x: number; y: number } };
 
 export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>({
   features,
@@ -80,11 +144,16 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   valueLabel = "value",
   colorMode = "light",
   zoomExtent = DEFAULT_ZOOM_EXTENT,
-  ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region to see its value.",
+  projection = DEFAULT_PROJECTION,
+  markers,
+  getMarkerValue,
+  markerRadiusRange = DEFAULT_MARKER_RADIUS_RANGE,
+  markerColor,
+  formatMarkerValue = formatThousandsNumber,
+  markerValueLabel = "value",
+  ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
 }: InteractiveGeoProps<P>) {
-  const [hovered, setHovered] = useState<{ feature: Feature<Geometry, P>; clientPos: { x: number; y: number } } | null>(
-    null,
-  );
+  const [hovered, setHovered] = useState<Hovered<P> | null>(null);
   // A state-backed callback ref, not a plain useRef — see interactive-
   // hist's own comment on why this needs to be state, not a ref read
   // during render.
@@ -103,18 +172,26 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   }, [features, getValue]);
   const colorScale = useMemo(() => sequentialLogScale(domain, colorMode), [domain, colorMode]);
   const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT);
+  const resolvedMarkerColor = markerColor ?? categoricalColor(0);
+
+  // Same domain/scale split as the region fill above — computed outside
+  // useD3 so nothing here needs duplicating if a future caller wants a
+  // marker-size legend too. null (not an empty-range scale) when there's
+  // no value accessor, or no marker has a usable value yet — the render
+  // below falls back to a flat MARK_SPECS.marker.radius in that case.
+  const markerRadiusScale = useMemo(() => {
+    if (!markers || !getMarkerValue) return null;
+    const values = markers.map(getMarkerValue).filter((v): v is number => v != null && v > 0);
+    if (values.length === 0) return null;
+    return d3.scaleSqrt([Math.min(...values), Math.max(...values)], markerRadiusRange);
+  }, [markers, getMarkerValue, markerRadiusRange]);
 
   const ref = useD3<SVGSVGElement>(
     (svg) => {
       if (features.features.length === 0) return;
 
-      // geoNaturalEarth1, not geoMercator — Mercator's area distortion
-      // badly overstates high-latitude countries (Greenland-reads-as-
-      // Africa-sized territory) on a fill-by-magnitude map, where area
-      // itself carries meaning; a whole-world choropleth should use a
-      // projection that doesn't visually lie about size.
-      const projection = d3.geoNaturalEarth1().fitSize([width, mapHeight], features);
-      const path = d3.geoPath(projection);
+      const fittedProjection = projection().fitSize([width, mapHeight], features);
+      const path = d3.geoPath(fittedProjection);
 
       const g = svg.attr("width", width).attr("height", mapHeight).append("g");
 
@@ -184,21 +261,82 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       attachMarkHover<Feature<Geometry, P>>(
         regions as unknown as d3.Selection<d3.BaseType, Feature<Geometry, P>, d3.BaseType, unknown>,
         {
-          onHover: (feature, clientPos) => setHovered({ feature, clientPos }),
+          onHover: (feature, clientPos) => setHovered({ kind: "region", feature, clientPos }),
           onLeave: () => setHovered(null),
         },
       );
+
+      // Marker overlay (#264) — projected straight from each marker's own
+      // [lng, lat] via the same fitted projection the regions use, so it
+      // lands correctly regardless of which projection a caller passed.
+      // Appended into the same zoom-transformed `g`, after the region
+      // paths, so markers draw on top and pan/zoom in lockstep.
+      if (markers && markers.length > 0) {
+        const positioned = markers
+          .map((marker) => ({ marker, xy: fittedProjection(marker.position) }))
+          // A marker whose coordinates fall outside the projection's own
+          // valid range (fittedProjection returns null) can't be placed —
+          // drop it rather than plotting at a garbage position.
+          .filter((entry): entry is { marker: GeoMarker; xy: [number, number] } => entry.xy != null);
+
+        const markerNodes = g
+          .selectAll("circle.geo-marker")
+          .data(positioned)
+          .join("circle")
+          .attr("class", "geo-marker")
+          .attr("cx", (d) => d.xy[0])
+          .attr("cy", (d) => d.xy[1])
+          .attr("r", (d) => {
+            const v = getMarkerValue?.(d.marker);
+            return markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
+          })
+          .attr("fill", resolvedMarkerColor)
+          .attr("fill-opacity", 0.85)
+          .attr("stroke", "var(--card)")
+          .attr("stroke-width", MARK_SPECS.marker.ringWidth);
+
+        // Stops a marker click from also reaching the background reset
+        // handler above — same reasoning as the region click handler; a
+        // marker isn't zoomable to bounds the way a region is, so this
+        // only suppresses the reset, it doesn't zoom anywhere.
+        markerNodes.style("cursor", "pointer").on("click", (event) => {
+          event.stopPropagation();
+        });
+
+        attachMarkHover<{ marker: GeoMarker; xy: [number, number] }>(
+          markerNodes as unknown as d3.Selection<d3.BaseType, { marker: GeoMarker; xy: [number, number] }, d3.BaseType, unknown>,
+          {
+            onHover: (d, clientPos) => setHovered({ kind: "marker", marker: d.marker, clientPos }),
+            onLeave: () => setHovered(null),
+          },
+        );
+      }
     },
-    [features, width, mapHeight, getValue, colorScale, zoomExtent],
+    [
+      features,
+      width,
+      mapHeight,
+      getValue,
+      colorScale,
+      zoomExtent,
+      projection,
+      markers,
+      getMarkerValue,
+      markerRadiusScale,
+      resolvedMarkerColor,
+    ],
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
-  const hoveredValue = hovered ? getValue(hovered.feature) : null;
+  const hoveredValue = hovered?.kind === "region" ? getValue(hovered.feature) : null;
   const hoveredColor = hoveredValue != null && hoveredValue > 0 ? colorScale(hoveredValue) : undefined;
+  const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
 
   // Log-space fraction, matching the log-scaled fill — a linear fraction
   // here would put the indicator tick in the wrong place relative to the
-  // gradient bar (sampled from the same log scale's interpolator).
+  // gradient bar (sampled from the same log scale's interpolator). Only
+  // meaningful for a region hover — a hovered marker doesn't move the
+  // region-fill legend's own indicator.
   const legendT =
     hoveredValue != null && hoveredValue > 0
       ? Math.min(
@@ -217,11 +355,22 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           <ChartTooltip
             x={hovered.clientPos.x - containerRect.left}
             y={hovered.clientPos.y - containerRect.top}
-            title={getLabel(hovered.feature)}
+            title={hovered.kind === "region" ? getLabel(hovered.feature) : hovered.marker.label}
             rows={
-              hoveredValue == null || hoveredValue <= 0
-                ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
-                : [{ label: valueLabel, value: formatValue(hoveredValue), color: hoveredColor ?? "", variant: "swatch" }]
+              hovered.kind === "region"
+                ? hoveredValue == null || hoveredValue <= 0
+                  ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
+                  : [{ label: valueLabel, value: formatValue(hoveredValue), color: hoveredColor ?? "", variant: "swatch" }]
+                : hoveredMarkerValue == null
+                  ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
+                  : [
+                      {
+                        label: markerValueLabel,
+                        value: formatMarkerValue(hoveredMarkerValue),
+                        color: resolvedMarkerColor,
+                        variant: "swatch",
+                      },
+                    ]
             }
             containerWidth={width}
           />
