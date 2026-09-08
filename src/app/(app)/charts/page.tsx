@@ -1,183 +1,71 @@
 import Link from "next/link";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CHART_CATEGORIES,
+  CHART_CATEGORY_ORDER,
+  CHARTS,
+  FAVORITE_CHART_HREFS,
+  chartsByCategory,
+} from "@/lib/charts-catalog";
 
-// Phase 4 — see REBUILD_PLAN.md for the full ~55-chart legacy inventory,
-// which of these were picked first and why, and what's still blocked
-// pending Phase 5 (entertainment/finance/location catalogs).
-const CHARTS = [
-  {
-    href: "/charts/happiness",
-    title: "Happiness distribution",
-    description: "How your day-to-day happiness score is spread out, 0-100.",
-  },
-  {
-    href: "/charts/happiness-trend",
-    title: "Happiness trend",
-    description: "Monthly average happiness over time.",
-  },
-  {
-    href: "/charts/happiness-daily",
-    title: "Daily happiness",
-    description: "Zoomable line of every logged day's happiness score.",
-  },
-  {
-    href: "/charts/happiness-calendar",
-    title: "Happiness calendar",
-    description: "A year-by-year heatmap of daily happiness.",
-  },
-  {
-    href: "/charts/day-types",
-    title: "Day types",
-    description: "Work, days off, vacation and travel across the years.",
-  },
-  {
-    href: "/charts/weight",
-    title: "Weight over time",
-    description: "Zoomable line — drag the strip below to zoom into a range.",
-  },
-  {
-    href: "/charts/coffee-trend",
-    title: "Coffee trend",
-    description: "Monthly average cups per day, with each month's range.",
-  },
-  {
-    href: "/charts/coffee-calendar",
-    title: "Coffee calendar",
-    description: "A year-by-year heatmap of cups per day.",
-  },
-  {
-    href: "/charts/distance-trend",
-    title: "Distance walked trend",
-    description: "Monthly average kilometres per day.",
-  },
-  {
-    href: "/charts/distance-daily",
-    title: "Daily distance walked",
-    description: "Every logged day — zoom and pan through the range.",
-  },
-  {
-    href: "/charts/training-volume",
-    title: "Training volume",
-    description: "Total hours trained each month, with session detail on hover.",
-  },
-  {
-    href: "/charts/sleep",
-    title: "Sleep calendar",
-    description: "A year-by-year heatmap of nightly sleep duration.",
-  },
-  {
-    href: "/charts/sleep-trend",
-    title: "Sleep trend",
-    description: "Average time asleep per night, at any bucket size."
-  },
-  {
-    href: "/charts/sleep-daily",
-    title: "Nightly sleep",
-    description: "Every logged night — zoom and pan through the range.",
-  },
-  {
-    href: "/charts/sleep-locations",
-    title: "Sleep locations",
-    description: "Where you slept, as a share of nights over time.",
-  },
-  {
-    href: "/charts/gym",
-    title: "Weight & training volume",
-    description: "Body weight against how many workouts you logged each month.",
-  },
-  {
-    href: "/charts/exercise-mix",
-    title: "Exercise mix",
-    description: "Workout count by category, exercise, or subtype, over any time range.",
-  },
-  {
-    href: "/charts/screen-time",
-    title: "Screen time",
-    description: "Phone against laptop, and how the balance has shifted.",
-  },
-  {
-    href: "/charts/screen-time-daily",
-    title: "Daily screen time",
-    description: "Every logged day — zoom and pan through the range.",
-  },
-  {
-    href: "/charts/screen-time-calendar",
-    title: "Screen time calendar",
-    description: "Both devices on one grid, coloured by which dominated.",
-  },
-  {
-    href: "/charts/instagram",
-    title: "Instagram followers",
-    description: "Follower count over time.",
-  },
-  {
-    href: "/charts/places",
-    title: "Most-visited places",
-    description: "Ranked by how often each place filled your day's two place slots.",
-  },
-  {
-    href: "/charts/place-hierarchy",
-    title: "Place hierarchy",
-    description: "A zoomable sunburst of where your days happen, by geography or category.",
-  },
-  {
-    href: "/charts/place-history",
-    title: "Where you were",
-    description: "Days spent in each country, as a share over time.",
-  },
-  {
-    href: "/charts/people",
-    title: "People network",
-    description: "Who gets logged together — drag nodes to reposition.",
-  },
-  {
-    href: "/charts/people-over-time",
-    title: "Who you saw",
-    description: "Days logged with each person, as a share over time.",
-  },
-  {
-    href: "/charts/people-table",
-    title: "People table",
-    description: "Everyone ranked by days logged, with recent rank movement.",
-  },
-  {
-    href: "/charts/people-calendar",
-    title: "People calendar",
-    description: "How many people you logged each day.",
-  },
-  {
-    href: "/charts/people-impact",
-    title: "People impact",
-    description: "Who contributed most to how your days went, week by week.",
-  },
-  {
-    href: "/charts/world",
-    title: "Days per country",
-    description: "A world map colored by how many days you've logged in each country.",
-  },
-] as const;
-
+// Landing page for the chart catalog (#268) — a hand-picked favorites row
+// plus category cards, rather than one flat grid of every chart. Browsing
+// everything at once, or searching by name, lives at /charts/all; a single
+// category's full chart list lives at /charts/category/[slug].
 export default function ChartsIndexPage() {
+  const favorites = CHARTS.filter((chart) => FAVORITE_CHART_HREFS.includes(chart.href));
+
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:py-12">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8 md:py-12">
       <div className="flex items-center justify-between">
         <h1 className="font-heading text-2xl font-medium tracking-tight md:text-3xl">Charts</h1>
-        <Link href="/" className="text-xs text-muted-foreground hover:text-foreground">
-          Home
-        </Link>
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
-        {CHARTS.map((chart) => (
-          <Link key={chart.href} href={chart.href}>
-            <Card className="h-full transition-colors hover:bg-accent">
-              <CardHeader>
-                <CardTitle>{chart.title}</CardTitle>
-                <CardDescription>{chart.description}</CardDescription>
-              </CardHeader>
-            </Card>
+        <div className="flex items-center gap-4">
+          <Link href="/charts/all" className="text-xs text-muted-foreground hover:text-foreground">
+            All charts
           </Link>
-        ))}
+          <Link href="/" className="text-xs text-muted-foreground hover:text-foreground">
+            Home
+          </Link>
+        </div>
       </div>
+
+      <section className="flex flex-col gap-4">
+        <h2 className="text-sm font-medium text-muted-foreground">Favorites</h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
+          {favorites.map((chart) => (
+            <Link key={chart.href} href={chart.href}>
+              <Card className="h-full transition-colors hover:bg-accent">
+                <CardHeader>
+                  <CardTitle>{chart.title}</CardTitle>
+                  <CardDescription>{chart.description}</CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <h2 className="text-sm font-medium text-muted-foreground">Browse by category</h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
+          {CHART_CATEGORY_ORDER.map((category) => {
+            const count = chartsByCategory(category).length;
+            return (
+              <Link key={category} href={`/charts/category/${category}`}>
+                <Card className="h-full transition-colors hover:bg-accent">
+                  <CardHeader>
+                    <CardTitle>{CHART_CATEGORIES[category].label}</CardTitle>
+                    <CardDescription>{CHART_CATEGORIES[category].description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-xs text-muted-foreground">
+                    {count} chart{count === 1 ? "" : "s"}
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
     </main>
   );
 }
