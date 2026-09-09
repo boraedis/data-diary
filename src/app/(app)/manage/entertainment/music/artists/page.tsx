@@ -1,23 +1,13 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CatalogBrowser } from "@/components/manage/catalog-browser";
+import { ArtistsBrowser } from "@/components/manage/artists-browser";
 import { GenreCatalogPanel } from "@/components/manage/genre-catalog-panel";
 import { ReviewProgressRow } from "@/components/manage/review-progress-row";
 import { listArtists, listGenreGroups, listGenres } from "@/lib/catalog-admin";
 import { getMusicCurationStats } from "@/lib/music";
-import type { SearchItem } from "@/components/entry-forms/search-panel";
 
 export const dynamic = "force-dynamic";
-
-function toSearchItem(artist: Awaited<ReturnType<typeof listArtists>>[number]): SearchItem {
-  return {
-    id: artist.id,
-    primary: artist.name,
-    secondary: artist.genres.slice(0, 3).join(", ") || undefined,
-    searchTerms: artist.aliases,
-  };
-}
 
 export default async function ManageArtistsPage() {
   const [artists, genreGroups, genres, curation] = await Promise.all([
@@ -26,6 +16,7 @@ export default async function ManageArtistsPage() {
     listGenres(),
     getMusicCurationStats(),
   ]);
+  const artistsWithGenres = artists.filter((a) => a.genres.length > 0).length;
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
@@ -36,25 +27,30 @@ export default async function ManageArtistsPage() {
         </Link>
       </div>
 
-      {curation.totalGenres > 0 && (
+      {(curation.totalGenres > 0 || artists.length > 0) && (
         <Card>
-          <CardContent>
-            <ReviewProgressRow
-              label="Genres grouped"
-              href="#genres"
-              done={curation.groupedGenres}
-              total={curation.totalGenres}
-            />
+          <CardContent className="flex flex-col gap-3">
+            {curation.totalGenres > 0 && (
+              <ReviewProgressRow
+                label="Genres grouped"
+                href="#genres"
+                done={curation.groupedGenres}
+                total={curation.totalGenres}
+              />
+            )}
+            {artists.length > 0 && (
+              <ReviewProgressRow
+                label="Artists with a genre"
+                href="#artist-list"
+                done={artistsWithGenres}
+                total={artists.length}
+              />
+            )}
           </CardContent>
         </Card>
       )}
 
-      <CatalogBrowser
-        items={artists.map(toSearchItem)}
-        basePath="/manage/entertainment/music/artists"
-        placeholder="Search artists…"
-        emptyMessage="No artists yet — import some listens first."
-      />
+      <ArtistsBrowser artists={artists} />
 
       <GenreCatalogPanel initialGenreGroups={genreGroups} initialGenres={genres} />
     </main>
