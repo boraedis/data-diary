@@ -118,7 +118,7 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
     >
       <ChartCard
         title={CITIES[city].label}
-        description="Neighborhoods colored by days logged there; dots mark places you've visited. Scroll to zoom, drag to pan, hover for detail."
+        description="Neighborhoods colored by days logged there; dot size shows how often you've visited. Scroll to zoom, drag to pan, hover for detail."
         empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}
       >
         <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
@@ -140,14 +140,16 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"
-              // Every visited place is plotted now, not a curated top-N
-              // (see getCityHeatmapData's own comment) — sizing hundreds
-              // of dots by frequency would read as noise, not signal;
-              // uniform small dots (still at a constant on-screen size
-              // regardless of zoom, per InteractiveGeo's own `markers`
-              // comment) stay legible with the count this can now reach.
-              scaleMarkersByValue={false}
-              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there; dots mark places you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
+              // scaleMarkersByValue stays at its default (true) — bigger
+              // dots for more-visited places. An earlier version of this
+              // chart turned that off on the theory that plotting every
+              // place (not just a curated top-N) would make size-by-
+              // frequency read as noise; reverted per feedback that the
+              // size signal was worth keeping even at full density, now
+              // that dots no longer balloon on zoom (below) and can be
+              // hidden entirely via the toggle above when they crowd a
+              // small neighborhood.
+              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
             />
           )}
         </ResponsiveChart>

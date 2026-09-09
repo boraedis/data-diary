@@ -5,7 +5,7 @@ import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
-import { resolveCityFeatureName } from "@/lib/geo/resolve-city-place";
+import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
 import dcMetroTopo from "@/data/geo/dc-metro.topo.json";
 import dubaiTopo from "@/data/geo/dubai.topo.json";
@@ -664,12 +664,19 @@ export type CityHeatmapData = {
  * (same "was I there that day" dedup getCountryVisitData uses, generalized
  * from "first namePath segment" to resolveCityFeatureName's arbitrary-depth
  * walk — see that function's own comment on why DC-metro/NYC need more than
- * one segment checked). `destinations` is every geocoded specific place in
- * the city with the same day-presence count, for the marker overlay — not
- * capped to a curated top-N (an earlier version was; see
- * interactive-geo.tsx's own `markers` prop comment on why showing every
- * marker wants uniform dot sizing instead of a smaller curated set sized by
- * frequency).
+ * one segment checked). `destinations` is every geocoded specific place
+ * anywhere in the city (isPlaceInCity, not resolveCityFeatureName — every
+ * visited place under the city's roots, not just ones that also resolve to
+ * a drawn neighborhood) with the same day-presence count, for the marker
+ * overlay.
+ *
+ * `destinations` intentionally includes places whose own neighborhood
+ * *doesn't* resolve to any geometry feature (a real gap: an unmapped or
+ * misnamed neighborhood, see e.g. atlanta-names.ts's documented Briarcliff
+ * Woods case). Those still get a real dot at their real geocoded position,
+ * with no fill underneath it — which is exactly what makes a geometry/
+ * alias-table gap visible on the rendered map instead of the place just
+ * silently disappearing from the chart.
  *
  * Two day-presence tallies over the same underlying rows, not one tally
  * fed two ways — a day spent at 3 different addresses inside one
@@ -717,15 +724,23 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
     if (resolved) resolvedByPlaceId.set(p.id, `${resolved.root}\0${resolved.featureName}`);
   }
 
+  // Two different membership tests, deliberately: the choropleth fill
+  // only makes sense for a place that resolves to an actual drawn
+  // feature (resolvedByPlaceId, the narrower test), but the destination
+  // dots use the broader isPlaceInCity — a place can genuinely be inside
+  // the city with no matching neighborhood polygon (a real geometry/
+  // alias gap, not a bug), and plotting it anyway is what lets that gap
+  // be spotted on the map instead of the place just silently vanishing.
   const dayNeighborhoodPairs = new Set<string>();
   const dayPlacePairs = new Set<string>();
   for (const row of dayRows) {
     for (const placeId of [row.place1Id, row.place2Id]) {
       if (placeId === null) continue;
-      const resolvedKey = resolvedByPlaceId.get(placeId);
-      if (!resolvedKey) continue; // not inside this city at all
-      dayNeighborhoodPairs.add(`${row.date}\0${resolvedKey}`);
+      const place = placeById.get(placeId);
+      if (!place?.idPath || !isPlaceInCity(place.idPath, city.sources)) continue;
       dayPlacePairs.add(`${row.date}\0${placeId}`);
+      const resolvedKey = resolvedByPlaceId.get(placeId);
+      if (resolvedKey) dayNeighborhoodPairs.add(`${row.date}\0${resolvedKey}`);
     }
   }
 

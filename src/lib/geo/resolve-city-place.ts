@@ -44,3 +44,19 @@ export function resolveCityFeatureName(
   }
   return null; // idPath doesn't pass through any of this city's roots at all
 }
+
+/**
+ * Whether a place sits under any of a city's catalog roots at all —
+ * independent of whether resolveCityFeatureName can also match it to a
+ * drawn geometry feature. Deliberately the weaker, geometry-independent
+ * half of that check, split out for the destination-marker overlay: a
+ * place can genuinely be "in Atlanta" while its neighborhood has no
+ * matching polygon (a real gap in the geometry/alias table, like
+ * Atlanta's own Briarcliff Woods — see atlanta-names.ts), and the whole
+ * point of showing it as a dot anyway is to make that gap visible on the
+ * map instead of silently dropping the place.
+ */
+export function isPlaceInCity(idPath: string, roots: CityRootConfig[]): boolean {
+  const idSegments = idPath.split("/").filter(Boolean);
+  return roots.some((r) => idSegments.includes(String(r.rootId)));
+}
