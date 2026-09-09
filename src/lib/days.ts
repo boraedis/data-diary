@@ -865,21 +865,21 @@ function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
 // into a clean 400 here, instead of letting it reach the INSERT and fail
 // as a raw Postgres FK-constraint-violation string surfaced through the
 // route's generic 500 handler.
-async function findMissingExerciseIds(ids: number[]): Promise<number[]> {
-  if (ids.length === 0) return [];
-  const db = getDb();
-  const uniqueIds = [...new Set(ids)];
-  const rows = await db.select({ id: exercises.id }).from(exercises).where(inArray(exercises.id, uniqueIds));
-  const found = new Set(rows.map((r) => r.id));
-  return uniqueIds.filter((id) => !found.has(id));
-}
-
-// exerciseId -> category, for every distinct id referenced by a batch of
-// workouts — used to require durationMinutes for distance/sport workouts
-// (see the exerciseCategoryEnum comment in schema.ts: strength exercises
-// carry no scalar duration at all, they live entirely in workout_sets, so
-// this deliberately only gates the other two categories).
-async function findExerciseCategoriesById(ids: number[]): Promise<Map<number, ExerciseCategory>> {
+//
+// The exercises lookup answers *both* questions validateHealthPayload has
+// about an exercise id — does a row exist, and what category is it — from
+// one query, so an id absent from the returned map is by definition a
+// missing FK. #284 originally added the category lookup as a second
+// select over the same table with the same ids, which cost every health
+// save a redundant round trip (and, since it landed between the existing
+// two lookups, broke every test in days-validation.test.ts that asserts on
+// the call sequence — see #291).
+//
+// Category matters because duration lives in a different place per
+// category: see the exerciseCategoryEnum comment in schema.ts — strength
+// exercises carry no scalar duration at all, they live entirely in
+// workout_sets.
+async function findExerciseCategories(ids: number[]): Promise<Map<number, ExerciseCategory>> {
   if (ids.length === 0) return new Map();
   const db = getDb();
   const uniqueIds = [...new Set(ids)];
@@ -917,16 +917,17 @@ export async function validateHealthPayload(body: unknown): Promise<Result<Healt
   const workoutsResult = parseWorkouts(b.workouts);
   if (!workoutsResult.ok) return workoutsResult;
 
-  const missingExerciseIds = await findMissingExerciseIds(workoutsResult.value.map((w) => w.exerciseId));
+  const exerciseIds = workoutsResult.value.map((w) => w.exerciseId);
+  const categoryByExerciseId = await findExerciseCategories(exerciseIds);
+  const missingExerciseIds = [...new Set(exerciseIds)].filter((id) => !categoryByExerciseId.has(id));
   if (missingExerciseIds.length > 0) {
     return { ok: false, error: `Exercise not found: ${missingExerciseIds.join(", ")}` };
   }
 
   // Every workout needs a duration somewhere — mirrors health-entry-form.tsx.
   // Distance/sport carry it as their own scalar field; strength has none
-  // (see findExerciseCategoriesById above), so it's required on at least one
+  // (see findExerciseCategories above), so it's required on at least one
   // set instead.
-  const categoryByExerciseId = await findExerciseCategoriesById(workoutsResult.value.map((w) => w.exerciseId));
   const missingDuration = workoutsResult.value.some((w) => {
     const category = categoryByExerciseId.get(w.exerciseId);
     if (category === "distance" || category === "sport") return w.durationMinutes === null;

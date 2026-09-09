@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { personImpact } from "@/lib/impact";
+import { personImpact, recencyWeight } from "@/lib/impact";
 
 // Pins legacy's people-impact formula (#232). These aren't tests of
 // something derived — they're a fence around a verbatim port, so an
@@ -68,5 +68,28 @@ describe("personImpact", () => {
   it("returns zero for a slot outside the known range", () => {
     expect(personImpact(80, 8)).toBe(0);
     expect(personImpact(80, -3)).toBe(0);
+  });
+});
+
+describe("recencyWeight", () => {
+  it("counts today at full weight", () => {
+    expect(recencyWeight(0)).toBeCloseTo(1, 10);
+  });
+
+  it("has fallen to roughly half a year in", () => {
+    // The inflection point of legacy's curve, and the reason a race built
+    // on it keeps moving: a year of absence costs about half your score.
+    expect(recencyWeight(365)).toBeCloseTo(0.539, 3);
+  });
+
+  it("decreases with age and never reaches zero", () => {
+    const ages = [0, 30, 180, 365, 730, 3650];
+    const weights = ages.map(recencyWeight);
+    for (let i = 1; i < weights.length; i++) expect(weights[i]).toBeLessThan(weights[i - 1]);
+    expect(weights.at(-1)).toBeGreaterThan(0.05);
+  });
+
+  it("clamps a negative age rather than weighting a future day above 1", () => {
+    expect(recencyWeight(-100)).toBe(recencyWeight(0));
   });
 });

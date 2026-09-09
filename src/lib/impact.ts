@@ -76,3 +76,49 @@ export function personImpact(happiness: number, slot: number): number {
   if (weight === undefined) return 0;
   return weight * negativeWeight(happiness / 100) * SCALE;
 }
+
+// --- Recency ---------------------------------------------------------------
+
+/**
+ * Constants for the recency fader below, legacy's own (`people_bar_race.js`
+ * builds the same curve inline as a lookup table). Like the impact curve
+ * above, their derivation isn't recorded anywhere and they stay as-is
+ * because the numbers they produce are the ones with years of remembered
+ * meaning behind them. `b` is the inflection point in days and `c` the
+ * floor, which is as much as can be said with confidence.
+ */
+const RECENCY_STEEPNESS = 0.03; // legacy's `a`
+const RECENCY_INFLECTION_DAYS = 365; // legacy's `b`
+const RECENCY_FLOOR = 0.05; // legacy's `c`
+/** Scales the curve so age 0 lands exactly on 1 (legacy's `d`). */
+const RECENCY_NORMALIZER =
+  (Math.atan(RECENCY_STEEPNESS * RECENCY_INFLECTION_DAYS) + Math.PI / 2) / (1 - RECENCY_FLOOR);
+
+/**
+ * How much a past day still counts, by how long ago it was.
+ *
+ * Ported from `people_bar_race.js`'s inline `fader` table — the bar race
+ * was the only chart that used it, so it lived in that file rather than in
+ * `vis_functions.js`. Weighting impact by this turns an all-time total
+ * into a "who matters *now*" reading, which is what makes the race move:
+ * without it bars only ever grow and rank changes stop happening once the
+ * early leaders are far enough ahead.
+ *
+ * An arctan sigmoid, not an exponential decay: it holds near full weight
+ * through the first few months, falls off steepest around the one-year
+ * mark (~0.54 at 365 days), and flattens onto a floor rather than
+ * approaching zero — so someone you haven't seen in five years still
+ * counts for something, which is the point.
+ *
+ * @param ageDays how many days before the moment being scored the day was.
+ *   Negative ages (a future day, which a caller shouldn't be summing at
+ *   all) clamp to 0 rather than returning a weight above 1.
+ * @returns a weight in (0.05, 1] — exactly 1 at age 0.
+ */
+export function recencyWeight(ageDays: number): number {
+  const age = Math.max(0, ageDays);
+  return (
+    (Math.atan(RECENCY_STEEPNESS * (RECENCY_INFLECTION_DAYS - age)) + Math.PI / 2) / RECENCY_NORMALIZER +
+    RECENCY_FLOOR
+  );
+}
