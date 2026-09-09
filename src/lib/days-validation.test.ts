@@ -47,15 +47,30 @@ describe("validateSleepPayload", () => {
 });
 
 describe("validateHealthPayload", () => {
+  // The exercises lookup returns each row's category as well as its id —
+  // one query answers both "does this exist" and "which duration rule
+  // applies" (see findExerciseCategories in days.ts). So a queued exercise
+  // row needs a real category on it, or the duration rule below is being
+  // tested against undefined.
+  const strength = (id: number) => ({ id, category: "strength" as const });
+  const distance = (id: number) => ({ id, category: "distance" as const });
+  const sport = (id: number) => ({ id, category: "sport" as const });
+
+  /** A strength workout that satisfies the duration rule, for tests about
+   * something other than duration. */
+  const timedSet = { sets: [{ setNumber: 1, reps: 10, durationSeconds: 60 }] };
+
   it("accepts a workout whose exercise and location both exist", async () => {
-    dbState.current = createMockDb([[{ id: 5 }], [{ id: 9 }]]);
-    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5, locationId: 9 }] });
+    dbState.current = createMockDb([[strength(5)], [{ id: 9 }]]);
+    const result = await validateHealthPayload({
+      workouts: [{ exerciseId: 5, locationId: 9, ...timedSet }],
+    });
     expect(result.ok).toBe(true);
   });
 
   it("skips the location lookup entirely when no workout has one (no wasted DB call)", async () => {
-    dbState.current = createMockDb([[{ id: 5 }]]); // only one queued result — a second DB call would throw
-    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5 }] });
+    dbState.current = createMockDb([[strength(5)]]); // only one queued result — a second DB call would throw
+    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5, ...timedSet }] });
     expect(result.ok).toBe(true);
   });
 
@@ -65,16 +80,36 @@ describe("validateHealthPayload", () => {
     expect(result).toEqual({ ok: false, error: "Exercise not found: 999" });
   });
 
+  it("reports a missing exercise before checking anything else about it", async () => {
+    // The id isn't in the returned map at all, so there's no category to
+    // apply a duration rule with — "not found" has to win, and it has to
+    // win before the place lookup runs (one queued result, so a second
+    // call would throw).
+    dbState.current = createMockDb([[strength(5)]]);
+    const result = await validateHealthPayload({
+      workouts: [
+        { exerciseId: 5, ...timedSet },
+        { exerciseId: 999, locationId: 9 },
+      ],
+    });
+    expect(result).toEqual({ ok: false, error: "Exercise not found: 999" });
+  });
+
   it("rejects a workout referencing a location that doesn't exist", async () => {
-    dbState.current = createMockDb([[{ id: 5 }], []]);
-    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5, locationId: 999 }] });
+    dbState.current = createMockDb([[strength(5)], []]);
+    const result = await validateHealthPayload({
+      workouts: [{ exerciseId: 5, locationId: 999, ...timedSet }],
+    });
     expect(result).toEqual({ ok: false, error: "Location not found: 999" });
   });
 
   it("checks each referenced exercise id only once even if used by multiple workouts", async () => {
-    dbState.current = createMockDb([[{ id: 5 }]]); // one queued result for one deduped lookup
+    dbState.current = createMockDb([[strength(5)]]); // one queued result for one deduped lookup
     const result = await validateHealthPayload({
-      workouts: [{ exerciseId: 5 }, { exerciseId: 5 }],
+      workouts: [
+        { exerciseId: 5, ...timedSet },
+        { exerciseId: 5, ...timedSet },
+      ],
     });
     expect(result.ok).toBe(true);
   });
@@ -83,6 +118,95 @@ describe("validateHealthPayload", () => {
     dbState.current = createMockDb([]); // any DB call here would throw
     const result = await validateHealthPayload({ workouts: [{}] });
     expect(result).toEqual({ ok: false, error: "Every workout needs an exercise" });
+  });
+
+  // #284's rule: every workout carries a duration somewhere, but *where*
+  // depends on the exercise's category — distance and sport have their own
+  // scalar minutes, strength has none at all and has to prove it through a
+  // set. Shipped untested; these are the tests it should have had (#291).
+  const DURATION_ERROR =
+    "Duration is required for every workout — distance/sport need a duration, strength needs at least one set with a duration";
+
+  it("rejects a distance workout with no duration", async () => {
+    dbState.current = createMockDb([[distance(5)]]);
+    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5, distanceKm: 5 }] });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
+  });
+
+  it("rejects a sport workout with no duration", async () => {
+    dbState.current = createMockDb([[sport(5)]]);
+    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5 }] });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
+  });
+
+  it("accepts a distance workout that has one", async () => {
+    dbState.current = createMockDb([[distance(5)]]);
+    const result = await validateHealthPayload({
+      workouts: [{ exerciseId: 5, distanceKm: 5, durationMinutes: 30 }],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a strength workout whose sets are all untimed", async () => {
+    // Not the same as "no duration field" — a strength workout legitimately
+    // has no durationMinutes of its own, so the rule reads its sets.
+    dbState.current = createMockDb([[strength(5)]]);
+    const result = await validateHealthPayload({
+      workouts: [{ exerciseId: 5, sets: [{ setNumber: 1, reps: 10, weightLbs: 135 }] }],
+    });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
+  });
+
+  it("rejects a strength workout with no sets at all", async () => {
+    dbState.current = createMockDb([[strength(5)]]);
+    const result = await validateHealthPayload({ workouts: [{ exerciseId: 5 }] });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
+  });
+
+  it("accepts a strength workout where any one set is timed", async () => {
+    dbState.current = createMockDb([[strength(5)]]);
+    const result = await validateHealthPayload({
+      workouts: [
+        {
+          exerciseId: 5,
+          sets: [
+            { setNumber: 1, reps: 10, weightLbs: 135 },
+            { setNumber: 2, reps: 10, durationSeconds: 45 },
+          ],
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not accept a strength workout's own durationMinutes in place of a timed set", async () => {
+    // The form has no duration field for strength, so a payload carrying
+    // one didn't come from the UI — the rule shouldn't quietly honour it.
+    dbState.current = createMockDb([[strength(5)]]);
+    const result = await validateHealthPayload({
+      workouts: [{ exerciseId: 5, durationMinutes: 45, sets: [{ setNumber: 1, reps: 10 }] }],
+    });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
+  });
+
+  it("rejects the batch when any one workout is missing its duration", async () => {
+    dbState.current = createMockDb([[distance(5), strength(6)]]);
+    const result = await validateHealthPayload({
+      workouts: [
+        { exerciseId: 5, durationMinutes: 30 },
+        { exerciseId: 6, sets: [{ setNumber: 1, reps: 10 }] },
+      ],
+    });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
+  });
+
+  it("checks duration before the location lookup, so a bad batch costs one query", async () => {
+    // One queued result: reaching the place lookup would throw.
+    dbState.current = createMockDb([[distance(5)]]);
+    const result = await validateHealthPayload({
+      workouts: [{ exerciseId: 5, locationId: 9 }],
+    });
+    expect(result).toEqual({ ok: false, error: DURATION_ERROR });
   });
 });
 
