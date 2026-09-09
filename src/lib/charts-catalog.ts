@@ -260,6 +260,12 @@ export const CHARTS: ChartEntry[] = [
     category: "places",
   },
   {
+    href: "/charts/us-states",
+    title: "Days per state",
+    description: "A US map colored by how many days you've logged in each state.",
+    category: "places",
+  },
+  {
     href: "/charts/city-heatmap",
     title: "City heatmap",
     description: "Neighborhood-level maps for Atlanta, DC metro, Dubai, NYC, and Istanbul, with your top destinations marked.",
