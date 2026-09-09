@@ -155,31 +155,6 @@ describe("UsStateVisitsChart", () => {
       return regions(container).map(nameOf);
     }
 
-    it("starts with nothing expanded", () => {
-      renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
-      const row = screen.getByRole("navigation", { name: /expanded region/i });
-      expect(row.textContent).toMatch(/click a region/i);
-      expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
-    });
-
-    it("replaces the clicked state with its counties, keeping every other state on the map", async () => {
-      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
-      fireEvent.click(stateNamed(container, "Georgia"));
-      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
-
-      const names = regionNames(container);
-      // Georgia's own polygon is gone, replaced by its 159 counties...
-      expect(names).not.toContain("Georgia");
-      // ...while its neighbours are untouched and still clickable, which
-      // is the entire point of expanding in place rather than swapping
-      // the map out for a county-only view.
-      expect(names).toContain("Alabama");
-      expect(names).toContain("Florida");
-      expect(names).toContain("Alaska");
-      // 51 states - Georgia + its 159 counties.
-      expect(names).toHaveLength(51 - 1 + 159);
-    });
-
     it("moves focus to a neighbour on click, restoring the first state's polygon", async () => {
       const { container } = renderChart(TWO_STATES, COUNTIES);
       fireEvent.click(stateNamed(container, "Georgia"));
@@ -197,7 +172,38 @@ describe("UsStateVisitsChart", () => {
       expect(names).not.toContain("Alabama");
       // 51 states - Alabama + its 67 counties.
       expect(names).toHaveLength(51 - 1 + 67);
-      expect(screen.getAllByRole("button", { name: /collapse/i })).toHaveLength(1);
+    });
+
+    it("keeps the open state open when one of its own counties is clicked", async () => {
+      const { container } = renderChart(TWO_STATES, COUNTIES);
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+
+      // A county belongs to the state you drilled into — clicking it is
+      // staying inside, not leaving. Collapsing here would read as the
+      // map undoing the click that got you here.
+      fireEvent.click(stateNamed(container, "Fulton"));
+
+      const names = regionNames(container);
+      expect(names).toContain("Fulton");
+      expect(names).not.toContain("Georgia");
+    });
+
+    it("closes the open state when a state that can't expand is clicked", async () => {
+      // Alaska has counties in us-atlas, so to get a genuinely
+      // non-expandable region the resolver has to come back empty. The
+      // component treats "resolved to nothing" the same as "no
+      // subdivisions exist", which is the path a country with no geometry
+      // takes on the world map.
+      const { container } = renderChart(TWO_STATES, { counties: [], unresolvedDays: 0 });
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+      expect(regionNames(container)).not.toContain("Georgia");
+
+      // Clicking away from it puts Georgia back together.
+      fireEvent.click(stateNamed(container, "Alabama"));
+      await waitFor(() => expect(regionNames(container)).toContain("Georgia"));
+      expect(regionNames(container)).not.toContain("Fulton");
     });
 
     it("draws exactly one outline, over whichever state is open", async () => {
@@ -239,29 +245,32 @@ describe("UsStateVisitsChart", () => {
       expect(fillOf("DeKalb")).toBe("var(--muted)");
     });
 
-    it("collapses back to the whole map from the chip", async () => {
+    it("resets the whole map on a single background click", async () => {
       const { container } = renderChart(TWO_STATES, COUNTIES);
       fireEvent.click(stateNamed(container, "Georgia"));
       await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
 
-      fireEvent.click(screen.getByRole("button", { name: "Collapse Georgia" }));
-
-      const names = regionNames(container);
-      expect(names).toContain("Georgia");
-      expect(names).not.toContain("Fulton");
-      expect(names).toHaveLength(51);
-    });
-
-    it("collapses when the background is clicked, since that means back to the whole map", async () => {
-      const { container } = renderChart(TWO_STATES, COUNTIES);
-      fireEvent.click(stateNamed(container, "Georgia"));
-      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
-
-      const svg = container.querySelector("svg")!;
-      fireEvent.click(svg);
+      // One click, not two: the collapse and the zoom-out are halves of
+      // the same gesture. This used to take two because collapsing
+      // rebuilt the SVG and killed the zoom-out transition mid-flight.
+      fireEvent.click(container.querySelector("svg")!);
 
       expect(regionNames(container)).toContain("Georgia");
       expect(regionNames(container)).not.toContain("Fulton");
+      expect(regionNames(container)).toHaveLength(51);
+    });
+
+    it("shows no chrome naming the open region", async () => {
+      const { container } = renderChart(TWO_STATES, COUNTIES);
+      expect(screen.queryByRole("navigation")).toBeNull();
+
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+
+      // The outline says which region is open; there's nothing to
+      // operate and nothing to close.
+      expect(screen.queryByRole("navigation")).toBeNull();
+      expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
     });
   });
 });

@@ -110,22 +110,36 @@ describe("WorldVisitsChart", () => {
     // turn and assert the map genuinely did not change.
     await Promise.resolve();
     expect(regions(container)).toHaveLength(worldCount);
-    expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
   });
 
-  it("collapses the US back to one polygon", async () => {
+  it("collapses the US back to one polygon on a single background click", async () => {
     const { container } = render(<WorldVisitsChart data={COUNTRIES} usStates={STATES} />);
     const worldCount = regions(container).length;
 
     fireEvent.click(countryNamed(container, "United States of America"));
     await waitFor(() => expect(regions(container).map(nameOf)).toContain(CALIFORNIA));
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse United States" }));
+    fireEvent.click(container.querySelector("svg")!);
 
     const names = regions(container).map(nameOf);
     expect(names).toContain("United States of America");
     expect(names).not.toContain(CALIFORNIA);
     expect(names).toHaveLength(worldCount);
+  });
+
+  it("closes the US when another country is clicked", async () => {
+    const { container } = render(<WorldVisitsChart data={COUNTRIES} usStates={STATES} />);
+    fireEvent.click(countryNamed(container, "United States of America"));
+    await waitFor(() => expect(regions(container).map(nameOf)).toContain(CALIFORNIA));
+
+    // France can't expand — there's no admin-1 geometry for it — but
+    // clicking it is still clicking away from the US, so the US goes
+    // back to being one polygon.
+    fireEvent.click(countryNamed(container, "France"));
+
+    const names = regions(container).map(nameOf);
+    expect(names).toContain("United States of America");
+    expect(names).not.toContain(CALIFORNIA);
   });
 
   it("offers no expansion at all without state data (the recap's embed)", () => {

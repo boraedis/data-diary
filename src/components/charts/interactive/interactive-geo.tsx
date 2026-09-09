@@ -48,10 +48,20 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // click — Alabama. Expanding in place means a neighbour is always one
 // click away and the reader never loses the surrounding context.
 //
-// Exactly one region is open at a time: clicking a neighbour restores the
-// previous region's own polygon on its way to subdividing the new one,
-// and clicking open background restores it and zooms back out. See the
-// `expansion` state below for why accumulating them turned out worse.
+// Exactly one region is open at a time, and every click is a complete
+// gesture — there is no chrome to operate, and nothing needs closing
+// before the next thing can be opened:
+//
+//   click another expandable region  -> that one opens, the old one closes
+//   click a region that can't expand -> the old one closes, camera goes there
+//   click a subdivision of the open one -> stays open, camera goes there
+//   click open background            -> closes and zooms back out, one click
+//
+// The third line is the deliberate exception: a county belongs to the
+// state you drilled into, so clicking it is staying inside rather than
+// leaving. Collapsing there would make the map appear to undo your work.
+// See the `expansion` state below for why accumulating open regions
+// turned out worse than replacing them.
 //
 // A caller that passes nothing, or returns null for a given feature,
 // keeps exactly the old behavior: click zooms to that feature's bounds.
@@ -138,16 +148,8 @@ const DEFAULT_MARKER_RADIUS_RANGE: [number, number] = [3, 10];
 // together within that same budget instead of the legend overflowing it.
 const LEGEND_AREA_HEIGHT = 36;
 
-// Reserved for the expanded-regions row above the map, on the same
-// budget-sharing logic as LEGEND_AREA_HEIGHT — and only subtracted when a
-// caller actually passes `resolveExpansion`, so a plain choropleth's map
-// area is exactly what it was before drill-down existed.
-//
-// Reserved whenever drill-down is *configured*, not only while something
-// is expanded: the row appearing on first expand would shrink mapHeight,
-// which refits the projection, which moves every polygon on screen — the
-// one thing in-place expansion exists to avoid.
-const EXPANSION_ROW_HEIGHT = 28;
+/** Anything d3's own `fitSize` will take as a fit target. */
+export type GeoFitTarget = Parameters<d3.GeoProjection["fitSize"]>[1];
 
 /** A feature as the drill-down machinery sees it — properties erased to
  * the base GeoJSON type, since one chain's levels legitimately carry
@@ -335,7 +337,7 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    *
    * Only affects framing. Everything in `features` is still drawn,
    * hoverable and clickable. */
-  fitTo?: FeatureCollection<Geometry, P>;
+  fitTo?: GeoFitTarget;
 };
 
 /** Discriminated union so one hover state serves both layers — a marker
@@ -455,8 +457,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     return values.length ? [Math.min(...values), Math.max(...values)] : [1, 10];
   }, [drawn]);
   const colorScale = useMemo(() => sequentialLogScale(domain, colorMode), [domain, colorMode]);
-  const expansionRowHeight = resolveExpansion ? EXPANSION_ROW_HEIGHT : 0;
-  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - expansionRowHeight);
+  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT);
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
 
   /** Show one region as its own subdivisions, restoring whichever region
@@ -469,11 +470,27 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     setExpansion({ key, value });
   }, []);
 
-  // Which base feature the next draw owes a zoom to. A ref, not state:
-  // it's a one-shot instruction consumed by the render function on the
-  // very next draw, and making it state would trigger a second rebuild
-  // just to clear it.
-  const pendingZoomKeyRef = useRef<string | null>(null);
+  // The view change the *next* draw owes, when a click both changes what's
+  // expanded and wants to move the camera.
+  //
+  // This indirection is load-bearing rather than fussy. Expanding or
+  // collapsing is React state, so it rebuilds the SVG — and a d3
+  // transition started in the click handler dies with the nodes it was
+  // animating. That's what made "click the background" take two clicks to
+  // get home: the first click collapsed and started a zoom-out, the
+  // rebuild cancelled the zoom-out mid-flight and re-applied the
+  // still-zoomed transform, and only a second click (which changed no
+  // state, so rebuilt nothing) actually animated. Deferring the camera
+  // move to just after the rebuild makes it one click, still animated.
+  //
+  // A ref, not state: it's a one-shot instruction consumed by the very
+  // next draw, and making it state would trigger another rebuild purely
+  // to clear it.
+  type PendingView =
+    | { kind: "reset" }
+    | { kind: "expansion"; key: string }
+    | { kind: "feature"; key: string };
+  const pendingViewRef = useRef<PendingView | null>(null);
   // The base `features` reference as of the last draw, to tell "the whole
   // map changed" apart from "only the expansions changed" — see where the
   // zoom transform is carried, in the render function below.
@@ -631,49 +648,68 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         svg.transition().duration(600).call(zoomBehavior.transform, transform);
       }
 
+      /** Zoom to a base feature, closing whatever was open on the way.
+       * Deferred through pendingViewRef when there's actually something
+       * to close, since that rebuild would otherwise kill the
+       * transition — see that ref's own comment. */
+      function leaveExpansionAndZoomTo(key: string, feature: GeoFeature) {
+        if (expansion) {
+          pendingViewRef.current = { kind: "feature", key };
+          collapse();
+        } else {
+          zoomToBounds(feature);
+        }
+      }
+
       regions.style("cursor", "pointer").on("click", function (event, d) {
         // Stops this from also reaching the background click handler
         // below (a click that lands on a region isn't also "outside every
         // region").
         event.stopPropagation();
-        // Not expandable: no resolver configured, or this polygon is
-        // already a subdivision. Either way, keep the pre-#107 behavior.
-        if (!resolveExpansion || d.expandableKey === null) {
+        // A subdivision of the region that's currently open. Clicking one
+        // is staying *inside* what you drilled into, not leaving it, so
+        // this zooms without collapsing — otherwise clicking a county
+        // would snap its whole state back to a single polygon, which
+        // reads as the map undoing your work.
+        if (d.expandableKey === null) {
           zoomToBounds(d.feature);
           return;
         }
         const key = d.expandableKey;
-        const next = resolveExpansion(d.feature);
-        if (next === null) {
-          // Nothing to expand into (a country with no subdivision
-          // geometry) — zoom to it instead of doing nothing on click.
+        if (!resolveExpansion) {
           zoomToBounds(d.feature);
           return;
         }
+        const next = resolveExpansion(d.feature);
+        if (next === null) {
+          // Nothing to expand into (a country with no subdivision
+          // geometry). Still counts as clicking away from whatever was
+          // open, so it closes that too rather than leaving a region
+          // subdivided off in the corner while the camera flies
+          // somewhere unrelated.
+          leaveExpansionAndZoomTo(key, d.feature);
+          return;
+        }
         if (!(next instanceof Promise)) {
-          pendingZoomKeyRef.current = key;
+          pendingViewRef.current = { kind: "expansion", key };
           expand(key, next);
           return;
         }
         setExpanding(true);
         next
-          .then((expansion) => {
-            if (expansion) {
-              // The zoom is deferred to the *next* draw rather than run
-              // here: expanding rebuilds the SVG, which would cut a
-              // transition started now off mid-flight. See
-              // pendingZoomKeyRef's own comment.
-              pendingZoomKeyRef.current = key;
-              expand(key, expansion);
+          .then((resolved) => {
+            if (resolved) {
+              pendingViewRef.current = { kind: "expansion", key };
+              expand(key, resolved);
             } else {
-              zoomToBounds(d.feature);
+              leaveExpansionAndZoomTo(key, d.feature);
             }
           })
           // A failed geometry import shouldn't leave the map stuck
           // showing "Loading…" forever with clicks swallowed; fall back
           // to the zoom the click would have done without an expansion
           // configured at all.
-          .catch(() => zoomToBounds(d.feature))
+          .catch(() => leaveExpansionAndZoomTo(key, d.feature))
           .finally(() => setExpanding(false));
       });
 
@@ -685,30 +721,45 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       // interactive-network.tsx's own comment on the equivalent d3-drag
       // behavior), so this only ever fires for a true click on open
       // background.
+      // Clicking open background is a single "reset the map" gesture: it
+      // closes whatever region is open *and* animates back to the origin
+      // view, in one click. A click that landed on a region
+      // stopPropagation()s above before it bubbles here; a real pan
+      // gesture's click gets suppressed by d3-zoom itself before it's
+      // even dispatched (d3-zoom only suppresses the native click after a
+      // gesture that actually moved — see interactive-network.tsx's own
+      // comment on the equivalent d3-drag behavior), so this only ever
+      // fires for a true click on open background.
       svg.on("click", () => {
-        svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
-        // Clicking open background means "back to the whole map", so it
-        // closes the open region as well as resetting the zoom — the two
-        // halves of the same gesture. Leaving a region subdivided while
-        // zoomed all the way back out would strand a field of counties
-        // too small to read.
-        collapse();
+        if (expansion) {
+          // Collapsing rebuilds the SVG, so the zoom-out is handed to the
+          // next draw instead of started here where it would be killed
+          // half-finished. It still animates, from wherever the reader
+          // currently is — the transform is carried across the rebuild.
+          pendingViewRef.current = { kind: "reset" };
+          collapse();
+        } else {
+          svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
+        }
       });
 
       svg.call(zoomBehavior);
 
-      // The zoom owed to a region that was just expanded. Deferred to
-      // here — the draw *after* the expansion — because expanding
-      // rebuilds this whole SVG, and a transition started in the click
-      // handler would be torn down before it finished. Targets the
-      // expansion's own features rather than the region that was clicked,
-      // since that region's polygon no longer exists to measure.
-      const owedZoomKey = pendingZoomKeyRef.current;
-      if (owedZoomKey) {
-        pendingZoomKeyRef.current = null;
-        // Only if the open region is still the one that asked for it — a
+      // The camera move owed by the click that caused this draw — see
+      // pendingViewRef above for why it can't happen in the handler.
+      const pendingView = pendingViewRef.current;
+      pendingViewRef.current = null;
+      if (pendingView?.kind === "reset") {
+        svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
+      } else if (pendingView?.kind === "expansion") {
+        // Targets the expansion's own features, not the region that was
+        // clicked — that region's polygon no longer exists to measure.
+        // Only if the open region is still the one that asked for it: a
         // second click landing before this draw supersedes the first.
-        if (expansion?.key === owedZoomKey) zoomToBounds(expansion.value.features);
+        if (expansion?.key === pendingView.key) zoomToBounds(expansion.value.features);
+      } else if (pendingView?.kind === "feature") {
+        const target = drawn.find((entry) => entry.expandableKey === pendingView.key);
+        if (target) zoomToBounds(target.feature);
       }
 
       attachMarkHover<DrawnFeature>(
@@ -822,46 +873,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     // Fixed to the full `height` given (not auto-growing) — map + legend
     // share this one budget; see LEGEND_AREA_HEIGHT's own comment above.
     <div style={{ width, height }} className="flex flex-col">
-      {resolveExpansion ? (
-        // Not a breadcrumb: there's no trail to walk back, just one open
-        // region at a time. A single dismissible chip naming it, which
-        // doubles as the affordance for closing it without having to find
-        // empty background to click.
-        <nav
-          aria-label="Expanded region"
-          style={{ height: EXPANSION_ROW_HEIGHT }}
-          className="flex items-center gap-1.5 overflow-x-auto text-xs text-muted-foreground"
-        >
-          {expansion === null ? (
-            <span className="truncate opacity-80">Click a region to break it into smaller areas.</span>
-          ) : (
-            <button
-              type="button"
-              onClick={collapse}
-              title={`Collapse ${expansion.value.label}`}
-              // An explicit label, not the visible text: composed from
-              // the chip's parts a screen reader would announce it as
-              // "Georgia ✕", which says nothing about what activating
-              // it does.
-              aria-label={`Collapse ${expansion.value.label}`}
-              className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-foreground hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              <span className="max-w-48 truncate">{expansion.value.label}</span>
-              <span aria-hidden className="opacity-60">
-                ✕
-              </span>
-            </button>
-          )}
-          {expanding ? (
-            // role=status so the wait is announced rather than only shown
-            // — loading a county file is the one interaction here that
-            // isn't instant.
-            <span role="status" className="shrink-0 pl-1 opacity-70">
-              Loading…
-            </span>
-          ) : null}
-        </nav>
-      ) : null}
+      {/* No label for what's open, and no close button. With one region
+          expanded at a time, its own outline says which one, and clicking
+          anywhere else — another region, or open background — leaves it.
+          A chip naming it was a row of chrome restating what the map
+          already shows, and it cost the map 28px of height. */}
       <div
         ref={setContainerEl}
         style={{ position: "relative", width, height: mapHeight }}
@@ -869,6 +885,19 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         aria-label={ariaLabel}
       >
         <svg ref={ref} />
+        {expanding ? (
+          // Absolutely positioned, so it costs the map no layout height —
+          // a row that appeared on first click would shrink the SVG,
+          // refit the projection and shift every polygon on screen.
+          // role=status so the wait is announced, not only shown: loading
+          // a county file is the one interaction here that isn't instant.
+          <span
+            role="status"
+            className="pointer-events-none absolute top-2 left-2 rounded-full bg-card/90 px-2 py-0.5 text-xs text-muted-foreground shadow-sm"
+          >
+            Loading…
+          </span>
+        ) : null}
         {hovered && containerRect ? (
           <ChartTooltip
             x={hovered.clientPos.x - containerRect.left}
