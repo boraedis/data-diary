@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as d3 from "d3";
 import type { Feature, Geometry } from "geojson";
 import { UsStateVisitsChart } from "./us-state-visits-chart";
+import type { UsCountyVisitData, UsStateVisitEntry } from "@/lib/charts";
 
 // A mounted-DOM pass over the two things this chart does that nothing
 // else in the codebase covers: that geoAlbersUsa actually produces real
@@ -43,6 +44,14 @@ afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
 });
 
+const NO_COUNTIES: UsCountyVisitData = { counties: [], unresolvedDays: 0 };
+
+/** Most tests here only care about the state level, so county data
+ * defaults to empty rather than every call site repeating it. */
+function renderChart(data: UsStateVisitEntry[], counties: UsCountyVisitData = NO_COUNTIES) {
+  return render(<UsStateVisitsChart data={data} counties={counties} />);
+}
+
 function regions(container: HTMLElement): SVGPathElement[] {
   return [...container.querySelectorAll<SVGPathElement>("svg path")];
 }
@@ -56,7 +65,7 @@ function nameOf(path: SVGPathElement): string | undefined {
 
 describe("UsStateVisitsChart", () => {
   it("draws the 50 states and DC, and nothing geoAlbersUsa can't place", () => {
-    const { container } = render(<UsStateVisitsChart data={[{ state: "Georgia", days: 100 }]} />);
+    const { container } = renderChart([{ state: "Georgia", days: 100 }]);
     const names = regions(container).map(nameOf);
 
     expect(names).toHaveLength(51);
@@ -71,7 +80,7 @@ describe("UsStateVisitsChart", () => {
   });
 
   it("gives every drawn state real path geometry", () => {
-    const { container } = render(<UsStateVisitsChart data={[{ state: "Georgia", days: 100 }]} />);
+    const { container } = renderChart([{ state: "Georgia", days: 100 }]);
     // A feature the projection can't place gets no `d` at all. Asserting
     // on all 51 (not a sample) is what makes this a real check that the
     // FIPS cut and geoAlbersUsa's own coverage agree.
@@ -81,7 +90,7 @@ describe("UsStateVisitsChart", () => {
   });
 
   it("shades a state with data and leaves an unvisited one as an explicit no-data fill", () => {
-    const { container } = render(<UsStateVisitsChart data={[{ state: "Georgia", days: 100 }]} />);
+    const { container } = renderChart([{ state: "Georgia", days: 100 }]);
     const fillFor = (name: string) => regions(container).find((p) => nameOf(p) === name)?.getAttribute("fill");
 
     expect(fillFor("Georgia")).not.toBe("var(--muted)");
@@ -91,27 +100,98 @@ describe("UsStateVisitsChart", () => {
   });
 
   it("reports a resolved territory the map can't draw instead of dropping its days", () => {
-    render(
-      <UsStateVisitsChart
-        data={[
-          { state: "Georgia", days: 100 },
-          { state: "United States Virgin Islands", days: 3 },
-        ]}
-      />,
-    );
+    renderChart([
+      { state: "Georgia", days: 100 },
+      { state: "United States Virgin Islands", days: 3 },
+    ]);
     expect(screen.getByText(/United States Virgin Islands \(3 days\)/)).toBeTruthy();
   });
 
   it("says nothing about off-map regions when every state resolves to a drawn one", () => {
-    render(<UsStateVisitsChart data={[{ state: "Georgia", days: 100 }]} />);
+    renderChart([{ state: "Georgia", days: 100 }]);
     expect(screen.queryByText(/Not drawn on this map/)).toBeNull();
   });
 
   it("renders the map with no visit data at all rather than failing", () => {
-    const { container } = render(<UsStateVisitsChart data={[]} />);
+    const { container } = renderChart([]);
     expect(regions(container)).toHaveLength(51);
     for (const path of regions(container)) {
       expect(path.getAttribute("fill")).toBe("var(--muted)");
     }
+  });
+
+  it("reports US days that landed in no county, so they can't quietly vanish", () => {
+    renderChart([{ state: "Illinois", days: 4 }], { counties: [], unresolvedDays: 2 });
+    expect(screen.getByText(/2 days in the US couldn't be placed in a county/)).toBeTruthy();
+  });
+
+  describe("county drill-down (#107)", () => {
+    // Fulton County, Georgia. The FIPS prefix (13) is Georgia's, which is
+    // what the drill-down filters the county layer by.
+    const FULTON = "13121";
+    const COUNTIES: UsCountyVisitData = {
+      counties: [{ fips: FULTON, name: "Fulton", days: 1891 }],
+      unresolvedDays: 0,
+    };
+
+    function stateNamed(container: HTMLElement, name: string): SVGPathElement {
+      const match = regions(container).find((p) => nameOf(p) === name);
+      if (!match) throw new Error(`no state path for "${name}"`);
+      return match;
+    }
+
+    it("starts at the root level with no way back out yet", () => {
+      renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+      const crumb = screen.getByRole("navigation", { name: /map drill-down/i });
+      expect(crumb.textContent).toContain("United States");
+      // Nothing above the root to click back to.
+      expect(screen.queryByRole("button", { name: "United States" })).toBeNull();
+    });
+
+    it("swaps in the clicked state's counties and nothing else's", async () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+      fireEvent.click(stateNamed(container, "Georgia"));
+
+      // The county layer is fetched by dynamic import on this click, so
+      // the swap lands a tick later — exactly the behavior the async
+      // resolveDrilldown contract exists for.
+      await waitFor(() => expect(regions(container).length).not.toBe(51));
+
+      const names = regions(container).map(nameOf);
+      expect(names).toContain("Fulton");
+      expect(names).toContain("DeKalb");
+      // Georgia has 159 counties — the most of any state, and a number
+      // worth pinning: getting the FIPS prefix filter wrong would either
+      // draw all 3,231 or none.
+      expect(names).toHaveLength(159);
+      expect(names).not.toContain("Los Angeles");
+    });
+
+    it("shades a county by its own data and rescales to the drilled-in level", async () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regions(container).length).toBe(159));
+
+      const fillOf = (name: string) => regions(container).find((p) => nameOf(p) === name)?.getAttribute("fill");
+      expect(fillOf("Fulton")).not.toBe("var(--muted)");
+      // A county with no logged days reads as no data, same as an
+      // unvisited state one level up.
+      expect(fillOf("DeKalb")).toBe("var(--muted)");
+    });
+
+    it("names the drilled-in level in the breadcrumb and goes back on click", async () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regions(container).length).toBe(159));
+
+      const crumb = screen.getByRole("navigation", { name: /map drill-down/i });
+      expect(crumb.textContent).toContain("Georgia");
+      // The root is a link now that it's no longer the current level.
+      const back = screen.getByRole("button", { name: "United States" });
+      fireEvent.click(back);
+
+      await waitFor(() => expect(regions(container).length).toBe(51));
+      expect(regions(container).map(nameOf)).toContain("Georgia");
+    });
   });
 });

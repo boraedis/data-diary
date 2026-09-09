@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import worldTopologyRaw from "world-atlas/countries-110m.json";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
-import { InteractiveGeo } from "@/components/charts/interactive/interactive-geo";
+import { InteractiveGeo, type GeoFeature, type GeoLevel } from "@/components/charts/interactive/interactive-geo";
+import { loadUsStateFeatures, usStatesLevel } from "@/components/charts/us-geo-levels";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import type { CountryVisitEntry } from "@/lib/charts";
+import type { CountryVisitEntry, UsStateVisitEntry } from "@/lib/charts";
 
 type CountryProperties = { name: string };
 
@@ -23,13 +24,34 @@ const worldTopology = worldTopologyRaw as unknown as Topology<{
   countries: GeometryCollection<CountryProperties>;
 }>;
 
+// world-atlas's own spelling for the US — what normalizeCountryName maps
+// "USA" onto, and what this file's drill-down has to match against.
+const UNITED_STATES = "United States of America";
+
 /** Choropleth of days logged per country — #24's first real InteractiveGeo
  * consumer. `data` is the server-fetched day count per (already
  * catalog-named) country; joined against world-atlas's own GeoJSON
  * feature names via normalizeCountryName (src/lib/geo/country-names.ts),
  * since this app's place catalog is free-text, not a controlled ISO
- * list. */
-export function WorldVisitsChart({ data }: { data: CountryVisitEntry[] }) {
+ * list.
+ *
+ * Clicking the US drills into its states (#107); every other country
+ * keeps the original zoom-to-bounds. That asymmetry is the honest state
+ * of the world rather than an oversight — see `resolveDrilldown` below. */
+export function WorldVisitsChart({
+  data,
+  usStates,
+}: {
+  data: CountryVisitEntry[];
+  /** Per-state day counts, enabling the US drill-down. Omit to keep this
+   * map at zoom-to-bounds only — which is what the recap does
+   * (recap-people-places-section.tsx): its `data` is scoped to one recap
+   * period, and there's no period-scoped state breakdown to match it, so
+   * drilling in would show whole-history county numbers underneath a
+   * period-scoped map and quietly contradict it. Better no drill-down
+   * than one that disagrees with the level above it. */
+  usStates?: UsStateVisitEntry[];
+}) {
   const features = useMemo(() => feature(worldTopology, worldTopology.objects.countries), []);
 
   const daysByCountry = useMemo(() => {
@@ -47,6 +69,34 @@ export function WorldVisitsChart({ data }: { data: CountryVisitEntry[] }) {
     return map;
   }, [data]);
 
+  const daysByState = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of usStates ?? []) map.set(entry.state, (map.get(entry.state) ?? 0) + entry.days);
+    return map;
+  }, [usStates]);
+
+  /**
+   * The US is the only country that drills anywhere, and that's a real
+   * limit rather than a stub: subdivision geometry for everyone else means
+   * Natural Earth's admin-1 layer, which has no topojson-org-quality npm
+   * package and would need a one-time conversion plus per-country name
+   * reconciliation against this free-text catalog — #107's own scoping
+   * discussion parked that behind #163's geometry-storage decision.
+   *
+   * Returning null for every other country is what keeps that honest:
+   * the primitive falls back to zoom-to-bounds, exactly what this map did
+   * before drill-down existed, instead of opening an empty subdivision
+   * view for a country with no geometry to show.
+   */
+  const resolveDrilldown = useCallback(
+    (f: GeoFeature, depth: number): Promise<GeoLevel | null> | null => {
+      if (depth !== 0) return null;
+      if (String(f.properties?.name ?? "") !== UNITED_STATES) return null;
+      return loadUsStateFeatures().then((stateFeatures) => usStatesLevel(stateFeatures, daysByState));
+    },
+    [daysByState],
+  );
+
   return (
     <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
       {({ width, height }) => (
@@ -57,7 +107,13 @@ export function WorldVisitsChart({ data }: { data: CountryVisitEntry[] }) {
           getValue={(f) => daysByCountry.get(f.properties.name) ?? null}
           getLabel={(f) => f.properties.name}
           valueLabel="days"
-          ariaLabel="World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there."
+          resolveDrilldown={usStates ? resolveDrilldown : undefined}
+          rootLabel="World"
+          ariaLabel={
+            usStates
+              ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to drill into its states; clicking any other country zooms to it. Hover a country to see how many days you've logged there."
+              : "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there."
+          }
         />
       )}
     </ResponsiveChart>
