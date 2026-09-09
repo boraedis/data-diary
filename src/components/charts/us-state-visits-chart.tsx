@@ -1,15 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
-import * as d3 from "d3";
+import { useCallback, useMemo } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import statesTopologyRaw from "us-atlas/states-10m.json";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
-import { InteractiveGeo } from "@/components/charts/interactive/interactive-geo";
-import type { UsStateVisitEntry } from "@/lib/charts";
-
-type StateProperties = { name: string };
+import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
+import {
+  isAlbersUsaDrawable,
+  loadUsCountyFeatures,
+  usCountiesExpansion,
+  usProjection,
+  type UsStateProperties,
+} from "@/components/charts/us-geo-levels";
+import type { UsCountyVisitData, UsStateVisitEntry } from "@/lib/charts";
 
 // us-atlas's states-10m.json (~114KB), the standard/published-geography
 // path #163 locked in — no custom TopoJSON committed for this chart, the
@@ -19,38 +23,24 @@ type StateProperties = { name: string };
 // it comes from, so shipping the compact form over the wire and decoding
 // here is what keeps the size win.
 //
+// Statically imported here, unlike the county layer (loaded on demand in
+// us-geo-levels.ts): states *are* this page, so there's nothing to defer.
+//
 // The 10m file, not us-atlas's *-albers-10m sibling: the albers files are
 // pre-projected into screen coordinates and want d3.geoIdentity, which
 // isn't a GeoProjection and so doesn't fit InteractiveGeo's `projection`
 // prop without a cast. Projecting real lon/lat here costs nothing
 // measurable and keeps the primitive's contract honest.
 const statesTopology = statesTopologyRaw as unknown as Topology<{
-  states: GeometryCollection<StateProperties>;
+  states: GeometryCollection<UsStateProperties>;
 }>;
 
-// us-atlas ships 56 state-level features: the 50 states, DC (FIPS 11), and
-// 5 territories — American Samoa (60), Guam (66), the Northern Mariana
-// Islands (69), Puerto Rico (72) and the US Virgin Islands (78). FIPS
-// codes for the states and DC all fall at or below 56, and the territories
-// all start at 60, so the numeric cut is exact rather than a heuristic.
-//
-// The cut exists because d3.geoAlbersUsa — the composite projection that
-// produces the familiar lower-48 layout with Alaska and Hawaii as insets,
-// and the only sane choice for a US map — has no defined position for
-// anything outside the 50 states + DC: it returns null for those
-// coordinates. A territory feature left in would render as a path with no
-// `d`, i.e. an invisible, unhoverable nothing sitting in the legend's
-// color domain. Filtered out here and reported explicitly below instead —
-// see `offMapEntries`.
-const MAX_ALBERS_USA_FIPS = 56;
-
-export function UsStateVisitsChart({ data }: { data: UsStateVisitEntry[] }) {
+export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry[]; counties: UsCountyVisitData }) {
   const features = useMemo(() => {
     const decoded = feature(statesTopology, statesTopology.objects.states);
-    return {
-      ...decoded,
-      features: decoded.features.filter((f) => Number(f.id) <= MAX_ALBERS_USA_FIPS),
-    };
+    // Territories dropped — see isAlbersUsaDrawable's own comment, and
+    // `offMapEntries` below for where their days go instead.
+    return { ...decoded, features: decoded.features.filter((f) => isAlbersUsaDrawable(f.id)) };
   }, []);
 
   const daysByState = useMemo(() => {
@@ -64,6 +54,11 @@ export function UsStateVisitsChart({ data }: { data: UsStateVisitEntry[] }) {
     return map;
   }, [data]);
 
+  const daysByCountyFips = useMemo(
+    () => new Map(counties.counties.map((c) => [c.fips, c.days])),
+    [counties],
+  );
+
   // Days that resolved to a real us-atlas feature the map above can't
   // draw — in practice the US Virgin Islands, which this catalog has real
   // logged days in. Surfaced as a line of text under the chart rather than
@@ -75,11 +70,30 @@ export function UsStateVisitsChart({ data }: { data: UsStateVisitEntry[] }) {
     return data.filter((entry) => !drawn.has(entry.state));
   }, [data, features]);
 
+  /** Clicking a state replaces its polygon with its own counties, drawn
+   * in place inside the outline it just occupied (#107). Returns a promise
+   * rather than an expansion, so the 842KB county layer is fetched on this
+   * click instead of shipped with the page — see loadUsCountyFeatures. */
+  const resolveExpansion = useCallback(
+    (f: GeoFeature): Promise<GeoExpansion | null> => {
+      const stateFips = String(f.id);
+      const stateName = String(f.properties?.name ?? "");
+      return loadUsCountyFeatures(stateFips).then((countyFeatures) =>
+        // A state whose counties somehow didn't load keeps its own
+        // polygon rather than being replaced by nothing at all.
+        countyFeatures.features.length === 0
+          ? null
+          : usCountiesExpansion(stateName, stateFips, countyFeatures, daysByCountyFips),
+      );
+    },
+    [daysByCountyFips],
+  );
+
   return (
     <>
       <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
         {({ width, height }) => (
-          <InteractiveGeo<StateProperties>
+          <InteractiveGeo<UsStateProperties>
             features={features}
             width={width}
             height={height}
@@ -89,12 +103,15 @@ export function UsStateVisitsChart({ data }: { data: UsStateVisitEntry[] }) {
             // squeezed into a corner): the composite is the one projection
             // that renders all 50 states together at one honest, roughly
             // equal-area scale — exactly the comparison a per-state
-            // choropleth is asking the reader to make.
-            projection={() => d3.geoAlbersUsa()}
+            // choropleth is asking the reader to make. Counties expand
+            // into this same projection, which is what lands them inside
+            // the outline their state occupied.
+            projection={usProjection}
             getValue={(f) => daysByState.get(f.properties.name) ?? null}
             getLabel={(f) => f.properties.name}
             valueLabel="days"
-            ariaLabel="Map of the United States, with each state shaded by how many days you've logged there. Scroll or pinch to zoom, drag to pan. Click a state to zoom into it, click the background to reset. Hover a state to see its exact count."
+            resolveExpansion={resolveExpansion}
+            ariaLabel="Map of the United States, with each state shaded by how many days you've logged there. Scroll or pinch to zoom, drag to pan. Click a state to break it into its counties in place; neighbouring states stay on the map and can be opened too. Hover a state or county to see its exact count."
           />
         )}
       </ResponsiveChart>
@@ -103,6 +120,13 @@ export function UsStateVisitsChart({ data }: { data: UsStateVisitEntry[] }) {
           Not drawn on this map:{" "}
           {offMapEntries.map((e) => `${e.state} (${e.days} ${e.days === 1 ? "day" : "days"})`).join(", ")} — the
           composite US projection covers the 50 states and DC only.
+        </p>
+      ) : null}
+      {counties.unresolvedDays > 0 ? (
+        <p className="pt-1 text-xs text-muted-foreground">
+          {counties.unresolvedDays} {counties.unresolvedDays === 1 ? "day" : "days"} in the US couldn&apos;t be placed
+          in a county — usually an address geocoded just offshore. Counted in the state totals, missing once a
+          state is broken into counties.
         </p>
       ) : null}
     </>

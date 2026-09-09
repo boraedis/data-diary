@@ -13,7 +13,7 @@ import { normalizeCountryName } from "./country-names";
 // point. The join target can't drift from the drawn geometry's naming,
 // because it *is* the drawn geometry's naming.
 type StatesTopology = {
-  objects: { states: { geometries: { properties: { name: string } }[] } };
+  objects: { states: { geometries: { id: string; properties: { name: string } }[] } };
 };
 
 /** Every feature name us-atlas's states-10m.json actually contains — the
@@ -28,6 +28,19 @@ type StatesTopology = {
  * real logged days from silently vanishing. */
 export const US_STATE_FEATURE_NAMES: ReadonlySet<string> = new Set(
   (statesTopoRaw as unknown as StatesTopology).objects.states.geometries.map((g) => g.properties.name),
+);
+
+/** State name -> its 2-digit FIPS code, from the same file (#107).
+ *
+ * FIPS is what actually links the two us-atlas layers together: a county's
+ * own 5-digit id begins with its state's 2 digits (Fulton County, Georgia
+ * is `13121`; Georgia is `13`), which is how the county drill-down narrows
+ * 3,231 county polygons down to the one state being drilled into without
+ * needing a second lookup table. Codes are zero-padded strings, not
+ * numbers — `"01"` (Alabama) is not `1`, and prefix-matching a county id
+ * only works on the padded form. */
+export const US_STATE_FIPS_BY_NAME: ReadonlyMap<string, string> = new Map(
+  (statesTopoRaw as unknown as StatesTopology).objects.states.geometries.map((g) => [g.properties.name, String(g.id)]),
 );
 
 // Same shape and same rule as country-names.ts's own table: this app's
