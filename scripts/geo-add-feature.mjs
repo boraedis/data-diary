@@ -39,8 +39,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CITIES } from "./lib/geo-cities.mjs";
 import { fixWinding } from "./lib/geo-winding.mjs";
+import { CITIES } from "../src/lib/geo/city-config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCES_DIR = path.join(__dirname, "..", "src", "data", "geo", "sources");
@@ -105,7 +105,7 @@ function main() {
     process.exit(1);
   }
 
-  const targetPath = path.join(SOURCES_DIR, source.file);
+  const targetPath = path.join(SOURCES_DIR, source.sourceFile);
   const target = JSON.parse(readFileSync(targetPath, "utf8"));
 
   const newFeature = {
@@ -116,10 +116,10 @@ function main() {
 
   const existingIndex = target.features.findIndex((f) => f.properties.name.toLowerCase() === name.toLowerCase());
   if (existingIndex >= 0) {
-    console.log(`Replacing existing "${name}" in ${source.file}`);
+    console.log(`Replacing existing "${name}" in ${source.sourceFile}`);
     target.features[existingIndex] = newFeature;
   } else {
-    console.log(`Adding new "${name}" to ${source.file}`);
+    console.log(`Adding new "${name}" to ${source.sourceFile}`);
     target.features.push(newFeature);
   }
   target.features.sort((a, b) => a.properties.name.localeCompare(b.properties.name));

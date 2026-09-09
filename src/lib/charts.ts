@@ -4,6 +4,13 @@ import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
+import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
+import atlantaTopo from "@/data/geo/atlanta.topo.json";
+import dcMetroTopo from "@/data/geo/dc-metro.topo.json";
+import dubaiTopo from "@/data/geo/dubai.topo.json";
+import nycTopo from "@/data/geo/nyc.topo.json";
+import istanbulTopo from "@/data/geo/istanbul.topo.json";
 import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
@@ -606,6 +613,187 @@ export async function getCountryVisitData(): Promise<CountryVisitEntry[]> {
   return [...counts.entries()]
     .map(([country, dayCount]) => ({ country, days: dayCount }))
     .sort((a, b) => b.days - a.days);
+}
+
+// --- City heatmap (#266) ---------------------------------------------------
+
+// The committed, derived artifact from #265's geo-build.mjs pipeline — read
+// here purely for each feature's own `name`/`root` properties (a TopoJSON
+// object's `.geometries` carry `properties` without needing any arc
+// resolution), not for the geometry itself. The chart component
+// (city-heatmap-chart.tsx) does its own separate client-side import of the
+// same files to actually decode + render them — same split
+// world-visits-chart.tsx already has between getCountryVisitData (no
+// geometry import at all, since country names are globally unique) and its
+// own client-side world-atlas import. Duplicating the import isn't
+// duplicating logic: this file needs a name index; the chart needs paths.
+const CITY_TOPOLOGIES: Record<CityKey, { objects: Record<string, { geometries: { properties: { name: string; root: string } }[] }> }> = {
+  atlanta: atlantaTopo,
+  "dc-metro": dcMetroTopo,
+  dubai: dubaiTopo,
+  nyc: nycTopo,
+  istanbul: istanbulTopo,
+};
+
+function loadCityGeometryNames(cityKey: CityKey): Map<string, Set<string>> {
+  const byRoot = new Map<string, Set<string>>();
+  for (const geometry of CITY_TOPOLOGIES[cityKey].objects[cityKey].geometries) {
+    const { name, root } = geometry.properties;
+    if (!byRoot.has(root)) byRoot.set(root, new Set());
+    byRoot.get(root)!.add(name);
+  }
+  return byRoot;
+}
+
+// `root` travels alongside `name` (not folded into one string) because
+// two different roots can share a neighborhood name — a chart matching
+// purely by name would silently merge, e.g., a real "Downtown" in
+// Washington with an unrelated "Downtown" in Arlington. The consuming
+// chart component keys its own lookup by (root, name) together, the same
+// pair each decoded topojson feature's own `properties` already carries.
+export type CityHeatmapNeighborhood = { root: string; name: string; days: number };
+export type CityHeatmapDestination = {
+  id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  days: number;
+  /** Which geometry feature this place itself resolves to, or null if
+   * it's in the city but doesn't match any drawn neighborhood — surfaced
+   * in the chart's marker tooltip (not just logged server-side) so a
+   * geometry/alias-table gap can be spotted and fixed from the map
+   * itself, per #177's own follow-up ask. */
+  neighborhood: { root: string; name: string } | null;
+};
+export type CityHeatmapData = {
+  neighborhoods: CityHeatmapNeighborhood[];
+  destinations: CityHeatmapDestination[];
+};
+
+/**
+ * Per-city choropleth + destination-marker data for #177's city-heatmap
+ * chart. `neighborhoods` is a day-presence tally per geometry feature name
+ * (same "was I there that day" dedup getCountryVisitData uses, generalized
+ * from "first namePath segment" to resolveCityFeatureName's arbitrary-depth
+ * walk — see that function's own comment on why DC-metro/NYC need more than
+ * one segment checked). `destinations` is every geocoded specific place
+ * anywhere in the city (isPlaceInCity, not resolveCityFeatureName — every
+ * visited place under the city's roots, not just ones that also resolve to
+ * a drawn neighborhood) with the same day-presence count, for the marker
+ * overlay.
+ *
+ * `destinations` intentionally includes places whose own neighborhood
+ * *doesn't* resolve to any geometry feature (a real gap: an unmapped or
+ * misnamed neighborhood, see e.g. atlanta-names.ts's documented Briarcliff
+ * Woods case). Those still get a real dot at their real geocoded position,
+ * with no fill underneath it — which is exactly what makes a geometry/
+ * alias-table gap visible on the rendered map instead of the place just
+ * silently disappearing from the chart.
+ *
+ * Two day-presence tallies over the same underlying rows, not one tally
+ * fed two ways — a day spent at 3 different addresses inside one
+ * neighborhood is 1 day of "presence" for that neighborhood's fill, but up
+ * to 3 separate (day, place) pairs for the destinations ranking below (a
+ * neighborhood value isn't just its top destination's value summed).
+ */
+export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapData> {
+  const city = CITIES[cityKey];
+  const db = getDb();
+
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return { neighborhoods: [], destinations: [] };
+
+  const placeRows = await db
+    .select({
+      id: places.id,
+      name: places.name,
+      idPath: places.idPath,
+      namePath: places.namePath,
+      lat: places.lat,
+      lng: places.lng,
+    })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+  const placeById = new Map(placeRows.map((p) => [p.id, p]));
+
+  function splitResolvedKey(key: string): { root: string; name: string } {
+    const [root, name] = key.split("\0");
+    return { root, name };
+  }
+
+  const geometryNamesByRoot = loadCityGeometryNames(cityKey);
+  // Keyed by "root\0featureName", not featureName alone — two different
+  // roots (e.g. Washington and Arlington) could share a neighborhood
+  // name; see CityHeatmapNeighborhood's own comment.
+  const resolvedByPlaceId = new Map<number, string>();
+  for (const p of placeRows) {
+    if (!p.idPath || !p.namePath) continue;
+    const resolved = resolveCityFeatureName({ idPath: p.idPath, namePath: p.namePath }, city.sources, geometryNamesByRoot, city.normalize);
+    if (resolved) resolvedByPlaceId.set(p.id, `${resolved.root}\0${resolved.featureName}`);
+  }
+
+  // Two different membership tests, deliberately: the choropleth fill
+  // only makes sense for a place that resolves to an actual drawn
+  // feature (resolvedByPlaceId, the narrower test), but the destination
+  // dots use the broader isPlaceInCity — a place can genuinely be inside
+  // the city with no matching neighborhood polygon (a real geometry/
+  // alias gap, not a bug), and plotting it anyway is what lets that gap
+  // be spotted on the map instead of the place just silently vanishing.
+  const dayNeighborhoodPairs = new Set<string>();
+  const dayPlacePairs = new Set<string>();
+  for (const row of dayRows) {
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const place = placeById.get(placeId);
+      if (!place?.idPath || !isPlaceInCity(place.idPath, city.sources)) continue;
+      dayPlacePairs.add(`${row.date}\0${placeId}`);
+      const resolvedKey = resolvedByPlaceId.get(placeId);
+      if (resolvedKey) dayNeighborhoodPairs.add(`${row.date}\0${resolvedKey}`);
+    }
+  }
+
+  const neighborhoodCounts = new Map<string, number>();
+  for (const pair of dayNeighborhoodPairs) {
+    const resolvedKey = pair.split("\0").slice(1).join("\0");
+    neighborhoodCounts.set(resolvedKey, (neighborhoodCounts.get(resolvedKey) ?? 0) + 1);
+  }
+  const neighborhoods = [...neighborhoodCounts.entries()].map(([resolvedKey, dayCount]) => ({
+    ...splitResolvedKey(resolvedKey),
+    days: dayCount,
+  }));
+
+  const placeCounts = new Map<number, number>();
+  for (const pair of dayPlacePairs) {
+    const id = Number(pair.split("\0")[1]);
+    placeCounts.set(id, (placeCounts.get(id) ?? 0) + 1);
+  }
+  const destinations = [...placeCounts.entries()]
+    .map(([id, dayCount]): CityHeatmapDestination | null => {
+      const place = placeById.get(id);
+      if (!place || place.lat == null || place.lng == null) return null; // ungeocoded — nothing to plot
+      const resolvedKey = resolvedByPlaceId.get(id);
+      return {
+        id,
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+        days: dayCount,
+        neighborhood: resolvedKey ? splitResolvedKey(resolvedKey) : null,
+      };
+    })
+    .filter((d): d is CityHeatmapDestination => d !== null)
+    .sort((a, b) => b.days - a.days);
+
+  return { neighborhoods, destinations };
 }
 
 // --- Place hierarchy (sunburst, #118) -------------------------------------

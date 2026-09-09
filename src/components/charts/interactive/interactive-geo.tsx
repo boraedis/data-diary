@@ -38,17 +38,30 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // primitive's own default stays geoNaturalEarth1 (area-accurate at global
 // scale, see its own comment below, and what every current consumer
 // already renders), but a city-scale consumer (#177's per-city
-// neighborhood heatmaps, via #266) should pass geoAzimuthalEqualArea
-// instead. geoMercator was the obvious first guess for "local map" — it's
-// what every web map uses at city zoom — but it's still not area-true
-// anywhere, purely a scale-familiarity choice; this codebase already
-// prefers projections that don't visually lie about size (see below).
-// geoAzimuthalEqualArea is the better fit for a single small region: true
-// equal-area at (and near) its own center, and — unlike
-// geoConicEqualArea/Albers, which is tuned for an east-west-elongated
-// mid-latitude extent like the US — it doesn't assume any particular
-// shape or latitude, so the same choice works for a compact city
-// regardless of where on the globe it sits.
+// neighborhood heatmaps, via #266) should pass geoMercator instead.
+//
+// Correction (found after #266 shipped, via an actual rendered check —
+// see #266's own PR thread): this comment used to recommend
+// geoAzimuthalEqualArea for city scale, reasoning that plain Mercator's
+// distortion made it "visually lie about size" the way it does at world
+// scale. That reasoning doesn't transfer down to a single city's few-km
+// extent: Mercator's local scale factor is latitude-dependent, but over
+// an extent that small the factor is close enough to constant that no
+// neighborhood ends up looking bigger or smaller *relative to another
+// neighborhood in the same city* than it truly is — the exact comparison
+// this codebase's "don't lie about size" rule exists to protect (see
+// world-visits-chart's own USA/Greenland framing). There's no real
+// equal-area benefit being bought at this scale, and chasing it cost a
+// real, visible bug: geoAzimuthalEqualArea defaults to being tangent at
+// [0°, 0°] unless explicitly `.rotate()`/`.center()`'d onto the data —
+// this component only ever calls `.fitSize()` on whatever projection a
+// caller passes, which adjusts scale/translate, never rotation — so
+// Atlanta (~9,000km from the default tangent point) rendered as a badly
+// sheared rhombus instead of its real shape. geoMercator has no
+// equivalent centering requirement (its conformality doesn't depend on
+// being tangent at the data), so `fitSize` alone renders it correctly
+// for any city on Earth without this primitive needing a rotate/center
+// prop at all.
 const DEFAULT_PROJECTION = () => d3.geoNaturalEarth1();
 
 // Module-level, not inline default parameter values — see
@@ -103,19 +116,38 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   colorMode?: ColorMode;
   zoomExtent?: [number, number];
   /** `d3.geoProjection` factory — fitSize is applied to it here, so pass
-   * an un-fit projection (e.g. `() => d3.geoAzimuthalEqualArea()`, not
+   * an un-fit projection (e.g. `() => d3.geoMercator()`, not
    * `.fitSize(...)` already called). Defaults to geoNaturalEarth1, the
    * right call at world scale; see this module's own comment above for
-   * why a city-scale caller should pass geoAzimuthalEqualArea instead. */
+   * why a city-scale caller should pass geoMercator instead — and
+   * specifically not an azimuthal projection, which needs explicit
+   * `.rotate()`/`.center()` onto the data that fitSize alone doesn't
+   * provide. */
   projection?: () => d3.GeoProjection;
   /** Optional point overlay (e.g. visited-place markers) drawn above the
-   * region fill, panning/zooming with it. Omit for a plain choropleth. */
+   * region fill, panning/zooming with it. Omit for a plain choropleth.
+   * Rendered at a constant *screen* size regardless of zoom level (each
+   * marker's radius/stroke is counter-scaled by the current zoom
+   * transform's own k on every zoom tick) — a marker that grew along with
+   * the map as you zoomed in used to end up covering more of it, exactly
+   * backwards from what zooming in should do. */
   markers?: GeoMarker[];
   /** Marker radius scales by this if provided (bubble-map style, same
    * d3.scaleSqrt pattern interactive-network.tsx uses for node size) —
-   * omit for every marker at a flat MARK_SPECS.marker.radius instead. */
+   * omit for every marker at a flat MARK_SPECS.marker.radius instead.
+   * Still drives the tooltip's value row even when scaleMarkersByValue is
+   * false — the two are independent (a chart can show real values on
+   * hover without using them to size the dots). */
   getMarkerValue?: (marker: GeoMarker) => number | null | undefined;
   markerRadiusRange?: [number, number];
+  /** Whether marker radius actually scales by getMarkerValue — default
+   * true. A chart plotting many markers at once (#177's city-heatmap,
+   * every visited place rather than a curated top handful) wants uniform,
+   * unobtrusive dots instead: size-by-frequency reads as "these few are
+   * what matter" for a curated top-N, but as visual noise once every
+   * marker is shown. Set false for that case; getMarkerValue's tooltip
+   * role is unaffected. */
+  scaleMarkersByValue?: boolean;
   /** Marker fill — defaults to categoricalColor(0), distinct from the
    * region fill's sequential scale since a marker and a region encode two
    * different things (a specific visited place vs. an aggregate value). */
@@ -124,6 +156,16 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   /** Label for a marker's tooltip value row, e.g. "visits". Only shown
    * when getMarkerValue is also given. */
   markerValueLabel?: string;
+  /** Optional second tooltip row for a marker, below the value row — a
+   * plain string, not a magnitude (e.g. #177's city-heatmap uses this for
+   * which neighborhood the place resolves to). Return an explicit string
+   * like "not mapped" to actively flag a gap rather than returning null —
+   * a missing row and "no match found" read very differently when the
+   * whole point is spotting a mismatch from the tooltip. Return null only
+   * for "this row doesn't apply to this marker at all". */
+  getMarkerSecondaryValue?: (marker: GeoMarker) => string | null;
+  /** Label for the secondary row, e.g. "neighborhood". */
+  markerSecondaryLabel?: string;
   ariaLabel?: string;
 };
 
@@ -148,9 +190,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   markers,
   getMarkerValue,
   markerRadiusRange = DEFAULT_MARKER_RADIUS_RANGE,
+  scaleMarkersByValue = true,
   markerColor,
   formatMarkerValue = formatThousandsNumber,
   markerValueLabel = "value",
+  getMarkerSecondaryValue,
+  markerSecondaryLabel = "detail",
   ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered<P> | null>(null);
@@ -195,6 +240,17 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
 
       const g = svg.attr("width", width).attr("height", mapHeight).append("g");
 
+      // Assigned once the marker block below runs (still before any zoom
+      // event can fire, since both happen synchronously in this same
+      // effect) — declared here, not `const` inside that block, so the
+      // zoom handler's closure can reach the current selection to
+      // counter-scale it on every tick. Stays null for a markerless map.
+      let markerNodes: d3.Selection<SVGCircleElement, { marker: GeoMarker; xy: [number, number] }, d3.BaseType, unknown> | null = null;
+      function markerRadius(d: { marker: GeoMarker }) {
+        const v = getMarkerValue?.(d.marker);
+        return scaleMarkersByValue && markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
+      }
+
       const regions = g
         .selectAll("path")
         .data(features.features)
@@ -217,6 +273,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .scaleExtent(zoomExtent)
         .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
           g.attr("transform", event.transform.toString());
+          // Counter-scale markers by the same factor the transform above
+          // just applied, so their on-screen size stays constant instead
+          // of growing with the map — see `markers`' own prop comment.
+          const k = event.transform.k;
+          markerNodes?.attr("r", (d) => markerRadius(d) / k).attr("stroke-width", MARK_SPECS.marker.ringWidth / k);
         });
 
       function zoomToFeature(feature: Feature<Geometry, P>) {
@@ -279,17 +340,14 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           // drop it rather than plotting at a garbage position.
           .filter((entry): entry is { marker: GeoMarker; xy: [number, number] } => entry.xy != null);
 
-        const markerNodes = g
-          .selectAll("circle.geo-marker")
+        markerNodes = g
+          .selectAll<SVGCircleElement, { marker: GeoMarker; xy: [number, number] }>("circle.geo-marker")
           .data(positioned)
           .join("circle")
           .attr("class", "geo-marker")
           .attr("cx", (d) => d.xy[0])
           .attr("cy", (d) => d.xy[1])
-          .attr("r", (d) => {
-            const v = getMarkerValue?.(d.marker);
-            return markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
-          })
+          .attr("r", markerRadius)
           .attr("fill", resolvedMarkerColor)
           .attr("fill-opacity", 0.85)
           .attr("stroke", "var(--card)")
@@ -323,6 +381,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       markers,
       getMarkerValue,
       markerRadiusScale,
+      scaleMarkersByValue,
       resolvedMarkerColor,
     ],
   );
@@ -331,6 +390,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   const hoveredValue = hovered?.kind === "region" ? getValue(hovered.feature) : null;
   const hoveredColor = hoveredValue != null && hoveredValue > 0 ? colorScale(hoveredValue) : undefined;
   const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
+  const hoveredMarkerSecondary = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
 
   // Log-space fraction, matching the log-scaled fill — a linear fraction
   // here would put the indicator tick in the wrong place relative to the
@@ -361,16 +421,28 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                 ? hoveredValue == null || hoveredValue <= 0
                   ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
                   : [{ label: valueLabel, value: formatValue(hoveredValue), color: hoveredColor ?? "", variant: "swatch" }]
-                : hoveredMarkerValue == null
-                  ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
-                  : [
-                      {
-                        label: markerValueLabel,
-                        value: formatMarkerValue(hoveredMarkerValue),
-                        color: resolvedMarkerColor,
-                        variant: "swatch",
-                      },
-                    ]
+                : [
+                    ...(hoveredMarkerValue == null
+                      ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" as const }]
+                      : [
+                          {
+                            label: markerValueLabel,
+                            value: formatMarkerValue(hoveredMarkerValue),
+                            color: resolvedMarkerColor,
+                            variant: "swatch" as const,
+                          },
+                        ]),
+                    ...(hoveredMarkerSecondary != null
+                      ? [
+                          {
+                            label: markerSecondaryLabel,
+                            value: hoveredMarkerSecondary,
+                            color: resolvedMarkerColor,
+                            variant: "swatch" as const,
+                          },
+                        ]
+                      : []),
+                  ]
             }
             containerWidth={width}
           />

@@ -253,6 +253,12 @@ export const CHARTS: ChartEntry[] = [
     description: "A world map colored by how many days you've logged in each country.",
     category: "places",
   },
+  {
+    href: "/charts/city-heatmap",
+    title: "City heatmap",
+    description: "Neighborhood-level maps for Atlanta, DC metro, Dubai, NYC, and Istanbul, with your top destinations marked.",
+    category: "places",
+  },
 ] as const satisfies ChartEntry[];
 
 // Hand-picked, not usage-derived (#268 triage decision) — a short, stable
