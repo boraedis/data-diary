@@ -140,6 +140,10 @@ describe("UsStateVisitsChart", () => {
       counties: [{ fips: "13121", name: "Fulton", days: 1891 }],
       unresolvedDays: 0,
     };
+    const TWO_STATES = [
+      { state: "Georgia", days: 100 },
+      { state: "Alabama", days: 3 },
+    ];
 
     function stateNamed(container: HTMLElement, name: string): SVGPathElement {
       const match = regions(container).find((p) => nameOf(p) === name);
@@ -147,15 +151,13 @@ describe("UsStateVisitsChart", () => {
       return match;
     }
 
-    /** Region paths only — the unfilled outline drawn over an expanded
-     * state is decoration, not a region, and shouldn't be counted as one. */
     function regionNames(container: HTMLElement): (string | undefined)[] {
       return regions(container).map(nameOf);
     }
 
     it("starts with nothing expanded", () => {
       renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
-      const row = screen.getByRole("navigation", { name: /expanded regions/i });
+      const row = screen.getByRole("navigation", { name: /expanded region/i });
       expect(row.textContent).toMatch(/click a region/i);
       expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
     });
@@ -168,7 +170,6 @@ describe("UsStateVisitsChart", () => {
       const names = regionNames(container);
       // Georgia's own polygon is gone, replaced by its 159 counties...
       expect(names).not.toContain("Georgia");
-      expect(names.filter((n) => n === "Fulton")).toHaveLength(1);
       // ...while its neighbours are untouched and still clickable, which
       // is the entire point of expanding in place rather than swapping
       // the map out for a county-only view.
@@ -179,41 +180,51 @@ describe("UsStateVisitsChart", () => {
       expect(names).toHaveLength(51 - 1 + 159);
     });
 
-    it("lets a neighbour be opened directly, without collapsing the first", async () => {
-      const { container } = renderChart(
-        [
-          { state: "Georgia", days: 100 },
-          { state: "Alabama", days: 3 },
-        ],
-        COUNTIES,
-      );
+    it("moves focus to a neighbour on click, restoring the first state's polygon", async () => {
+      const { container } = renderChart(TWO_STATES, COUNTIES);
       fireEvent.click(stateNamed(container, "Georgia"));
       await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
 
       // Alabama is still a state polygon on screen, so it can be clicked
-      // straight away — no going back up a level first.
+      // straight away — no going back out first.
       fireEvent.click(stateNamed(container, "Alabama"));
       await waitFor(() => expect(regionNames(container)).toContain("Mobile"));
 
       const names = regionNames(container);
-      expect(names).not.toContain("Georgia");
+      // Only one region is subdivided at a time: Georgia is whole again.
+      expect(names).toContain("Georgia");
+      expect(names).not.toContain("Fulton");
       expect(names).not.toContain("Alabama");
-      // Both open at once: Georgia's 159 + Alabama's 67.
-      expect(names).toHaveLength(51 - 2 + 159 + 67);
-      expect(screen.getAllByRole("button", { name: /collapse/i })).toHaveLength(2);
+      // 51 states - Alabama + its 67 counties.
+      expect(names).toHaveLength(51 - 1 + 67);
+      expect(screen.getAllByRole("button", { name: /collapse/i })).toHaveLength(1);
     });
 
-    it("draws an outline over each expanded state so its border stays legible", async () => {
-      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+    it("draws exactly one outline, over whichever state is open", async () => {
+      const { container } = renderChart(TWO_STATES, COUNTIES);
       expect(container.querySelectorAll("path.geo-expanded-outline")).toHaveLength(0);
 
       fireEvent.click(stateNamed(container, "Georgia"));
       await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
-
-      const outlines = container.querySelectorAll<SVGPathElement>("path.geo-expanded-outline");
+      let outlines = container.querySelectorAll<SVGPathElement>("path.geo-expanded-outline");
       expect(outlines).toHaveLength(1);
       expect(outlines[0].getAttribute("fill")).toBe("none");
       expect(outlines[0].getAttribute("d")).toBeTruthy();
+
+      fireEvent.click(stateNamed(container, "Alabama"));
+      await waitFor(() => expect(regionNames(container)).toContain("Mobile"));
+      outlines = container.querySelectorAll<SVGPathElement>("path.geo-expanded-outline");
+      expect(outlines).toHaveLength(1);
+    });
+
+    it("keeps border strokes at a constant screen width so they sharpen when zoomed", () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+      // Without this the browser scales the stroke with the geometry, so
+      // at 8x a 0.5px border paints 4px wide and starts swallowing small
+      // counties whole.
+      for (const path of regions(container)) {
+        expect(path.getAttribute("vector-effect")).toBe("non-scaling-stroke");
+      }
     });
 
     it("shades a county by its own data, on one scale shared with the states around it", async () => {
@@ -228,27 +239,29 @@ describe("UsStateVisitsChart", () => {
       expect(fillOf("DeKalb")).toBe("var(--muted)");
     });
 
-    it("collapses one state back to its own polygon, leaving others open", async () => {
-      const { container } = renderChart(
-        [
-          { state: "Georgia", days: 100 },
-          { state: "Alabama", days: 3 },
-        ],
-        COUNTIES,
-      );
+    it("collapses back to the whole map from the chip", async () => {
+      const { container } = renderChart(TWO_STATES, COUNTIES);
       fireEvent.click(stateNamed(container, "Georgia"));
       await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
-      fireEvent.click(stateNamed(container, "Alabama"));
-      await waitFor(() => expect(regionNames(container)).toContain("Mobile"));
 
-      fireEvent.click(screen.getByRole("button", { name: /collapse georgia/i }));
+      fireEvent.click(screen.getByRole("button", { name: "Collapse Georgia" }));
 
       const names = regionNames(container);
       expect(names).toContain("Georgia");
       expect(names).not.toContain("Fulton");
-      // Alabama stays open — collapsing is per-region, not a reset.
-      expect(names).toContain("Mobile");
-      expect(screen.getAllByRole("button", { name: /collapse/i })).toHaveLength(1);
+      expect(names).toHaveLength(51);
+    });
+
+    it("collapses when the background is clicked, since that means back to the whole map", async () => {
+      const { container } = renderChart(TWO_STATES, COUNTIES);
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+
+      const svg = container.querySelector("svg")!;
+      fireEvent.click(svg);
+
+      expect(regionNames(container)).toContain("Georgia");
+      expect(regionNames(container)).not.toContain("Fulton");
     });
   });
 });

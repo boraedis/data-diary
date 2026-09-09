@@ -46,8 +46,12 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // breadcrumb back out. It worked, but it threw away the thing that makes
 // a map a map: after drilling into Georgia you could no longer see — or
 // click — Alabama. Expanding in place means a neighbour is always one
-// click away, several regions can be open at once, and the reader never
-// loses the surrounding context. See `expansions` state below.
+// click away and the reader never loses the surrounding context.
+//
+// Exactly one region is open at a time: clicking a neighbour restores the
+// previous region's own polygon on its way to subdividing the new one,
+// and clicking open background restores it and zooms back out. See the
+// `expansion` state below for why accumulating them turned out worse.
 //
 // A caller that passes nothing, or returns null for a given feature,
 // keeps exactly the old behavior: click zooms to that feature's bounds.
@@ -58,11 +62,34 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // query params, no shareable deep link (#107's own "URL state" decision),
 // same as the zoom/pan transform this component has always kept in the DOM.
 //
-// Projection is a caller-supplied factory (#264), not hardcoded — this
-// primitive's own default stays geoNaturalEarth1 (area-accurate at global
-// scale, see its own comment below, and what every current consumer
-// already renders), but a city-scale consumer (#177's per-city
-// neighborhood heatmaps, via #266) should pass geoMercator instead.
+// Projection is a caller-supplied factory (#264), not hardcoded. The
+// default is now geoMercator, changed from geoNaturalEarth1 once this
+// became a map you expand and zoom into rather than one you only look at.
+//
+// The reason is conformality. geoNaturalEarth1 is a compromise
+// pseudocylindrical projection: it keeps areas honest and looks right at
+// a glance, but it shears badly toward the edges of its frame — Alaska,
+// Russia's far east and New Zealand all arrive visibly skewed, leaning
+// away from the centre. That's tolerable on a static world map, where
+// nobody is studying an individual country's outline. It stops being
+// tolerable the moment you can click a country, break it into
+// subdivisions and zoom into them, because now the reader *is* studying
+// shapes, and studying them exactly where the distortion is worst.
+//
+// geoMercator is conformal: it preserves local shape everywhere, at every
+// scale, which is precisely why every zoomable web map in existence
+// (Google, OSM, Mapbox) is built on it. A drilled-into region looks like
+// itself no matter where on the map it sits.
+//
+// The cost is real and worth stating plainly: Mercator inflates area with
+// latitude, so Greenland reads far larger than it is and the poles can't
+// be drawn at all (d3 clips them). This file used to argue the other side
+// of that trade — see the geoAzimuthalEqualArea correction below, which
+// leans on a "don't lie about size" rule. That rule hasn't been
+// abandoned: it's that on a *choropleth* the quantity is carried by
+// colour, not by area, so an inflated Greenland misleads much less than a
+// sheared Alaska does when shape is the thing you're inspecting. A caller
+// that genuinely needs area comparison should pass geoEqualEarth.
 //
 // Correction (found after #266 shipped, via an actual rendered check —
 // see #266's own PR thread): this comment used to recommend
@@ -86,7 +113,7 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // being tangent at the data), so `fitSize` alone renders it correctly
 // for any city on Earth without this primitive needing a rotate/center
 // prop at all.
-const DEFAULT_PROJECTION = () => d3.geoNaturalEarth1();
+const DEFAULT_PROJECTION = () => d3.geoMercator();
 
 // Module-level, not inline default parameter values — see
 // interactive-network.tsx's own comment on why an array-literal default
@@ -228,12 +255,13 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   zoomExtent?: [number, number];
   /** `d3.geoProjection` factory — fitSize is applied to it here, so pass
    * an un-fit projection (e.g. `() => d3.geoMercator()`, not
-   * `.fitSize(...)` already called). Defaults to geoNaturalEarth1, the
-   * right call at world scale; see this module's own comment above for
-   * why a city-scale caller should pass geoMercator instead — and
-   * specifically not an azimuthal projection, which needs explicit
+   * `.fitSize(...)` already called). Defaults to geoMercator, which is
+   * conformal and so keeps every region's shape correct at any zoom — see
+   * this module's own comment above for why that beats an equal-area
+   * default on a map you expand into, and specifically why an azimuthal
+   * projection is the wrong answer here (it needs explicit
    * `.rotate()`/`.center()` onto the data that fitSize alone doesn't
-   * provide. */
+   * provide). */
   projection?: () => d3.GeoProjection;
   /** Optional point overlay (e.g. visited-place markers) drawn above the
    * region fill, panning/zooming with it. Omit for a plain choropleth.
@@ -294,6 +322,20 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * bundling it into the initial page. While one is pending, clicks are
    * ignored and the row above the map says so. */
   resolveExpansion?: (feature: GeoFeature) => GeoExpansion | null | Promise<GeoExpansion | null>;
+  /** What the projection is fitted to, if not `features` themselves.
+   *
+   * For when one outlying feature would otherwise dictate the framing of
+   * the whole map. The case this exists for: under Mercator, Antarctica
+   * stretches across the bottom of the world and `fitSize` dutifully
+   * shrinks every inhabited continent into the upper half of the frame to
+   * make room for it. Fitting to the world *without* Antarctica frames
+   * the part anyone is looking at, and Antarctica still gets drawn — it
+   * simply runs off the bottom edge, which the outermost `<svg>` clips
+   * for free. That's the same thing every web map does with it.
+   *
+   * Only affects framing. Everything in `features` is still drawn,
+   * hoverable and clickable. */
+  fitTo?: FeatureCollection<Geometry, P>;
 };
 
 /** Discriminated union so one hover state serves both layers — a marker
@@ -330,15 +372,23 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   markerSecondaryLabel = "detail",
   ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
   resolveExpansion,
+  fitTo,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
-  // Regions currently shown as their own subdivisions, keyed by the base
-  // feature they replaced. A Map, not an array: several regions can be
-  // open at once (expanding Alabama doesn't close Georgia — that's the
-  // point of expanding in place), and this has to answer "is *this*
-  // feature expanded?" on every render. Insertion order drives the row of
-  // chips above the map.
-  const [expansions, setExpansions] = useState<ReadonlyMap<string, GeoExpansion>>(new Map());
+  // The one region currently shown as its own subdivisions, together with
+  // the key of the base feature it replaced — or null when the map is
+  // whole.
+  //
+  // Exactly one at a time, deliberately. An earlier version accumulated
+  // them (open Georgia, then open Alabama beside it, both staying open),
+  // which sounds strictly more capable and reads as clutter: two
+  // neighbouring states dissolved into a single undifferentiated field of
+  // 226 counties, with no visual cue about which belonged to which. One
+  // at a time keeps a clear figure/ground — the region you're inspecting
+  // is subdivided, everything else stays whole as context — and clicking
+  // a neighbour simply moves that focus, restoring the previous region's
+  // own polygon on the way.
+  const [expansion, setExpansion] = useState<{ key: string; value: GeoExpansion } | null>(null);
   // Only ever true while an async resolveExpansion is in flight. Kept out
   // of useD3's deps on purpose: it drives one line of text, and putting it
   // in deps would tear down and rebuild the entire SVG twice per
@@ -363,8 +413,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     const entries: DrawnFeature[] = [];
     for (const f of features.features) {
       const key = featureKey(f);
-      const expansion = expansions.get(key);
-      if (expansion) continue; // replaced by its subdivisions below
+      if (expansion?.key === key) continue; // replaced by its subdivisions below
       entries.push({
         feature: f,
         getValue: getValue as DrawnFeature["getValue"],
@@ -373,21 +422,19 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         expandableKey: key,
       });
     }
-    for (const expansion of expansions.values()) {
-      for (const f of expansion.features.features) {
-        entries.push({
-          feature: f,
-          getValue: expansion.getValue,
-          getLabel: expansion.getLabel,
-          valueLabel: expansion.valueLabel ?? valueLabel,
-          // A subdivision is the bottom of the chain — see
-          // resolveExpansion's own prop comment.
-          expandableKey: null,
-        });
-      }
+    for (const f of expansion?.value.features.features ?? []) {
+      entries.push({
+        feature: f,
+        getValue: expansion!.value.getValue,
+        getLabel: expansion!.value.getLabel,
+        valueLabel: expansion!.value.valueLabel ?? valueLabel,
+        // A subdivision is the bottom of the chain — see
+        // resolveExpansion's own prop comment.
+        expandableKey: null,
+      });
     }
     return entries;
-  }, [features, expansions, featureKey, getValue, getLabel, valueLabel]);
+  }, [features, expansion, featureKey, getValue, getLabel, valueLabel]);
 
   // Computed here (not inside useD3 below) so the legend can read the same
   // domain/scale without duplicating the computation — same split
@@ -412,12 +459,14 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - expansionRowHeight);
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
 
-  const expand = useCallback((key: string, expansion: GeoExpansion) => {
+  /** Show one region as its own subdivisions, restoring whichever region
+   * was previously open back to its single polygon. */
+  const expand = useCallback((key: string, value: GeoExpansion) => {
     // Hover is cleared in the same setState batch: the tooltip is showing
     // a polygon that's about to stop existing, and leaving it up for a
     // frame reads as a stale readout attached to the new drawing.
     setHovered(null);
-    setExpansions((current) => new Map(current).set(key, expansion));
+    setExpansion({ key, value });
   }, []);
 
   // Which base feature the next draw owes a zoom to. A ref, not state:
@@ -431,14 +480,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   const lastBaseFeaturesRef = useRef(features);
 
   /** Put one expanded region back to its own single polygon. */
-  const collapse = useCallback((key: string) => {
+  const collapse = useCallback(() => {
     setHovered(null);
-    setExpansions((current) => {
-      if (!current.has(key)) return current;
-      const next = new Map(current);
-      next.delete(key);
-      return next;
-    });
+    setExpansion(null);
   }, []);
 
   // Same domain/scale split as the region fill above — computed outside
@@ -464,7 +508,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       // sliding every other region out from under the pointer. The base
       // map's framing is fixed; expanding only ever changes what fills
       // one outline.
-      const fittedProjection = projection().fitSize([width, mapHeight], features);
+      const fittedProjection = projection().fitSize([width, mapHeight], fitTo ?? features);
       const path = d3.geoPath(fittedProjection);
 
       // d3-zoom keeps the current transform on the DOM node itself (the
@@ -517,16 +561,29 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           return v == null || v <= 0 ? "var(--muted)" : colorScale(v);
         })
         .attr("stroke", "var(--border)")
-        .attr("stroke-width", 0.5);
+        .attr("stroke-width", 0.5)
+        // Borders stay 0.5 *screen* pixels at every zoom level instead of
+        // being scaled up with the geometry. Zooming in therefore makes
+        // them sharper and finer rather than fatter — at 8x a scaled
+        // stroke would render 4px wide and start swallowing small
+        // counties whole.
+        //
+        // `vector-effect`, not a counter-scale in the zoom handler the way
+        // markers below do it: markers are a handful of circles, but a
+        // drilled-into map can carry thousands of paths, and rewriting a
+        // stroke-width attribute across all of them on every zoom tick is
+        // exactly the kind of per-frame DOM churn that makes a pan feel
+        // heavy. The browser applies this one at paint time, for free.
+        .attr("vector-effect", "non-scaling-stroke");
 
-      // The outline of each expanded region, drawn unfilled on top of its
+      // The outline of the expanded region, drawn unfilled on top of its
       // own subdivisions. Without it a state dissolves into a field of
       // counties the moment it opens, and the boundary the reader clicked
       // — the one thing orienting them — disappears. `pointer-events:
       // none` so it's purely cartographic and never eats a click meant
       // for a county underneath.
       g.selectAll<SVGPathElement, GeoExpansion>("path.geo-expanded-outline")
-        .data([...expansions.values()])
+        .data(expansion ? [expansion.value] : [])
         .join("path")
         .attr("class", "geo-expanded-outline")
         .attr("d", (e) => path(e.features))
@@ -534,6 +591,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .attr("stroke", "var(--foreground)")
         .attr("stroke-opacity", 0.45)
         .attr("stroke-width", 1)
+        .attr("vector-effect", "non-scaling-stroke")
         .style("pointer-events", "none");
 
       // Click a region to zoom to its own bounds; click the background to
@@ -629,6 +687,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       // background.
       svg.on("click", () => {
         svg.transition().duration(600).call(zoomBehavior.transform, d3.zoomIdentity);
+        // Clicking open background means "back to the whole map", so it
+        // closes the open region as well as resetting the zoom — the two
+        // halves of the same gesture. Leaving a region subdivided while
+        // zoomed all the way back out would strand a field of counties
+        // too small to read.
+        collapse();
       });
 
       svg.call(zoomBehavior);
@@ -642,8 +706,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       const owedZoomKey = pendingZoomKeyRef.current;
       if (owedZoomKey) {
         pendingZoomKeyRef.current = null;
-        const expansion = expansions.get(owedZoomKey);
-        if (expansion) zoomToBounds(expansion.features);
+        // Only if the open region is still the one that asked for it — a
+        // second click landing before this draw supersedes the first.
+        if (expansion?.key === owedZoomKey) zoomToBounds(expansion.value.features);
       }
 
       attachMarkHover<DrawnFeature>(
@@ -711,12 +776,13 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     [
       // `drawn` carries every polygon and its accessors, and changes
       // identity exactly when the drawing should. `features` and
-      // `expansions` are here too, separately: the projection is fitted
-      // to the base features alone, and the expanded-region outlines are
-      // drawn from the expansion map directly.
+      // `expansion` are here too, separately: the projection is fitted to
+      // the base features alone, and the expanded-region outline is drawn
+      // from the expansion directly.
       drawn,
       features,
-      expansions,
+      fitTo,
+      expansion,
       width,
       mapHeight,
       colorScale,
@@ -724,6 +790,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       projection,
       resolveExpansion,
       expand,
+      collapse,
       markers,
       getMarkerValue,
       markerRadiusScale,
@@ -756,37 +823,34 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     // share this one budget; see LEGEND_AREA_HEIGHT's own comment above.
     <div style={{ width, height }} className="flex flex-col">
       {resolveExpansion ? (
-        // Not a breadcrumb: expansion isn't a path, it's a set. Several
-        // regions can be open at once and they have no order relative to
-        // each other, so this is a row of dismissible chips — one per
-        // open region, each collapsing just itself.
+        // Not a breadcrumb: there's no trail to walk back, just one open
+        // region at a time. A single dismissible chip naming it, which
+        // doubles as the affordance for closing it without having to find
+        // empty background to click.
         <nav
-          aria-label="Expanded regions"
+          aria-label="Expanded region"
           style={{ height: EXPANSION_ROW_HEIGHT }}
           className="flex items-center gap-1.5 overflow-x-auto text-xs text-muted-foreground"
         >
-          {expansions.size === 0 ? (
+          {expansion === null ? (
             <span className="truncate opacity-80">Click a region to break it into smaller areas.</span>
           ) : (
-            [...expansions.entries()].map(([key, expansion]) => (
-              <button
-                key={expansion.key}
-                type="button"
-                onClick={() => collapse(key)}
-                title={`Collapse ${expansion.label}`}
-                // An explicit label, not the visible text: composed from
-                // the chip's parts a screen reader would announce it as
-                // "Georgia ✕", which says nothing about what activating
-                // it does.
-                aria-label={`Collapse ${expansion.label}`}
-                className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-foreground hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                <span className="max-w-32 truncate">{expansion.label}</span>
-                <span aria-hidden className="opacity-60">
-                  ✕
-                </span>
-              </button>
-            ))
+            <button
+              type="button"
+              onClick={collapse}
+              title={`Collapse ${expansion.value.label}`}
+              // An explicit label, not the visible text: composed from
+              // the chip's parts a screen reader would announce it as
+              // "Georgia ✕", which says nothing about what activating
+              // it does.
+              aria-label={`Collapse ${expansion.value.label}`}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-foreground hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <span className="max-w-48 truncate">{expansion.value.label}</span>
+              <span aria-hidden className="opacity-60">
+                ✕
+              </span>
+            </button>
           )}
           {expanding ? (
             // role=status so the wait is announced rather than only shown

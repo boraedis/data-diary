@@ -28,6 +28,18 @@ const worldTopology = worldTopologyRaw as unknown as Topology<{
 // "USA" onto, and what this file's drill-down has to match against.
 const UNITED_STATES = "United States of America";
 
+// Excluded from what the projection is *fitted* to, not from what's
+// drawn. Under Mercator (this map's projection since #107 — see
+// interactive-geo.tsx on why a map you zoom into wants a conformal one)
+// Antarctica stretches across the entire bottom of the world, and fitting
+// to it shrinks every inhabited continent into the upper half of the
+// frame to make room for a continent with no logged days in it.
+//
+// Left in `features` deliberately: it's still drawn, hovered and coloured
+// like anywhere else, it just runs off the bottom edge (which the
+// outermost <svg> clips). Exactly how every web map handles it.
+const ANTARCTICA = "Antarctica";
+
 /** Choropleth of days logged per country — #24's first real InteractiveGeo
  * consumer. `data` is the server-fetched day count per (already
  * catalog-named) country; joined against world-atlas's own GeoJSON
@@ -54,6 +66,12 @@ export function WorldVisitsChart({
   usStates?: UsStateVisitEntry[];
 }) {
   const features = useMemo(() => feature(worldTopology, worldTopology.objects.countries), []);
+
+  // See ANTARCTICA above — framing only, never what gets drawn.
+  const fitTo = useMemo(
+    () => ({ ...features, features: features.features.filter((f) => f.properties.name !== ANTARCTICA) }),
+    [features],
+  );
 
   const daysByCountry = useMemo(() => {
     const map = new Map<string, number>();
@@ -101,6 +119,7 @@ export function WorldVisitsChart({
       {({ width, height }) => (
         <InteractiveGeo<CountryProperties>
           features={features}
+          fitTo={fitTo}
           width={width}
           height={height}
           getValue={(f) => daysByCountry.get(f.properties.name) ?? null}
