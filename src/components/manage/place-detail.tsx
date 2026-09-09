@@ -195,7 +195,11 @@ export function PlaceDetail({
 
   const metroName = metros.find((m) => m.id === place.metroId)?.name ?? null;
   const categoryNames = categories.map((c) => c.name);
-  const subcategoryNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
+  // Scoped to the selected category — an unfiltered flatMap of every
+  // category's subcategories let you pick a subcategory that belongs to a
+  // different category than the one chosen above (see new-place-modal.tsx,
+  // which this now mirrors).
+  const subcategoryNames = categories.find((c) => c.name === category)?.subcategories.map((s) => s.name) ?? [];
   const breadcrumb = ancestry.slice(0, -1); // everything but this place itself
   // Immediate parent, if any — same info as the last breadcrumb entry, just
   // surfaced as a quick link alongside the sub-places below rather than only
@@ -345,31 +349,37 @@ export function PlaceDetail({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="place-category">Category</Label>
-                <Input
+                <Select
                   id="place-category"
-                  list="place-category-options"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                />
-                <datalist id="place-category-options">
+                  onChange={(e) => {
+                    setCategory(e.target.value);
+                    setSubcategory("");
+                  }}
+                >
+                  <option value="">— Select category —</option>
                   {categoryNames.map((n) => (
-                    <option key={n} value={n} />
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
                   ))}
-                </datalist>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="place-subcategory">Subcategory</Label>
-                <Input
+                <Select
                   id="place-subcategory"
-                  list="place-subcategory-options"
                   value={subcategory}
                   onChange={(e) => setSubcategory(e.target.value)}
-                />
-                <datalist id="place-subcategory-options">
+                  disabled={!category}
+                >
+                  <option value="">{category ? "— Select subcategory —" : "— Select a category first —"}</option>
                   {subcategoryNames.map((n) => (
-                    <option key={n} value={n} />
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
                   ))}
-                </datalist>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="place-subregion">Subregion</Label>
