@@ -87,7 +87,7 @@ Current shape:
   | Migrate remaining chart pages onto the primitives above, delete old bespoke components | shipped | #25 | — |
   | `InteractiveScroller` | shipped | #117 | weight |
   | `InteractiveDonut` (zoomable sunburst) | shipped | #118 | place hierarchy |
-  | `InteractiveTimeline` | not started | #119 | — |
+  | `InteractiveTimeline` | shipped | #119 | — (no consumer yet) |
 
   `InteractiveDonut` is the only primitive here that takes a *tree* rather
   than a series — its input shape and the pure builders for it live in
@@ -306,12 +306,21 @@ Timeline — plus a notes/polish pass on every primitive shipped under #14),
 is now the active one. `main` has InteractiveScroller (#117) merged, and
 InteractiveDonut (#118) shipped as a zoomable multi-ring sunburst (the
 single-ring-vs-sunburst question on that issue was resolved in favor of
-the sunburst — a plain donut is just `visibleRings={1}`). Still
-open: InteractiveTimeline (#119), the subs-chart
-rebuild onto Scroller/Line (#120), InteractiveRanked's bar-race mode
-(#103), InteractiveGeo's click-into-subdivisions drill-down (#107), and a
-per-primitive "notes & polish backlog" sub-issue for each primitive from
-the original epic (#110-#116). Each is workable independently — check the
-issue itself for its own scope/API-shape notes before starting.
+the sunburst — a plain donut is just `visibleRings={1}`), and
+InteractiveTimeline (#119) rounds out the three. All three new primitives
+this epic scoped are now built.
+
+`InteractiveTimeline` is the one primitive here with **no consumer yet** —
+#119 was explicitly scoped as "build the primitive, don't wire a specific
+chart", since the candidate datasets (profile occupation/residence
+history, #96's project-version timeline) weren't settled. Its overlap
+stacking lives as a pure function in `src/lib/viz/timeline.ts`, the same
+split `hierarchy.ts` has from `InteractiveDonut`.
+
+Still open: the subs-chart rebuild onto Scroller/Line (#120),
+InteractiveLine's own label/hover/zoom pass (#110), and a per-primitive
+"notes & polish backlog" sub-issue for each primitive from the original
+epic (#111-#116). Each is workable independently — check the issue itself
+for its own scope/API-shape notes before starting.
 
 <!-- END:repo-development-guide -->
