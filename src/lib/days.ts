@@ -922,16 +922,23 @@ export async function validateHealthPayload(body: unknown): Promise<Result<Healt
     return { ok: false, error: `Exercise not found: ${missingExerciseIds.join(", ")}` };
   }
 
-  // Duration is required for distance/sport workouts — mirrors
-  // health-entry-form.tsx, which only shows the duration field for those two
-  // categories and not for strength (see findExerciseCategoriesById above).
+  // Every workout needs a duration somewhere — mirrors health-entry-form.tsx.
+  // Distance/sport carry it as their own scalar field; strength has none
+  // (see findExerciseCategoriesById above), so it's required on at least one
+  // set instead.
   const categoryByExerciseId = await findExerciseCategoriesById(workoutsResult.value.map((w) => w.exerciseId));
   const missingDuration = workoutsResult.value.some((w) => {
     const category = categoryByExerciseId.get(w.exerciseId);
-    return (category === "distance" || category === "sport") && w.durationMinutes === null;
+    if (category === "distance" || category === "sport") return w.durationMinutes === null;
+    if (category === "strength") return !w.sets.some((s) => s.durationSeconds !== null);
+    return false;
   });
   if (missingDuration) {
-    return { ok: false, error: "Duration is required for distance and sport workouts" };
+    return {
+      ok: false,
+      error:
+        "Duration is required for every workout — distance/sport need a duration, strength needs at least one set with a duration",
+    };
   }
 
   const locationIds = workoutsResult.value
