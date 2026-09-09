@@ -46,20 +46,24 @@ describe("getMusicListenStats", () => {
 });
 
 describe("getMusicCurationStats", () => {
-  it("combines the two independent Promise.all queries in call order", async () => {
+  it("combines the three independent Promise.all queries in call order", async () => {
     // First queued result answers the genres select, second answers the
-    // podcastShows select — this is exactly the ordering bug this kind of
-    // Promise.all is easy to introduce (e.g. swapping which query populates
-    // which destructured variable).
+    // podcastShows select, third answers the artists/artistGenres select —
+    // this is exactly the ordering bug this kind of Promise.all is easy to
+    // introduce (e.g. swapping which query populates which destructured
+    // variable).
     dbState.current = createMockDb([
       [{ total: 100, grouped: 60 }],
       [{ total: 20, categorized: 5 }],
+      [{ total: 30, withGenres: 18 }],
     ]);
     expect(await getMusicCurationStats()).toEqual({
       totalGenres: 100,
       groupedGenres: 60,
       totalPodcastShows: 20,
       categorizedPodcastShows: 5,
+      totalArtists: 30,
+      artistsWithGenres: 18,
     });
   });
 });

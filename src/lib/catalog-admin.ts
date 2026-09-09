@@ -1586,6 +1586,15 @@ export async function updateGenreGroupAssignment(id: number, groupId: number | n
   return updated;
 }
 
+export async function getGenre(id: number): Promise<GenreItem | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: genres.id, name: genres.name, groupId: genres.groupId })
+    .from(genres)
+    .where(eq(genres.id, id));
+  return row ?? null;
+}
+
 // --- Music: artists (read + edit aliases) ------------------------------------
 // No create/delete either — artist rows come from the import pipeline,
 // resolved by the export's artist name (src/lib/music-import.ts). The
@@ -1634,7 +1643,12 @@ export async function listArtists(): Promise<(ArtistItem & { genres: string[] })
   return [...byArtist.values()];
 }
 
-export async function getArtist(id: number): Promise<(ArtistItem & { genres: string[] }) | null> {
+// Unlike listArtists (genre names only, for search/browse display), the
+// detail page needs genre ids too so it can offer a remove button per tag
+// (#248).
+export type ArtistGenreItem = { id: number; name: string };
+
+export async function getArtist(id: number): Promise<(ArtistItem & { genres: ArtistGenreItem[] }) | null> {
   const db = getDb();
   const rows = await db
     .select({
@@ -1642,6 +1656,7 @@ export async function getArtist(id: number): Promise<(ArtistItem & { genres: str
       name: artists.name,
       aliases: artists.aliases,
       spotifyId: artists.spotifyId,
+      genreId: genres.id,
       genreName: genres.name,
     })
     .from(artists)
@@ -1656,7 +1671,9 @@ export async function getArtist(id: number): Promise<(ArtistItem & { genres: str
     name: first.name,
     aliases: first.aliases,
     spotifyId: first.spotifyId,
-    genres: rows.map((r) => r.genreName).filter((g): g is string => g !== null),
+    genres: rows
+      .filter((r): r is typeof r & { genreId: number; genreName: string } => r.genreId !== null && r.genreName !== null)
+      .map((r) => ({ id: r.genreId, name: r.genreName })),
   };
 }
 
@@ -1668,6 +1685,34 @@ export async function updateArtistAliases(id: number, aliases: string[]): Promis
     .where(eq(artists.id, id))
     .returning({ id: artists.id, name: artists.name, aliases: artists.aliases, spotifyId: artists.spotifyId });
   return updated;
+}
+
+// Manual genre add/remove per artist (#248) — restricted to genre rows that
+// already exist in the catalog (picked via a <Select> on the artist detail
+// page, never hand-typed) so this can't fragment the curated Spotify tag
+// set the same way a free-text add would. Covers two distinct problems with
+// one UI: a genre Spotify never resolved (add it), and a wrong one Spotify
+// did resolve — e.g. an artist picking up a one-off tag from a single
+// outlier track — since remove is just as available as add.
+export function validateArtistGenreInput(body: unknown): Result<{ genreId: number }> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  if (typeof b.genreId !== "number" || !Number.isInteger(b.genreId)) {
+    return { ok: false, error: "Invalid genreId" };
+  }
+  return { ok: true, value: { genreId: b.genreId } };
+}
+
+export async function addArtistGenre(artistId: number, genreId: number): Promise<void> {
+  const db = getDb();
+  await db.insert(artistGenres).values({ artistId, genreId }).onConflictDoNothing();
+}
+
+export async function removeArtistGenre(artistId: number, genreId: number): Promise<void> {
+  const db = getDb();
+  await db.delete(artistGenres).where(and(eq(artistGenres.artistId, artistId), eq(artistGenres.genreId, genreId)));
 }
 
 // --- Music: podcast categories (catalog) -------------------------------------

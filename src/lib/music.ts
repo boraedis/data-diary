@@ -3,7 +3,7 @@
 // (the artists/genres/podcasts catalog CRUD), same file-per-concern split
 // this app already uses elsewhere.
 import { count, countDistinct, desc, eq, max, min, sum } from "drizzle-orm";
-import { genres, musicListens, podcastShows } from "@/db/schema";
+import { artistGenres, artists, genres, musicListens, podcastShows } from "@/db/schema";
 import { getDb } from "@/lib/db";
 
 // Below this, a listen was a skip, not a play — 30 seconds is Spotify's own
@@ -48,20 +48,30 @@ export type MusicCurationStats = {
   groupedGenres: number;
   totalPodcastShows: number;
   categorizedPodcastShows: number;
+  totalArtists: number;
+  artistsWithGenres: number;
 };
 
-// The two catalogs the import pipeline populates automatically but can
-// never finish curating on its own: a genre's broad group and a podcast
-// show's category are both hand-assigned (see the `genres`/`podcastShows`
-// table comments in schema.ts for why neither has an API source). This is
+// Three catalogs the import pipeline populates automatically but can never
+// finish curating on its own: a genre's broad group and a podcast show's
+// category are both hand-assigned (see the `genres`/`podcastShows` table
+// comments in schema.ts for why neither has an API source), and an
+// artist's Spotify genre lookup can come back empty — timed out by
+// music-import.ts's IMPORT_TIME_BUDGET_MS, or Spotify genuinely has no
+// genre for that artist — with manual add/remove (#248, catalog-admin.ts's
+// addArtistGenre/removeArtistGenre) the only way to fill or fix it. This is
 // what backs the "needs review" progress bars on the music manage page —
 // `count(column)` here is a plain SQL COUNT(column), which only counts
 // non-null values, so it doubles as the "assigned" count for free.
 export async function getMusicCurationStats(): Promise<MusicCurationStats> {
   const db = getDb();
-  const [[genreRow], [showRow]] = await Promise.all([
+  const [[genreRow], [showRow], [artistRow]] = await Promise.all([
     db.select({ total: count(), grouped: count(genres.groupId) }).from(genres),
     db.select({ total: count(), categorized: count(podcastShows.categoryId) }).from(podcastShows),
+    db
+      .select({ total: count(artists.id), withGenres: countDistinct(artistGenres.artistId) })
+      .from(artists)
+      .leftJoin(artistGenres, eq(artistGenres.artistId, artists.id)),
   ]);
 
   return {
@@ -69,6 +79,8 @@ export async function getMusicCurationStats(): Promise<MusicCurationStats> {
     groupedGenres: genreRow.grouped,
     totalPodcastShows: showRow.total,
     categorizedPodcastShows: showRow.categorized,
+    totalArtists: artistRow.total,
+    artistsWithGenres: artistRow.withGenres,
   };
 }
 

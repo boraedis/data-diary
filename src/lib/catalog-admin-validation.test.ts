@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  validateArtistGenreInput,
   validateEntertainmentKindInput,
   validateExerciseSubfocusInput,
   validateExerciseSubtypeInput,
@@ -128,5 +129,23 @@ describe("validateExerciseSubfocusInput", () => {
       ok: false,
       error: "Invalid focusId",
     });
+  });
+});
+
+describe("validateArtistGenreInput", () => {
+  it("accepts a valid genreId", () => {
+    expect(validateArtistGenreInput({ genreId: 7 })).toEqual({ ok: true, value: { genreId: 7 } });
+  });
+
+  it("rejects a non-integer genreId", () => {
+    expect(validateArtistGenreInput({ genreId: 7.5 })).toEqual({ ok: false, error: "Invalid genreId" });
+  });
+
+  it("rejects a missing genreId", () => {
+    expect(validateArtistGenreInput({})).toEqual({ ok: false, error: "Invalid genreId" });
+  });
+
+  it("rejects a string genreId (no implicit coercion)", () => {
+    expect(validateArtistGenreInput({ genreId: "7" })).toEqual({ ok: false, error: "Invalid genreId" });
   });
 });
