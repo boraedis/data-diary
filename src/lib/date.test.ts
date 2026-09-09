@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, isValidDateString, parseDate, toDateString, todayDateString } from "@/lib/date";
+import { addDays, daysBetween, isValidDateString, parseDate, toDateString, todayDateString } from "@/lib/date";
 
 describe("isValidDateString", () => {
   it("accepts well-formed real calendar dates", () => {
@@ -75,5 +75,26 @@ describe("todayDateString", () => {
     const result = todayDateString();
     expect(isValidDateString(result)).toBe(true);
     expect(result).toBe(toDateString(new Date()));
+  });
+});
+
+describe("daysBetween", () => {
+  it("counts whole calendar days forward and back", () => {
+    expect(daysBetween("2024-01-01", "2024-01-08")).toBe(7);
+    expect(daysBetween("2024-01-08", "2024-01-01")).toBe(-7);
+    expect(daysBetween("2024-01-01", "2024-01-01")).toBe(0);
+  });
+
+  it("crosses a DST boundary without drifting", () => {
+    // US DST starts 2024-03-10; a local-midnight subtraction would give
+    // 6.958 days here and round to the wrong answer without care.
+    expect(daysBetween("2024-03-07", "2024-03-14")).toBe(7);
+    expect(daysBetween("2024-11-01", "2024-11-08")).toBe(7);
+  });
+
+  it("spans months and leap years", () => {
+    expect(daysBetween("2024-02-28", "2024-03-01")).toBe(2); // 2024 is a leap year
+    expect(daysBetween("2023-02-28", "2023-03-01")).toBe(1);
+    expect(daysBetween("2023-01-01", "2024-01-01")).toBe(365);
   });
 });
