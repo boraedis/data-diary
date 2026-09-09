@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { CalendarExplorer } from "@/components/charts/calendar-explorer";
@@ -17,9 +17,13 @@ import {
   OTHER_ID,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
-import { personImpact } from "@/lib/impact";
+import { personImpact, recencyWeight } from "@/lib/impact";
 import { computeRankings, type RankWindow } from "@/lib/ranking";
 import { categoricalColor } from "@/lib/viz/color";
+import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { InteractiveBarRace } from "@/components/charts/interactive/interactive-bar-race";
+import type { RaceFrame } from "@/lib/viz/race";
+import { daysBetween, parseDate } from "@/lib/date";
 import type { PeopleDay } from "@/lib/charts";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
@@ -321,3 +325,157 @@ const LIMIT_OPTIONS: GroupByOption<TableLimit>[] = [
   { id: "50", label: "Top 50" },
   { id: "all", label: "Everyone" },
 ];
+
+/**
+ * The people bar race: who mattered most, week by week.
+ *
+ * Legacy had this chart (`people_bar_race.js`) and it's the reason #103
+ * exists. The scoring is legacy's, in full: each day a person appears
+ * contributes `personImpact(day's happiness, their slot)`, and every past
+ * day is then weighted by `recencyWeight(how long ago it was)` — an arctan
+ * fade with a floor, not a decaying-to-nothing exponential. So a frame's
+ * value is not a running total but a **recency-weighted standing at that
+ * moment**, which is what makes the race a race: bars fall as well as
+ * rise, and someone who drops out of your life slides back down the board
+ * over the following year or two instead of sitting on an unassailable
+ * lifetime score. See `src/lib/impact.ts` for both curves and why neither
+ * gets "fixed".
+ *
+ * Deliberate departures from legacy, all of them things it got wrong
+ * rather than choices it made:
+ *  - Days with no happiness score are skipped, not scored as zero (the
+ *    same call `PeopleImpactChart` makes above — without a score there is
+ *    no impact to compute, and a zero would read as "they were there and
+ *    it counted for nothing"). Legacy passed `undefined` into the formula
+ *    and summed the resulting NaN.
+ *  - Negative slots are excluded, again matching `PeopleImpactChart`:
+ *    `getPeopleDailyData` doesn't return them, they hold five appearances
+ *    in the whole history, and a bar race can't draw a negative bar
+ *    anyway. Legacy tried to read them and indexed its own slot-weight
+ *    table out of bounds doing it.
+ *
+ * The whole thing is computed here on the client, not in SQL: the impact
+ * curve is TypeScript, the same rows already feed three other charts on
+ * this page, and the work is a few million multiply-adds done once per
+ * mount rather than per frame — playback itself reads the finished frames.
+ */
+
+/** One frame a week, matching legacy's `i % 7 == 0`. Weekly is what makes
+ * a decade legible in a minute of playback; daily frames would be 3,000 of
+ * them and no more informative, since the fader moves slowly by design. */
+const RACE_FRAME_INTERVAL_DAYS = 7;
+
+/** Legacy dropped the first 100 days (`day > START + 100`). Kept: the
+ * opening weeks are a handful of days against a nearly empty board, so the
+ * race starts with wild rank churn that means nothing. */
+const RACE_WARM_UP_DAYS = 100;
+
+/** Legacy's `sum > 5`. Someone logged a handful of times can't hold a
+ * position on the board, but they can flicker through it on the day they
+ * appear; the cut keeps the race about the people actually in your life. */
+const RACE_MIN_DAYS_LOGGED = 6;
+
+/** Bars on screen at once. Legacy used 20-25 on a fixed 800px-tall canvas;
+ * 10 is what stays readable inside the app's own responsive chart height,
+ * where each row still has to carry a name and a number. */
+const RACE_TOP_N = 10;
+
+/** Impact scores are unitless — whole numbers read better racing than
+ * `PeopleImpactChart`'s one decimal, which nobody can track at 3 frames a
+ * second. Module-level so its identity is stable across renders. */
+const formatImpactScore = (value: number) => Math.round(value).toLocaleString();
+
+export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
+  const { frames, colorByName } = useMemo(() => {
+    const scored = data.filter((day) => day.happiness !== null);
+    if (scored.length === 0) return { frames: [] as RaceFrame[], colorByName: new Map<string, string>() };
+
+    // Who's eligible, and what colour they carry. Latest tag wins, same as
+    // the people table's own "who are they now" reading.
+    const appearances = new Map<string, number>();
+    const colorByName = new Map<string, string>();
+    for (const day of scored) {
+      for (const person of day.people) {
+        appearances.set(person.name, (appearances.get(person.name) ?? 0) + 1);
+        if (person.tagColor) colorByName.set(person.name, person.tagColor);
+      }
+    }
+    const eligible = new Set(
+      [...appearances.entries()].filter(([, n]) => n >= RACE_MIN_DAYS_LOGGED).map(([name]) => name),
+    );
+
+    // Flattened once up front: the frame loop below walks this list for
+    // every frame, so it must not be re-deriving day shapes as it goes.
+    const start = scored[0].date;
+    const contributions = scored.map((day) => ({
+      date: day.date,
+      dayIndex: daysBetween(start, day.date),
+      scores: day.people
+        .filter((person) => eligible.has(person.name))
+        .map((person) => ({
+          name: person.name,
+          score: personImpact(day.happiness as number, person.slot),
+        })),
+    }));
+
+    const frames: RaceFrame[] = [];
+    let nextFrameIndex = RACE_WARM_UP_DAYS;
+    for (const day of contributions) {
+      if (day.dayIndex < nextFrameIndex) continue;
+      // Anchored to logged days rather than to the calendar, so a gap in
+      // logging skips frames instead of emitting a run of identical ones.
+      nextFrameIndex = day.dayIndex + RACE_FRAME_INTERVAL_DAYS;
+
+      const totals = new Map<string, number>();
+      for (const past of contributions) {
+        if (past.dayIndex > day.dayIndex) break;
+        const weight = recencyWeight(day.dayIndex - past.dayIndex);
+        for (const { name, score } of past.scores) {
+          totals.set(name, (totals.get(name) ?? 0) + weight * score);
+        }
+      }
+
+      frames.push({
+        date: parseDate(day.date),
+        entries: [...totals.entries()]
+          // A negative standing is possible in principle (the impact curve
+          // can go negative) and can't be drawn as a bar; dropping those
+          // rows is honest here because in this data set it never happens
+          // — negative slots aren't in the source at all.
+          .filter(([, value]) => value > 0)
+          .map(([label, value]) => ({ label, value })),
+      });
+    }
+
+    return { frames, colorByName };
+  }, [data]);
+
+  const color = useCallback(
+    (label: string) => colorByName.get(label) ?? categoricalColor(0),
+    [colorByName],
+  );
+
+  return (
+    <ChartPage title="People race" filters={null}>
+      <ChartCard
+        title="People race"
+        description="Who mattered most, week by week. Each person's score sums the impact of every day you logged them, with older days fading — so the board reflects who was around lately, not an all-time total. Play it, or drag the slider to any week."
+        empty={frames.length === 0}
+      >
+        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+          {({ width, height }) => (
+            <InteractiveBarRace
+              frames={frames}
+              topN={RACE_TOP_N}
+              width={width}
+              height={height}
+              color={color}
+              formatValue={formatImpactScore}
+              ariaLabel="Animated ranking of the people in your days, scored by recency-weighted impact, from the start of the log to the most recent week."
+            />
+          )}
+        </ResponsiveChart>
+      </ChartCard>
+    </ChartPage>
+  );
+}

@@ -11,11 +11,16 @@ import { categoricalColor } from "@/lib/viz/color";
 // to a CSS width percentage anyway.
 //
 // Bar-race mode (this issue's stretch goal — legacy's setInterval-driven
-// BarRace, redone with real play/pause/scrub controls) is split out to
+// BarRace, redone with real play/pause/scrub controls) was split out to
 // #103 rather than shipped here, per #22's own acceptance criteria ("don't
 // let it block shipping ranked-list mode... don't ship an uncontrolled
 // auto-play regression"): it's a genuinely separate feature (time-stepped
 // animation/reordering), not an incremental extension of this static list.
+// It shipped under #103 as its own sibling primitive, `InteractiveBarRace`
+// (./interactive-bar-race.tsx), rather than as a mode of this one — the
+// two share the `RankedEntry` shape and nothing else, since a race needs a
+// rescaling axis and per-frame SVG geometry that these HTML rows can't
+// express. See that file's header for the full reasoning.
 
 export type RankedEntry = { label: string; value: number };
 

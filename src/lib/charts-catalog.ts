@@ -248,6 +248,12 @@ export const CHARTS: ChartEntry[] = [
     category: "people",
   },
   {
+    href: "/charts/people-race",
+    title: "People race",
+    description: "An animated ranking of who mattered most, week by week.",
+    category: "people",
+  },
+  {
     href: "/charts/world",
     title: "Days per country",
     description: "A world map colored by how many days you've logged in each country.",
