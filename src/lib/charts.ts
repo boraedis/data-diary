@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
+import { resolveUsStateName } from "@/lib/geo/us-state-names";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
@@ -612,6 +613,84 @@ export async function getCountryVisitData(): Promise<CountryVisitEntry[]> {
 
   return [...counts.entries()]
     .map(([country, dayCount]) => ({ country, days: dayCount }))
+    .sort((a, b) => b.days - a.days);
+}
+
+// --- US state visits (state choropleth, #287) -----------------------------
+
+export type UsStateVisitEntry = { state: string; days: number };
+
+/**
+ * Distinct days logged in each US state — the state-level counterpart to
+ * getCountryVisitData above, and deliberately the same "was I there that
+ * day" read rather than a mention tally: a day whose two place slots both
+ * land in Georgia counts once, not twice, because a choropleth's fill
+ * encodes per-day presence.
+ *
+ * Where getCountryVisitData can stop at idPath's *first* segment (the
+ * root place is the country, by construction), a state sits at no fixed
+ * depth, so resolution goes through resolveUsStateName's full namePath
+ * walk — see its own doc comment for why "the second segment is the
+ * state" is a fact about today's data rather than an invariant, and why
+ * scanning root-to-leaf is what keeps a city named after a state (New
+ * York, Washington) from shadowing the real one.
+ *
+ * Territories us-atlas ships but d3's albersUsa composite can't place
+ * (the US Virgin Islands, which this catalog really does have days in)
+ * are resolved and returned here like any other entry. Dropping them is
+ * the *chart's* call, not this function's — it renders them as an
+ * explicit off-map note rather than letting real logged days disappear
+ * because of a projection's limits.
+ *
+ * Aggregated in JS rather than SQL for the same reason every neighboring
+ * function in this file is: `days` is a few thousand rows, and the walk
+ * above has no reasonable SQL expression.
+ */
+export async function getUsStateVisitData(): Promise<UsStateVisitEntry[]> {
+  const db = getDb();
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return [];
+
+  const placeRows = await db
+    .select({ id: places.id, namePath: places.namePath })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+  const stateByPlaceId = new Map<number, string>();
+  for (const p of placeRows) {
+    const state = resolveUsStateName(p.namePath);
+    if (state) stateByPlaceId.set(p.id, state);
+  }
+
+  // Set of "date\0state" pairs — same null-byte join delimiter, and same
+  // reasoning, as getCountryVisitData's own dedup above: neither a date
+  // string nor a us-atlas feature name can contain a null byte, so the
+  // pair is safe to use as a Set key.
+  const dayStatePairs = new Set<string>();
+  for (const row of dayRows) {
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const state = stateByPlaceId.get(placeId);
+      if (state) dayStatePairs.add(`${row.date}\0${state}`);
+    }
+  }
+
+  const counts = new Map<string, number>();
+  for (const pair of dayStatePairs) {
+    const state = pair.split("\0")[1];
+    counts.set(state, (counts.get(state) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([state, dayCount]) => ({ state, days: dayCount }))
     .sort((a, b) => b.days - a.days);
 }
 
