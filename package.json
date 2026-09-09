@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "migrate:history": "node scripts/migrate-history.mjs",
     "backfill:place-paths": "node scripts/backfill-place-paths.mjs",
+    "backfill:place-addresses": "tsx scripts/backfill-place-addresses.mjs",
     "backfill:entertainment-duration-location": "node scripts/backfill-entertainment-duration-location.mjs",
     "migrate:watchlist-rankings": "node scripts/migrate-watchlist-rankings.mjs",
     "diagnose:place-cycles": "node scripts/diagnose-place-cycles.mjs",
