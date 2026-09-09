@@ -97,12 +97,13 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
               features={features}
               width={width}
               height={height}
-              // geoAzimuthalEqualArea, not geoMercator — see
-              // interactive-geo.tsx's own module comment on why a
-              // city-scale map should stay area-true the same way the
-              // world map does, rather than defaulting to Mercator just
-              // because it's the familiar web-map choice.
-              projection={() => d3.geoAzimuthalEqualArea()}
+              // geoMercator, not geoAzimuthalEqualArea — see
+              // interactive-geo.tsx's own module comment (corrected after
+              // this shipped with the azimuthal version, which sheared
+              // badly: it needs explicit rotation onto the data that
+              // fitSize alone doesn't provide, and buys no real accuracy
+              // benefit at city scale anyway).
+              projection={() => d3.geoMercator()}
               getValue={(f) => daysByFeature.get(neighborhoodKey(f.properties.root, f.properties.name)) ?? null}
               getLabel={(f) => f.properties.name}
               valueLabel="days"

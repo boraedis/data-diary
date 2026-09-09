@@ -38,17 +38,30 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // primitive's own default stays geoNaturalEarth1 (area-accurate at global
 // scale, see its own comment below, and what every current consumer
 // already renders), but a city-scale consumer (#177's per-city
-// neighborhood heatmaps, via #266) should pass geoAzimuthalEqualArea
-// instead. geoMercator was the obvious first guess for "local map" — it's
-// what every web map uses at city zoom — but it's still not area-true
-// anywhere, purely a scale-familiarity choice; this codebase already
-// prefers projections that don't visually lie about size (see below).
-// geoAzimuthalEqualArea is the better fit for a single small region: true
-// equal-area at (and near) its own center, and — unlike
-// geoConicEqualArea/Albers, which is tuned for an east-west-elongated
-// mid-latitude extent like the US — it doesn't assume any particular
-// shape or latitude, so the same choice works for a compact city
-// regardless of where on the globe it sits.
+// neighborhood heatmaps, via #266) should pass geoMercator instead.
+//
+// Correction (found after #266 shipped, via an actual rendered check —
+// see #266's own PR thread): this comment used to recommend
+// geoAzimuthalEqualArea for city scale, reasoning that plain Mercator's
+// distortion made it "visually lie about size" the way it does at world
+// scale. That reasoning doesn't transfer down to a single city's few-km
+// extent: Mercator's local scale factor is latitude-dependent, but over
+// an extent that small the factor is close enough to constant that no
+// neighborhood ends up looking bigger or smaller *relative to another
+// neighborhood in the same city* than it truly is — the exact comparison
+// this codebase's "don't lie about size" rule exists to protect (see
+// world-visits-chart's own USA/Greenland framing). There's no real
+// equal-area benefit being bought at this scale, and chasing it cost a
+// real, visible bug: geoAzimuthalEqualArea defaults to being tangent at
+// [0°, 0°] unless explicitly `.rotate()`/`.center()`'d onto the data —
+// this component only ever calls `.fitSize()` on whatever projection a
+// caller passes, which adjusts scale/translate, never rotation — so
+// Atlanta (~9,000km from the default tangent point) rendered as a badly
+// sheared rhombus instead of its real shape. geoMercator has no
+// equivalent centering requirement (its conformality doesn't depend on
+// being tangent at the data), so `fitSize` alone renders it correctly
+// for any city on Earth without this primitive needing a rotate/center
+// prop at all.
 const DEFAULT_PROJECTION = () => d3.geoNaturalEarth1();
 
 // Module-level, not inline default parameter values — see
@@ -103,10 +116,13 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   colorMode?: ColorMode;
   zoomExtent?: [number, number];
   /** `d3.geoProjection` factory — fitSize is applied to it here, so pass
-   * an un-fit projection (e.g. `() => d3.geoAzimuthalEqualArea()`, not
+   * an un-fit projection (e.g. `() => d3.geoMercator()`, not
    * `.fitSize(...)` already called). Defaults to geoNaturalEarth1, the
    * right call at world scale; see this module's own comment above for
-   * why a city-scale caller should pass geoAzimuthalEqualArea instead. */
+   * why a city-scale caller should pass geoMercator instead — and
+   * specifically not an azimuthal projection, which needs explicit
+   * `.rotate()`/`.center()` onto the data that fitSize alone doesn't
+   * provide. */
   projection?: () => d3.GeoProjection;
   /** Optional point overlay (e.g. visited-place markers) drawn above the
    * region fill, panning/zooming with it. Omit for a plain choropleth. */
