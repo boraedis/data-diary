@@ -191,6 +191,19 @@ export function HealthEntryForm({
       return;
     }
 
+    // Mirrors validateHealthPayload in src/lib/days.ts — duration is only
+    // ever shown (and required) for distance/sport workouts; strength
+    // carries no scalar duration at all (see exerciseCategoryEnum in
+    // schema.ts).
+    const missingDuration = workouts.some((w) => {
+      const category = exercises.find((e) => e.id === w.exerciseId)?.category;
+      return (category === "distance" || category === "sport") && w.durationMinutes === null;
+    });
+    if (missingDuration) {
+      setError("Duration is required for distance and sport workouts");
+      return;
+    }
+
     setSaving(true);
 
     const payload: HealthPayload = {

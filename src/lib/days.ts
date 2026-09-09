@@ -874,6 +874,22 @@ async function findMissingExerciseIds(ids: number[]): Promise<number[]> {
   return uniqueIds.filter((id) => !found.has(id));
 }
 
+// exerciseId -> category, for every distinct id referenced by a batch of
+// workouts — used to require durationMinutes for distance/sport workouts
+// (see the exerciseCategoryEnum comment in schema.ts: strength exercises
+// carry no scalar duration at all, they live entirely in workout_sets, so
+// this deliberately only gates the other two categories).
+async function findExerciseCategoriesById(ids: number[]): Promise<Map<number, ExerciseCategory>> {
+  if (ids.length === 0) return new Map();
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db
+    .select({ id: exercises.id, category: exercises.category })
+    .from(exercises)
+    .where(inArray(exercises.id, uniqueIds));
+  return new Map(rows.map((r) => [r.id, r.category]));
+}
+
 async function findMissingPlaceIds(ids: number[]): Promise<number[]> {
   if (ids.length === 0) return [];
   const db = getDb();
@@ -905,6 +921,19 @@ export async function validateHealthPayload(body: unknown): Promise<Result<Healt
   if (missingExerciseIds.length > 0) {
     return { ok: false, error: `Exercise not found: ${missingExerciseIds.join(", ")}` };
   }
+
+  // Duration is required for distance/sport workouts — mirrors
+  // health-entry-form.tsx, which only shows the duration field for those two
+  // categories and not for strength (see findExerciseCategoriesById above).
+  const categoryByExerciseId = await findExerciseCategoriesById(workoutsResult.value.map((w) => w.exerciseId));
+  const missingDuration = workoutsResult.value.some((w) => {
+    const category = categoryByExerciseId.get(w.exerciseId);
+    return (category === "distance" || category === "sport") && w.durationMinutes === null;
+  });
+  if (missingDuration) {
+    return { ok: false, error: "Duration is required for distance and sport workouts" };
+  }
+
   const locationIds = workoutsResult.value
     .map((w) => w.locationId)
     .filter((id): id is number => id !== null);
