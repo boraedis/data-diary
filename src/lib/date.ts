@@ -50,3 +50,19 @@ export function addDays(dateStr: string, delta: number): string {
 export function todayDateString(): string {
   return toDateString(new Date());
 }
+
+/**
+ * Whole calendar days from `from` to `to` — negative when `to` is earlier.
+ *
+ * Built from `Date.UTC` on the parsed y/m/d fields rather than from two
+ * local `Date`s: a local-midnight subtraction is 23 or 25 hours across a
+ * DST boundary, so the naive `(b - a) / 86400000` drifts by a day the
+ * moment a range spans one. UTC noon-free arithmetic on bare calendar
+ * fields has no such boundary, and these are calendar dates with no time
+ * of day to preserve in the first place.
+ */
+export function daysBetween(from: string, to: string): number {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+}
