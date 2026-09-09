@@ -2347,6 +2347,33 @@ async function geocodeOrNull(address: string | null): Promise<{ lat: number | nu
   }
 }
 
+/**
+ * What to actually write for lat/lng on an update, given whether the
+ * address changed and what (if anything) re-geocoding it came back with.
+ *
+ * Real bug fixed here (#302): `updatePlaceCatalogEntry` used to spread
+ * `geo` straight into the update whenever the address changed —
+ * `geocodeOrNull` above never returns `null` itself (it returns
+ * `{lat: null, lng: null}` on a failure/empty result), so that spread was
+ * unconditionally true and unconditionally wrote whatever `geo` held. A
+ * missing address, an unresolvable one, a missing API key, or a network
+ * hiccup would silently overwrite a place's existing, correct coordinates
+ * with null — the exact "I tried to correct the address and the
+ * coordinates disappeared" report. Geocoding is documented as a
+ * best-effort *enhancement* two comments up; this is what actually makes
+ * it one on the write path too: a failed re-geocode leaves the place's
+ * current lat/lng untouched rather than clobbering them, and a caller can
+ * tell the two cases apart from this function's own return (`{}` vs a
+ * real pair) without re-deriving the logic itself.
+ */
+export function resolveGeoUpdate(
+  addressChanged: boolean,
+  geo: { lat: number | null; lng: number | null } | null
+): { lat?: number | null; lng?: number | null } {
+  if (!addressChanged || !geo || geo.lat === null || geo.lng === null) return {};
+  return { lat: geo.lat, lng: geo.lng };
+}
+
 // Legacy's own root-creation flow only ever produced places with
 // category "Region", subcategory "Country" at the top of the tree
 // (new_place_form.ejs's "Add New Country" button opens a modal literally
@@ -2552,7 +2579,19 @@ export async function getPlaceChildren(id: number): Promise<PlaceCatalogItem[]> 
   return db.select(PLACE_COLUMNS).from(places).where(eq(places.parentId, id)).orderBy(asc(places.name));
 }
 
-export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
+/**
+ * `geocodeFailed` is true when the address changed and re-geocoding it
+ * came back empty (or errored) — the place's existing lat/lng were kept
+ * rather than cleared (see `resolveGeoUpdate`), but the caller may still
+ * want to tell a human the address they just typed didn't resolve to a
+ * location, since nothing about `item` on its own reveals that: a
+ * genuinely unchanged pair of coordinates looks identical whether the
+ * geocode was skipped, succeeded and confirmed the same spot, or failed
+ * and fell back to what was already there.
+ */
+export type UpdatePlaceCatalogResult = { item: PlaceCatalogItem; geocodeFailed: boolean };
+
+export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<UpdatePlaceCatalogResult> {
   assertValidRoot(input.category, input.subcategory, input.parentId, input.color);
   assertValidMetro(input.category, input.subcategory, input.metroId);
   const db = getDb();
@@ -2576,6 +2615,15 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
   // src/lib/geocode.ts).
   const addressChanged = existing?.address !== input.address;
   const geo = addressChanged ? await geocodeOrNull(input.address) : null;
+  // A real attempt against a real address that came back with nothing to
+  // show for it — see `resolveGeoUpdate`'s own comment for why this is a
+  // distinct, worth-reporting outcome rather than silently falling back.
+  // `!!input.address` excludes clearing the address entirely: that's a
+  // deliberate "no address" rather than a failed lookup (geocodeOrNull
+  // short-circuits to the same `{lat: null, lng: null}` for both, so this
+  // is the one place that still has to tell them apart), and it shouldn't
+  // read as an error when it's neither a mistake nor a surprise.
+  const geocodeFailed = !!input.address && geo !== null && (geo.lat === null || geo.lng === null);
 
   const trimmedName = input.name.trim();
   // A rename or a re-parent both change this place's own idPath/namePath,
@@ -2595,12 +2643,12 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
       subregionName: input.subregionName,
       color: input.color,
       metroId: input.metroId,
-      ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
+      ...resolveGeoUpdate(addressChanged, geo),
     })
     .where(eq(places.id, id))
     .returning(PLACE_COLUMNS);
 
-  if (!pathAffectingChange) return updated;
+  if (!pathAffectingChange) return { item: updated, geocodeFailed };
 
   const parentPath = updated.parentId !== null ? await fetchPlacePathParts(updated.parentId) : null;
   const { idPath, namePath } = buildPlacePath(parentPath, updated.id, updated.name);
@@ -2610,7 +2658,7 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
     .where(eq(places.id, updated.id))
     .returning(PLACE_COLUMNS);
   await cascadePlacePaths({ id: withPath.id, idPath, namePath });
-  return withPath;
+  return { item: withPath, geocodeFailed };
 }
 
 // A place is referenced three ways: as one of a day's 2 place slots
