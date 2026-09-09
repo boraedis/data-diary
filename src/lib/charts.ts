@@ -645,15 +645,6 @@ function loadCityGeometryNames(cityKey: CityKey): Map<string, Set<string>> {
   return byRoot;
 }
 
-// Caps the destination-marker overlay to the N most-visited specific places
-// in the city, not literally every address ever logged there (legacy's own
-// version did that, and — confirmed with @boraedis on #177 — it read as
-// rough/cluttered rather than a real feature; see interactive-geo.tsx's own
-// #264 comment on redesigning this encoding). 20 is a size chosen for
-// legibility at this app's standard chart height
-// (h-[min(62vh,640px)]), not a data-driven cutoff.
-const CITY_HEATMAP_TOP_DESTINATIONS = 20;
-
 // `root` travels alongside `name` (not folded into one string) because
 // two different roots can share a neighborhood name — a chart matching
 // purely by name would silently merge, e.g., a real "Downtown" in
@@ -673,9 +664,12 @@ export type CityHeatmapData = {
  * (same "was I there that day" dedup getCountryVisitData uses, generalized
  * from "first namePath segment" to resolveCityFeatureName's arbitrary-depth
  * walk — see that function's own comment on why DC-metro/NYC need more than
- * one segment checked). `destinations` is the top
- * CITY_HEATMAP_TOP_DESTINATIONS specific places by the same day-presence
- * count, for the marker overlay.
+ * one segment checked). `destinations` is every geocoded specific place in
+ * the city with the same day-presence count, for the marker overlay — not
+ * capped to a curated top-N (an earlier version was; see
+ * interactive-geo.tsx's own `markers` prop comment on why showing every
+ * marker wants uniform dot sizing instead of a smaller curated set sized by
+ * frequency).
  *
  * Two day-presence tallies over the same underlying rows, not one tally
  * fed two ways — a day spent at 3 different addresses inside one
@@ -757,8 +751,7 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
       return { id, name: place.name, lat: place.lat, lng: place.lng, days: dayCount };
     })
     .filter((d): d is CityHeatmapDestination => d !== null)
-    .sort((a, b) => b.days - a.days)
-    .slice(0, CITY_HEATMAP_TOP_DESTINATIONS);
+    .sort((a, b) => b.days - a.days);
 
   return { neighborhoods, destinations };
 }

@@ -47,6 +47,16 @@ const CITY_TOPOLOGIES: Record<CityKey, Topology<{ [key: string]: GeometryCollect
 const CITY_ORDER: CityKey[] = ["atlanta", "dc-metro", "dubai", "nyc", "istanbul"];
 const CITY_OPTIONS: GroupByOption<CityKey>[] = CITY_ORDER.map((id) => ({ id, label: CITIES[id].label }));
 
+// A real two-option GroupByPicker for the destinations toggle, same as
+// exercise-mix-explorer.tsx's own stacked/proportional switch — not a new
+// checkbox/switch component for what's structurally the same "pick one of
+// a small fixed set" control every other filter row in this app already
+// uses.
+const DESTINATION_OPTIONS: GroupByOption<"shown" | "hidden">[] = [
+  { id: "shown", label: "Show" },
+  { id: "hidden", label: "Hide" },
+];
+
 // Composite (root, name) key — matches CityHeatmapNeighborhood's own
 // comment in src/lib/charts.ts on why two different roots (e.g.
 // Washington and Arlington) can't be keyed by name alone.
@@ -56,6 +66,7 @@ function neighborhoodKey(root: string, name: string): string {
 
 export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatmapData> }) {
   const [city, setCity] = useState<CityKey>("atlanta");
+  const [destinations, setDestinations] = useState<"shown" | "hidden">("shown");
   const cityData = data[city];
 
   const features = useMemo(() => {
@@ -69,26 +80,45 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
     return map;
   }, [cityData]);
 
-  const { markers, daysByMarkerId } = useMemo(() => {
-    const markers: GeoMarker[] = cityData.destinations.map((d) => ({
+  const { destinationMarkers, daysByMarkerId } = useMemo(() => {
+    const destinationMarkers: GeoMarker[] = cityData.destinations.map((d) => ({
       id: d.id,
       position: [d.lng, d.lat],
       label: d.name,
     }));
     const daysByMarkerId = new Map<string | number, number>(cityData.destinations.map((d) => [d.id, d.days]));
-    return { markers, daysByMarkerId };
+    return { destinationMarkers, daysByMarkerId };
   }, [cityData]);
+  // Not `markers={destinations === "shown" ? destinationMarkers : []}`
+  // inline below — a fresh `[]` literal on every render that's toggled
+  // off would sit in InteractiveGeo's own useD3 deps array and rebuild
+  // the whole SVG on every unrelated re-render, the exact bug this app's
+  // other primitives have their own module comments warning about (see
+  // interactive-network.tsx's). Memoized here instead.
+  const visibleMarkers = useMemo(
+    () => (destinations === "shown" ? destinationMarkers : []),
+    [destinations, destinationMarkers],
+  );
 
   return (
     <ChartPage
       title="City heatmap"
       filters={
-        <GroupByPicker value={city} onChange={setCity} options={CITY_OPTIONS} label="City" />
+        <>
+          <GroupByPicker value={city} onChange={setCity} options={CITY_OPTIONS} label="City" />
+          <GroupByPicker
+            value={destinations}
+            onChange={setDestinations}
+            options={DESTINATION_OPTIONS}
+            label="Destinations"
+            className="ml-auto"
+          />
+        </>
       }
     >
       <ChartCard
         title={CITIES[city].label}
-        description="Neighborhoods colored by days logged there; dots mark your most-visited specific places. Scroll to zoom, drag to pan, hover for detail."
+        description="Neighborhoods colored by days logged there; dots mark places you've visited. Scroll to zoom, drag to pan, hover for detail."
         empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}
       >
         <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
@@ -107,10 +137,17 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
               getValue={(f) => daysByFeature.get(neighborhoodKey(f.properties.root, f.properties.name)) ?? null}
               getLabel={(f) => f.properties.name}
               valueLabel="days"
-              markers={markers}
+              markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"
-              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there; dots mark your most-visited specific places. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
+              // Every visited place is plotted now, not a curated top-N
+              // (see getCityHeatmapData's own comment) — sizing hundreds
+              // of dots by frequency would read as noise, not signal;
+              // uniform small dots (still at a constant on-screen size
+              // regardless of zoom, per InteractiveGeo's own `markers`
+              // comment) stay legible with the count this can now reach.
+              scaleMarkersByValue={false}
+              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there; dots mark places you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
             />
           )}
         </ResponsiveChart>

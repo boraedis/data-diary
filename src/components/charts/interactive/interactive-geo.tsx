@@ -125,13 +125,29 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * provide. */
   projection?: () => d3.GeoProjection;
   /** Optional point overlay (e.g. visited-place markers) drawn above the
-   * region fill, panning/zooming with it. Omit for a plain choropleth. */
+   * region fill, panning/zooming with it. Omit for a plain choropleth.
+   * Rendered at a constant *screen* size regardless of zoom level (each
+   * marker's radius/stroke is counter-scaled by the current zoom
+   * transform's own k on every zoom tick) — a marker that grew along with
+   * the map as you zoomed in used to end up covering more of it, exactly
+   * backwards from what zooming in should do. */
   markers?: GeoMarker[];
   /** Marker radius scales by this if provided (bubble-map style, same
    * d3.scaleSqrt pattern interactive-network.tsx uses for node size) —
-   * omit for every marker at a flat MARK_SPECS.marker.radius instead. */
+   * omit for every marker at a flat MARK_SPECS.marker.radius instead.
+   * Still drives the tooltip's value row even when scaleMarkersByValue is
+   * false — the two are independent (a chart can show real values on
+   * hover without using them to size the dots). */
   getMarkerValue?: (marker: GeoMarker) => number | null | undefined;
   markerRadiusRange?: [number, number];
+  /** Whether marker radius actually scales by getMarkerValue — default
+   * true. A chart plotting many markers at once (#177's city-heatmap,
+   * every visited place rather than a curated top handful) wants uniform,
+   * unobtrusive dots instead: size-by-frequency reads as "these few are
+   * what matter" for a curated top-N, but as visual noise once every
+   * marker is shown. Set false for that case; getMarkerValue's tooltip
+   * role is unaffected. */
+  scaleMarkersByValue?: boolean;
   /** Marker fill — defaults to categoricalColor(0), distinct from the
    * region fill's sequential scale since a marker and a region encode two
    * different things (a specific visited place vs. an aggregate value). */
@@ -164,6 +180,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   markers,
   getMarkerValue,
   markerRadiusRange = DEFAULT_MARKER_RADIUS_RANGE,
+  scaleMarkersByValue = true,
   markerColor,
   formatMarkerValue = formatThousandsNumber,
   markerValueLabel = "value",
@@ -211,6 +228,17 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
 
       const g = svg.attr("width", width).attr("height", mapHeight).append("g");
 
+      // Assigned once the marker block below runs (still before any zoom
+      // event can fire, since both happen synchronously in this same
+      // effect) — declared here, not `const` inside that block, so the
+      // zoom handler's closure can reach the current selection to
+      // counter-scale it on every tick. Stays null for a markerless map.
+      let markerNodes: d3.Selection<SVGCircleElement, { marker: GeoMarker; xy: [number, number] }, d3.BaseType, unknown> | null = null;
+      function markerRadius(d: { marker: GeoMarker }) {
+        const v = getMarkerValue?.(d.marker);
+        return scaleMarkersByValue && markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
+      }
+
       const regions = g
         .selectAll("path")
         .data(features.features)
@@ -233,6 +261,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .scaleExtent(zoomExtent)
         .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
           g.attr("transform", event.transform.toString());
+          // Counter-scale markers by the same factor the transform above
+          // just applied, so their on-screen size stays constant instead
+          // of growing with the map — see `markers`' own prop comment.
+          const k = event.transform.k;
+          markerNodes?.attr("r", (d) => markerRadius(d) / k).attr("stroke-width", MARK_SPECS.marker.ringWidth / k);
         });
 
       function zoomToFeature(feature: Feature<Geometry, P>) {
@@ -295,17 +328,14 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           // drop it rather than plotting at a garbage position.
           .filter((entry): entry is { marker: GeoMarker; xy: [number, number] } => entry.xy != null);
 
-        const markerNodes = g
-          .selectAll("circle.geo-marker")
+        markerNodes = g
+          .selectAll<SVGCircleElement, { marker: GeoMarker; xy: [number, number] }>("circle.geo-marker")
           .data(positioned)
           .join("circle")
           .attr("class", "geo-marker")
           .attr("cx", (d) => d.xy[0])
           .attr("cy", (d) => d.xy[1])
-          .attr("r", (d) => {
-            const v = getMarkerValue?.(d.marker);
-            return markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
-          })
+          .attr("r", markerRadius)
           .attr("fill", resolvedMarkerColor)
           .attr("fill-opacity", 0.85)
           .attr("stroke", "var(--card)")
@@ -339,6 +369,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       markers,
       getMarkerValue,
       markerRadiusScale,
+      scaleMarkersByValue,
       resolvedMarkerColor,
     ],
   );
