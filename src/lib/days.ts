@@ -874,6 +874,22 @@ async function findMissingExerciseIds(ids: number[]): Promise<number[]> {
   return uniqueIds.filter((id) => !found.has(id));
 }
 
+// exerciseId -> category, for every distinct id referenced by a batch of
+// workouts — used to require durationMinutes for distance/sport workouts
+// (see the exerciseCategoryEnum comment in schema.ts: strength exercises
+// carry no scalar duration at all, they live entirely in workout_sets, so
+// this deliberately only gates the other two categories).
+async function findExerciseCategoriesById(ids: number[]): Promise<Map<number, ExerciseCategory>> {
+  if (ids.length === 0) return new Map();
+  const db = getDb();
+  const uniqueIds = [...new Set(ids)];
+  const rows = await db
+    .select({ id: exercises.id, category: exercises.category })
+    .from(exercises)
+    .where(inArray(exercises.id, uniqueIds));
+  return new Map(rows.map((r) => [r.id, r.category]));
+}
+
 async function findMissingPlaceIds(ids: number[]): Promise<number[]> {
   if (ids.length === 0) return [];
   const db = getDb();
@@ -905,6 +921,26 @@ export async function validateHealthPayload(body: unknown): Promise<Result<Healt
   if (missingExerciseIds.length > 0) {
     return { ok: false, error: `Exercise not found: ${missingExerciseIds.join(", ")}` };
   }
+
+  // Every workout needs a duration somewhere — mirrors health-entry-form.tsx.
+  // Distance/sport carry it as their own scalar field; strength has none
+  // (see findExerciseCategoriesById above), so it's required on at least one
+  // set instead.
+  const categoryByExerciseId = await findExerciseCategoriesById(workoutsResult.value.map((w) => w.exerciseId));
+  const missingDuration = workoutsResult.value.some((w) => {
+    const category = categoryByExerciseId.get(w.exerciseId);
+    if (category === "distance" || category === "sport") return w.durationMinutes === null;
+    if (category === "strength") return !w.sets.some((s) => s.durationSeconds !== null);
+    return false;
+  });
+  if (missingDuration) {
+    return {
+      ok: false,
+      error:
+        "Duration is required for every workout — distance/sport need a duration, strength needs at least one set with a duration",
+    };
+  }
+
   const locationIds = workoutsResult.value
     .map((w) => w.locationId)
     .filter((id): id is number => id !== null);

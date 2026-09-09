@@ -191,6 +191,23 @@ export function HealthEntryForm({
       return;
     }
 
+    // Mirrors validateHealthPayload in src/lib/days.ts — every workout needs
+    // a duration somewhere. Distance/sport carry it on the workout itself;
+    // strength has no scalar duration field (see exerciseCategoryEnum in
+    // schema.ts) so it's required on at least one set instead.
+    const missingDuration = workouts.some((w) => {
+      const category = exercises.find((e) => e.id === w.exerciseId)?.category;
+      if (category === "distance" || category === "sport") return w.durationMinutes === null;
+      if (category === "strength") return !w.sets.some((s) => s.durationSeconds !== null);
+      return false;
+    });
+    if (missingDuration) {
+      setError(
+        "Duration is required for every workout — distance/sport need a duration, strength needs at least one set with a duration"
+      );
+      return;
+    }
+
     setSaving(true);
 
     const payload: HealthPayload = {
