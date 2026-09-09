@@ -1,8 +1,13 @@
 // Server-only geocoding wrapper — turns a place's free-text `address` into
-// lat/lng, and the reverse. Same shape as src/lib/tmdb.ts: the API key is
-// read from `GOOGLE_MAPS_API_KEY` at call time (never at module load,
-// never client-side) via the Geocoding API's plain HTTP endpoint, no SDK
-// needed.
+// lat/lng. Same shape as src/lib/tmdb.ts: the API key is read from
+// `GOOGLE_MAPS_API_KEY` at call time (never at module load, never
+// client-side) via the Geocoding API's plain HTTP endpoint, no SDK needed.
+//
+// No reverse-geocoding here, and no address reconstruction anywhere in
+// this app — #302 settled that the expected value for `address` going
+// forward is a full address pasted in as-is from Google Maps, not
+// anything derived from coordinates or assembled from a hierarchy path.
+// This module's only job is the one direction: address -> lat/lng.
 //
 // This deliberately does NOT mirror the legacy app's behavior of
 // re-geocoding on every single place edit regardless of what changed —
@@ -57,42 +62,4 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
   const location = data.results[0]?.geometry?.location;
   if (!location) return null;
   return { lat: location.lat, lng: location.lng };
-}
-
-/**
- * The reverse of `geocodeAddress`: a coordinate pair -> the best
- * human-readable address Google has for it. Built for #302's backfill
- * (`scripts/backfill-place-addresses.mjs`) — a real chunk of the places
- * catalog has coordinates (captured however the place was originally
- * pinned) but no `address`, because legacy only ever reconstructed one
- * from `street_num`/`street_name`, and plenty of places (a friend's house,
- * a hiking trail, a park) never had those set in the first place even
- * though they were still pinned on a map.
- *
- * Same null-vs-throw contract as `geocodeAddress`: null for a coordinate
- * Google has nothing for, a throw only for a genuine request/API failure.
- * `results[0]` is Google's own best/most specific match (a full geocode
- * response is ordered most-specific to least, e.g. street address up
- * through country) — good enough here without picking through result
- * types, since this backs an optional field a human can always edit.
- */
-export async function reverseGeocodeAddress(lat: number, lng: number): Promise<string | null> {
-  const url = new URL(GEOCODE_URL);
-  url.searchParams.set("latlng", `${lat},${lng}`);
-  url.searchParams.set("key", getApiKey());
-
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    throw new Error(`Reverse geocoding request failed (${res.status})`);
-  }
-  const data = (await res.json()) as {
-    status: string;
-    results: { formatted_address: string }[];
-  };
-
-  if (data.status === "ZERO_RESULTS") return null;
-  if (data.status !== "OK") {
-    throw new Error(`Reverse geocoding failed: ${data.status}`);
-  }
-  return data.results[0]?.formatted_address ?? null;
 }

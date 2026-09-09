@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { geocodeAddress, reverseGeocodeAddress } from "@/lib/geocode";
+import { geocodeAddress } from "@/lib/geocode";
 
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) });
@@ -47,41 +47,5 @@ describe("geocodeAddress", () => {
     vi.unstubAllEnvs();
     mockFetchOnce({ status: "OK", results: [] });
     await expect(geocodeAddress("x")).rejects.toThrow("GOOGLE_MAPS_API_KEY");
-  });
-});
-
-describe("reverseGeocodeAddress", () => {
-  it("returns Google's best formatted address on a successful match", async () => {
-    mockFetchOnce({ status: "OK", results: [{ formatted_address: "3234 Iberville St, New Orleans, LA" }] });
-    expect(await reverseGeocodeAddress(29.97, -90.09)).toBe("3234 Iberville St, New Orleans, LA");
-  });
-
-  it("takes the first (most specific) result when several come back", async () => {
-    mockFetchOnce({
-      status: "OK",
-      results: [{ formatted_address: "3234 Iberville St, New Orleans, LA" }, { formatted_address: "New Orleans, LA" }],
-    });
-    expect(await reverseGeocodeAddress(29.97, -90.09)).toBe("3234 Iberville St, New Orleans, LA");
-  });
-
-  it("returns null (not a throw) for ZERO_RESULTS", async () => {
-    mockFetchOnce({ status: "ZERO_RESULTS", results: [] });
-    expect(await reverseGeocodeAddress(0, 0)).toBeNull();
-  });
-
-  it("throws on a non-OK, non-ZERO_RESULTS status", async () => {
-    mockFetchOnce({ status: "REQUEST_DENIED", results: [] });
-    await expect(reverseGeocodeAddress(0, 0)).rejects.toThrow("REQUEST_DENIED");
-  });
-
-  it("throws on an HTTP-level failure", async () => {
-    mockFetchOnce({}, false, 500);
-    await expect(reverseGeocodeAddress(0, 0)).rejects.toThrow("500");
-  });
-
-  it("throws if GOOGLE_MAPS_API_KEY is not configured", async () => {
-    vi.unstubAllEnvs();
-    mockFetchOnce({ status: "OK", results: [] });
-    await expect(reverseGeocodeAddress(0, 0)).rejects.toThrow("GOOGLE_MAPS_API_KEY");
   });
 });
