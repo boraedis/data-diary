@@ -652,7 +652,19 @@ function loadCityGeometryNames(cityKey: CityKey): Map<string, Set<string>> {
 // chart component keys its own lookup by (root, name) together, the same
 // pair each decoded topojson feature's own `properties` already carries.
 export type CityHeatmapNeighborhood = { root: string; name: string; days: number };
-export type CityHeatmapDestination = { id: number; name: string; lat: number; lng: number; days: number };
+export type CityHeatmapDestination = {
+  id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  days: number;
+  /** Which geometry feature this place itself resolves to, or null if
+   * it's in the city but doesn't match any drawn neighborhood — surfaced
+   * in the chart's marker tooltip (not just logged server-side) so a
+   * geometry/alias-table gap can be spotted and fixed from the map
+   * itself, per #177's own follow-up ask. */
+  neighborhood: { root: string; name: string } | null;
+};
 export type CityHeatmapData = {
   neighborhoods: CityHeatmapNeighborhood[];
   destinations: CityHeatmapDestination[];
@@ -713,6 +725,11 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
     .where(inArray(places.id, [...referencedIds]));
   const placeById = new Map(placeRows.map((p) => [p.id, p]));
 
+  function splitResolvedKey(key: string): { root: string; name: string } {
+    const [root, name] = key.split("\0");
+    return { root, name };
+  }
+
   const geometryNamesByRoot = loadCityGeometryNames(cityKey);
   // Keyed by "root\0featureName", not featureName alone — two different
   // roots (e.g. Washington and Arlington) could share a neighborhood
@@ -749,10 +766,10 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
     const resolvedKey = pair.split("\0").slice(1).join("\0");
     neighborhoodCounts.set(resolvedKey, (neighborhoodCounts.get(resolvedKey) ?? 0) + 1);
   }
-  const neighborhoods = [...neighborhoodCounts.entries()].map(([resolvedKey, dayCount]) => {
-    const [root, name] = resolvedKey.split("\0");
-    return { root, name, days: dayCount };
-  });
+  const neighborhoods = [...neighborhoodCounts.entries()].map(([resolvedKey, dayCount]) => ({
+    ...splitResolvedKey(resolvedKey),
+    days: dayCount,
+  }));
 
   const placeCounts = new Map<number, number>();
   for (const pair of dayPlacePairs) {
@@ -763,7 +780,15 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
     .map(([id, dayCount]): CityHeatmapDestination | null => {
       const place = placeById.get(id);
       if (!place || place.lat == null || place.lng == null) return null; // ungeocoded — nothing to plot
-      return { id, name: place.name, lat: place.lat, lng: place.lng, days: dayCount };
+      const resolvedKey = resolvedByPlaceId.get(id);
+      return {
+        id,
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+        days: dayCount,
+        neighborhood: resolvedKey ? splitResolvedKey(resolvedKey) : null,
+      };
     })
     .filter((d): d is CityHeatmapDestination => d !== null)
     .sort((a, b) => b.days - a.days);

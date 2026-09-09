@@ -156,6 +156,16 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   /** Label for a marker's tooltip value row, e.g. "visits". Only shown
    * when getMarkerValue is also given. */
   markerValueLabel?: string;
+  /** Optional second tooltip row for a marker, below the value row — a
+   * plain string, not a magnitude (e.g. #177's city-heatmap uses this for
+   * which neighborhood the place resolves to). Return an explicit string
+   * like "not mapped" to actively flag a gap rather than returning null —
+   * a missing row and "no match found" read very differently when the
+   * whole point is spotting a mismatch from the tooltip. Return null only
+   * for "this row doesn't apply to this marker at all". */
+  getMarkerSecondaryValue?: (marker: GeoMarker) => string | null;
+  /** Label for the secondary row, e.g. "neighborhood". */
+  markerSecondaryLabel?: string;
   ariaLabel?: string;
 };
 
@@ -184,6 +194,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   markerColor,
   formatMarkerValue = formatThousandsNumber,
   markerValueLabel = "value",
+  getMarkerSecondaryValue,
+  markerSecondaryLabel = "detail",
   ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered<P> | null>(null);
@@ -378,6 +390,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   const hoveredValue = hovered?.kind === "region" ? getValue(hovered.feature) : null;
   const hoveredColor = hoveredValue != null && hoveredValue > 0 ? colorScale(hoveredValue) : undefined;
   const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
+  const hoveredMarkerSecondary = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
 
   // Log-space fraction, matching the log-scaled fill — a linear fraction
   // here would put the indicator tick in the wrong place relative to the
@@ -408,16 +421,28 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                 ? hoveredValue == null || hoveredValue <= 0
                   ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
                   : [{ label: valueLabel, value: formatValue(hoveredValue), color: hoveredColor ?? "", variant: "swatch" }]
-                : hoveredMarkerValue == null
-                  ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
-                  : [
-                      {
-                        label: markerValueLabel,
-                        value: formatMarkerValue(hoveredMarkerValue),
-                        color: resolvedMarkerColor,
-                        variant: "swatch",
-                      },
-                    ]
+                : [
+                    ...(hoveredMarkerValue == null
+                      ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" as const }]
+                      : [
+                          {
+                            label: markerValueLabel,
+                            value: formatMarkerValue(hoveredMarkerValue),
+                            color: resolvedMarkerColor,
+                            variant: "swatch" as const,
+                          },
+                        ]),
+                    ...(hoveredMarkerSecondary != null
+                      ? [
+                          {
+                            label: markerSecondaryLabel,
+                            value: hoveredMarkerSecondary,
+                            color: resolvedMarkerColor,
+                            variant: "swatch" as const,
+                          },
+                        ]
+                      : []),
+                  ]
             }
             containerWidth={width}
           />

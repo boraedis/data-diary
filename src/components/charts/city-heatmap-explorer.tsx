@@ -80,14 +80,22 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
     return map;
   }, [cityData]);
 
-  const { destinationMarkers, daysByMarkerId } = useMemo(() => {
+  const { destinationMarkers, daysByMarkerId, neighborhoodByMarkerId } = useMemo(() => {
     const destinationMarkers: GeoMarker[] = cityData.destinations.map((d) => ({
       id: d.id,
       position: [d.lng, d.lat],
       label: d.name,
     }));
     const daysByMarkerId = new Map<string | number, number>(cityData.destinations.map((d) => [d.id, d.days]));
-    return { destinationMarkers, daysByMarkerId };
+    // Explicit "not mapped" string, not a missing map entry — a place
+    // whose neighborhood has no matching geometry feature still gets a
+    // real tooltip row saying so, which is the whole point (spotting a
+    // geometry/alias-table gap from the map itself, per #177's own
+    // follow-up ask), not something to silently omit.
+    const neighborhoodByMarkerId = new Map<string | number, string>(
+      cityData.destinations.map((d) => [d.id, d.neighborhood?.name ?? "not mapped"]),
+    );
+    return { destinationMarkers, daysByMarkerId, neighborhoodByMarkerId };
   }, [cityData]);
   // Not `markers={destinations === "shown" ? destinationMarkers : []}`
   // inline below — a fresh `[]` literal on every render that's toggled
@@ -140,6 +148,8 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"
+              getMarkerSecondaryValue={(m) => neighborhoodByMarkerId.get(m.id) ?? null}
+              markerSecondaryLabel="neighborhood"
               // scaleMarkersByValue stays at its default (true) — bigger
               // dots for more-visited places. An earlier version of this
               // chart turned that off on the theory that plotting every
