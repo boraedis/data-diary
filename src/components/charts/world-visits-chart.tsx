@@ -5,8 +5,8 @@ import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import worldTopologyRaw from "world-atlas/countries-110m.json";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
-import { InteractiveGeo, type GeoFeature, type GeoLevel } from "@/components/charts/interactive/interactive-geo";
-import { loadUsStateFeatures, usStatesLevel } from "@/components/charts/us-geo-levels";
+import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
+import { loadUsStateFeatures, usStatesExpansion } from "@/components/charts/us-geo-levels";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import type { CountryVisitEntry, UsStateVisitEntry } from "@/lib/charts";
 
@@ -35,9 +35,10 @@ const UNITED_STATES = "United States of America";
  * since this app's place catalog is free-text, not a controlled ISO
  * list.
  *
- * Clicking the US drills into its states (#107); every other country
- * keeps the original zoom-to-bounds. That asymmetry is the honest state
- * of the world rather than an oversight — see `resolveDrilldown` below. */
+ * Clicking the US breaks it into its states in place (#107), with every
+ * other country still drawn around it; every other country keeps the
+ * original zoom-to-bounds. That asymmetry is the honest state of the
+ * world rather than an oversight — see `resolveExpansion` below. */
 export function WorldVisitsChart({
   data,
   usStates,
@@ -47,9 +48,9 @@ export function WorldVisitsChart({
    * map at zoom-to-bounds only — which is what the recap does
    * (recap-people-places-section.tsx): its `data` is scoped to one recap
    * period, and there's no period-scoped state breakdown to match it, so
-   * drilling in would show whole-history county numbers underneath a
-   * period-scoped map and quietly contradict it. Better no drill-down
-   * than one that disagrees with the level above it. */
+   * expanding it would show whole-history state numbers beside
+   * period-scoped countries and quietly contradict them. Better no
+   * expansion than one that disagrees with the map around it. */
   usStates?: UsStateVisitEntry[];
 }) {
   const features = useMemo(() => feature(worldTopology, worldTopology.objects.countries), []);
@@ -76,8 +77,8 @@ export function WorldVisitsChart({
   }, [usStates]);
 
   /**
-   * The US is the only country that drills anywhere, and that's a real
-   * limit rather than a stub: subdivision geometry for everyone else means
+   * The US is the only country that expands, and that's a real limit
+   * rather than a stub: subdivision geometry for everyone else means
    * Natural Earth's admin-1 layer, which has no topojson-org-quality npm
    * package and would need a one-time conversion plus per-country name
    * reconciliation against this free-text catalog — #107's own scoping
@@ -85,14 +86,12 @@ export function WorldVisitsChart({
    *
    * Returning null for every other country is what keeps that honest:
    * the primitive falls back to zoom-to-bounds, exactly what this map did
-   * before drill-down existed, instead of opening an empty subdivision
-   * view for a country with no geometry to show.
+   * before, instead of blanking a country that has no geometry to show.
    */
-  const resolveDrilldown = useCallback(
-    (f: GeoFeature, depth: number): Promise<GeoLevel | null> | null => {
-      if (depth !== 0) return null;
+  const resolveExpansion = useCallback(
+    (f: GeoFeature): Promise<GeoExpansion | null> | null => {
       if (String(f.properties?.name ?? "") !== UNITED_STATES) return null;
-      return loadUsStateFeatures().then((stateFeatures) => usStatesLevel(stateFeatures, daysByState));
+      return loadUsStateFeatures().then((stateFeatures) => usStatesExpansion(stateFeatures, daysByState));
     },
     [daysByState],
   );
@@ -107,11 +106,10 @@ export function WorldVisitsChart({
           getValue={(f) => daysByCountry.get(f.properties.name) ?? null}
           getLabel={(f) => f.properties.name}
           valueLabel="days"
-          resolveDrilldown={usStates ? resolveDrilldown : undefined}
-          rootLabel="World"
+          resolveExpansion={usStates ? resolveExpansion : undefined}
           ariaLabel={
             usStates
-              ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to drill into its states; clicking any other country zooms to it. Hover a country to see how many days you've logged there."
+              ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to break it into its states in place; clicking any other country zooms to it. Hover a country or state to see how many days you've logged there."
               : "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there."
           }
         />

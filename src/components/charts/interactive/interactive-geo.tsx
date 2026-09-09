@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 import { useD3 } from "@/hooks/use-d3";
@@ -27,20 +27,36 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // distinguishable. See sequentialLogScale's own doc comment in
 // viz/color.ts.
 //
-// Click-into-subdivisions (#107) is now real, via the optional
-// `resolveDrilldown` prop: a caller returns the next `GeoLevel` down for a
-// clicked feature (or a promise of one, so a big geometry file can be
-// lazily imported at the moment it's first needed rather than shipped
-// with the page), and this component keeps the level stack, renders the
-// breadcrumb back out, and resets the zoom on every level change. A
-// caller that passes nothing, or returns null for a given feature, keeps
-// exactly the old behavior: click zooms to that feature's bounds. That
-// fallback is what lets one map mix the two — on the world map only the
-// US drills anywhere, and every other country still just zooms.
+// Click-into-subdivisions (#107) is real, via the optional
+// `resolveExpansion` prop: a caller returns the subdivisions of a clicked
+// region (or a promise of them, so a big geometry file can be lazily
+// imported at the moment it's first needed rather than shipped with the
+// page), and this component swaps that one region's polygon for them and
+// zooms to it.
 //
-// The level stack is transient client state, deliberately: no query
-// params, no shareable deep link (#107's own "URL state" decision), same
-// as the zoom/pan transform this component has always kept in the DOM.
+// **Expansion happens in place, not as a level swap.** The clicked
+// region's own polygon is removed and its subdivisions are drawn through
+// the *same fitted projection*, so they land exactly inside the outline
+// that was there a moment ago, while every neighbouring region stays on
+// screen at its own level. Nothing is re-fitted, nothing jumps, and the
+// only visual change is a zoom transform plus one polygon becoming many.
+//
+// That's a deliberate correction of this feature's first implementation,
+// which replaced the entire map with the drilled-in level and offered a
+// breadcrumb back out. It worked, but it threw away the thing that makes
+// a map a map: after drilling into Georgia you could no longer see — or
+// click — Alabama. Expanding in place means a neighbour is always one
+// click away, several regions can be open at once, and the reader never
+// loses the surrounding context. See `expansions` state below.
+//
+// A caller that passes nothing, or returns null for a given feature,
+// keeps exactly the old behavior: click zooms to that feature's bounds.
+// That fallback is what lets one map mix the two — on the world map only
+// the US expands, and every other country still just zooms.
+//
+// Which regions are expanded is transient client state, deliberately: no
+// query params, no shareable deep link (#107's own "URL state" decision),
+// same as the zoom/pan transform this component has always kept in the DOM.
 //
 // Projection is a caller-supplied factory (#264), not hardcoded — this
 // primitive's own default stays geoNaturalEarth1 (area-accurate at global
@@ -95,68 +111,92 @@ const DEFAULT_MARKER_RADIUS_RANGE: [number, number] = [3, 10];
 // together within that same budget instead of the legend overflowing it.
 const LEGEND_AREA_HEIGHT = 36;
 
-// Reserved for the drill-down breadcrumb row above the map, on the same
+// Reserved for the expanded-regions row above the map, on the same
 // budget-sharing logic as LEGEND_AREA_HEIGHT — and only subtracted when a
-// caller actually passes `resolveDrilldown`, so a plain choropleth's map
+// caller actually passes `resolveExpansion`, so a plain choropleth's map
 // area is exactly what it was before drill-down existed.
-const BREADCRUMB_AREA_HEIGHT = 28;
+//
+// Reserved whenever drill-down is *configured*, not only while something
+// is expanded: the row appearing on first expand would shrink mapHeight,
+// which refits the projection, which moves every polygon on screen — the
+// one thing in-place expansion exists to avoid.
+const EXPANSION_ROW_HEIGHT = 28;
 
 /** A feature as the drill-down machinery sees it — properties erased to
  * the base GeoJSON type, since one chain's levels legitimately carry
  * different property shapes (a country's `{name}` and a county's
- * `{name, state}` aren't the same type). Each level's own accessors are
- * built alongside its own features by `geoLevel` below, so the erasure
- * never actually loses anything at the point it matters. */
+ * `{name, state}` aren't the same type). Each expansion's own accessors
+ * are built alongside its own features by `geoExpansion` below, so the
+ * erasure never actually loses anything at the point it matters. */
 export type GeoFeature = Feature<Geometry, GeoJsonProperties>;
 
-/** One level of a drill-down chain: the geometry to draw, plus the
- * accessors that read it. Bundled together deliberately — features and
- * their accessors are only ever meaningful as a pair, and keeping them in
- * one object is what makes it impossible for this component to render one
- * level's polygons through another level's `getValue`. */
-export type GeoLevel = {
-  /** Stable identity, used as the breadcrumb's React key. */
+/** The subdivisions of one expanded region: the geometry to draw in its
+ * place, plus the accessors that read it. Bundled together deliberately —
+ * features and their accessors are only ever meaningful as a pair, and
+ * keeping them in one object is what makes it impossible for this
+ * component to render one set of polygons through another's `getValue`,
+ * which matters far more here than it would for a level swap: states and
+ * counties are on screen *simultaneously*, each drawn through its own
+ * accessors.
+ *
+ * Note what's deliberately absent: a projection. Subdivisions are drawn
+ * through the map's existing fitted projection, which is exactly what
+ * makes them land inside the outline of the region they replaced. An
+ * expansion that could pick its own projection couldn't be drawn in
+ * place at all. */
+export type GeoExpansion = {
+  /** Stable identity for this expansion, used as a React key. */
   key: string;
-  /** Breadcrumb label for this level, e.g. "Georgia". */
+  /** Label for the expanded-regions row, e.g. "Georgia". */
   label: string;
   features: FeatureCollection<Geometry, GeoJsonProperties>;
   getValue: (feature: GeoFeature) => number | null | undefined;
   getLabel: (feature: GeoFeature) => string;
-  /** Defaults to the parent level's projection when omitted — a chain
-   * that stays in one part of the world (US states -> counties) usually
-   * wants the same one the whole way down. */
-  projection?: () => d3.GeoProjection;
+  /** Tooltip value label for these subdivisions, if it differs from the
+   * map's own (it usually doesn't — "days" is "days" at either scale). */
   valueLabel?: string;
-  ariaLabel?: string;
 };
 
 /**
- * Builds a `GeoLevel` from properly-typed features and accessors, erasing
- * the property type at the boundary.
+ * Builds a `GeoExpansion` from properly-typed features and accessors,
+ * erasing the property type at the boundary.
  *
  * The cast is the point of this function, and it's safe in a way a bare
  * `as` at a call site wouldn't be: everything it erases travels together.
- * A level's `getValue`/`getLabel` are written against the very
- * FeatureCollection handed in beside them, and nothing downstream ever
- * pairs one level's features with another's accessors — the component
- * reads whichever level is active as a single unit. The cast has to go
+ * An expansion's `getValue`/`getLabel` are written against the very
+ * FeatureCollection handed in beside them, and every feature this
+ * component draws carries its own accessors alongside it (see
+ * `DrawnFeature`), so the two can't drift apart. The cast has to go
  * through `unknown` because accessor parameters are contravariant under
  * `strictFunctionTypes`: `(f: Feature<Geometry, CountyProperties>) => x`
  * is genuinely not a subtype of `(f: GeoFeature) => x`, even though
- * calling it only ever with that level's own features is sound.
+ * calling it only ever with that expansion's own features is sound.
  */
-export function geoLevel<P extends GeoJsonProperties>(spec: {
+export function geoExpansion<P extends GeoJsonProperties>(spec: {
   key: string;
   label: string;
   features: FeatureCollection<Geometry, P>;
   getValue: (feature: Feature<Geometry, P>) => number | null | undefined;
   getLabel: (feature: Feature<Geometry, P>) => string;
-  projection?: () => d3.GeoProjection;
   valueLabel?: string;
-  ariaLabel?: string;
-}): GeoLevel {
-  return spec as unknown as GeoLevel;
+}): GeoExpansion {
+  return spec as unknown as GeoExpansion;
 }
+
+/** One polygon as actually drawn: the feature, plus whichever accessors
+ * belong to it. The base map's features and every expansion's features
+ * end up in one flat list bound to one D3 selection, so each entry has to
+ * carry its own way of being read — there is no single "current level"
+ * once a state and its neighbour's counties share the screen. */
+type DrawnFeature = {
+  feature: GeoFeature;
+  getValue: (feature: GeoFeature) => number | null | undefined;
+  getLabel: (feature: GeoFeature) => string;
+  valueLabel?: string;
+  /** Identity of the base feature this can expand into, or null for a
+   * feature that's already a subdivision (the bottom of the chain). */
+  expandableKey: string | null;
+};
 
 /** A point overlay drawn on top of the choropleth (#264) — e.g. a
  * visited-place marker on a city heatmap. Positioned in real geographic
@@ -238,33 +278,34 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   /** Label for the secondary row, e.g. "neighborhood". */
   markerSecondaryLabel?: string;
   ariaLabel?: string;
-  /** Next level down for a clicked feature, or null to fall back to
-   * zoom-to-bounds for that feature (#107). `depth` is 0 while the root
-   * level from this component's own props is showing, 1 one level in, and
-   * so on — a chain that goes country -> state -> county switches on it.
+  /** The subdivisions to draw in place of a clicked region, or null to
+   * fall back to zoom-to-bounds for it (#107) — which is the right answer
+   * for a region with no subdivision geometry (most countries) and for a
+   * subdivision that's already the bottom of the chain.
+   *
+   * Only ever called for a feature from `features` — a subdivision drawn
+   * by a previous expansion can't itself expand, since these are drawn
+   * through one shared projection and nesting them further would need a
+   * second, deeper geometry source this app doesn't have.
    *
    * May return a promise: county geometry is several times the size of
    * everything else a chart page loads, and making it awaitable is what
-   * lets a caller `import()` it on the first drill-in instead of bundling
-   * it into the initial page. While one is pending, clicks are ignored
-   * and the breadcrumb row says so. */
-  resolveDrilldown?: (feature: GeoFeature, depth: number) => GeoLevel | null | Promise<GeoLevel | null>;
-  /** Breadcrumb label for the root level, e.g. "World" or "United
-   * States". Only rendered when `resolveDrilldown` is also given. */
-  rootLabel?: string;
+   * lets a caller `import()` it on the first expansion instead of
+   * bundling it into the initial page. While one is pending, clicks are
+   * ignored and the row above the map says so. */
+  resolveExpansion?: (feature: GeoFeature) => GeoExpansion | null | Promise<GeoExpansion | null>;
 };
 
 /** Discriminated union so one hover state serves both layers — a marker
  * sits on top of a region and should win the tooltip while hovered, not
  * show two overlapping readouts.
  *
- * Holds a `GeoFeature` rather than this component's own `P`: once a chart
- * can drill from countries into counties, the hovered feature isn't
- * necessarily the root level's property shape any more. It's read back
- * only through the active level's own `getLabel`/`getValue`, which is
- * where the real typing lives. */
+ * The region case holds a whole `DrawnFeature`, not just a feature: with
+ * states and counties on screen at once, the hovered polygon's own
+ * accessors are the only way to read it correctly, and they travel with
+ * it. */
 type Hovered =
-  | { kind: "region"; feature: GeoFeature; clientPos: { x: number; y: number } }
+  | { kind: "region"; drawn: DrawnFeature; clientPos: { x: number; y: number } }
   | { kind: "marker"; marker: GeoMarker; clientPos: { x: number; y: number } };
 
 export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>({
@@ -288,48 +329,65 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   getMarkerSecondaryValue,
   markerSecondaryLabel = "detail",
   ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
-  resolveDrilldown,
-  rootLabel = "All",
+  resolveExpansion,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
-  // Levels drilled into below the root, deepest last. Empty means the
-  // root level (this component's own `features`/`getValue`/`getLabel`
-  // props) is showing.
-  const [stack, setStack] = useState<GeoLevel[]>([]);
-  // Only ever true while an async resolveDrilldown is in flight. Kept out
-  // of useD3's deps on purpose: it drives the breadcrumb row's text, and
-  // putting it in deps would tear down and rebuild the entire SVG twice
-  // per drill-in for a caption change.
-  const [drilling, setDrilling] = useState(false);
+  // Regions currently shown as their own subdivisions, keyed by the base
+  // feature they replaced. A Map, not an array: several regions can be
+  // open at once (expanding Alabama doesn't close Georgia — that's the
+  // point of expanding in place), and this has to answer "is *this*
+  // feature expanded?" on every render. Insertion order drives the row of
+  // chips above the map.
+  const [expansions, setExpansions] = useState<ReadonlyMap<string, GeoExpansion>>(new Map());
+  // Only ever true while an async resolveExpansion is in flight. Kept out
+  // of useD3's deps on purpose: it drives one line of text, and putting it
+  // in deps would tear down and rebuild the entire SVG twice per
+  // expansion for a caption change.
+  const [expanding, setExpanding] = useState(false);
   // A state-backed callback ref, not a plain useRef — see interactive-
   // hist's own comment on why this needs to be state, not a ref read
   // during render.
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
 
-  // The root level, expressed as a GeoLevel so everything below this line
-  // reads one shape whether or not a drill-down is configured — rather
-  // than every use site branching on "props or stack top?".
-  const rootLevel = useMemo<GeoLevel>(
-    () =>
-      geoLevel<P>({
-        key: "__root__",
-        label: rootLabel,
-        features,
-        getValue,
-        getLabel,
-        projection,
+  /** Identity of a base feature, for tracking what's expanded. Prefers
+   * the GeoJSON `id` both us-atlas and world-atlas set on every feature;
+   * falls back to the label so a caller's own geometry without ids still
+   * works. */
+  const featureKey = useCallback((f: GeoFeature) => String(f.id ?? getLabel(f as Feature<Geometry, P>)), [getLabel]);
+
+  // Every polygon to draw, base and expanded together, each carrying the
+  // accessors that read it. An expanded region contributes its
+  // subdivisions *instead of* itself, which is the whole in-place trick:
+  // same list, same projection, one polygon swapped for many.
+  const drawn = useMemo<DrawnFeature[]>(() => {
+    const entries: DrawnFeature[] = [];
+    for (const f of features.features) {
+      const key = featureKey(f);
+      const expansion = expansions.get(key);
+      if (expansion) continue; // replaced by its subdivisions below
+      entries.push({
+        feature: f,
+        getValue: getValue as DrawnFeature["getValue"],
+        getLabel: getLabel as DrawnFeature["getLabel"],
         valueLabel,
-        ariaLabel,
-      }),
-    [rootLabel, features, getValue, getLabel, projection, valueLabel, ariaLabel],
-  );
-  const active = stack.length > 0 ? stack[stack.length - 1] : rootLevel;
-  // Falls back up the stack, then to the root — a level that doesn't name
-  // its own projection keeps drawing in its parent's (see GeoLevel's own
-  // comment: a US state's counties want exactly the projection the state
-  // map already used).
-  const activeProjection =
-    active.projection ?? [...stack].reverse().find((l) => l.projection)?.projection ?? projection;
+        expandableKey: key,
+      });
+    }
+    for (const expansion of expansions.values()) {
+      for (const f of expansion.features.features) {
+        entries.push({
+          feature: f,
+          getValue: expansion.getValue,
+          getLabel: expansion.getLabel,
+          valueLabel: expansion.valueLabel ?? valueLabel,
+          // A subdivision is the bottom of the chain — see
+          // resolveExpansion's own prop comment.
+          expandableKey: null,
+        });
+      }
+    }
+    return entries;
+  }, [features, expansions, featureKey, getValue, getLabel, valueLabel]);
 
   // Computed here (not inside useD3 below) so the legend can read the same
   // domain/scale without duplicating the computation — same split
@@ -339,35 +397,48 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   // rebuild-on-every-pointermove bug this file's own module comment warns
   // about.
   //
-  // Keyed off the *active* level, so drilling into a state rescales the
-  // fill to that state's own counties. Deliberately not a domain shared
-  // across levels: a county holding 5 days next to one holding 300 is the
-  // comparison the drilled-in view exists to make, and inheriting the
-  // national domain (where Fulton's ~1900 sets the ceiling) would flatten
-  // every county in most states into one indistinguishable color.
+  // Spans everything on screen, states and counties alike, because they
+  // *are* on screen together and one legend has to explain all of it.
+  // That's honest here in a way it wouldn't be for every chart: both
+  // levels measure the same thing in the same unit (days present in an
+  // area), so a county reading darker than the state next to it is a true
+  // comparison, not an artifact of two scales sharing a color ramp.
   const domain = useMemo<[number, number]>(() => {
-    const values = active.features.features.map(active.getValue).filter((v): v is number => v != null && v > 0);
+    const values = drawn.map((d) => d.getValue(d.feature)).filter((v): v is number => v != null && v > 0);
     return values.length ? [Math.min(...values), Math.max(...values)] : [1, 10];
-  }, [active]);
+  }, [drawn]);
   const colorScale = useMemo(() => sequentialLogScale(domain, colorMode), [domain, colorMode]);
-  const breadcrumbHeight = resolveDrilldown ? BREADCRUMB_AREA_HEIGHT : 0;
-  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - breadcrumbHeight);
+  const expansionRowHeight = resolveExpansion ? EXPANSION_ROW_HEIGHT : 0;
+  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - expansionRowHeight);
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
 
-  const drillTo = useCallback((level: GeoLevel) => {
-    // Hover is cleared with the same setState batch that swaps the level:
-    // the tooltip is showing a feature that's about to stop existing, and
-    // leaving it up for a frame reads as the new map having a stale
-    // readout attached to it.
+  const expand = useCallback((key: string, expansion: GeoExpansion) => {
+    // Hover is cleared in the same setState batch: the tooltip is showing
+    // a polygon that's about to stop existing, and leaving it up for a
+    // frame reads as a stale readout attached to the new drawing.
     setHovered(null);
-    setStack((current) => [...current, level]);
+    setExpansions((current) => new Map(current).set(key, expansion));
   }, []);
 
-  /** Truncate the stack to `depth` levels — 0 is the root. Drives the
-   * breadcrumb links back out. */
-  const drillUpTo = useCallback((depth: number) => {
+  // Which base feature the next draw owes a zoom to. A ref, not state:
+  // it's a one-shot instruction consumed by the render function on the
+  // very next draw, and making it state would trigger a second rebuild
+  // just to clear it.
+  const pendingZoomKeyRef = useRef<string | null>(null);
+  // The base `features` reference as of the last draw, to tell "the whole
+  // map changed" apart from "only the expansions changed" — see where the
+  // zoom transform is carried, in the render function below.
+  const lastBaseFeaturesRef = useRef(features);
+
+  /** Put one expanded region back to its own single polygon. */
+  const collapse = useCallback((key: string) => {
     setHovered(null);
-    setStack((current) => (depth >= current.length ? current : current.slice(0, depth)));
+    setExpansions((current) => {
+      if (!current.has(key)) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
   }, []);
 
   // Same domain/scale split as the region fill above — computed outside
@@ -384,24 +455,45 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
 
   const ref = useD3<SVGSVGElement>(
     (svg) => {
-      if (active.features.features.length === 0) return;
+      if (drawn.length === 0) return;
+
+      // Fitted to the *base* features only, never to what's currently
+      // drawn. This is the single line that makes expansion happen in
+      // place: refitting to include an expansion's subdivisions would
+      // rescale and re-centre the whole map on every expand and collapse,
+      // sliding every other region out from under the pointer. The base
+      // map's framing is fixed; expanding only ever changes what fills
+      // one outline.
+      const fittedProjection = projection().fitSize([width, mapHeight], features);
+      const path = d3.geoPath(fittedProjection);
 
       // d3-zoom keeps the current transform on the DOM node itself (the
       // `__zoom` expando), and useD3 only clears the <svg>'s *children* —
-      // the element itself survives every rebuild. Without this reset, a
-      // transform from the previous drawing leaks into the next one: the
-      // freshly-appended <g> below has no transform attribute, so the map
-      // *looks* unzoomed while d3-zoom still believes it's zoomed in, and
-      // the first scroll or drag afterwards snaps the view. Latent before
-      // drill-down (it needed a features change, e.g. switching city on
-      // the city heatmap while zoomed); unmissable once every drill-in
-      // and breadcrumb click swaps the geometry.
-      svg.property("__zoom", d3.zoomIdentity);
+      // the element itself survives every rebuild. So the transform has to
+      // be handled explicitly on every rebuild, in one of two ways:
+      //
+      //  - The base map changed (a different `features` prop entirely,
+      //    e.g. switching city on the city heatmap): reset to identity.
+      //    Carrying one map's zoom onto another's geometry is meaningless.
+      //  - Only the expansions changed: *keep* the transform and re-apply
+      //    it to the newly-created <g> below. Expanding a region must not
+      //    throw away the zoom the reader is already at.
+      //
+      // Getting this wrong was a real, latent bug before in-place
+      // expansion existed: the fresh <g> had no transform attribute while
+      // `__zoom` still held the old one, so the map *looked* unzoomed and
+      // the next scroll snapped the view.
+      const baseChanged = lastBaseFeaturesRef.current !== features;
+      lastBaseFeaturesRef.current = features;
+      const node = svg.node();
+      const carriedTransform = baseChanged || !node ? d3.zoomIdentity : d3.zoomTransform(node);
+      svg.property("__zoom", carriedTransform);
 
-      const fittedProjection = activeProjection().fitSize([width, mapHeight], active.features);
-      const path = d3.geoPath(fittedProjection);
-
-      const g = svg.attr("width", width).attr("height", mapHeight).append("g");
+      const g = svg
+        .attr("width", width)
+        .attr("height", mapHeight)
+        .append("g")
+        .attr("transform", carriedTransform.toString());
 
       // Assigned once the marker block below runs (still before any zoom
       // event can fire, since both happen synchronously in this same
@@ -415,16 +507,34 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       }
 
       const regions = g
-        .selectAll("path")
-        .data(active.features.features)
+        .selectAll<SVGPathElement, DrawnFeature>("path.geo-region")
+        .data(drawn)
         .join("path")
-        .attr("d", path)
-        .attr("fill", (f) => {
-          const v = active.getValue(f);
+        .attr("class", "geo-region")
+        .attr("d", (d) => path(d.feature))
+        .attr("fill", (d) => {
+          const v = d.getValue(d.feature);
           return v == null || v <= 0 ? "var(--muted)" : colorScale(v);
         })
         .attr("stroke", "var(--border)")
         .attr("stroke-width", 0.5);
+
+      // The outline of each expanded region, drawn unfilled on top of its
+      // own subdivisions. Without it a state dissolves into a field of
+      // counties the moment it opens, and the boundary the reader clicked
+      // — the one thing orienting them — disappears. `pointer-events:
+      // none` so it's purely cartographic and never eats a click meant
+      // for a county underneath.
+      g.selectAll<SVGPathElement, GeoExpansion>("path.geo-expanded-outline")
+        .data([...expansions.values()])
+        .join("path")
+        .attr("class", "geo-expanded-outline")
+        .attr("d", (e) => path(e.features))
+        .attr("fill", "none")
+        .attr("stroke", "var(--foreground)")
+        .attr("stroke-opacity", 0.45)
+        .attr("stroke-width", 1)
+        .style("pointer-events", "none");
 
       // Click a region to zoom to its own bounds; click the background to
       // reset back to the origin view. zoomBehavior is a variable (not
@@ -443,8 +553,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           markerNodes?.attr("r", (d) => markerRadius(d) / k).attr("stroke-width", MARK_SPECS.marker.ringWidth / k);
         });
 
-      function zoomToFeature(feature: GeoFeature) {
-        const [[x0, y0], [x1, y1]] = path.bounds(feature);
+      /** Zoom to any GeoJSON object's bounds — a single feature, or a
+       * whole FeatureCollection (which is what an expanded region's
+       * extent is, once its own polygon is gone). */
+      function zoomToBounds(target: Parameters<typeof path.bounds>[0]) {
+        const [[x0, y0], [x1, y1]] = path.bounds(target);
         const dx = x1 - x0;
         const dy = y1 - y0;
         // A feature with degenerate (zero-area) geometry can't be zoomed
@@ -460,43 +573,50 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         svg.transition().duration(600).call(zoomBehavior.transform, transform);
       }
 
-      regions.style("cursor", "pointer").on("click", function (event, f) {
+      regions.style("cursor", "pointer").on("click", function (event, d) {
         // Stops this from also reaching the background click handler
         // below (a click that lands on a region isn't also "outside every
         // region").
         event.stopPropagation();
-        if (!resolveDrilldown) {
-          zoomToFeature(f);
+        // Not expandable: no resolver configured, or this polygon is
+        // already a subdivision. Either way, keep the pre-#107 behavior.
+        if (!resolveExpansion || d.expandableKey === null) {
+          zoomToBounds(d.feature);
           return;
         }
-        // `depth` is read from the stack length captured when this
-        // drawing was built, which is exactly the depth being clicked —
-        // a level swap rebuilds the whole SVG, so a handler can never
-        // outlive the level it was attached to.
-        const next = resolveDrilldown(f, stack.length);
+        const key = d.expandableKey;
+        const next = resolveExpansion(d.feature);
         if (next === null) {
-          // This feature doesn't drill anywhere (a non-US country on the
-          // world map, a county at the bottom of the chain) — keep the
-          // pre-#107 behavior rather than doing nothing on click.
-          zoomToFeature(f);
+          // Nothing to expand into (a country with no subdivision
+          // geometry) — zoom to it instead of doing nothing on click.
+          zoomToBounds(d.feature);
           return;
         }
         if (!(next instanceof Promise)) {
-          drillTo(next);
+          pendingZoomKeyRef.current = key;
+          expand(key, next);
           return;
         }
-        setDrilling(true);
+        setExpanding(true);
         next
-          .then((level) => {
-            if (level) drillTo(level);
-            else zoomToFeature(f);
+          .then((expansion) => {
+            if (expansion) {
+              // The zoom is deferred to the *next* draw rather than run
+              // here: expanding rebuilds the SVG, which would cut a
+              // transition started now off mid-flight. See
+              // pendingZoomKeyRef's own comment.
+              pendingZoomKeyRef.current = key;
+              expand(key, expansion);
+            } else {
+              zoomToBounds(d.feature);
+            }
           })
           // A failed geometry import shouldn't leave the map stuck
           // showing "Loading…" forever with clicks swallowed; fall back
-          // to the zoom the click would have done without a drill-down
+          // to the zoom the click would have done without an expansion
           // configured at all.
-          .catch(() => zoomToFeature(f))
-          .finally(() => setDrilling(false));
+          .catch(() => zoomToBounds(d.feature))
+          .finally(() => setExpanding(false));
       });
 
       // Clicking the background resets to the origin view. A click that
@@ -513,10 +633,26 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
 
       svg.call(zoomBehavior);
 
-      attachMarkHover<GeoFeature>(regions as unknown as d3.Selection<d3.BaseType, GeoFeature, d3.BaseType, unknown>, {
-        onHover: (feature, clientPos) => setHovered({ kind: "region", feature, clientPos }),
-        onLeave: () => setHovered(null),
-      });
+      // The zoom owed to a region that was just expanded. Deferred to
+      // here — the draw *after* the expansion — because expanding
+      // rebuilds this whole SVG, and a transition started in the click
+      // handler would be torn down before it finished. Targets the
+      // expansion's own features rather than the region that was clicked,
+      // since that region's polygon no longer exists to measure.
+      const owedZoomKey = pendingZoomKeyRef.current;
+      if (owedZoomKey) {
+        pendingZoomKeyRef.current = null;
+        const expansion = expansions.get(owedZoomKey);
+        if (expansion) zoomToBounds(expansion.features);
+      }
+
+      attachMarkHover<DrawnFeature>(
+        regions as unknown as d3.Selection<d3.BaseType, DrawnFeature, d3.BaseType, unknown>,
+        {
+          onHover: (drawnFeature, clientPos) => setHovered({ kind: "region", drawn: drawnFeature, clientPos }),
+          onLeave: () => setHovered(null),
+        },
+      );
 
       // Marker overlay (#264) — projected straight from each marker's own
       // [lng, lat] via the same fitted projection the regions use, so it
@@ -524,14 +660,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       // Appended into the same zoom-transformed `g`, after the region
       // paths, so markers draw on top and pan/zoom in lockstep.
       //
-      // Root level only: `markers` is one flat list belonging to the map
-      // a caller handed in, and a drilled-in level is showing different
-      // geometry at a different scale that those markers were never
-      // chosen for. Re-projecting them onto a single county would either
-      // scatter dots outside its borders or crowd every one of them into
-      // it. A drill-down chain that wants its own per-level markers should
-      // say so on GeoLevel rather than have this silently reuse the root's.
-      if (stack.length === 0 && markers && markers.length > 0) {
+      // Unaffected by expansion, and that's a real dividend of doing this
+      // in place rather than as a level swap: the projection never
+      // changes, so every marker stays exactly where it belongs no matter
+      // which regions are open. (A level swap would have had to hide them
+      // — the old geometry they were positioned against would be gone.)
+      if (markers && markers.length > 0) {
         const positioned = markers
           .map((marker) => ({ marker, xy: fittedProjection(marker.position) }))
           // A marker whose coordinates fall outside the projection's own
@@ -546,11 +680,16 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .attr("class", "geo-marker")
           .attr("cx", (d) => d.xy[0])
           .attr("cy", (d) => d.xy[1])
-          .attr("r", markerRadius)
+          // Counter-scaled by the carried transform, not drawn at 1x:
+          // this rebuild can happen while already zoomed in (expanding a
+          // region keeps the reader's zoom), and markers sized for 1x
+          // would appear bloated by exactly that factor until the next
+          // zoom event corrected them.
+          .attr("r", (d) => markerRadius(d) / carriedTransform.k)
           .attr("fill", resolvedMarkerColor)
           .attr("fill-opacity", 0.85)
           .attr("stroke", "var(--card)")
-          .attr("stroke-width", MARK_SPECS.marker.ringWidth);
+          .attr("stroke-width", MARK_SPECS.marker.ringWidth / carriedTransform.k);
 
         // Stops a marker click from also reaching the background reset
         // handler above — same reasoning as the region click handler; a
@@ -570,20 +709,21 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       }
     },
     [
-      // `active` replaces the old features/getValue pair — it carries
-      // both, and changes identity exactly when the drawn level does.
-      // `stack` is here too (not just `active`) because the click handler
-      // closes over stack.length for the drill depth, and the marker
-      // block reads it to decide whether to draw at all.
-      active,
-      stack,
+      // `drawn` carries every polygon and its accessors, and changes
+      // identity exactly when the drawing should. `features` and
+      // `expansions` are here too, separately: the projection is fitted
+      // to the base features alone, and the expanded-region outlines are
+      // drawn from the expansion map directly.
+      drawn,
+      features,
+      expansions,
       width,
       mapHeight,
       colorScale,
       zoomExtent,
-      activeProjection,
-      resolveDrilldown,
-      drillTo,
+      projection,
+      resolveExpansion,
+      expand,
       markers,
       getMarkerValue,
       markerRadiusScale,
@@ -593,7 +733,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
-  const hoveredValue = hovered?.kind === "region" ? active.getValue(hovered.feature) : null;
+  const hoveredValue = hovered?.kind === "region" ? hovered.drawn.getValue(hovered.drawn.feature) : null;
   const hoveredColor = hoveredValue != null && hoveredValue > 0 ? colorScale(hoveredValue) : undefined;
   const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
   const hoveredMarkerSecondary = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
@@ -615,45 +755,44 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     // Fixed to the full `height` given (not auto-growing) — map + legend
     // share this one budget; see LEGEND_AREA_HEIGHT's own comment above.
     <div style={{ width, height }} className="flex flex-col">
-      {resolveDrilldown ? (
+      {resolveExpansion ? (
+        // Not a breadcrumb: expansion isn't a path, it's a set. Several
+        // regions can be open at once and they have no order relative to
+        // each other, so this is a row of dismissible chips — one per
+        // open region, each collapsing just itself.
         <nav
-          aria-label="Map drill-down"
-          style={{ height: BREADCRUMB_AREA_HEIGHT }}
-          className="flex items-center gap-1 overflow-hidden text-xs text-muted-foreground"
+          aria-label="Expanded regions"
+          style={{ height: EXPANSION_ROW_HEIGHT }}
+          className="flex items-center gap-1.5 overflow-x-auto text-xs text-muted-foreground"
         >
-          {[rootLevel, ...stack].map((level, depth) => {
-            const isCurrent = depth === stack.length;
-            return (
-              <span key={level.key} className="flex min-w-0 items-center gap-1">
-                {depth > 0 ? (
-                  <span aria-hidden className="shrink-0 opacity-60">
-                    /
-                  </span>
-                ) : null}
-                {isCurrent ? (
-                  // The level you're looking at is a label, not a link —
-                  // aria-current so a screen reader gets the same "you are
-                  // here" the visual weight conveys.
-                  <span aria-current="location" className="truncate font-medium text-foreground">
-                    {level.label}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => drillUpTo(depth)}
-                    className="truncate rounded-sm underline-offset-2 hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                  >
-                    {level.label}
-                  </button>
-                )}
-              </span>
-            );
-          })}
-          {drilling ? (
-            // aria-live so the wait is announced rather than only shown —
-            // loading a county file is the one interaction here that
+          {expansions.size === 0 ? (
+            <span className="truncate opacity-80">Click a region to break it into smaller areas.</span>
+          ) : (
+            [...expansions.entries()].map(([key, expansion]) => (
+              <button
+                key={expansion.key}
+                type="button"
+                onClick={() => collapse(key)}
+                title={`Collapse ${expansion.label}`}
+                // An explicit label, not the visible text: composed from
+                // the chip's parts a screen reader would announce it as
+                // "Georgia ✕", which says nothing about what activating
+                // it does.
+                aria-label={`Collapse ${expansion.label}`}
+                className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-foreground hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <span className="max-w-32 truncate">{expansion.label}</span>
+                <span aria-hidden className="opacity-60">
+                  ✕
+                </span>
+              </button>
+            ))
+          )}
+          {expanding ? (
+            // role=status so the wait is announced rather than only shown
+            // — loading a county file is the one interaction here that
             // isn't instant.
-            <span role="status" className="shrink-0 pl-2 opacity-70">
+            <span role="status" className="shrink-0 pl-1 opacity-70">
               Loading…
             </span>
           ) : null}
@@ -663,21 +802,21 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         ref={setContainerEl}
         style={{ position: "relative", width, height: mapHeight }}
         role="img"
-        aria-label={active.ariaLabel ?? ariaLabel}
+        aria-label={ariaLabel}
       >
         <svg ref={ref} />
         {hovered && containerRect ? (
           <ChartTooltip
             x={hovered.clientPos.x - containerRect.left}
             y={hovered.clientPos.y - containerRect.top}
-            title={hovered.kind === "region" ? active.getLabel(hovered.feature) : hovered.marker.label}
+            title={hovered.kind === "region" ? hovered.drawn.getLabel(hovered.drawn.feature) : hovered.marker.label}
             rows={
               hovered.kind === "region"
                 ? hoveredValue == null || hoveredValue <= 0
                   ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
                   : [
                       {
-                        label: active.valueLabel ?? valueLabel,
+                        label: hovered.drawn.valueLabel ?? valueLabel,
                         value: formatValue(hoveredValue),
                         color: hoveredColor ?? "",
                         variant: "swatch",

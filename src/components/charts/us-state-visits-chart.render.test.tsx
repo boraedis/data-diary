@@ -52,15 +52,23 @@ function renderChart(data: UsStateVisitEntry[], counties: UsCountyVisitData = NO
   return render(<UsStateVisitsChart data={data} counties={counties} />);
 }
 
+/** The region paths only. `path.geo-region` rather than every `svg path`
+ * because an expanded region also draws an unfilled outline over its own
+ * subdivisions — decoration, not a region, and counting it as one would
+ * quietly inflate every assertion below. */
 function regions(container: HTMLElement): SVGPathElement[] {
-  return [...container.querySelectorAll<SVGPathElement>("svg path")];
+  return [...container.querySelectorAll<SVGPathElement>("svg path.geo-region")];
 }
 
 /** The name of the GeoJSON feature d3 bound to a region path — read off
  * d3's own `__data__` expando, the same handle interactive-donut's render
  * test uses, rather than asking the component for a test-only attribute. */
 function nameOf(path: SVGPathElement): string | undefined {
-  return (d3.select(path).datum() as Feature<Geometry, { name: string }> | undefined)?.properties.name;
+  // The bound datum is the component's own DrawnFeature — the feature
+  // plus the accessors that read it, since states and counties share one
+  // selection and each needs its own.
+  const drawn = d3.select(path).datum() as { feature: Feature<Geometry, { name: string }> } | undefined;
+  return drawn?.feature?.properties?.name;
 }
 
 describe("UsStateVisitsChart", () => {
@@ -125,12 +133,11 @@ describe("UsStateVisitsChart", () => {
     expect(screen.getByText(/2 days in the US couldn't be placed in a county/)).toBeTruthy();
   });
 
-  describe("county drill-down (#107)", () => {
+  describe("county expansion (#107)", () => {
     // Fulton County, Georgia. The FIPS prefix (13) is Georgia's, which is
-    // what the drill-down filters the county layer by.
-    const FULTON = "13121";
+    // what the expansion filters the county layer by.
     const COUNTIES: UsCountyVisitData = {
-      counties: [{ fips: FULTON, name: "Fulton", days: 1891 }],
+      counties: [{ fips: "13121", name: "Fulton", days: 1891 }],
       unresolvedDays: 0,
     };
 
@@ -140,58 +147,108 @@ describe("UsStateVisitsChart", () => {
       return match;
     }
 
-    it("starts at the root level with no way back out yet", () => {
+    /** Region paths only — the unfilled outline drawn over an expanded
+     * state is decoration, not a region, and shouldn't be counted as one. */
+    function regionNames(container: HTMLElement): (string | undefined)[] {
+      return regions(container).map(nameOf);
+    }
+
+    it("starts with nothing expanded", () => {
       renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
-      const crumb = screen.getByRole("navigation", { name: /map drill-down/i });
-      expect(crumb.textContent).toContain("United States");
-      // Nothing above the root to click back to.
-      expect(screen.queryByRole("button", { name: "United States" })).toBeNull();
+      const row = screen.getByRole("navigation", { name: /expanded regions/i });
+      expect(row.textContent).toMatch(/click a region/i);
+      expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
     });
 
-    it("swaps in the clicked state's counties and nothing else's", async () => {
+    it("replaces the clicked state with its counties, keeping every other state on the map", async () => {
       const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
       fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
 
-      // The county layer is fetched by dynamic import on this click, so
-      // the swap lands a tick later — exactly the behavior the async
-      // resolveDrilldown contract exists for.
-      await waitFor(() => expect(regions(container).length).not.toBe(51));
-
-      const names = regions(container).map(nameOf);
-      expect(names).toContain("Fulton");
-      expect(names).toContain("DeKalb");
-      // Georgia has 159 counties — the most of any state, and a number
-      // worth pinning: getting the FIPS prefix filter wrong would either
-      // draw all 3,231 or none.
-      expect(names).toHaveLength(159);
-      expect(names).not.toContain("Los Angeles");
+      const names = regionNames(container);
+      // Georgia's own polygon is gone, replaced by its 159 counties...
+      expect(names).not.toContain("Georgia");
+      expect(names.filter((n) => n === "Fulton")).toHaveLength(1);
+      // ...while its neighbours are untouched and still clickable, which
+      // is the entire point of expanding in place rather than swapping
+      // the map out for a county-only view.
+      expect(names).toContain("Alabama");
+      expect(names).toContain("Florida");
+      expect(names).toContain("Alaska");
+      // 51 states - Georgia + its 159 counties.
+      expect(names).toHaveLength(51 - 1 + 159);
     });
 
-    it("shades a county by its own data and rescales to the drilled-in level", async () => {
+    it("lets a neighbour be opened directly, without collapsing the first", async () => {
+      const { container } = renderChart(
+        [
+          { state: "Georgia", days: 100 },
+          { state: "Alabama", days: 3 },
+        ],
+        COUNTIES,
+      );
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+
+      // Alabama is still a state polygon on screen, so it can be clicked
+      // straight away — no going back up a level first.
+      fireEvent.click(stateNamed(container, "Alabama"));
+      await waitFor(() => expect(regionNames(container)).toContain("Mobile"));
+
+      const names = regionNames(container);
+      expect(names).not.toContain("Georgia");
+      expect(names).not.toContain("Alabama");
+      // Both open at once: Georgia's 159 + Alabama's 67.
+      expect(names).toHaveLength(51 - 2 + 159 + 67);
+      expect(screen.getAllByRole("button", { name: /collapse/i })).toHaveLength(2);
+    });
+
+    it("draws an outline over each expanded state so its border stays legible", async () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+      expect(container.querySelectorAll("path.geo-expanded-outline")).toHaveLength(0);
+
+      fireEvent.click(stateNamed(container, "Georgia"));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+
+      const outlines = container.querySelectorAll<SVGPathElement>("path.geo-expanded-outline");
+      expect(outlines).toHaveLength(1);
+      expect(outlines[0].getAttribute("fill")).toBe("none");
+      expect(outlines[0].getAttribute("d")).toBeTruthy();
+    });
+
+    it("shades a county by its own data, on one scale shared with the states around it", async () => {
       const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
       fireEvent.click(stateNamed(container, "Georgia"));
-      await waitFor(() => expect(regions(container).length).toBe(159));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
 
       const fillOf = (name: string) => regions(container).find((p) => nameOf(p) === name)?.getAttribute("fill");
       expect(fillOf("Fulton")).not.toBe("var(--muted)");
       // A county with no logged days reads as no data, same as an
-      // unvisited state one level up.
+      // unvisited state does.
       expect(fillOf("DeKalb")).toBe("var(--muted)");
     });
 
-    it("names the drilled-in level in the breadcrumb and goes back on click", async () => {
-      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES);
+    it("collapses one state back to its own polygon, leaving others open", async () => {
+      const { container } = renderChart(
+        [
+          { state: "Georgia", days: 100 },
+          { state: "Alabama", days: 3 },
+        ],
+        COUNTIES,
+      );
       fireEvent.click(stateNamed(container, "Georgia"));
-      await waitFor(() => expect(regions(container).length).toBe(159));
+      await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
+      fireEvent.click(stateNamed(container, "Alabama"));
+      await waitFor(() => expect(regionNames(container)).toContain("Mobile"));
 
-      const crumb = screen.getByRole("navigation", { name: /map drill-down/i });
-      expect(crumb.textContent).toContain("Georgia");
-      // The root is a link now that it's no longer the current level.
-      const back = screen.getByRole("button", { name: "United States" });
-      fireEvent.click(back);
+      fireEvent.click(screen.getByRole("button", { name: /collapse georgia/i }));
 
-      await waitFor(() => expect(regions(container).length).toBe(51));
-      expect(regions(container).map(nameOf)).toContain("Georgia");
+      const names = regionNames(container);
+      expect(names).toContain("Georgia");
+      expect(names).not.toContain("Fulton");
+      // Alabama stays open — collapsing is per-region, not a reset.
+      expect(names).toContain("Mobile");
+      expect(screen.getAllByRole("button", { name: /collapse/i })).toHaveLength(1);
     });
   });
 });

@@ -4,12 +4,12 @@ import * as d3 from "d3";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { FeatureCollection, Geometry } from "geojson";
-import { geoLevel, type GeoLevel } from "@/components/charts/interactive/interactive-geo";
+import { geoExpansion, type GeoExpansion } from "@/components/charts/interactive/interactive-geo";
 
 // The US half of #107's drill-down, shared by both maps that use it: the
-// world map drills a clicked USA into states, and the US map drills a
+// world map expands a clicked USA into states, and the US map expands a
 // clicked state into its counties. Both need the same geometry loading,
-// the same albersUsa filtering rule and the same level shape, so it lives
+// the same feature filtering and the same expansion shape, so it lives
 // here once rather than being written twice with two chances to diverge.
 //
 // Everything here is client-side. The server has its own, separate reason
@@ -44,11 +44,10 @@ export function isAlbersUsaDrawable(id: string | number | undefined): boolean {
   return Number(String(id).slice(0, 2)) <= MAX_ALBERS_USA_FIPS;
 }
 
-/** The projection every US level in this file draws with. A drilled-in
- * state keeps the composite rather than switching to something fitted to
- * that one state: `fitSize` already zooms to whatever features it's given,
- * so the counties fill the frame either way, and staying on one projection
- * means the shapes don't subtly change form as you drill in and back out. */
+/** The projection the US map draws with. Only the *base* map names a
+ * projection at all — expansions are drawn through whatever the map is
+ * already fitted to, which is what puts a state's counties inside the
+ * outline the state itself occupied (see GeoExpansion). */
 export const usProjection = () => d3.geoAlbersUsa();
 
 // Decoded topology is cached at module scope, keyed by nothing more
@@ -59,8 +58,22 @@ export const usProjection = () => d3.geoAlbersUsa();
 let statesPromise: Promise<FeatureCollection<Geometry, UsStateProperties>> | null = null;
 let countiesPromise: Promise<FeatureCollection<Geometry, UsCountyProperties>> | null = null;
 
-/** Every state geoAlbersUsa can draw. Dynamically imported so the world
- * map doesn't ship US state geometry to someone who never clicks the US. */
+/**
+ * The 50 states plus DC — us-atlas's 5 territories filtered out.
+ * Dynamically imported so the world map doesn't ship US state geometry to
+ * someone who never clicks the US.
+ *
+ * Both consumers want exactly these 51, but for two independent reasons
+ * that happen to coincide, and it's worth not mistaking one for the other:
+ *
+ *  - On the US map, because geoAlbersUsa can't place a territory at all
+ *    (see MAX_ALBERS_USA_FIPS).
+ *  - On the world map, because these replace world-atlas's own "United
+ *    States of America" polygon, and that polygon covers the 50 states and
+ *    DC only. world-atlas ships Puerto Rico as its *own country feature*,
+ *    already drawn separately with its own value — so including us-atlas's
+ *    Puerto Rico here would stack a second polygon on top of it.
+ */
 export function loadUsStateFeatures(): Promise<FeatureCollection<Geometry, UsStateProperties>> {
   statesPromise ??= import("us-atlas/states-10m.json").then((mod) => {
     const topo = (mod.default ?? mod) as unknown as Topology<{ states: GeometryCollection<UsStateProperties> }>;
@@ -92,42 +105,37 @@ export function loadUsCountyFeatures(stateFips: string): Promise<FeatureCollecti
   }));
 }
 
-/** The "all US states" level — the world map's first step in, and the US
- * map's own root. */
-export function usStatesLevel(
+/** The US, broken into its states — the world map's expansion for the
+ * United States. */
+export function usStatesExpansion(
   features: FeatureCollection<Geometry, UsStateProperties>,
   daysByState: ReadonlyMap<string, number>,
-): GeoLevel {
-  return geoLevel<UsStateProperties>({
+): GeoExpansion {
+  return geoExpansion<UsStateProperties>({
     key: "us-states",
     label: "United States",
     features,
     getValue: (f) => daysByState.get(f.properties.name) ?? null,
     getLabel: (f) => f.properties.name,
-    projection: usProjection,
     valueLabel: "days",
-    ariaLabel:
-      "Map of the United States, with each state shaded by how many days you've logged there. Click a state to drill into its counties, or use the breadcrumb above to go back.",
   });
 }
 
-/** One state's counties. `stateName` is only the breadcrumb label — the
- * features themselves were already narrowed by FIPS. */
-export function usCountiesLevel(
+/** One state, broken into its counties. `stateName` labels the collapse
+ * chip; the features themselves were already narrowed by FIPS. */
+export function usCountiesExpansion(
   stateName: string,
   stateFips: string,
   features: FeatureCollection<Geometry, UsCountyProperties>,
   daysByCountyFips: ReadonlyMap<string, number>,
-): GeoLevel {
-  return geoLevel<UsCountyProperties>({
+): GeoExpansion {
+  return geoExpansion<UsCountyProperties>({
     key: `us-counties-${stateFips}`,
     label: stateName,
     features,
     // Keyed by FIPS id, not name — see loadUsCountyFeatures above.
     getValue: (f) => daysByCountyFips.get(String(f.id)) ?? null,
     getLabel: (f) => f.properties.name,
-    projection: usProjection,
     valueLabel: "days",
-    ariaLabel: `Counties of ${stateName}, each shaded by how many days you've logged there. Use the breadcrumb above to go back out.`,
   });
 }
