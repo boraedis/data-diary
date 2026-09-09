@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { InteractiveBarRace } from "./interactive-bar-race";
+import { InteractiveBarRace, readableTextColor } from "./interactive-bar-race";
 import type { RaceFrame } from "@/lib/viz/race";
 
 // A mounted-DOM pass over what race.test.ts's pure math can't reach: that
@@ -64,8 +64,31 @@ function renderRace(props: Partial<React.ComponentProps<typeof InteractiveBarRac
 describe("InteractiveBarRace", () => {
   it("draws a row per racer, ranked, starting at the first frame", () => {
     const { container } = renderRace();
-    expect(orderedLabels(container)).toEqual(["Ana", "Bo"]);
+    // Cy has no entry in the first frame and is drawn at zero, below the
+    // two who do — same as legacy, which ranked every name every frame.
+    expect(orderedLabels(container)).toEqual(["Ana", "Bo", "Cy"]);
     expect(valueFor(container, "Ana")).toBe("10");
+    expect(valueFor(container, "Cy")).toBe("0");
+  });
+
+  it("slides a swapping bar between rows instead of jumping it", () => {
+    const { container } = renderRace();
+    const yOf = (label: string) =>
+      Number(
+        /translate\(0,([-\d.]+)\)/.exec(
+          rows(container)
+            .find((r) => r.querySelector("text.race-name")?.textContent === label)
+            ?.getAttribute("transform") ?? "",
+        )?.[1] ?? NaN,
+      );
+
+    const anaStart = yOf("Ana");
+    const boStart = yOf("Bo");
+    fireEvent.change(screen.getByLabelText("Scrub through time"), { target: { value: "0.5" } });
+    // Ana leads at frame 0 and Bo at frame 1; halfway through the swap
+    // both sit between the two rows rather than either having jumped.
+    expect(yOf("Ana")).toBeCloseTo((anaStart + boStart) / 2, 5);
+    expect(yOf("Bo")).toBeCloseTo((anaStart + boStart) / 2, 5);
   });
 
   it("keeps only the rows near the cut in the DOM", () => {
@@ -146,5 +169,29 @@ describe("InteractiveBarRace", () => {
     const { container } = renderRace({ frames: [] });
     expect(rows(container)).toHaveLength(0);
     expect(screen.getByRole("button", { name: "Play" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("readableTextColor", () => {
+  it("picks dark text on a light bar and light text on a dark one", () => {
+    expect(readableTextColor("#f7e463")).toBe("#111111"); // pale yellow
+    expect(readableTextColor("#1a2a6c")).toBe("#fafafa"); // navy
+  });
+
+  it("falls back to the bar's computed fill when the color is a CSS var", () => {
+    // `var(--chart-1)` is unparseable as a color; the resolved fill of the
+    // element it's painting is what the browser actually drew. Set as an
+    // inline style rather than a presentation attribute because jsdom
+    // doesn't fold SVG presentation attributes into computed style — a
+    // real browser resolves both, and the `var()` case with it.
+    const node = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    node.style.fill = "#ffffff";
+    document.body.append(node);
+    expect(readableTextColor("var(--chart-1)", node)).toBe("#111111");
+    node.remove();
+  });
+
+  it("degrades to the surface color when nothing resolves", () => {
+    expect(readableTextColor("var(--chart-1)", null)).toBe("var(--card)");
   });
 });

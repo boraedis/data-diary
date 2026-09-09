@@ -375,10 +375,11 @@ const RACE_WARM_UP_DAYS = 100;
  * appear; the cut keeps the race about the people actually in your life. */
 const RACE_MIN_DAYS_LOGGED = 6;
 
-/** Bars on screen at once. Legacy used 20-25 on a fixed 800px-tall canvas;
- * 10 is what stays readable inside the app's own responsive chart height,
- * where each row still has to carry a name and a number. */
-const RACE_TOP_N = 10;
+/** Bars on screen at once — legacy's own range (it used 20-25 on a fixed
+ * 800px-tall canvas). A race is more interesting the deeper the board
+ * goes, since the movement worth watching is mostly outside the top few;
+ * this is what the taller chart height below buys. */
+const RACE_TOP_N = 20;
 
 /** Impact scores are unitless — whole numbers read better racing than
  * `PeopleImpactChart`'s one decimal, which nobody can track at 3 frames a
@@ -459,10 +460,18 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
     <ChartPage title="People race" filters={null}>
       <ChartCard
         title="People race"
-        description="Who mattered most, week by week. Each person's score sums the impact of every day you logged them, with older days fading — so the board reflects who was around lately, not an all-time total. Play it, or drag the slider to any week."
+        description="Who mattered most, week by week — each person's score sums the impact of every day you logged them, with older days fading, so the board reflects who was around lately rather than an all-time total."
         empty={frames.length === 0}
       >
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+        {/* Taller than the app's usual `h-[min(62vh,640px)]` chart class,
+            which every other chart page shares. Deliberate, and the one
+            place it's worth breaking: 20 rows carrying a name and a number
+            inside each bar need the height, and unlike a line or a
+            calendar this chart has nothing else on the page competing for
+            the viewport. Capped so it still fits a laptop screen with the
+            card header above it, rather than forcing a scroll to see the
+            controls. */}
+        <ResponsiveChart className="h-[min(72vh,820px)] min-h-[420px]">
           {({ width, height }) => (
             <InteractiveBarRace
               frames={frames}

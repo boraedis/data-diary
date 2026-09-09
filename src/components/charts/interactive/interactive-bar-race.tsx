@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 import {
+  buildRaceIndex,
   interpolateDate,
   interpolateStandings,
   leaderValue,
-  raceLabels,
   type RaceFrame,
   type RaceStanding,
 } from "@/lib/viz/race";
@@ -63,9 +63,15 @@ import { styleAxis } from "./axis";
 // `.transition()` calls here — the rAF loop already interpolates, and a
 // transition on top of it would fight the clock.
 
-const DEFAULT_MARGIN = { top: 24, right: 16, bottom: 12, left: 8 };
-/** Room for the ticker (the big period readout) at the bottom right. */
-const TICKER_AREA_HEIGHT = 44;
+const DEFAULT_MARGIN = { top: 22, right: 16, bottom: 6, left: 8 };
+/** The ticker (the big period readout) sits in the plot's own bottom-right
+ * corner, legacy's placement — but *inside* the plot rather than in a
+ * strip reserved below it. The corner is dead space by construction (the
+ * shortest bar on the board is the one next to it), so the readout costs
+ * no vertical room at all: every pixel of the caller's height goes to
+ * bars. It's drawn last, so a bar that does reach that far passes under
+ * it, and kept low-contrast so it never competes with a real value. */
+const TICKER_OPACITY = 0.35;
 /** Room for the transport row, taken out of the caller's `height` rather
  * than added to it — the same fixed-budget approach InteractiveGeo takes
  * for its legend and InteractiveDonut for its breadcrumb, and for the same
@@ -74,11 +80,11 @@ const TICKER_AREA_HEIGHT = 44;
  * card. */
 const CONTROLS_AREA_HEIGHT = 44;
 /** Bar thickness cap. Unlike a normal bar chart this is generous — a race
- * with 10 rows on a tall viewport should fill it, and MARK_SPECS' 24px cap
- * is sized for a dense multi-series chart, not for rows carrying a name
- * and a number inside them. */
+ * on a tall viewport should fill it, and MARK_SPECS' 24px cap is sized for
+ * a dense multi-series chart, not for rows carrying a name and a number
+ * inside them. */
 const MAX_BAR_THICKNESS = 44;
-const BAND_PADDING = 0.22;
+const BAND_PADDING = 0.2;
 /** Gap between a bar's end and the text riding next to it. */
 const LABEL_GAP = 8;
 /** Width held back from the plot for the leader's value label. The x scale
@@ -129,6 +135,35 @@ export type InteractiveBarRaceProps = {
 
 const DEFAULT_DATE_FORMAT = d3.timeFormat("%b %Y");
 
+/**
+ * Black or white, whichever is readable on `fill` — for the name label
+ * that rides inside its own bar.
+ *
+ * A fixed surface color doesn't work here: bar colors are the entity's
+ * own (a person's group color, say), so the same `var(--card)` that reads
+ * cleanly on a pale yellow bar disappears on a navy one. Judged by WCAG
+ * relative luminance against the crossover where black and white swap
+ * places (0.179), which is exact rather than eyeballed.
+ *
+ * `fill` may be a `var(--chart-N)` token that JS can't parse — hence the
+ * fallback to the *computed* fill of the bar element itself, which the
+ * browser has already resolved. That's a style read, so the caller caches
+ * the answer per label rather than asking every frame. Black and white
+ * rather than theme tokens on purpose: the bar is this text's background,
+ * not the page, so the page's theme has no say in it.
+ */
+export function readableTextColor(fill: string, node?: SVGElement | null): string {
+  const parsed = d3.color(fill) ?? (node ? d3.color(getComputedStyle(node).fill) : null);
+  if (!parsed) return "var(--card)";
+  const { r, g, b } = parsed.rgb();
+  const channel = (value: number) => {
+    const s = value / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+  return luminance > 0.179 ? "#111111" : "#fafafa";
+}
+
 /** Bound to every bar/label group, mutated in place each frame. Standing
  * data must never be reallocated per frame — this is 60Hz work over every
  * visible row. */
@@ -150,7 +185,10 @@ export function InteractiveBarRace({
   // inside a `url(#...)` reference — stripped rather than risking it.
   const clipId = `race-clip-${useId().replace(/:/g, "")}`;
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<SpeedId>("normal");
+  // Fast by default: a real race here is hundreds of weekly frames, and
+  // the slower tiers are for studying a stretch of it, not for the first
+  // watch-through.
+  const [speed, setSpeed] = useState<SpeedId>("fast");
 
   /** Playback position in fractional frame units. A ref, not state: it
    * changes every animation frame and nothing in React's tree may depend
@@ -170,14 +208,20 @@ export function InteractiveBarRace({
   // which is cheap — one frame over at most `topN + 1` rows.
   const latest = useRef({ colorFor: (() => "") as (label: string, index: number) => string, formatValue, formatDate });
 
+  // Every frame's ranking, resolved once. See buildRaceIndex — ranks have
+  // to be known per frame for the drawn rank to be a blend between two of
+  // them, which is what makes bars slide past each other on a lead change
+  // instead of jumping between rows.
+  const index = useMemo(() => buildRaceIndex(frames), [frames]);
+
   const colorFor = useMemo(() => {
     if (typeof color === "function") return color;
     if (typeof color === "string") return () => color;
     // Default: fixed-slot palette by first-appearance order. Computed once
     // per frame set, not per animation frame.
-    const order = new Map(raceLabels(frames).map((label, i) => [label, i]));
+    const order = new Map(index.labels.map((label, i) => [label, i]));
     return (label: string) => categoricalColor(Math.min(order.get(label) ?? 0, 5));
-  }, [color, frames]);
+  }, [color, index]);
 
   // Publishes the callbacks the render function reads, and repaints when
   // one of them actually changes. Declared above `useD3` on purpose:
@@ -190,14 +234,11 @@ export function InteractiveBarRace({
 
   const svgHeight = Math.max(0, height - CONTROLS_AREA_HEIGHT);
   const innerWidth = Math.max(0, width - DEFAULT_MARGIN.left - DEFAULT_MARGIN.right);
-  const innerHeight = Math.max(
-    0,
-    svgHeight - DEFAULT_MARGIN.top - DEFAULT_MARGIN.bottom - TICKER_AREA_HEIGHT,
-  );
+  const innerHeight = Math.max(0, svgHeight - DEFAULT_MARGIN.top - DEFAULT_MARGIN.bottom);
 
   const svgRef = useD3<SVGSVGElement>(
     (svg) => {
-      if (frames.length === 0 || innerWidth <= 0 || innerHeight <= 0) return;
+      if (index.frames.length === 0 || innerWidth <= 0 || innerHeight <= 0) return;
 
       svg
         .attr("viewBox", `0 0 ${width} ${svgHeight}`)
@@ -223,6 +264,21 @@ export function InteractiveBarRace({
         .range([0, (innerHeight * (topN + 1)) / topN])
         .padding(BAND_PADDING);
       const barThickness = Math.min(MAX_BAR_THICKNESS, y.bandwidth());
+      // A drawn rank is fractional mid-swap, which a band scale can't take
+      // as a domain value — so bands are read as "first band's top, plus
+      // rank steps". Exact for whole ranks, linear in between, which is
+      // the slide.
+      const bandTop = y(0) ?? 0;
+      const bandStep = y.step();
+      const rankToY = (rank: number) =>
+        bandTop + Math.min(rank, topN) * bandStep + (y.bandwidth() - barThickness) / 2;
+      // Stable per-label index for the color callback — the drawn rank
+      // changes every frame and would repaint a filtered palette, which is
+      // exactly what viz/color.ts forbids.
+      const colorIndex = new Map(index.labels.map((label, i) => [label, i]));
+      /** Per-label inside-the-bar text color, resolved once (see
+       * `readableTextColor` — the fallback path reads computed style). */
+      const textColors = new Map<string, string>();
       // Floors at the app's own axis-tick size — a name that has to be
       // read while it moves can't go below what a static tick uses.
       const labelFontSize = Math.max(11, Math.min(14, barThickness * 0.45));
@@ -252,21 +308,26 @@ export function InteractiveBarRace({
         .attr("height", innerHeight);
       const rowsG = plot.append("g").attr("clip-path", `url(#${clipId})`);
 
-      const ticker = svg
+      // Appended to `plot` after the rows, so it paints over them and its
+      // coordinates are the plot's own — the corner it sits in is the
+      // bottom of the shortest bar's row.
+      const ticker = plot
         .append("text")
         .attr("aria-hidden", "true")
         .attr("text-anchor", "end")
-        .attr("x", width - DEFAULT_MARGIN.right)
-        .attr("y", svgHeight - DEFAULT_MARGIN.bottom)
+        .attr("x", innerWidth)
+        .attr("y", innerHeight - 2)
         .attr("fill", "var(--muted-foreground)")
-        .attr("opacity", 0.5)
+        .attr("opacity", TICKER_OPACITY)
         .style("font-size", `${Math.min(40, Math.max(20, innerWidth / 14))}px`)
         .style("font-weight", "600")
         .style("font-variant-numeric", "tabular-nums");
 
       const applyFrame = (position: number) => {
         const { colorFor: colorOf, formatValue: valueFormat, formatDate: dateFormat } = latest.current;
-        const standings = interpolateStandings(frames, position);
+        // Only the rows near the cut come back — the rest are ranked and
+        // interpolated inside `interpolateStandings` and dropped there.
+        const standings = interpolateStandings(index, position, topN + 1);
         const max = leaderValue(standings);
         x.domain([0, max]);
 
@@ -285,12 +346,10 @@ export function InteractiveBarRace({
             sel.selectAll("line").attr("stroke", "var(--border)").attr("stroke-opacity", 0.4),
           );
 
-        // Only rows near the cut exist in the DOM. Everyone else is a
-        // number in `standings` and nothing more, so a race over hundreds
-        // of labels costs the same per frame as one over a dozen.
-        const visible = standings
-          .slice(0, topN + 1)
-          .map<BarDatum>((standing) => ({ label: standing.label, standing }));
+        const visible = standings.map<BarDatum>((standing) => ({
+          label: standing.label,
+          standing,
+        }));
 
         rowsG
           .selectAll<SVGGElement, BarDatum>("g.race-row")
@@ -320,18 +379,22 @@ export function InteractiveBarRace({
           )
           .each(function (d) {
             const row = d3.select(this);
-            const bandY = y(Math.min(d.standing.rank, topN)) ?? 0;
             const barWidth = Math.max(0, x(Math.max(0, d.standing.value)));
-            // A row past the cut fades rather than clipping abruptly at
-            // the plot edge, so the bottom of the chart reads as "there's
-            // more below" instead of as a hard truncation.
-            row
-              .attr("transform", `translate(0,${bandY + (y.bandwidth() - barThickness) / 2})`)
-              .attr("opacity", d.standing.rank >= topN ? 0.35 : 1);
-            row
+            // No opacity treatment for the row past the cut — the clip
+            // path already hides it, and a bar climbing into view slides
+            // up through the plot's bottom edge, which reads better than
+            // one fading in place.
+            row.attr("transform", `translate(0,${rankToY(d.standing.rank)})`);
+            const fill = colorOf(d.label, colorIndex.get(d.label) ?? 0);
+            const bar = row
               .select<SVGPathElement>("path.race-bar")
               .attr("d", roundedBarPath(0, 0, barWidth, barThickness, "right"))
-              .attr("fill", colorOf(d.label, d.standing.rank));
+              .attr("fill", fill);
+            let insideColor = textColors.get(d.label);
+            if (insideColor === undefined) {
+              insideColor = readableTextColor(fill, bar.node());
+              textColors.set(d.label, insideColor);
+            }
 
             // The name rides inside its own bar while it fits and flips
             // outside once the bar is too short to hold it — legacy's own
@@ -349,7 +412,7 @@ export function InteractiveBarRace({
               .attr("x", inside ? barWidth - LABEL_GAP : barWidth + LABEL_GAP)
               .attr("y", barThickness / 2)
               .attr("text-anchor", inside ? "end" : "start")
-              .attr("fill", inside ? "var(--card)" : "var(--foreground)");
+              .attr("fill", inside ? insideColor : "var(--foreground)");
             row
               .select<SVGTextElement>("text.race-value")
               .attr("x", inside ? barWidth + LABEL_GAP : barWidth + LABEL_GAP + approxNameWidth + LABEL_GAP)
@@ -357,7 +420,7 @@ export function InteractiveBarRace({
               .text(valueFormat(d.standing.value));
           });
 
-        const date = interpolateDate(frames, position);
+        const date = interpolateDate(index, position);
         ticker.text(date ? dateFormat(date) : "");
       };
 
@@ -368,7 +431,7 @@ export function InteractiveBarRace({
         applyFrameRef.current = null;
       };
     },
-    [frames, topN, width, svgHeight, innerWidth, innerHeight, clipId],
+    [index, topN, width, svgHeight, innerWidth, innerHeight, clipId],
   );
 
   /** Moves the clock and repaints, without going through React. The scrub

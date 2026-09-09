@@ -12,9 +12,18 @@ import type { RankedEntry } from "@/components/charts/interactive/interactive-ra
 // transition per keyframe in a `for` loop, which is why it had no pause,
 // no scrub and no way to stop short of navigating away. This module
 // replaces that with a continuous position: `interpolateStandings` answers
-// "what does the ranking look like at fractional frame 12.4" for any
+// "what does the board look like at fractional frame 12.4" for any
 // position the caller asks for, so playback is just a clock driving a
 // number, and scrubbing is that same number coming from a slider instead.
+//
+// **Rank is interpolated, not recomputed.** This is what makes two bars
+// slide past each other on a lead change instead of teleporting between
+// rows. Ranking the *interpolated values* would give an integer rank that
+// flips the instant one bar's value passes another's — the crossing would
+// be a jump-cut. So each frame's ranking is computed once up front
+// (`buildRaceIndex`) and the rank a bar is *drawn* at is a fractional
+// blend of its rank in the two neighboring frames, exactly the quantity
+// legacy's d3 transitions were tweening between keyframes.
 
 /** One period's standings, pre-aggregated by the caller. */
 export type RaceFrame = {
@@ -27,13 +36,31 @@ export type RaceFrame = {
   entries: RankedEntry[];
 };
 
-/** One bar at one instant: an interpolated value plus the rank it sorts
- * to. `rank` is a float-free integer position (0 = leader) that the
- * primitive turns into a y coordinate. */
+/** One bar at one instant. `rank` is fractional while a swap is in
+ * progress (0 = leader) — the primitive turns it straight into a y
+ * coordinate. */
 export type RaceStanding = {
   label: string;
   value: number;
   rank: number;
+};
+
+/**
+ * Frames with every label's rank resolved, ready to interpolate between.
+ *
+ * Built once per frame set rather than per animation frame: ranking every
+ * label in every frame is O(frames x labels log labels), fine once at
+ * mount and far too much to redo 60 times a second.
+ */
+export type RaceIndex = {
+  /** Every label in the race, in first-appearance order. */
+  labels: string[];
+  dates: Date[];
+  /** Per frame, every label's value and integer rank in that frame.
+   * Labels missing from a frame are present here with value 0, ranked
+   * below everyone who scored — a bar has to have a position to come from
+   * even in the frames before it exists. */
+  frames: Map<string, RaceStanding>[];
 };
 
 /**
@@ -59,43 +86,91 @@ export function raceLabels(frames: RaceFrame[]): string[] {
 }
 
 /**
- * The standings at a fractional frame `position`.
+ * Ranks every label in every frame, once.
+ *
+ * Ties break by label so a frame's ranking is deterministic — without it,
+ * two entries level on value could swap rank purely from sort instability,
+ * and the bars would drift past each other while standing still.
+ */
+export function buildRaceIndex(frames: RaceFrame[]): RaceIndex {
+  const labels = raceLabels(frames);
+  return {
+    labels,
+    dates: frames.map((frame) => frame.date),
+    frames: frames.map((frame) => {
+      const values = new Map(frame.entries.map((entry) => [entry.label, entry.value]));
+      const ranked = labels
+        .map((label) => ({ label, value: values.get(label) ?? 0 }))
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+      return new Map(ranked.map((entry, rank) => [entry.label, { ...entry, rank }]));
+    }),
+  };
+}
+
+/**
+ * Smoothstep, applied to the *rank* blend only.
+ *
+ * A linear rank blend means a bar is between rows for the whole period
+ * between two frames, so on a board with near-ties several bars are
+ * drifting through each other at any given instant and the rows never
+ * look settled. Easing the blend keeps a bar on its row for most of the
+ * period and spends the swap in the middle of it — the crossing becomes a
+ * deliberate movement rather than a constant slow drift. Values stay
+ * linear: a value is a real quantity being interpolated, and easing it
+ * would make the numbers lie.
+ */
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * The board at a fractional frame `position`, ordered by drawn rank.
  *
  * `position` is in frame units — 3 is exactly frame 3, 3.5 is halfway
  * between frames 3 and 4 — and is clamped to the available range, so a
  * caller's clock overshooting the end simply parks on the last frame.
- * Values interpolate linearly between the two neighboring frames (legacy's
- * own `(1 - t) * a + t * b`, just continuous instead of quantized to
- * thirds), and rank is recomputed from the *interpolated* values, which is
- * what makes a lead change read as two bars crossing rather than swapping
- * places instantly.
+ * Values blend linearly between the two neighboring frames (legacy's own
+ * `(1 - t) * a + t * b`, just continuous instead of quantized to thirds);
+ * rank blends through `smoothstep` — see above for why the two differ.
  *
- * Ties break by label so a frame's output is deterministic — without it,
- * two entries level on value could swap rank frame to frame purely from
- * sort instability, and the bars would jitter while standing still.
+ * `limit` caps how many standings come back, counting from the leader —
+ * pass the number of rows actually drawn (plus the one below the cut a
+ * climbing bar rises from). Everyone below that is still ranked and still
+ * interpolated; they're simply not returned, so a race over hundreds of
+ * labels costs the same per frame as one over a dozen.
  */
-export function interpolateStandings(frames: RaceFrame[], position: number): RaceStanding[] {
-  if (frames.length === 0) return [];
+export function interpolateStandings(
+  index: RaceIndex,
+  position: number,
+  limit?: number,
+): RaceStanding[] {
+  if (index.frames.length === 0) return [];
 
-  const clamped = Math.min(Math.max(position, 0), frames.length - 1);
+  const clamped = Math.min(Math.max(position, 0), index.frames.length - 1);
   const lower = Math.floor(clamped);
-  const upper = Math.min(lower + 1, frames.length - 1);
+  const upper = Math.min(lower + 1, index.frames.length - 1);
   const t = clamped - lower;
+  const rankT = smoothstep(t);
+  const a = index.frames[lower];
+  const b = index.frames[upper];
 
-  const values = new Map<string, number>();
-  for (const entry of frames[lower].entries) {
-    values.set(entry.label, entry.value * (1 - t));
-  }
-  if (t > 0) {
-    for (const entry of frames[upper].entries) {
-      values.set(entry.label, (values.get(entry.label) ?? 0) + entry.value * t);
-    }
-  }
+  const standings = index.labels.map((label) => {
+    const from = a.get(label);
+    const to = b.get(label);
+    // Both are always present — buildRaceIndex ranks every label in every
+    // frame — but the fallbacks keep this honest if an index is ever built
+    // by hand.
+    const start = from ?? { label, value: 0, rank: index.labels.length };
+    const end = to ?? start;
+    return {
+      label,
+      value: start.value * (1 - t) + end.value * t,
+      rank: start.rank * (1 - rankT) + end.rank * rankT,
+    };
+  });
 
-  return [...values.entries()]
-    .map(([label, value]) => ({ label, value, rank: 0 }))
-    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
-    .map((standing, index) => ({ ...standing, rank: index }));
+  standings.sort((x, y) => x.rank - y.rank);
+  return limit === undefined ? standings : standings.slice(0, limit);
 }
 
 /**
@@ -103,23 +178,27 @@ export function interpolateStandings(frames: RaceFrame[], position: number): Rac
  * values are — so the ticker sweeps through the period between two frames
  * instead of jumping a month at a time while the bars move smoothly.
  */
-export function interpolateDate(frames: RaceFrame[], position: number): Date | null {
-  if (frames.length === 0) return null;
-  const clamped = Math.min(Math.max(position, 0), frames.length - 1);
+export function interpolateDate(index: RaceIndex, position: number): Date | null {
+  if (index.dates.length === 0) return null;
+  const clamped = Math.min(Math.max(position, 0), index.dates.length - 1);
   const lower = Math.floor(clamped);
-  const upper = Math.min(lower + 1, frames.length - 1);
+  const upper = Math.min(lower + 1, index.dates.length - 1);
   const t = clamped - lower;
-  const a = frames[lower].date.getTime();
-  const b = frames[upper].date.getTime();
+  const a = index.dates[lower].getTime();
+  const b = index.dates[upper].getTime();
   return new Date(a * (1 - t) + b * t);
 }
 
 /**
- * The x-axis maximum at a fractional position: the leader's own value,
- * with a floor of 1 so an all-zero opening frame still has a usable scale.
+ * The x-axis maximum for a set of standings: the largest value in it, with
+ * a floor of 1 so an all-zero opening frame still has a usable scale.
+ *
+ * The largest *value*, not the top-ranked bar's — mid-swap the two aren't
+ * the same bar, and keying the axis off rank would make it flinch every
+ * time a lead changed.
  *
  * Rescaling to the leader every frame is legacy's behaviour
- * (`xScale.domain([0, keyframe[1][0].value])`) and the Observable original's
+ * (`xScale.domain([0, keyframe[1][0].value]`) and the Observable original's
  * too. It's deliberate: a race whose axis is pinned to the *final* maximum
  * spends its first half as five stubs against an empty plot. The cost is
  * that bar lengths aren't comparable across time — which is why the axis
@@ -127,5 +206,7 @@ export function interpolateDate(frames: RaceFrame[], position: number): Date | n
  * every bar, rather than asking the reader to judge length alone.
  */
 export function leaderValue(standings: RaceStanding[]): number {
-  return Math.max(1, standings[0]?.value ?? 0);
+  let max = 1;
+  for (const standing of standings) max = Math.max(max, standing.value);
+  return max;
 }
