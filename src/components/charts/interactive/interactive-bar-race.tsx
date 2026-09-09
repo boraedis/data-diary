@@ -66,6 +66,13 @@ import { styleAxis } from "./axis";
 const DEFAULT_MARGIN = { top: 24, right: 16, bottom: 12, left: 8 };
 /** Room for the ticker (the big period readout) at the bottom right. */
 const TICKER_AREA_HEIGHT = 44;
+/** Room for the transport row, taken out of the caller's `height` rather
+ * than added to it — the same fixed-budget approach InteractiveGeo takes
+ * for its legend and InteractiveDonut for its breadcrumb, and for the same
+ * reason: the caller's `h-[min(62vh,640px)]` class is a hard cap on the
+ * whole component, so anything drawn outside that budget falls out of the
+ * card. */
+const CONTROLS_AREA_HEIGHT = 44;
 /** Bar thickness cap. Unlike a normal bar chart this is generous — a race
  * with 10 rows on a tall viewport should fill it, and MARK_SPECS' 24px cap
  * is sized for a dense multi-series chart, not for rows carrying a name
@@ -139,6 +146,9 @@ export function InteractiveBarRace({
   ariaLabel = "Animated ranking over time",
 }: InteractiveBarRaceProps) {
   const scrubId = useId();
+  // useId's own value contains colons, which are legal in an id but awful
+  // inside a `url(#...)` reference — stripped rather than risking it.
+  const clipId = `race-clip-${useId().replace(/:/g, "")}`;
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<SpeedId>("normal");
 
@@ -178,17 +188,21 @@ export function InteractiveBarRace({
     applyFrameRef.current?.(positionRef.current);
   }, [colorFor, formatValue, formatDate]);
 
+  const svgHeight = Math.max(0, height - CONTROLS_AREA_HEIGHT);
   const innerWidth = Math.max(0, width - DEFAULT_MARGIN.left - DEFAULT_MARGIN.right);
   const innerHeight = Math.max(
     0,
-    height - DEFAULT_MARGIN.top - DEFAULT_MARGIN.bottom - TICKER_AREA_HEIGHT,
+    svgHeight - DEFAULT_MARGIN.top - DEFAULT_MARGIN.bottom - TICKER_AREA_HEIGHT,
   );
 
   const svgRef = useD3<SVGSVGElement>(
     (svg) => {
       if (frames.length === 0 || innerWidth <= 0 || innerHeight <= 0) return;
 
-      svg.attr("viewBox", `0 0 ${width} ${height}`).attr("width", width).attr("height", height);
+      svg
+        .attr("viewBox", `0 0 ${width} ${svgHeight}`)
+        .attr("width", width)
+        .attr("height", svgHeight);
 
       const plot = svg
         .append("g")
@@ -197,16 +211,21 @@ export function InteractiveBarRace({
       const x = d3
         .scaleLinear()
         .range([0, Math.max(10, innerWidth - VALUE_LABEL_RESERVE)]);
-      // One extra band beyond `topN`: the row below the cut is where a bar
-      // climbing into view comes from and where a falling one goes, so it
-      // has to exist as a position even though it's clipped out of sight.
+      // One extra band beyond `topN`, sitting *past* the bottom of the
+      // plot: the row below the cut is where a bar climbing into view
+      // comes from and where a falling one goes, so it has to exist as a
+      // position — but drawing it inside the plot would cost a visible row
+      // to something the reader isn't meant to be reading. The SVG
+      // viewport clips it, so it reads as rising in from off-chart.
       const y = d3
         .scaleBand<number>()
         .domain(d3.range(topN + 1))
-        .range([0, innerHeight])
+        .range([0, (innerHeight * (topN + 1)) / topN])
         .padding(BAND_PADDING);
       const barThickness = Math.min(MAX_BAR_THICKNESS, y.bandwidth());
-      const labelFontSize = Math.max(10, Math.min(14, barThickness * 0.4));
+      // Floors at the app's own axis-tick size — a name that has to be
+      // read while it moves can't go below what a static tick uses.
+      const labelFontSize = Math.max(11, Math.min(14, barThickness * 0.45));
 
       // Axis on top, gridlines dropping through the plot — a horizontal
       // bar chart's scale belongs where the eye starts, and the bars are
@@ -219,15 +238,26 @@ export function InteractiveBarRace({
 
       // Bars and labels share one <g> per row so a single transform moves
       // them together — legacy kept them in separate groups and applied the
-      // same y translation twice.
-      const rowsG = plot.append("g");
+      // same y translation twice. The group is clipped to the plot so the
+      // extra below-the-cut band (see the y scale above) stays off-screen
+      // and a climbing bar slides in from the bottom edge rather than
+      // appearing in the ticker's whitespace.
+      svg
+        .append("clipPath")
+        .attr("id", clipId)
+        .append("rect")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", innerWidth)
+        .attr("height", innerHeight);
+      const rowsG = plot.append("g").attr("clip-path", `url(#${clipId})`);
 
       const ticker = svg
         .append("text")
         .attr("aria-hidden", "true")
         .attr("text-anchor", "end")
         .attr("x", width - DEFAULT_MARGIN.right)
-        .attr("y", height - DEFAULT_MARGIN.bottom)
+        .attr("y", svgHeight - DEFAULT_MARGIN.bottom)
         .attr("fill", "var(--muted-foreground)")
         .attr("opacity", 0.5)
         .style("font-size", `${Math.min(40, Math.max(20, innerWidth / 14))}px`)
@@ -338,7 +368,7 @@ export function InteractiveBarRace({
         applyFrameRef.current = null;
       };
     },
-    [frames, topN, width, height, innerWidth, innerHeight],
+    [frames, topN, width, svgHeight, innerWidth, innerHeight, clipId],
   );
 
   /** Moves the clock and repaints, without going through React. The scrub
