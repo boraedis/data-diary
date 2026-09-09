@@ -81,7 +81,7 @@ function NewPlaceModal({
   open: boolean;
   onClose: () => void;
   onCreated: (item: PlaceCatalogItem) => void;
-  parentOptions: { id: number; name: string; namePath: string | null }[];
+  parentOptions: { id: number; name: string; namePath: string | null; alias: string | null }[];
   mentionCounts: Map<number, number>;
   categories: (PlaceCategoryItem & { subcategories: PlaceSubcategoryItem[] })[];
   metros: MetroItem[];
@@ -109,11 +109,18 @@ function NewPlaceModal({
   // Most-mentioned first, then shallower before deeper, then name (see
   // src/lib/place-sort.ts) — with the full hierarchy path as each option's
   // caption, since place names alone aren't unique (see displayPath above).
+  // searchTerms includes alias so the picker matches it too, same as the
+  // main places search (toSearchItem below).
   const parentSearchItems: SearchItem[] = useMemo(
     () =>
       [...parentOptions]
         .sort(comparePlacesByMentions(mentionCounts))
-        .map((p) => ({ id: p.id, primary: p.name, caption: p.namePath ? displayPath(p.namePath) : null })),
+        .map((p) => ({
+          id: p.id,
+          primary: p.name,
+          caption: p.namePath ? displayPath(p.namePath) : null,
+          searchTerms: p.alias ? [p.alias] : undefined,
+        })),
     [parentOptions, mentionCounts]
   );
 
@@ -486,7 +493,7 @@ export function PlacesEntryForm({
             <NewPlaceModal
               open={modalOpen}
               onClose={() => setModalOpen(false)}
-              parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath }))}
+              parentOptions={items.map((p) => ({ id: p.id, name: p.name, namePath: p.namePath, alias: p.alias }))}
               mentionCounts={mentionCounts}
               categories={categories}
               metros={metros}
