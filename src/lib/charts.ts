@@ -4,7 +4,8 @@ import { getDb } from "@/lib/db";
 import { days, exercises, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import { resolveUsStateName } from "@/lib/geo/us-state-names";
+import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
+import { resolveCountyForPoint, type UsCounty } from "@/lib/geo/us-counties";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
@@ -692,6 +693,107 @@ export async function getUsStateVisitData(): Promise<UsStateVisitEntry[]> {
   return [...counts.entries()]
     .map(([state, dayCount]) => ({ state, days: dayCount }))
     .sort((a, b) => b.days - a.days);
+}
+
+// --- US county visits (state -> county drill-down, #107) ------------------
+
+export type UsCountyVisitEntry = {
+  /** 5-digit county FIPS — the join key the drilled-in chart matches
+   * against us-atlas's own county feature ids, rather than a name (county
+   * names repeat constantly across states: 34 different Washingtons). */
+  fips: string;
+  name: string;
+  days: number;
+};
+
+export type UsCountyVisitData = {
+  counties: UsCountyVisitEntry[];
+  /** Day-presence that's inside the US but landed in no county polygon —
+   * bad geocodes, essentially (see resolveCountyForPoint's own comment on
+   * the three real cases). Surfaced rather than dropped so the number
+   * can't quietly diverge from the state map's totals without anyone
+   * noticing. */
+  unresolvedDays: number;
+};
+
+/**
+ * Distinct days logged in each US county, for #107's state -> county
+ * drill-down. Same "was I there that day" dedup as the country and state
+ * choropleths above it.
+ *
+ * Resolution is a **spatial join, not a hierarchy walk** — the one place
+ * in this file that departs from the idPath/namePath pattern, because the
+ * catalog has no county tier to walk (see resolveCountyForPoint's doc
+ * comment for the measured evidence and why this isn't a shortcut).
+ *
+ * Cost: point-in-polygon over every distinct geocoded US place referenced
+ * by a day, ~200ms on the current catalog. Paid per request on a
+ * force-dynamic page, so it's deliberately scoped to *referenced* places
+ * (a few hundred) rather than every US place in the catalog, and the
+ * decoded county geometry is cached for the life of the process.
+ */
+export async function getUsCountyVisitData(): Promise<UsCountyVisitData> {
+  const db = getDb();
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return { counties: [], unresolvedDays: 0 };
+
+  const placeRows = await db
+    .select({ id: places.id, namePath: places.namePath, lat: places.lat, lng: places.lng })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+
+  // Resolved once per place, not once per (day, place) pair — the same
+  // place shows up on hundreds of days, and point-in-polygon is by far
+  // the most expensive thing in this function.
+  const countyByPlaceId = new Map<number, UsCounty>();
+  const inUsWithoutCounty = new Set<number>();
+  for (const p of placeRows) {
+    const state = resolveUsStateName(p.namePath);
+    if (!state) continue; // not in the US at all — not this chart's data
+    if (p.lat == null || p.lng == null) {
+      inUsWithoutCounty.add(p.id);
+      continue;
+    }
+    const county = resolveCountyForPoint(p.lat, p.lng, US_STATE_FIPS_BY_NAME.get(state) ?? null);
+    if (county) countyByPlaceId.set(p.id, county);
+    else inUsWithoutCounty.add(p.id);
+  }
+
+  const dayCountyPairs = new Set<string>();
+  const unresolvedDayPlacePairs = new Set<string>();
+  for (const row of dayRows) {
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const county = countyByPlaceId.get(placeId);
+      if (county) dayCountyPairs.add(`${row.date}\0${county.fips}`);
+      else if (inUsWithoutCounty.has(placeId)) unresolvedDayPlacePairs.add(`${row.date}\0${placeId}`);
+    }
+  }
+
+  const nameByFips = new Map<string, string>();
+  for (const county of countyByPlaceId.values()) nameByFips.set(county.fips, county.name);
+
+  const counts = new Map<string, number>();
+  for (const pair of dayCountyPairs) {
+    const fips = pair.split("\0")[1];
+    counts.set(fips, (counts.get(fips) ?? 0) + 1);
+  }
+
+  return {
+    counties: [...counts.entries()]
+      .map(([fips, dayCount]) => ({ fips, name: nameByFips.get(fips) ?? fips, days: dayCount }))
+      .sort((a, b) => b.days - a.days),
+    unresolvedDays: unresolvedDayPlacePairs.size,
+  };
 }
 
 // --- City heatmap (#266) ---------------------------------------------------
