@@ -15,8 +15,9 @@ import {
   type RaceFrame,
   type RaceStanding,
 } from "@/lib/viz/race";
-import { roundedBarPath } from "./marks";
+import { attachMarkHover, roundedBarPath } from "./marks";
 import { styleAxis } from "./axis";
+import { ChartTooltip } from "./tooltip";
 
 // InteractiveBarRace (#103) — time-stepped animated reordering of a
 // ranking, with real transport controls. Legacy's `BarRace`
@@ -62,6 +63,31 @@ import { styleAxis } from "./axis";
 // the pattern AGENTS.md calls for; it's also why there are no d3
 // `.transition()` calls here — the rAF loop already interpolates, and a
 // transition on top of it would fight the clock.
+//
+// **Interaction (#296).** Three additions, each solving a different gap
+// this primitive shipped without:
+//  - **Hover/focus tooltip**, via the standard `attachMarkHover` +
+//    `<ChartTooltip>` pair every other primitive uses — attached once per
+//    row inside the join's `enter` clause (see applyFrame below), not
+//    every frame. The "tooltip has to track a moving bar" problem #296
+//    called out is sidestepped rather than solved head-on: hovering a bar
+//    pauses playback (see handleHover), so the standing captured at the
+//    moment of the hover event stays correct for as long as the tooltip is
+//    shown — there is nothing to keep refreshing. This was a design call
+//    the issue left open, and pausing is arguably the more useful reading
+//    interaction anyway (a number that holds still is one you can actually
+//    read). It does not auto-resume on unhover, on purpose: silently
+//    restarting a race a viewer paused to read something would be its own
+//    kind of surprising.
+//  - **Keyboard playback** on the chart itself (not just the scrub input's
+//    own native arrow handling): Space to play/pause, Left/Right to step a
+//    frame, Shift+Left/Right for a bigger jump, Home/End for either end.
+//    See handleChartKeyDown.
+//  - **A visually-hidden standings list**, kept in sync with the *settled*
+//    playback position (mount, every pause, and every scrub tick that
+//    isn't mid-drag — see the `seek` callback) rather than per frame, so a
+//    screen reader gets an actual reading of the board without being
+//    spammed on every animation tick.
 
 const DEFAULT_MARGIN = { top: 22, right: 16, bottom: 6, left: 8 };
 /** The ticker (the big period readout) sits in the plot's own bottom-right
@@ -102,6 +128,12 @@ const SPEEDS = [
 ] as const;
 type SpeedId = (typeof SPEEDS)[number]["id"];
 
+/** Frames a Shift+Arrow keyboard step covers, vs. a single frame for a
+ * plain arrow — a "give me a decade, not a week" jump for a race that can
+ * run to hundreds of frames. Arbitrary but named, same tradeoff SPEEDS
+ * makes: a few legible choices beat a precise-but-unreachable one. */
+const KEYBOARD_JUMP_FRAMES = 10;
+
 export type { RaceFrame } from "@/lib/viz/race";
 
 export type InteractiveBarRaceProps = {
@@ -127,6 +159,10 @@ export type InteractiveBarRaceProps = {
   formatValue?: (value: number) => string;
   /** Formats the ticker. Defaults to "Mar 2024". */
   formatDate?: (date: Date) => string;
+  /** What the number *is*, for the hover/focus tooltip's row label (#296)
+   * — the bar itself has no room for this, so it only shows up on hover.
+   * Mirrors `InteractiveRanked`'s own `valueLabel` prop. */
+  valueLabel?: string;
   /** Whether playback starts on its own. Ignored when the viewer has
    * `prefers-reduced-motion` set — see the effect below. */
   autoPlay?: boolean;
@@ -169,6 +205,11 @@ export function readableTextColor(fill: string, node?: SVGElement | null): strin
  * visible row. */
 type BarDatum = { label: string; standing: RaceStanding };
 
+/** The hovered/focused bar, frozen at the moment the pointer/focus event
+ * fired — see the "Interaction (#296)" note above for why this doesn't
+ * need to keep refreshing while shown. */
+type HoveredBar = BarDatum & { clientPos: { x: number; y: number } };
+
 export function InteractiveBarRace({
   frames,
   topN = 10,
@@ -177,6 +218,7 @@ export function InteractiveBarRace({
   color,
   formatValue = formatThousandsNumber,
   formatDate = DEFAULT_DATE_FORMAT,
+  valueLabel = "Value",
   autoPlay = true,
   ariaLabel = "Animated ranking over time",
 }: InteractiveBarRaceProps) {
@@ -184,11 +226,23 @@ export function InteractiveBarRace({
   // useId's own value contains colons, which are legal in an id but awful
   // inside a `url(#...)` reference — stripped rather than risking it.
   const clipId = `race-clip-${useId().replace(/:/g, "")}`;
+  const standingsId = useId();
   const [playing, setPlaying] = useState(false);
   // Fast by default: a real race here is hundreds of weekly frames, and
   // the slower tiers are for studying a stretch of it, not for the first
   // watch-through.
   const [speed, setSpeed] = useState<SpeedId>("fast");
+  const [hovered, setHovered] = useState<HoveredBar | null>(null);
+  /** The visually-hidden standings list's current content — see the
+   * "Interaction (#296)" header note for when this updates. */
+  const [announcedStandings, setAnnouncedStandings] = useState<RaceStanding[]>([]);
+  // A state-backed callback ref, not a plain useRef — `containerEl`'s
+  // getBoundingClientRect() below needs to run during render (to turn a
+  // hover's *client* coordinates into coordinates relative to this
+  // component, the same conversion interactive-hist.tsx does), and reading
+  // a plain ref's `.current` during render is exactly what this project's
+  // lint rule warns against.
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
 
   /** Playback position in fractional frame units. A ref, not state: it
    * changes every animation frame and nothing in React's tree may depend
@@ -235,6 +289,22 @@ export function InteractiveBarRace({
   const svgHeight = Math.max(0, height - CONTROLS_AREA_HEIGHT);
   const innerWidth = Math.max(0, width - DEFAULT_MARGIN.left - DEFAULT_MARGIN.right);
   const innerHeight = Math.max(0, svgHeight - DEFAULT_MARGIN.top - DEFAULT_MARGIN.bottom);
+
+  // Declared before `useD3` (and referenced from inside its render
+  // function's `enter` clause below) purely to satisfy the lexical
+  // "declared before use" lint rule — it's only ever actually *called*
+  // from a deferred rAF/DOM event, long after the whole component
+  // function has finished running once, so declaration order has no
+  // runtime effect here. Pausing (if playing) is the resolution to #296's
+  // "the tooltip has to track a moving bar" problem: freeze the clock, and
+  // the standing captured right here stays correct for as long as the
+  // tooltip is shown — see the file header's "Interaction (#296)" note.
+  // Deliberately doesn't remember whether it was already paused before
+  // restoring anything on unhover; it just pauses, full stop.
+  const handleBarHover = (datum: BarDatum, clientPos: { x: number; y: number }) => {
+    setPlaying(false);
+    setHovered({ ...datum, clientPos });
+  };
 
   const svgRef = useD3<SVGSVGElement>(
     (svg) => {
@@ -372,6 +442,26 @@ export function InteractiveBarRace({
                 .attr("fill", "var(--muted-foreground)")
                 .style("font-size", `${labelFontSize}px`)
                 .style("font-variant-numeric", "tabular-nums");
+              // Attached once per DOM node here in `enter`, not per frame
+              // in the `.each()` below — the row persists across most
+              // frames (same node, re-bound datum), so this only needs to
+              // run when a row is first created. `attachMarkHover` reads
+              // whatever datum is bound to the node *at event time*
+              // (d3's own `.on()` semantics), so `handleBarHover` always
+              // sees the current frame's standing with no extra wiring —
+              // see the file header's "Interaction (#296)" note for why
+              // that's enough even though playback keeps moving between
+              // hovers. `property: "opacity"` (not the default
+              // fill-opacity) dims the whole row — bar and text together —
+              // rather than just the bar. Cast to attachMarkHover's own
+              // BaseType, same as interactive-network.tsx's own call —
+              // it's written against a generic selection, which TS won't
+              // structurally match against a concretely-typed one.
+              attachMarkHover<BarDatum>(g as unknown as d3.Selection<d3.BaseType, BarDatum, d3.BaseType, unknown>, {
+                onHover: handleBarHover,
+                onLeave: () => setHovered(null),
+                property: "opacity",
+              });
               return g;
             },
             (update) => update,
@@ -447,9 +537,26 @@ export function InteractiveBarRace({
       if (scrubRef.current && !draggingRef.current) {
         scrubRef.current.value = String(clamped);
       }
+      // Any programmatic position change invalidates a frozen tooltip —
+      // normally the pointer has already left the bar by the time this
+      // runs (leaving is what let the position move at all), but a
+      // keyboard shortcut fired while the pointer rests motionless over a
+      // bar is a real path to a stale one, so this is a plain safety net
+      // rather than the primary way hover gets cleared.
+      setHovered(null);
+      // The visually-hidden standings list updates only for a *settled*
+      // position: not while playing (every rAF tick would call this and
+      // turn the live region into noise) and not mid-drag on the scrub
+      // input (same reason — see its onPointerUp for the drag-end
+      // announce instead). A discrete keyboard step on either the scrub
+      // input or this component's own shortcuts still announces every
+      // time, which is the point: it's a deliberate move to a new frame.
+      if (!playing && !draggingRef.current) {
+        setAnnouncedStandings(interpolateStandings(index, clamped, topN));
+      }
       return clamped;
     },
-    [lastIndex],
+    [lastIndex, index, topN, playing],
   );
 
   // The clock. Runs only while playing, and stops itself at the end rather
@@ -498,6 +605,18 @@ export function InteractiveBarRace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The other half of the standings-list update rule (see `seek`'s own
+  // comment): this covers every way playback can *stop* — the pause
+  // button, hover-pause, and the clock running out — none of which go
+  // through `seek` at the moment they happen (`tick` calls `seek` just
+  // before flipping `playing`, while it's still true, so that call skips
+  // the announce; this effect catches the transition itself on the
+  // re-render that follows). Also re-announces if `index`/`topN` change
+  // while already paused, so the list can't go stale under a data update.
+  useEffect(() => {
+    if (!playing) setAnnouncedStandings(interpolateStandings(index, positionRef.current, topN));
+  }, [playing, index, topN]);
+
   const handlePlayPause = () => {
     // Pressing play at the finish line restarts rather than doing nothing,
     // which is what every media control does and what the alternative
@@ -511,16 +630,106 @@ export function InteractiveBarRace({
     setPlaying(true);
   };
 
+  /**
+   * Chart-level keyboard playback (#296) — separate from the scrub
+   * input's own native arrow-key handling, which only works while that
+   * input itself has focus. Space toggles play/pause; Left/Right step one
+   * frame; Shift+Left/Right jump `KEYBOARD_JUMP_FRAMES`; Home/End go to
+   * either end. Every branch pauses first (via `seek`'s side effects or
+   * directly) — a keyboard step during playback would otherwise fight the
+   * rAF clock for control of `positionRef`.
+   */
+  const handleChartKeyDown = (event: React.KeyboardEvent) => {
+    if (empty) return;
+    switch (event.key) {
+      case " ":
+      case "Spacebar":
+        event.preventDefault();
+        handlePlayPause();
+        return;
+      case "ArrowRight":
+      case "ArrowLeft": {
+        event.preventDefault();
+        setPlaying(false);
+        const step = event.shiftKey ? KEYBOARD_JUMP_FRAMES : 1;
+        seek(positionRef.current + (event.key === "ArrowRight" ? step : -step));
+        return;
+      }
+      case "Home":
+        event.preventDefault();
+        setPlaying(false);
+        seek(0);
+        return;
+      case "End":
+        event.preventDefault();
+        setPlaying(false);
+        seek(lastIndex);
+        return;
+      default:
+        return;
+    }
+  };
+
   const empty = frames.length === 0;
+  const containerRect = containerEl?.getBoundingClientRect();
+  // Resolved outside the D3 render function via the same `colorFor` it
+  // uses internally — categorical color is stable per label regardless of
+  // which frame is showing, so this doesn't need to come from the bar's
+  // own drawn fill.
+  const hoveredColor = hovered
+    ? colorFor(hovered.label, Math.max(0, index.labels.indexOf(hovered.label)))
+    : undefined;
 
   return (
-    <div className="flex h-full w-full flex-col">
-      {/* The race is a moving picture with no accessible reading of its
-          own — `role="img"` plus a caller-supplied description is the
-          honest treatment. The transport controls below are real,
-          labelled, focusable controls, and the chart is fully usable
-          paused and scrubbed from the keyboard. */}
-      <svg ref={svgRef} role="img" aria-label={ariaLabel} className="w-full" />
+    <div ref={setContainerEl} className="relative flex h-full w-full flex-col">
+      {/* Focusable wrapper around the SVG, separate from the individual
+          per-bar focus stops `attachMarkHover` adds below — this is the
+          chart-level keyboard surface (#296): Space, arrows, Home/End. The
+          focus ring is the "discoverable rather than secret" affordance
+          the issue asked for; `aria-keyshortcuts` gives assistive tech a
+          machine-readable version of the same thing.  The SVG itself keeps
+          `role="img"` — it's still a single flat picture as far as the
+          accessibility tree is concerned — with the always-current
+          standings list below as the actual accessible content. */}
+      <div
+        tabIndex={0}
+        onKeyDown={handleChartKeyDown}
+        aria-describedby={standingsId}
+        aria-keyshortcuts="Space ArrowLeft ArrowRight Home End"
+        className="rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        <svg ref={svgRef} role="img" aria-label={ariaLabel} className="w-full" />
+      </div>
+      {hovered && containerRect ? (
+        <ChartTooltip
+          x={hovered.clientPos.x - containerRect.left}
+          y={hovered.clientPos.y - containerRect.top}
+          title={`${hovered.label} · #${Math.round(hovered.standing.rank) + 1}`}
+          rows={[
+            {
+              label: valueLabel,
+              value: formatValue(hovered.standing.value),
+              color: hoveredColor ?? categoricalColor(0),
+            },
+          ]}
+          containerWidth={width}
+        />
+      ) : null}
+      {/* Visually hidden, kept in sync with the settled playback position
+          rather than the animation — see `seek` and the playing-effect
+          above for exactly when it updates. This is the accessible
+          alternative to the animation itself: a screen reader user gets a
+          real reading of the board, not just the one static `ariaLabel`
+          the SVG carries. */}
+      <div id={standingsId} role="status" aria-live="polite" className="sr-only">
+        {announcedStandings.length > 0 ? (
+          <ol>
+            {announcedStandings.map((standing) => (
+              <li key={standing.label}>{`${standing.label}: ${formatValue(standing.value)}`}</li>
+            ))}
+          </ol>
+        ) : null}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -564,6 +773,10 @@ export function InteractiveBarRace({
           }}
           onPointerUp={() => {
             draggingRef.current = false;
+            // The drag itself suppressed every intermediate announcement
+            // (see `seek`) so a continuous drag doesn't spam the live
+            // region — this is the one announce for wherever it ended up.
+            setAnnouncedStandings(interpolateStandings(index, positionRef.current, topN));
           }}
           onPointerCancel={() => {
             draggingRef.current = false;
