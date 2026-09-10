@@ -8,7 +8,7 @@ import { attachMarkHover, MARK_SPECS, roundedBarPath } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDate } from "@/lib/viz/format";
-import { daysBetween } from "@/lib/date";
+import { daysBetween, todayDateString } from "@/lib/date";
 import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/lib/viz/timeline";
 
 // InteractiveTimeline (#119) — the Gantt-style interval primitive, and the
@@ -38,11 +38,10 @@ import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/l
 //    y axis is ordinal lanes, and stretching those tells you nothing).
 //
 // Sizing: rows share the height the caller offers, within a readable band,
-// and the chart then takes only the height it actually needs. A timeline
-// has no natural way to fill arbitrary vertical space — three lanes are
-// three lanes — so stretching rows to fill a tall card would just produce
-// three slabs, and pinning the wrapper to the full height would leave the
-// chart marooned in the top third of it. Past the row-height floor the SVG
+// and the chart then draws only as tall as it actually needs, centred in
+// that space. A timeline has no natural way to fill arbitrary vertical
+// space — three lanes are three lanes — so stretching rows to fill a tall
+// card would just produce three slabs. Past the row-height floor the SVG
 // grows instead of compressing bars into invisibility, and the wrapper
 // scrolls within the space it was given.
 
@@ -97,6 +96,38 @@ export type InteractiveTimelineProps = {
 
 type Hovered = { item: LaidOutInterval; color: string; clientPos: { x: number; y: number } };
 
+/**
+ * Black or white for a label sitting *on* `fill`, whichever the reader can
+ * actually see.
+ *
+ * A fixed label colour doesn't work here. The first version used
+ * `var(--card)`, which is white in light mode (fine on a saturated bar) but
+ * near-black in dark mode — so every label went dark-on-dark the moment the
+ * chart was viewed in the theme most of this app is used in. And even a
+ * fixed white would fail on the pale colours a user can pick for an entry
+ * in the profile admin UI.
+ *
+ * `fill` is read back off the painted element with `getComputedStyle`
+ * rather than taken from the colour we set, because that colour is often a
+ * `var(--chart-N)` reference that only the browser can resolve. Where
+ * there's no resolved colour to measure (jsdom computes no styles), white
+ * is the safer guess: the default palette is mid-to-dark.
+ *
+ * The 0.179 threshold is the real WCAG crossover — the luminance at which
+ * contrast against black overtakes contrast against white — not a
+ * hand-tuned number.
+ */
+function contrastingTextColor(fill: string): string {
+  const rgb = d3.color(fill)?.rgb();
+  if (!rgb || Number.isNaN(rgb.r)) return "#ffffff";
+  const channel = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+  return luminance > 0.179 ? "#111111" : "#ffffff";
+}
+
 /** "3 yrs 2 mos", "8 mos", "24 days" — a span, not a date. Deliberately
  * local rather than added to viz/format.ts: `formatDuration` there means
  * hours-within-a-day, and overloading it with calendar-length spans would
@@ -132,7 +163,15 @@ export function InteractiveTimeline({
   // bars are always drawn from the same domain.
   const [visibleDomain, setVisibleDomain] = useState<[Date, Date] | null>(null);
 
-  const layout = useMemo(() => layoutTimeline(items, { openEnd }), [items, openEnd]);
+  // Resolved once, here, rather than letting `layoutTimeline` apply its own
+  // "default to today" internally while the tooltip separately falls back
+  // to something else. Two independent defaults for the same idea is
+  // exactly how an ongoing entry's tooltip came to report "0 days".
+  const resolvedOpenEnd = openEnd ?? todayDateString();
+  const layout = useMemo(
+    () => layoutTimeline(items, { openEnd: resolvedOpenEnd }),
+    [items, resolvedOpenEnd],
+  );
 
   const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
   // Rows share the height the caller gave, within the readable band; past
@@ -142,13 +181,12 @@ export function InteractiveTimeline({
     ? Math.min(ROW.maxHeight, Math.max(ROW.minHeight, availableHeight / layout.totalRows))
     : ROW.minHeight;
   const innerHeight = layout.totalRows * rowHeight;
-  // The SVG is exactly as tall as its content, and the wrapper takes the
-  // smaller of that and the height the caller offered. So a three-lane
-  // timeline sits at its natural height instead of floating in the top
-  // third of a 640px card, and a forty-row one scrolls inside the space it
-  // was given rather than blowing the page layout open.
+  // The SVG is exactly as tall as its content; the wrapper keeps the full
+  // height it was given and centres that content inside it. A forty-row
+  // timeline scrolls within that space rather than blowing the page layout
+  // open; a three-lane one sits in the middle of its card instead of
+  // clinging to the top with a void underneath.
   const svgHeight = innerHeight + MARGIN.top + MARGIN.bottom;
-  const wrapperHeight = Math.min(height, svgHeight);
 
   const laneIndexByName = useMemo(
     () => new Map(layout.lanes.map((lane, i) => [lane.lane, i])),
@@ -298,7 +336,6 @@ export function InteractiveTimeline({
         .attr("x", (d) => edges(d)[0] + 6)
         .attr("y", (d) => d.absoluteRow * rowHeight + rowHeight / 2)
         .attr("dominant-baseline", "middle")
-        .attr("fill", "var(--card)")
         .style("font-size", MARK_SPECS.axis.tickFontSize)
         .style("pointer-events", "none")
         .text((d) => d.label)
@@ -308,6 +345,15 @@ export function InteractiveTimeline({
           const [x0, x1] = edges(d);
           const available = x1 - x0 - 12;
           const node = this as SVGTextElement;
+
+          // Contrast is resolved per bar, against that bar's own painted
+          // colour — see contrastingTextColor.
+          const shape = (node.parentNode as Element | null)?.querySelector("path.timeline-bar-shape");
+          node.setAttribute(
+            "fill",
+            contrastingTextColor(shape ? getComputedStyle(shape).fill : ""),
+          );
+
           let text = d.label;
           while (text.length > 1 && node.getComputedTextLength() > available) {
             text = text.slice(0, -1);
@@ -392,7 +438,18 @@ export function InteractiveTimeline({
   return (
     <div
       ref={setContainerEl}
-      style={{ position: "relative", width, height: wrapperHeight }}
+      style={{
+        position: "relative",
+        width,
+        height,
+        display: "flex",
+        flexDirection: "column",
+        // `safe` matters here: a plain `center` centres an overflowing
+        // child by pushing its top out of the scroll container, where it
+        // can't be scrolled back to. `safe` falls back to start-alignment
+        // exactly when the content is taller than the box.
+        justifyContent: "safe center",
+      }}
       // Scrolls only when rows have pushed the SVG past the height the
       // caller gave — see the module comment on sizing.
       className="overflow-y-auto"
@@ -423,7 +480,7 @@ export function InteractiveTimeline({
             },
             {
               label: hovered.item.ongoing ? "so far" : "length",
-              value: formatSpan(hovered.item.start, hovered.item.end ?? (openEnd ?? hovered.item.start)),
+              value: formatSpan(hovered.item.start, hovered.item.end ?? resolvedOpenEnd),
               color: hovered.color,
               variant: "swatch",
             },

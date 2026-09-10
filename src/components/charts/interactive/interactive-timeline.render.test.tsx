@@ -187,6 +187,20 @@ describe("InteractiveTimeline", () => {
     expect(tooltip().getByText("First job")).toBeTruthy();
   });
 
+  it("measures an ongoing entry against today when no openEnd is given", () => {
+    // Regression: with `openEnd` omitted, the tooltip used to fall back to
+    // the entry's own start date while the layout separately defaulted to
+    // today — so a job that began months ago reported "0 days". Every
+    // other test here passes `openEnd` explicitly, which hid it.
+    const { container } = renderTimeline({
+      openEnd: undefined,
+      items: [{ id: "x", lane: "Work", label: "Current job", start: "2020-01-01", end: null }],
+    });
+    fireEvent.pointerEnter(bars(container)[0]);
+    expect(tooltip().queryByText("0 days")).toBeNull();
+    expect(tooltip().getByText(/yrs/)).toBeTruthy();
+  });
+
   it("offers no reset control until the view is actually zoomed", () => {
     renderTimeline();
     expect(screen.queryByRole("button", { name: /reset zoom/i })).toBeNull();

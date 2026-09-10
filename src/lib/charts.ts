@@ -16,6 +16,7 @@ import istanbulTopo from "@/data/geo/istanbul.topo.json";
 import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
+import type { TimelineInterval } from "@/lib/viz/timeline";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
 // domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
@@ -170,6 +171,81 @@ export async function getProfileRegionGroups(until: Date = new Date()): Promise<
     residence: residences.map(toRegion),
     relationship: relationships.map(toRegion),
   };
+}
+
+/** A profile timeline entry, plus the colour set for it in the profile
+ * admin UI (null when none was chosen).
+ *
+ * `color` rides alongside `TimelineInterval` rather than being added to it:
+ * `InteractiveTimeline` already takes colour as a prop-level function, so
+ * putting a colour field on the primitive's own input type would give it
+ * two competing sources of truth for the same decision. The chart builds a
+ * lookup from these and answers through that function instead. */
+export type LifeTimelineEntry = TimelineInterval & { color: string | null };
+
+/** The same three profile timelines as `getProfileRegionGroups` above, in
+ * `InteractiveTimeline`'s shape instead of `InteractiveScroller`'s — the
+ * life-timeline chart (#310).
+ *
+ * A sibling of that function rather than a reuse of it, for two reasons
+ * worth stating since the two now sit next to each other reading almost
+ * identically:
+ *
+ *  1. **`end: null` survives here.** A scroller region is a background
+ *     band and needs a real right edge, so that function resolves an
+ *     open-ended entry to `until` (today). This chart's whole subject is
+ *     the intervals themselves, and `InteractiveTimeline` draws "still
+ *     ongoing" differently from "ended today" — collapsing it would be
+ *     throwing away the distinction the chart exists to show.
+ *  2. **Regions never overlap-stack.** They're chrome painted behind a
+ *     series; two overlapping jobs just paint over each other. Here the
+ *     intervals are the data, so they go through `layoutTimeline`'s
+ *     sub-lane stacking, which needs the raw interval, not a resolved band.
+ *
+ * Ids are prefixed per lane because the three tables have independent
+ * `serial` primary keys — occupation 1 and residence 1 both exist, and the
+ * timeline keys its marks by id across the whole chart.
+ *
+ * `alias ?? name` for the label, matching `getProfileRegionGroups` — alias
+ * is the short form meant for exactly this kind of space-constrained
+ * display.
+ *
+ * Private-only, same as `getProfileRegionGroups`: the relationship
+ * timeline is permanently excluded from the public site (see AGENTS.md's
+ * #12 boundary). Never call this from src/lib/public-charts.ts. */
+export async function getLifeTimelineData(): Promise<LifeTimelineEntry[]> {
+  const [occupations, residences, relationships] = await Promise.all([
+    listProfileOccupations(),
+    listProfileResidences(),
+    listProfileRelationships(),
+  ]);
+
+  type Entry = {
+    id: number;
+    name: string;
+    alias: string | null;
+    start: string;
+    end: string | null;
+    color: string | null;
+  };
+  const toInterval = (lane: string, prefix: string) => (item: Entry): LifeTimelineEntry => ({
+    id: `${prefix}-${item.id}`,
+    lane,
+    label: item.alias ?? item.name,
+    start: item.start,
+    end: item.end,
+    color: item.color,
+  });
+
+  // Emitted in this order deliberately: `layoutTimeline` orders lanes by
+  // first appearance, so this array's order *is* the y-axis order. Work
+  // first, then where you lived, then who with — roughly outermost to most
+  // personal, and the same order the profile page lists them in.
+  return [
+    ...occupations.map(toInterval("Occupation", "occupation")),
+    ...residences.map(toInterval("Residence", "residence")),
+    ...relationships.map(toInterval("Relationship", "relationship")),
+  ];
 }
 
 // --- Sleep calendar ---------------------------------------------------
