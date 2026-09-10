@@ -252,6 +252,37 @@ describe("InteractiveTimeline", () => {
     expect(years.every((y) => y === "2021" || y === "2022")).toBe(true);
   });
 
+  it("does not push the domain back at a controlling caller that already set it", () => {
+    // Regression for a page-killing loop. This effect re-runs on every
+    // domain change — including ones the chart's own wheel-zoom caused —
+    // and it used to re-seed d3-zoom's transform unconditionally.
+    // `behavior.transform` reuses any gesture still live on the node, and a
+    // wheel gesture stays live for d3's 150ms wheelDelay, so re-seeding mid
+    // gesture dispatched through the previous behavior's listeners, which
+    // were still wired to setVisibleDomain: one wheel tick became ~200
+    // renders and React tore the page down with "Maximum update depth
+    // exceeded". The fix is to seed only when the transform doesn't already
+    // agree; this pins the "already agrees" half of that.
+    const onDomainChange = vi.fn();
+    const domain: [Date, Date] = [new Date(2020, 0, 1), new Date(2021, 0, 1)];
+    const { rerender } = render(
+      <InteractiveTimeline items={ITEMS} width={900} height={400} openEnd={OPEN_END} domain={domain} onDomainChange={onDomainChange} />,
+    );
+    // A fresh array holding the same instants — what a caller re-deriving
+    // its state produces, and what an identity check alone would miss.
+    rerender(
+      <InteractiveTimeline
+        items={ITEMS}
+        width={900}
+        height={400}
+        openEnd={OPEN_END}
+        domain={[new Date(2020, 0, 1), new Date(2021, 0, 1)]}
+        onDomainChange={onDomainChange}
+      />,
+    );
+    expect(onDomainChange).not.toHaveBeenCalled();
+  });
+
   it("sizes the left margin to the longest lane label so it can't clip", () => {
     // Lanes became data-driven once callers could group by company or job
     // name; a fixed margin clipped those mid-word.

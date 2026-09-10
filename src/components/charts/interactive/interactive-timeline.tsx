@@ -466,26 +466,43 @@ export function InteractiveTimeline({
       // `.on("dblclick.zoom", null)` throws instead.
       const selection = svg.call(behavior).on("dblclick.zoom", null);
 
-      // Seed d3-zoom's transform to match the window actually being drawn,
-      // BEFORE the zoom handler is attached below.
+      // Push the window being drawn into d3-zoom's own transform, but ONLY
+      // when the transform doesn't already say the same thing.
       //
-      // Both halves of that matter. Without the seeding, a window set from
-      // outside (the range slider, or the "since 2016" default) leaves the
-      // transform at identity, so the very next wheel tick recomputes from
-      // the full extent and the view jumps. And doing it before `.on("zoom")`
-      // is what keeps it from looping: `selection.call(behavior.transform,
-      // …)` dispatches a zoom event like any other, which would call back
-      // into setVisibleDomain with a fresh array, re-render, re-seed, and
-      // round again forever. With no handler registered yet, the seeding is
-      // silent.
+      // The seeding itself is needed: a window set from outside (the range
+      // slider, or a "since 2016" default) leaves d3's transform at
+      // identity, so the next wheel tick would recompute from the full
+      // extent and the view would jump.
+      //
+      // The guard is what makes it safe, and it is not optional. This
+      // effect re-runs on every domain change — including the ones this
+      // chart's own wheel-zoom just caused — and `behavior.transform`
+      // reuses any gesture still live on the node. A wheel gesture stays
+      // live for d3's wheelDelay (150ms) after the last tick, so re-seeding
+      // during that window dispatches through the *previous* behavior's
+      // listeners, which are still wired to setVisibleDomain: one wheel
+      // tick became ~200 renders and React tore the page down with
+      // "Maximum update depth exceeded". Comparing first means a
+      // self-inflicted domain change seeds nothing, because the transform
+      // already agrees.
+      //
+      // Compared in pixels rather than by date equality: the transform
+      // round-trips through floating-point pixel maths, so the domain that
+      // comes back is never exactly the one that went in.
       const baseX = d3.scaleTime().domain(fullDomain).range([0, innerWidth]);
-      if (visibleDomain) {
-        const spanPx = baseX(visibleDomain[1]) - baseX(visibleDomain[0]);
-        if (spanPx > 0) {
-          const k = innerWidth / spanPx;
+      const node = selection.node();
+      const target = visibleDomain ?? fullDomain;
+      const targetSpanPx = baseX(target[1]) - baseX(target[0]);
+      if (node && targetSpanPx > 0) {
+        const [shown0, shown1] = d3.zoomTransform(node).rescaleX(baseX).domain() as [Date, Date];
+        const alreadyShowing =
+          Math.abs(baseX(shown0) - baseX(target[0])) < 0.5 &&
+          Math.abs(baseX(shown1) - baseX(target[1])) < 0.5;
+        if (!alreadyShowing) {
+          const k = innerWidth / targetSpanPx;
           selection.call(
             behavior.transform,
-            d3.zoomIdentity.translate(-baseX(visibleDomain[0]) * k, 0).scale(k),
+            d3.zoomIdentity.translate(-baseX(target[0]) * k, 0).scale(k),
           );
         }
       }
