@@ -10,10 +10,13 @@ import type { RecapCount, RecapDiscovery, RecapPeoplePlaces } from "@/lib/recap-
 // Both charts here are the existing chart pages' own components, handed
 // period-scoped data instead of all-time data — `PlaceLeaderboard`
 // (InteractiveRanked, #22) and `WorldVisitsChart` (InteractiveGeo, #24).
-// That's deliberate per #172: no bespoke recap chart components, and it
-// means the map keeps the app-standard `h-[min(62vh,640px)] min-h-[320px]`
-// container that lives inside `WorldVisitsChart` rather than this section
-// picking its own height.
+// That's deliberate per #172: no bespoke recap chart components. The map's
+// height is passed explicitly, though, rather than left at its default: as
+// of #315, `WorldVisitsChart` defaults to the app-standard chart height,
+// which fills nearly the full viewport — right for that chart's own
+// dedicated page, wrong for one section embedded among several others
+// here, so this pins it back to the smaller, bounded size the section was
+// designed around.
 
 export function RecapPeoplePlacesSection({
   data,
@@ -74,7 +77,11 @@ export function RecapPeoplePlacesSection({
             <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
               Travel footprint
             </h3>
-            <WorldVisitsChart data={data.countryVisits} />
+            <WorldVisitsChart
+              data={data.countryVisits}
+              fillViewport={false}
+              heightClassName="h-[min(62vh,640px)] min-h-[320px]"
+            />
           </section>
         ) : null}
       </div>

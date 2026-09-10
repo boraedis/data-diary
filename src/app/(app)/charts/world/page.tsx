@@ -2,6 +2,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
+import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +13,12 @@ export default async function WorldVisitsChartPage() {
   const [data, usStates] = await Promise.all([getCountryVisitData(), getUsStateVisitData()]);
 
   return (
-    <ChartPage title="Days per country">
-      <ChartCard
-        title="Days per country"
-        description="Distinct days logged in each country. Click the US to drill into its states, scroll to zoom, drag to pan, hover for the exact count."
-        empty={data.length === 0}
-      >
+    <ChartPage
+      title="Days per country"
+      description="Distinct days logged in each country. Click the US to drill into its states."
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
+    >
+      <ChartCard empty={data.length === 0}>
         <WorldVisitsChart data={data} usStates={usStates} />
       </ChartCard>
     </ChartPage>

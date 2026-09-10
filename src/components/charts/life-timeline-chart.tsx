@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveTimeline } from "@/components/charts/interactive/interactive-timeline";
 import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
@@ -16,6 +16,7 @@ import {
   type LifeTimelineGroupBy,
   type LifeTimelineMode,
 } from "@/lib/life-timeline";
+import { TIMELINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // The first real consumer of InteractiveTimeline (#310) — the profile's
 // occupation/residence/relationship history, the dataset legacy's
@@ -125,6 +126,8 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
   return (
     <ChartPage
       title="Life timeline"
+      description="Occupation, residence and relationship history. Overlapping entries stack within their lane; an entry with no end date is still running."
+      info={{ interactionGuide: TIMELINE_INTERACTION_GUIDE }}
       filters={
         <>
           <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="Timeline" />
@@ -147,12 +150,8 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
         </>
       }
     >
-      <ChartCard
-        title="Life timeline"
-        description="Occupation, residence and relationship history. Overlapping entries stack within their lane; an entry with no end date is still running. Drag the period slider or scroll the chart to zoom, drag to pan, hover for dates."
-        empty={entries.length === 0}
-      >
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
+      <ChartCard empty={entries.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
           {({ width, height }) => (
             <InteractiveTimeline
               items={items}

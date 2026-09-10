@@ -3,12 +3,13 @@
 import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveScroller, type InteractiveScrollerSeries } from "@/components/charts/interactive/interactive-scroller";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups } from "@/lib/charts";
+import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // Second real consumer of InteractiveScroller (#117 follow-up) — the raw-
 // daily counterpart to happiness-averager-chart.tsx's monthly bucketing,
@@ -90,6 +91,8 @@ export function HappinessScrollerChart({
   return (
     <ChartPage
       title="Daily happiness"
+      description="Every logged day's happiness score."
+      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE }}
       backHref={backHref}
       backLabel={backLabel}
       filters={
@@ -98,12 +101,8 @@ export function HappinessScrollerChart({
         ) : null
       }
     >
-      <ChartCard
-        title="Daily happiness"
-        description="Scroll or drag on the chart to zoom, or drag the strip below it; double-click to reset."
-        empty={series[0].points.length === 0}
-      >
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+      <ChartCard empty={series[0].points.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveScroller
               series={series}

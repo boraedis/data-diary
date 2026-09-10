@@ -11,6 +11,7 @@ import {
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
+import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 /** A `DailyValue` optionally carrying the categories that made up the day,
  * which the primitive blends into one cell colour. */
@@ -35,6 +36,7 @@ export function CalendarExplorer({
   data,
   title,
   description,
+  methodology,
   formatValue,
   valueLabel,
   extraFilters,
@@ -46,6 +48,9 @@ export function CalendarExplorer({
   data: CalendarDay[];
   title: string;
   description: string;
+  /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
+   * Falls back to a visible placeholder when omitted. */
+  methodology?: string;
   formatValue: (value: number) => string;
   valueLabel: string;
   /** Extra controls rendered before the range picker. The caller owns
@@ -75,6 +80,8 @@ export function CalendarExplorer({
   return (
     <ChartPage
       title={title}
+      description={description}
+      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology }}
       filters={
         domain ? (
           <>
@@ -84,7 +91,7 @@ export function CalendarExplorer({
         ) : null
       }
     >
-      <ChartCard title={title} description={description} empty={points.length === 0}>
+      <ChartCard empty={points.length === 0}>
         <ResponsiveChart minWidth={240} className="min-h-[160px]">
           {({ width }) => (
             <InteractiveCalendar

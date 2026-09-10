@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import statesTopologyRaw from "us-atlas/states-10m.json";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { ChartCard } from "@/components/charts/chart-card";
+import { ChartPage } from "@/components/charts/chart-page";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
 import {
   isAlbersUsaDrawable,
@@ -18,6 +20,7 @@ import {
 import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
 import { CBSA_AREAS } from "@/lib/geo/us-cbsa";
 import type { FeatureCollection, Geometry } from "geojson";
+import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import type { UsCountyVisitData, UsStateVisitEntry } from "@/lib/charts";
 
 // us-atlas's states-10m.json (~114KB), the standard/published-geography
@@ -58,6 +61,16 @@ const MODE_OPTIONS: { id: UsMapMode; label: string }[] = [
   { id: "county", label: "Counties" },
   { id: "metro", label: "Metros" },
 ];
+
+/** The one-line description under the page title. Per mode, because the
+ * old single line ("click a state to drill into its counties") is only
+ * true in one of the three now. */
+const DESCRIPTIONS: Record<UsMapMode, string> = {
+  drill: "Distinct days logged in each US state. Click a state to drill into its counties.",
+  county: "Distinct days logged in each US county.",
+  metro:
+    "Distinct days logged in each US metropolitan and micropolitan area. Counties belonging to no such area are drawn on their own.",
+};
 
 const ARIA_LABELS: Record<UsMapMode, string> = {
   drill:
@@ -201,11 +214,21 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
   const showingRequestedMode = mode === "drill" || level?.mode === mode;
 
   return (
-    <>
-      <div className="pb-3">
-        <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />
-      </div>
-      <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
+    <ChartPage
+      title="Days per state"
+      description={DESCRIPTIONS[mode]}
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
+      filters={<GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />}
+    >
+      <ChartCard
+        // Only the whole-country case is empty here — a state you've never
+        // been to is a real, meaningful zero, and InteractiveGeo already
+        // renders it as a muted "no data" fill with its own tooltip row
+        // rather than a gap. Blanking the card because 18 states have no
+        // days would throw away the most interesting thing the map says.
+        empty={data.length === 0}
+      >
+      <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
         {({ width, height }) => (
           <InteractiveGeo<NamedProperties>
             // Remounted per mode rather than re-fed: InteractiveGeo holds
@@ -263,6 +286,7 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
           state is broken into counties.
         </p>
       ) : null}
-    </>
+      </ChartCard>
+    </ChartPage>
   );
 }

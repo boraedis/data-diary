@@ -203,6 +203,22 @@ concern if something private ends up served from one by accident.
   change gets run through the dataviz skill's `validate_palette.js`
   (colorblind-safety, contrast, lightness) before it's trusted — see #16's
   final comment for the last full validation record.
+- **Interaction guides track reality.** #315 gave every chart page a
+  `ChartInfo` popup whose "Interaction guide" section documents what a
+  chart actually supports (`src/lib/viz/interaction-guides.ts`, one
+  paragraph per primitive). Any change to a chart's or primitive's
+  interaction behavior — adding zoom to something that didn't have it,
+  removing legend-toggle, changing what a click does — must update the
+  matching guide copy in the same PR, not as a separate follow-up. As of
+  #315 the guide text is generic per *primitive*, not per chart, which
+  is already known to drift: not every chart built on a given primitive
+  actually exposes every feature that primitive supports (e.g. a chart
+  might not wire up a `regions` overlay or a legend-toggle another chart
+  on the same primitive has). The real fix — capability flags defined at
+  the *dataset/chart* level that the guide text is assembled from, rather
+  than one paragraph assumed true for every chart on a primitive — is
+  intentionally deferred to #316 rather than decided unilaterally here.
+  (User-approved convention, 2026-09-10.)
 - **One GitHub issue → one branch → one PR**, with `Closes #N` in the PR
   body. Follow-up feedback on work already in an open PR lands as new
   commits on that **same** branch — never a new branch/PR — until it

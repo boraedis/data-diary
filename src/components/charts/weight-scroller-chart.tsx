@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveScroller, type InteractiveScrollerPoint, type InteractiveScrollerSeries } from "@/components/charts/interactive/interactive-scroller";
 import { MultiSelectPicker, type MultiSelectOption } from "@/components/charts/interactive/multi-select-picker";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups, WeightMetricsPoint } from "@/lib/charts";
+import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // First real consumer of InteractiveScroller (#117) — weight is exactly
 // this primitive's use case (raw daily density, not a pre-bucketed
@@ -149,6 +150,8 @@ export function WeightScrollerChart({
   return (
     <ChartPage
       title="Weight over time"
+      description="Body weight, body fat %, and muscle mass over time."
+      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE }}
       backHref={backHref}
       backLabel={backLabel}
       filters={
@@ -161,12 +164,8 @@ export function WeightScrollerChart({
         </>
       }
     >
-      <ChartCard
-        title="Weight over time"
-        description="Scroll or drag on the chart to zoom, or drag the strip below it; double-click to reset."
-        empty={series.every((s) => s.points.length === 0)}
-      >
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+      <ChartCard empty={series.every((s) => s.points.length === 0)}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveScroller
               series={series}

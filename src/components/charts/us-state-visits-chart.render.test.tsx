@@ -52,6 +52,16 @@ function renderChart(data: UsStateVisitEntry[], counties: UsCountyVisitData = NO
   return render(<UsStateVisitsChart data={data} counties={counties} />);
 }
 
+/** The map's own <svg>. Found through InteractiveGeo's labelled wrapper
+ * (the role sits on that div, not the svg) rather than by taking the first
+ * svg in the container — the page shell this component now renders puts
+ * icon svgs ahead of it in the DOM. */
+function mapSvg(container: HTMLElement): SVGSVGElement {
+  const svg = container.querySelector<SVGSVGElement>('div[role="img"] svg');
+  if (!svg) throw new Error("map svg not found");
+  return svg;
+}
+
 /** The region paths only. `path.geo-region` rather than every `svg path`
  * because an expanded region also draws an unfilled outline over its own
  * subdivisions — decoration, not a region, and counting it as one would
@@ -120,12 +130,24 @@ describe("UsStateVisitsChart", () => {
     expect(screen.queryByText(/Not drawn on this map/)).toBeNull();
   });
 
-  it("renders the map with no visit data at all rather than failing", () => {
+  it("shows the card's empty state when nothing at all has been logged", () => {
+    // This component owns its own ChartPage/ChartCard shell (the view
+    // picker and the map share state), so `empty` now applies here rather
+    // than on the page — which is what a reader with no data actually
+    // sees. Before, this test rendered the map bare and never reached the
+    // card at all.
     const { container } = renderChart([]);
+    expect(regions(container)).toHaveLength(0);
+  });
+
+  it("draws every state, unshaded, when days exist but not in most states", () => {
+    // The real "no value for this polygon" case: geoAlbersUsa still has to
+    // produce path geometry for all 51, and each unvisited one takes the
+    // muted no-data fill rather than a colour or a gap.
+    const { container } = renderChart([{ state: "Georgia", days: 3 }]);
     expect(regions(container)).toHaveLength(51);
-    for (const path of regions(container)) {
-      expect(path.getAttribute("fill")).toBe("var(--muted)");
-    }
+    const unshaded = regions(container).filter((p) => p.getAttribute("fill") === "var(--muted)");
+    expect(unshaded).toHaveLength(50);
   });
 
   it("reports US days that landed in no county, so they can't quietly vanish", () => {
@@ -253,7 +275,8 @@ describe("UsStateVisitsChart", () => {
       // One click, not two: the collapse and the zoom-out are halves of
       // the same gesture. This used to take two because collapsing
       // rebuilt the SVG and killed the zoom-out transition mid-flight.
-      fireEvent.click(container.querySelector("svg")!);
+      // The map's own svg — see mapSvg.
+      fireEvent.click(mapSvg(container));
 
       expect(regionNames(container)).toContain("Georgia");
       expect(regionNames(container)).not.toContain("Fulton");
