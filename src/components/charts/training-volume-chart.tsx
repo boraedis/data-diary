@@ -4,6 +4,7 @@ import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { TrainingDay } from "@/lib/charts";
+import { TRAINING_METHODOLOGY } from "@/lib/viz/methodology";
 
 /**
  * Training volume as total time trained per bucket.
@@ -25,6 +26,7 @@ export function TrainingVolumeChart({ data }: { data: TrainingDay[] }) {
       data={data}
       title="Training volume"
       description="Total time trained. Hover a point for the days, exercises and average session length behind it."
+      methodology={TRAINING_METHODOLOGY}
       seriesId="training"
       label="Time trained"
       color={categoricalColor(1)}

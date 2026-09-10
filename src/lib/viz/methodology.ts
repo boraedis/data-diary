@@ -18,7 +18,16 @@ export const SLEEP_METHODOLOGY =
   "Sleep duration comes from a sleep time and a wake time logged for each day. How those two times get captured has changed over the years — for a long stretch they were entered manually from memory, more recently they come from a sleep-tracking app, where \"sleep time\" is when I fell asleep and \"wake time\" is when I stopped the app's tracking, a close but imperfect proxy for the moment I actually woke up.";
 
 export const SLEEP_LOCATION_METHODOLOGY =
-  "Where I slept each night is logged in two parts. The location is a general category — home, a friend's place, family's house, with a partner, or even a tent while camping. The sub-location is what I actually slept on or in: a bed, a couch, an air mattress, or, while traveling, the mode of transit itself — a flight, bus, train, or car.";
+  "Where I slept each night is logged in two parts. The location is a general category — home, a friend's place, family's house, at a partner's, or even a tent while camping. The sub-location is what I actually slept on or in: a bed, a couch, an air mattress, or, while traveling, the mode of transit itself — a flight, bus, train, or car.";
+
+export const COFFEE_METHODOLOGY =
+  "Coffee is logged as a simple count of cups per day. It's not a precise measure — cup size and strength vary quite a bit from one to the next — but it's consistent enough to track the ebb and flow of caffeine intake over time.";
+
+export const DISTANCE_METHODOLOGY =
+  "Distance walked comes from my iPhone's own tracking, logged once per day. It has the usual limitations of phone-based tracking — a day with the phone left behind or spent walking indoors can undercount — but it's a consistent enough source to see real patterns over time.";
+
+export const TRAINING_METHODOLOGY =
+  "Every workout is logged here, whether that's a structured gym session, a sport, or a casual jog. Most of it comes from an app I already track things in — Strava for cardio, Hevy for lifting — copied or imported over, but anything more casual, like playing volleyball in the park with friends, gets logged directly.";
 
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";

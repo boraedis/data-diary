@@ -4,6 +4,7 @@ import { CalendarExplorer } from "@/components/charts/calendar-explorer";
 import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { categoricalColor } from "@/lib/viz/color";
 import type { DailyValue } from "@/lib/charts";
+import { COFFEE_METHODOLOGY } from "@/lib/viz/methodology";
 
 // Per-chart client components configuring a shared explorer.
 //
@@ -22,6 +23,7 @@ export function CoffeeTrendChart({ data }: { data: DailyValue[] }) {
       data={data}
       title="Coffee trend"
       description="Average cups per day. Marker size shows how many days fed each point; the band shows that bucket's range."
+      methodology={COFFEE_METHODOLOGY}
       seriesId="coffee"
       label="Coffee"
       color={categoricalColor(0)}
@@ -39,6 +41,7 @@ export function CoffeeCalendarChart({ data }: { data: DailyValue[] }) {
       data={data}
       title="Coffee calendar"
       description="A year-by-year heatmap of cups per day. Hover a day for the exact count."
+      methodology={COFFEE_METHODOLOGY}
       formatValue={(n) => `${n} cup${n === 1 ? "" : "s"}`}
       valueLabel="coffee"
       ariaLabel="Coffee calendar heatmap. Hover a day to see how many cups you had."
