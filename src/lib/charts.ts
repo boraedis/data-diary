@@ -1,7 +1,7 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
-import { days, exercises, people, places, tags, workouts } from "@/db/schema";
+import { days, exercises, metros, people, places, tags, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
@@ -16,6 +16,8 @@ import istanbulTopo from "@/data/geo/istanbul.topo.json";
 import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
+import type { LifeTimelineEntry } from "@/lib/life-timeline";
+export type { LifeTimelineEntry } from "@/lib/life-timeline";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
 // domains already migrated (Phases 1-3) — see REBUILD_PLAN.md for the full
@@ -170,6 +172,211 @@ export async function getProfileRegionGroups(until: Date = new Date()): Promise<
     residence: residences.map(toRegion),
     relationship: relationships.map(toRegion),
   };
+}
+
+/**
+ * Where one place sits in the place hierarchy, plus its metro.
+ *
+ * Resolved by walking the place's ancestors and reading each one's own
+ * category/subcategory, **not** by position in `namePath` — depth isn't
+ * consistent. A Dubai address is `UAE/Dubai/Dubai/Internet City/...` while
+ * an Atlanta one is `USA/Georgia/Atlanta/Midtown Atlanta/...`; indexing by
+ * depth happens to line up for those two and stops lining up the moment a
+ * tier is missing. The taxonomy is the thing that actually means something.
+ */
+type PlaceLevels = {
+  country: string | null;
+  state: string | null;
+  municipality: string | null;
+  neighborhood: string | null;
+  metro: string | null;
+};
+
+const EMPTY_LEVELS: PlaceLevels = {
+  country: null,
+  state: null,
+  municipality: null,
+  neighborhood: null,
+  metro: null,
+};
+
+/** Resolves `PlaceLevels` for every place id given, by fetching those
+ * places' ancestors in two queries rather than one per entry. */
+async function resolvePlaceLevels(placeIds: number[]): Promise<Map<number, PlaceLevels>> {
+  const resolved = new Map<number, PlaceLevels>();
+  if (placeIds.length === 0) return resolved;
+
+  const db = getDb();
+  const targets = await db
+    .select({ id: places.id, idPath: places.idPath })
+    .from(places)
+    .where(inArray(places.id, placeIds));
+
+  // Every ancestor of every target, from the materialized idPath
+  // ("3/17/42/108/") — one round trip for the whole hierarchy instead of a
+  // recursive walk per place.
+  const ancestorIds = new Set<number>();
+  const pathById = new Map<number, number[]>();
+  for (const target of targets) {
+    const ids = (target.idPath ?? "")
+      .split("/")
+      .filter(Boolean)
+      .map(Number)
+      .filter((n) => Number.isFinite(n));
+    pathById.set(target.id, ids);
+    for (const id of ids) ancestorIds.add(id);
+  }
+  if (ancestorIds.size === 0) return resolved;
+
+  const ancestors = await db
+    .select({
+      id: places.id,
+      name: places.name,
+      subcategory: places.subcategory,
+      metroName: metros.name,
+    })
+    .from(places)
+    .leftJoin(metros, eq(places.metroId, metros.id))
+    .where(inArray(places.id, [...ancestorIds]));
+  const ancestorById = new Map(ancestors.map((a) => [a.id, a]));
+
+  for (const [placeId, ids] of pathById) {
+    const levels: PlaceLevels = { ...EMPTY_LEVELS };
+    for (const id of ids) {
+      const ancestor = ancestorById.get(id);
+      if (!ancestor) continue;
+      switch (ancestor.subcategory) {
+        case "Country":
+          levels.country = ancestor.name;
+          break;
+        case "State/Province":
+          levels.state = ancestor.name;
+          break;
+        case "Municipality":
+          levels.municipality = ancestor.name;
+          // `metroId` is only ever set on a Municipality (see
+          // assertValidMetro in src/lib/days.ts), which is exactly what
+          // makes metro a useful grouping: it merges Arlington, Reston and
+          // Tysons Corner into one "Washington DC" lane.
+          levels.metro = ancestor.metroName;
+          break;
+        case "Neighborhood":
+        case "District":
+          // "District" is the same tier by another name in some countries.
+          // First one wins, so a neighborhood nested inside a district
+          // doesn't overwrite the district with something more granular.
+          levels.neighborhood ??= ancestor.name;
+          break;
+      }
+    }
+    resolved.set(placeId, levels);
+  }
+
+  return resolved;
+}
+
+/** The three profile timelines as `InteractiveTimeline` intervals, with
+ * every dimension the chart can group by resolved up front — the
+ * life-timeline chart (#310).
+ *
+ * A sibling of `getProfileRegionGroups` above rather than a reuse of it,
+ * for two reasons worth stating since the two sit next to each other
+ * reading almost identically:
+ *
+ *  1. **`end: null` survives here.** A scroller region is a background
+ *     band and needs a real right edge, so that function resolves an
+ *     open-ended entry to `until` (today). This chart's whole subject is
+ *     the intervals themselves, and `InteractiveTimeline` draws "still
+ *     ongoing" differently from "ended today" — collapsing it would be
+ *     throwing away the distinction the chart exists to show.
+ *  2. **Regions never overlap-stack.** They're chrome painted behind a
+ *     series; two overlapping jobs just paint over each other. Here the
+ *     intervals are the data, so they go through `layoutTimeline`'s
+ *     sub-lane stacking, which needs the raw interval, not a resolved band.
+ *
+ * Ids are prefixed per kind because the three tables have independent
+ * `serial` primary keys — occupation 1 and residence 1 both exist, and the
+ * timeline keys its marks by id across the whole chart.
+ *
+ * `alias ?? name` for the label, matching `getProfileRegionGroups` — alias
+ * is the short form meant for exactly this kind of space-constrained
+ * display.
+ *
+ * The grouping dimensions are resolved here, server-side, rather than
+ * shipping the place tree to the client for it to walk: the client only
+ * ever needs the resolved names, and they're a handful of short strings
+ * per entry against a catalog of hundreds of places.
+ *
+ * Private-only, same as `getProfileRegionGroups`: the relationship
+ * timeline is permanently excluded from the public site (see AGENTS.md's
+ * #12 boundary). Never call this from src/lib/public-charts.ts. */
+export async function getLifeTimelineData(): Promise<LifeTimelineEntry[]> {
+  const [occupations, residences, relationships] = await Promise.all([
+    listProfileOccupations(),
+    listProfileResidences(),
+    listProfileRelationships(),
+  ]);
+
+  const placeIds = [
+    ...occupations.map((o) => o.placeId),
+    ...residences.map((r) => r.placeId),
+  ].filter((id): id is number => typeof id === "number");
+  const levelsByPlaceId = await resolvePlaceLevels([...new Set(placeIds)]);
+
+  const levelsFor = (placeId: number | null): PlaceLevels =>
+    (placeId === null ? undefined : levelsByPlaceId.get(placeId)) ?? EMPTY_LEVELS;
+
+  const occupationEntries: LifeTimelineEntry[] = occupations.map((item) => ({
+    id: `occupation-${item.id}`,
+    lane: "Occupation",
+    label: item.alias ?? item.name,
+    start: item.start,
+    end: item.end,
+    color: item.color,
+    kind: "occupation",
+    company: item.company,
+    ...levelsFor(item.placeId),
+    roles: item.roles.map((role) => ({
+      id: `role-${role.id}`,
+      label: role.position,
+      start: role.start,
+      end: role.end,
+    })),
+  }));
+
+  const residenceEntries: LifeTimelineEntry[] = residences.map((item) => ({
+    id: `residence-${item.id}`,
+    lane: "Residence",
+    label: item.alias ?? item.name,
+    start: item.start,
+    end: item.end,
+    color: item.color,
+    kind: "residence",
+    company: null,
+    ...levelsFor(item.placeId),
+    roles: [],
+  }));
+
+  // Relationships have no place and no company, so they carry no grouping
+  // dimensions at all — they only ever appear in the overview mode.
+  const relationshipEntries: LifeTimelineEntry[] = relationships.map((item) => ({
+    id: `relationship-${item.id}`,
+    lane: "Relationship",
+    label: item.alias ?? item.name,
+    start: item.start,
+    end: item.end,
+    color: item.color,
+    kind: "relationship",
+    company: null,
+    ...EMPTY_LEVELS,
+    roles: [],
+  }));
+
+  // Emitted in this order deliberately: `layoutTimeline` orders lanes by
+  // first appearance, so this array's order *is* the y-axis order. Work
+  // first, then where you lived, then who with — roughly outermost to most
+  // personal, and the same order the profile page lists them in.
+  return [...occupationEntries, ...residenceEntries, ...relationshipEntries];
 }
 
 // --- Sleep calendar ---------------------------------------------------

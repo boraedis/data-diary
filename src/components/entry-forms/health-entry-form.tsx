@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { CatalogPicker } from "@/components/entry-forms/catalog-picker";
 import { ExercisePicker, type ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
+import { HevyImportModal } from "@/components/entry-forms/hevy-import-modal";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type {
   DayPayload,
@@ -24,6 +25,7 @@ import type {
   WorkoutPayload,
   WorkoutSetPayload,
 } from "@/lib/days";
+import type { HevyParsedWorkout } from "@/lib/hevy-import";
 import type { WorkoutDataSource } from "@/db/schema";
 
 type WorkoutDraft = {
@@ -69,6 +71,37 @@ function parseNumber(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// A workout has no subtype recorded yet — legacy paints these red and
+// blocks saving the day until every workout has one (issue #229); a Hevy
+// paste is the main source of these today, since the share text doesn't
+// always carry a variant.
+function isIncomplete(workout: WorkoutDraft): boolean {
+  return !workout.subtype || workout.subtype.trim() === "";
+}
+
+function setsEqual(a: WorkoutSetPayload[], b: WorkoutSetPayload[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (s, i) => s.reps === b[i].reps && s.weightLbs === b[i].weightLbs && s.durationSeconds === b[i].durationSeconds
+  );
+}
+
+// Re-pasting the exact same Hevy text should be a safe no-op rather than
+// double-logging every exercise (issue #229). This only catches an
+// identical re-paste, not "the same exercise with one set hand-edited
+// afterward" — a deliberately narrower guarantee than a full merge, kept
+// simple so a manual edit is never silently overwritten: existing rows are
+// never mutated or removed by an import, only appended to.
+function workoutMatches(existing: WorkoutDraft, incoming: WorkoutDraft): boolean {
+  return (
+    existing.exerciseId === incoming.exerciseId &&
+    existing.locationId === incoming.locationId &&
+    existing.subtype === incoming.subtype &&
+    existing.durationMinutes === incoming.durationMinutes &&
+    setsEqual(existing.sets, incoming.sets)
+  );
+}
+
 export function HealthEntryForm({
   date,
   initial,
@@ -101,6 +134,7 @@ export function HealthEntryForm({
   // click losing them.
   const [dirty, setDirty] = useState(false);
   useUnsavedChangesGuard(dirty);
+  const [hevyModalOpen, setHevyModalOpen] = useState(false);
 
   function markDirty() {
     setSavedAt(null);
@@ -182,12 +216,39 @@ export function HealthEntryForm({
     setPlaces((prev) => [...prev, item]);
   }
 
+  function handleHevyImport(parsed: HevyParsedWorkout[], locationId: number | null) {
+    const incoming: WorkoutDraft[] = parsed.map((w) => ({
+      exerciseId: w.exerciseId,
+      locationId,
+      subtype: w.subtype,
+      dataSource: "hevy",
+      durationMinutes: w.durationMinutes,
+      distanceKm: null,
+      effort: null,
+      sets: w.sets,
+    }));
+
+    markDirty();
+    setWorkouts((prev) => {
+      const additions = incoming.filter((next) => !prev.some((existing) => workoutMatches(existing, next)));
+      return [...prev, ...additions];
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
     if (workouts.some((w) => w.exerciseId === null)) {
       setError("Every workout needs an exercise selected");
+      return;
+    }
+
+    // Legacy's rule, carried forward for #229: Hevy's share text doesn't
+    // always carry a variant, so import deliberately leaves it blank rather
+    // than guessing — but the day can't save until it's filled in.
+    if (workouts.some(isIncomplete)) {
+      setError("Subtype is required for all workouts");
       return;
     }
 
@@ -300,19 +361,37 @@ export function HealthEntryForm({
       </Card>
 
       <Card size="sm">
-        <CardHeader>
-          <CardTitle>Workouts</CardTitle>
-          <CardDescription>
-            {workouts.length === 0 ? "None logged yet." : `${workouts.length} logged.`}
-          </CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Workouts</CardTitle>
+            <CardDescription>
+              {workouts.length === 0 ? "None logged yet." : `${workouts.length} logged.`}
+            </CardDescription>
+          </div>
+          <Button type="button" variant="outline" size="xs" onClick={() => setHevyModalOpen(true)}>
+            Import from Hevy
+          </Button>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {workouts.map((workout, wi) => {
             const exercise = exercises.find((e) => e.id === workout.exerciseId);
             const category = exercise?.category ?? null;
+            const incomplete = isIncomplete(workout);
 
             return (
-              <div key={wi} className="rounded-lg border border-border p-4">
+              <div
+                key={wi}
+                className={
+                  incomplete
+                    ? "rounded-lg border border-destructive/60 bg-destructive/5 p-4"
+                    : "rounded-lg border border-border p-4"
+                }
+              >
+                {incomplete ? (
+                  <p className="mb-3 text-sm text-destructive">
+                    Subtype missing — pick a variant before this day can be saved.
+                  </p>
+                ) : null}
                 <div className="flex flex-col gap-4">
                   <div className="space-y-1.5">
                     <Label htmlFor={`exercise-${wi}`}>Exercise</Label>
@@ -480,6 +559,16 @@ export function HealthEntryForm({
           </Button>
         </CardContent>
       </Card>
+
+      <HevyImportModal
+        open={hevyModalOpen}
+        onClose={() => setHevyModalOpen(false)}
+        openDayDate={date}
+        exerciseCatalog={exercises}
+        placeCatalog={places}
+        onPlaceCreated={handlePlaceCreated}
+        onImport={handleHevyImport}
+      />
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">

@@ -87,7 +87,7 @@ Current shape:
   | Migrate remaining chart pages onto the primitives above, delete old bespoke components | shipped | #25 | — |
   | `InteractiveScroller` | shipped | #117 | weight |
   | `InteractiveDonut` (zoomable sunburst) | shipped | #118 | place hierarchy |
-  | `InteractiveTimeline` | shipped | #119 | — (no consumer yet) |
+  | `InteractiveTimeline` | shipped | #119 | life timeline |
 
   `InteractiveDonut` is the only primitive here that takes a *tree* rather
   than a series — its input shape and the pure builders for it live in
@@ -310,12 +310,38 @@ the sunburst — a plain donut is just `visibleRings={1}`), and
 InteractiveTimeline (#119) rounds out the three. All three new primitives
 this epic scoped are now built.
 
-`InteractiveTimeline` is the one primitive here with **no consumer yet** —
-#119 was explicitly scoped as "build the primitive, don't wire a specific
-chart", since the candidate datasets (profile occupation/residence
-history, #96's project-version timeline) weren't settled. Its overlap
-stacking lives as a pure function in `src/lib/viz/timeline.ts`, the same
-split `hierarchy.ts` has from `InteractiveDonut`.
+`InteractiveTimeline`'s overlap stacking lives as a pure function in
+`src/lib/viz/timeline.ts`, the same split `hierarchy.ts` has from
+`InteractiveDonut`. #119 shipped it without a consumer on purpose; #310
+wired the first one (`/charts/life-timeline`, the profile's
+occupation/residence/relationship history — the dataset legacy's
+`TimeLine()` actually drew).
+
+Things that consumer turned up, worth knowing before adding another: a
+chart-wide label colour can't work (bar colours are user-chosen, so
+`InteractiveTimeline` resolves black-or-white per bar from that bar's own
+painted fill); a timeline is **content-sized**, drawing only as tall as its
+rows need and centring that in whatever height it's given rather than
+stretching to fill a card; and the left margin sizes itself to the longest
+lane label, since lanes became data-driven the moment a consumer could
+group by company or job name.
+
+Its `domain`/`onDomainChange` pair is optional and *controlled* — pass both
+and the caller owns the visible window, so an external control and the
+chart's own wheel-zoom stay one piece of state. The life timeline uses this
+for a `TimeRangePicker` and to open on 2016 rather than the full extent.
+Omit both and the chart keeps the window internally.
+
+The grouping logic (which lane an entry belongs to under a mode, and how an
+occupation's promotions chain into their own bars) is pure, in
+`src/lib/life-timeline.ts` — the same split again. Roles record a start and
+no end, so a role runs until the next one begins; taking their null ends at
+face value draws every promotion as an open-ended bar stacked on the last.
+
+The one chart category with no day-entry counterpart is `life`
+(`src/lib/charts-catalog.ts`): every other chart aggregates `days` rows,
+while this one reads the profile tables. Anything else sourced from
+declared profile intervals belongs there too.
 
 Still open: the subs-chart rebuild onto Scroller/Line (#120),
 InteractiveLine's own label/hover/zoom pass (#110), and a per-primitive

@@ -62,6 +62,15 @@ export function TimeRangePicker({
 
   const disabled = min >= max;
 
+  // The endpoint labels have to say enough to be unambiguous on their own,
+  // and what that takes depends on the track. Over a few months "Feb 14"
+  // is exactly right; over a track spanning decades (the life timeline's
+  // twenty-two years) a bare "Jan 1" tells the reader nothing about which
+  // year they've dragged to. Derived from the domain rather than exposed
+  // as a prop, so every caller gets the readable one without having to
+  // know to ask.
+  const endpointFormat = max - min > 400 * DAY_MS ? "monthYear" : "short";
+
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
@@ -100,8 +109,8 @@ export function TimeRangePicker({
         </Slider.Control>
       </Slider.Root>
       <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground tabular-nums">
-        <span>{formatDate(toDateString(new Date(shown[0])), "short")}</span>
-        <span>{formatDate(toDateString(new Date(shown[1])), "short")}</span>
+        <span>{formatDate(toDateString(new Date(shown[0])), endpointFormat)}</span>
+        <span>{formatDate(toDateString(new Date(shown[1])), endpointFormat)}</span>
       </div>
     </div>
   );
