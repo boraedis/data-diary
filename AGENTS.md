@@ -317,12 +317,26 @@ wired the first one (`/charts/life-timeline`, the profile's
 occupation/residence/relationship history — the dataset legacy's
 `TimeLine()` actually drew).
 
-Two things that consumer turned up, worth knowing before adding another:
-a chart-wide label colour can't work (bar colours are user-chosen, so
+Things that consumer turned up, worth knowing before adding another: a
+chart-wide label colour can't work (bar colours are user-chosen, so
 `InteractiveTimeline` resolves black-or-white per bar from that bar's own
-painted fill), and a timeline is **content-sized** — it draws only as tall
-as its rows need and centres that in whatever height it's given, rather
-than stretching to fill a card.
+painted fill); a timeline is **content-sized**, drawing only as tall as its
+rows need and centring that in whatever height it's given rather than
+stretching to fill a card; and the left margin sizes itself to the longest
+lane label, since lanes became data-driven the moment a consumer could
+group by company or job name.
+
+Its `domain`/`onDomainChange` pair is optional and *controlled* — pass both
+and the caller owns the visible window, so an external control and the
+chart's own wheel-zoom stay one piece of state. The life timeline uses this
+for a `TimeRangePicker` and to open on 2016 rather than the full extent.
+Omit both and the chart keeps the window internally.
+
+The grouping logic (which lane an entry belongs to under a mode, and how an
+occupation's promotions chain into their own bars) is pure, in
+`src/lib/life-timeline.ts` — the same split again. Roles record a start and
+no end, so a role runs until the next one begins; taking their null ends at
+face value draws every promotion as an open-ended bar stacked on the last.
 
 The one chart category with no day-entry counterpart is `life`
 (`src/lib/charts-catalog.ts`): every other chart aggregates `days` rows,

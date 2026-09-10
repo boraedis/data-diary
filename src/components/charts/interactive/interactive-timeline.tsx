@@ -88,6 +88,16 @@ export type InteractiveTimelineProps = {
    * individually would hand most of them the same muted grey and imply a
    * grouping that isn't there. A lane is the actual series here. */
   color?: string | ((item: LaidOutInterval, laneIndex: number) => string);
+  /** The visible x window, or `null` for the whole extent.
+   *
+   * Optional and *controlled*: pass it together with `onDomainChange` and
+   * the caller owns the window, so an external control (a range slider,
+   * a "since 2016" default) and the chart's own wheel-zoom stay one piece
+   * of state instead of two that drift apart. Omit both and the chart
+   * keeps the window internally, which is all a caller with no external
+   * controls needs. */
+  domain?: [Date, Date] | null;
+  onDomainChange?: (domain: [Date, Date] | null) => void;
   /** Tooltip row label for the interval's span. Defaults to "span". */
   valueLabel?: string;
   margin?: Partial<typeof DEFAULT_MARGIN>;
@@ -148,20 +158,36 @@ export function InteractiveTimeline({
   height,
   openEnd,
   color,
+  domain: controlledDomain,
+  onDomainChange,
   valueLabel = "span",
   margin,
   ariaLabel = "Timeline. Each bar is one interval, grouped into lanes down the left. Scroll or pinch to zoom the time axis, drag to pan. Hover or focus a bar for its dates.",
 }: InteractiveTimelineProps) {
-  const MARGIN = { ...DEFAULT_MARGIN, ...margin };
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // A state-backed callback ref, not a plain useRef — see interactive-
   // hist's own comment on why this needs to be state, not a ref read
   // during render.
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
-  // Visible x extent, or null for "everything". Held here rather than read
-  // off the zoom transform inside the render function so the axis and the
-  // bars are always drawn from the same domain.
-  const [visibleDomain, setVisibleDomain] = useState<[Date, Date] | null>(null);
+  // Visible x extent, or null for "everything". Held as state rather than
+  // read off the zoom transform inside the render function so the axis and
+  // the bars are always drawn from the same domain.
+  //
+  // The internal copy is only in play when the caller isn't controlling
+  // the window — the standard uncontrolled/controlled pair. `isControlled`
+  // keys off `onDomainChange` rather than `domain`, since a controlled
+  // caller's domain is legitimately `null` whenever the full extent is
+  // showing, and that mustn't read as "uncontrolled".
+  const [internalDomain, setInternalDomain] = useState<[Date, Date] | null>(null);
+  const isControlled = onDomainChange !== undefined;
+  const visibleDomain = isControlled ? controlledDomain ?? null : internalDomain;
+  const setVisibleDomain = useCallback(
+    (next: [Date, Date] | null) => {
+      if (onDomainChange) onDomainChange(next);
+      else setInternalDomain(next);
+    },
+    [onDomainChange],
+  );
 
   // Resolved once, here, rather than letting `layoutTimeline` apply its own
   // "default to today" internally while the tooltip separately falls back
@@ -172,6 +198,22 @@ export function InteractiveTimeline({
     () => layoutTimeline(items, { openEnd: resolvedOpenEnd }),
     [items, resolvedOpenEnd],
   );
+
+  // The left margin holds the lane labels, so it has to be sized by them.
+  // A fixed width was fine when lanes were "Occupation"/"Residence", and
+  // broke the moment a consumer laned by something from the data — job and
+  // company names ran off the left edge and were clipped by the SVG.
+  //
+  // Estimated from character count rather than measured: the real
+  // measurement only exists once the text is in the DOM, which is after
+  // every layout number here has already been used. The estimate is
+  // deliberately generous, the labels are truncated to whatever it yields
+  // (see the lane-label block below), and the cap keeps a pathological
+  // lane name from eating the plot.
+  const longestLane = layout.lanes.reduce((max, lane) => Math.max(max, lane.lane.length), 0);
+  const laneLabelWidth = Math.min(longestLane * 6.4 + 20, width * 0.3);
+  const requestedMargin = { ...DEFAULT_MARGIN, ...margin };
+  const MARGIN = { ...requestedMargin, left: Math.max(requestedMargin.left, laneLabelWidth) };
 
   const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
   // Rows share the height the caller gave, within the readable band; past
@@ -215,10 +257,15 @@ export function InteractiveTimeline({
   // than in an effect: an effect would paint the new data through the old
   // window for a frame and then correct itself, and
   // react-hooks/set-state-in-effect rightly flags that.
+  //
+  // Only when the chart owns the window: a controlled caller decides for
+  // itself whether a data change should reset the view, and calling its
+  // onDomainChange from inside a render would be a side effect during
+  // render, not just a state adjustment.
   const [itemsSeen, setItemsSeen] = useState(items);
   if (itemsSeen !== items) {
     setItemsSeen(items);
-    setVisibleDomain(null);
+    if (!isControlled) setInternalDomain(null);
   }
 
   const zoomRef = useRef<{
@@ -253,7 +300,7 @@ export function InteractiveTimeline({
             .attr("stroke", "var(--border)")
             .attr("stroke-width", MARK_SPECS.axis.strokeWidth);
         }
-        laneG
+        const laneLabel = laneG
           .append("text")
           .attr("x", -12)
           .attr("y", top + laneHeight / 2)
@@ -262,6 +309,24 @@ export function InteractiveTimeline({
           .attr("fill", "var(--muted-foreground)")
           .style("font-size", MARK_SPECS.axis.tickFontSize)
           .text(lane.lane);
+
+        // Truncated to the margin actually available, so a long lane name
+        // is shortened rather than running off the left edge of the SVG
+        // and being clipped mid-word. The estimate that sized the margin
+        // is only an estimate; this is the guarantee. The untruncated name
+        // stays reachable as a native tooltip.
+        laneLabel.each(function () {
+          const node = this as SVGTextElement;
+          const available = MARGIN.left - 16;
+          let text = lane.lane;
+          while (text.length > 1 && node.getComputedTextLength() > available) {
+            text = text.slice(0, -1);
+            node.textContent = `${text}…`;
+          }
+          if (node.textContent !== lane.lane) {
+            d3.select(node).append("title").text(lane.lane);
+          }
+        });
       }
 
       // Time axis along the bottom of the *plot*, which may be shorter than
@@ -393,20 +458,47 @@ export function InteractiveTimeline({
         .translateExtent([
           [0, 0],
           [innerWidth, Math.max(1, innerHeight)],
-        ])
-        .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
-          const base = d3.scaleTime().domain(fullDomain).range([0, innerWidth]);
-          const [d0, d1] = event.transform.rescaleX(base).domain() as [Date, Date];
-          setVisibleDomain(
-            event.transform.k === 1 ? null : [d0 < fullDomain[0] ? fullDomain[0] : d0, d1 > fullDomain[1] ? fullDomain[1] : d1],
-          );
-        });
+        ]);
 
       // Applied to the svg, and d3-zoom's own double-click handler removed
       // on the SELECTION rather than the generator — see
       // interactive-scroller.tsx's long comment for why the generator's
       // `.on("dblclick.zoom", null)` throws instead.
       const selection = svg.call(behavior).on("dblclick.zoom", null);
+
+      // Seed d3-zoom's transform to match the window actually being drawn,
+      // BEFORE the zoom handler is attached below.
+      //
+      // Both halves of that matter. Without the seeding, a window set from
+      // outside (the range slider, or the "since 2016" default) leaves the
+      // transform at identity, so the very next wheel tick recomputes from
+      // the full extent and the view jumps. And doing it before `.on("zoom")`
+      // is what keeps it from looping: `selection.call(behavior.transform,
+      // …)` dispatches a zoom event like any other, which would call back
+      // into setVisibleDomain with a fresh array, re-render, re-seed, and
+      // round again forever. With no handler registered yet, the seeding is
+      // silent.
+      const baseX = d3.scaleTime().domain(fullDomain).range([0, innerWidth]);
+      if (visibleDomain) {
+        const spanPx = baseX(visibleDomain[1]) - baseX(visibleDomain[0]);
+        if (spanPx > 0) {
+          const k = innerWidth / spanPx;
+          selection.call(
+            behavior.transform,
+            d3.zoomIdentity.translate(-baseX(visibleDomain[0]) * k, 0).scale(k),
+          );
+        }
+      }
+
+      behavior.on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        const [d0, d1] = event.transform.rescaleX(baseX).domain() as [Date, Date];
+        setVisibleDomain(
+          event.transform.k === 1
+            ? null
+            : [d0 < fullDomain[0] ? fullDomain[0] : d0, d1 > fullDomain[1] ? fullDomain[1] : d1],
+        );
+      });
+
       zoomRef.current = { behavior, selection };
 
       return () => {
@@ -422,7 +514,7 @@ export function InteractiveTimeline({
       zoomRef.current.selection.call(zoomRef.current.behavior.transform, d3.zoomIdentity);
     }
     setVisibleDomain(null);
-  }, []);
+  }, [setVisibleDomain]);
 
   const containerRect = containerEl?.getBoundingClientRect();
   const zoomed = visibleDomain !== null;

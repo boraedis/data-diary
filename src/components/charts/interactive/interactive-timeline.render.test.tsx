@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import * as d3 from "d3";
 import { InteractiveTimeline } from "./interactive-timeline";
@@ -204,6 +204,69 @@ describe("InteractiveTimeline", () => {
   it("offers no reset control until the view is actually zoomed", () => {
     renderTimeline();
     expect(screen.queryByRole("button", { name: /reset zoom/i })).toBeNull();
+  });
+
+  it("draws the window a controlling caller passes, not the full extent", () => {
+    // The data spans 2018-2026; this asks for 2021 only.
+    const { container } = renderTimeline({
+      domain: [new Date(2021, 0, 1), new Date(2021, 11, 31)],
+      onDomainChange: () => {},
+    });
+    const years = [...container.querySelectorAll("text")]
+      .map((t) => t.textContent ?? "")
+      .filter((t) => /^\d{4}$/.test(t));
+    expect(years.every((y) => y === "2021" || y === "2022")).toBe(true);
+    expect(years.length).toBeGreaterThan(0);
+  });
+
+  it("shows the reset control when a controlling caller has narrowed the window", () => {
+    renderTimeline({ domain: [new Date(2021, 0, 1), new Date(2021, 11, 31)], onDomainChange: () => {} });
+    expect(screen.getByRole("button", { name: /reset zoom/i })).toBeTruthy();
+  });
+
+  it("reports a reset through onDomainChange rather than keeping its own window", () => {
+    // The whole point of the controlled pair: an external control and the
+    // chart's own zoom have to be one piece of state, not two.
+    const onDomainChange = vi.fn();
+    renderTimeline({ domain: [new Date(2021, 0, 1), new Date(2021, 11, 31)], onDomainChange });
+    fireEvent.click(screen.getByRole("button", { name: /reset zoom/i }));
+    expect(onDomainChange).toHaveBeenCalledWith(null);
+  });
+
+  it("lets a controlling caller keep its window when the data changes underneath", () => {
+    // Uncontrolled, the chart resets its view on new data. Controlled, that
+    // call belongs to the caller — the mode pickers on the life timeline
+    // swap `items` constantly and must not lose the chosen period.
+    const domain: [Date, Date] = [new Date(2021, 0, 1), new Date(2021, 11, 31)];
+    const onDomainChange = vi.fn();
+    const { rerender, container } = render(
+      <InteractiveTimeline items={ITEMS} width={900} height={400} openEnd={OPEN_END} domain={domain} onDomainChange={onDomainChange} />,
+    );
+    rerender(
+      <InteractiveTimeline items={[...ITEMS]} width={900} height={400} openEnd={OPEN_END} domain={domain} onDomainChange={onDomainChange} />,
+    );
+    expect(onDomainChange).not.toHaveBeenCalled();
+    const years = [...container.querySelectorAll("text")]
+      .map((t) => t.textContent ?? "")
+      .filter((t) => /^\d{4}$/.test(t));
+    expect(years.every((y) => y === "2021" || y === "2022")).toBe(true);
+  });
+
+  it("sizes the left margin to the longest lane label so it can't clip", () => {
+    // Lanes became data-driven once callers could group by company or job
+    // name; a fixed margin clipped those mid-word.
+    const longLane = "A Very Long Company Name Indeed Ltd";
+    const { container } = renderTimeline({
+      items: [{ id: "x", lane: longLane, label: "Role", start: "2020-01-01", end: "2021-01-01" }],
+    });
+    const label = [...container.querySelectorAll("text")].find((t) =>
+      longLane.startsWith((t.textContent ?? "").replace("…", "")),
+    );
+    expect(label).toBeTruthy();
+    // Whatever the label ends up saying, its right edge sits left of the
+    // plot and its left edge is on-canvas.
+    const x = Number(label!.getAttribute("x"));
+    expect(x).toBeLessThan(0);
   });
 
   it("renders an honest empty state rather than an empty axis", () => {

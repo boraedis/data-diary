@@ -24,7 +24,21 @@ vi.mock("@/lib/profile", () => ({
 const { getLifeTimelineData } = await import("@/lib/charts");
 
 function entry(over: Partial<Record<string, unknown>> = {}) {
-  return { id: 1, name: "Name", alias: null, start: "2020-01-01", end: null, color: null, ...over };
+  // `placeId: null` keeps these entries out of the place-hierarchy lookup,
+  // which is a real query — this file mocks src/lib/profile.ts, not the
+  // database. The grouping dimensions that lookup resolves are covered
+  // separately, and purely, in life-timeline-views.test.ts.
+  return {
+    id: 1,
+    name: "Name",
+    alias: null,
+    start: "2020-01-01",
+    end: null,
+    color: null,
+    placeId: null,
+    roles: [],
+    ...over,
+  };
 }
 
 beforeEach(() => {
