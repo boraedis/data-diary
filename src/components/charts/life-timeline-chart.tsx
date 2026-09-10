@@ -16,6 +16,7 @@ import {
   type LifeTimelineGroupBy,
   type LifeTimelineMode,
 } from "@/lib/life-timeline";
+import { TIMELINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // The first real consumer of InteractiveTimeline (#310) — the profile's
 // occupation/residence/relationship history, the dataset legacy's
@@ -125,6 +126,8 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
   return (
     <ChartPage
       title="Life timeline"
+      description="Occupation, residence and relationship history. Overlapping entries stack within their lane; an entry with no end date is still running."
+      info={{ interactionGuide: TIMELINE_INTERACTION_GUIDE }}
       filters={
         <>
           <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="Timeline" />
@@ -147,11 +150,7 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
         </>
       }
     >
-      <ChartCard
-        title="Life timeline"
-        description="Occupation, residence and relationship history. Overlapping entries stack within their lane; an entry with no end date is still running. Drag the period slider or scroll the chart to zoom, drag to pan, hover for dates."
-        empty={entries.length === 0}
-      >
+      <ChartCard empty={entries.length === 0}>
         <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
           {({ width, height }) => (
             <InteractiveTimeline

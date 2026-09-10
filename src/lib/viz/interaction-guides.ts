@@ -44,6 +44,9 @@ export const BAR_RACE_INTERACTION_GUIDE =
 export const COMBO_INTERACTION_GUIDE =
   "Hover a point or bar for its exact value and date.";
 
+export const TIMELINE_INTERACTION_GUIDE =
+  "Drag the period slider or scroll the chart to zoom, drag to pan. Hover or focus an entry for its dates and length.";
+
 /** Shown in the popup's Methodology section until a chart has real,
  * hand-written copy from #316 — the content follow-up ticket. Deliberately
  * visible rather than hidden, so a placeholder reads as "not written yet"
