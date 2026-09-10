@@ -2347,6 +2347,67 @@ async function geocodeOrNull(address: string | null): Promise<{ lat: number | nu
   }
 }
 
+/**
+ * `<name>, <city>, <state>, <country>` — the geocode search string used
+ * when a place has no address of its own to search with (a friend's
+ * house, a trailhead, a park — plenty of real places in this catalog were
+ * never going to have a street address). Built from the place's own name
+ * plus the top 3 levels of its ancestor path, root-first in `namePath`
+ * (country/state/city, per this app's hierarchy — see the `places` table
+ * comment in schema.ts) but reversed here to read most-specific-first,
+ * the way a person would actually type a search. Deliberately stops at 3
+ * levels regardless of how much deeper the place itself sits below
+ * that — a city is usually enough for Google to place a named point
+ * within it; more levels (neighborhood, venue) only add noise. A null
+ * `parentNamePath` (a country-level root, or an as-yet-unbackfilled
+ * parent — see fetchPlacePathParts) falls back to just the name.
+ *
+ * This never touches the *stored* `address` column — see geocode.ts's own
+ * header for why (#302: no address reconstruction, ever). It's purely a
+ * search query, thrown away once geocoding returns.
+ *
+ * Split from buildFallbackGeocodeQuery below (which fetches the parent's
+ * namePath from the DB) so this pure string-building half is testable
+ * without one — same shape as resolveGeoUpdate above.
+ */
+export function buildFallbackGeocodeQueryFromPath(name: string, parentNamePath: string | null): string {
+  const ancestors = parentNamePath ? parentNamePath.replace(/\/$/, "").split("/").filter(Boolean) : [];
+  return [name, ...ancestors.slice(0, 3).reverse()].join(", ");
+}
+
+async function buildFallbackGeocodeQuery(name: string, parentId: number | null): Promise<string> {
+  const parentPath = parentId !== null ? await fetchPlacePathParts(parentId) : null;
+  return buildFallbackGeocodeQueryFromPath(name, parentPath?.namePath ?? null);
+}
+
+/**
+ * What to actually write for lat/lng on a save, given whether a geocode
+ * attempt (address-based or the name+path fallback above) was actually
+ * made and what — if anything — it came back with.
+ *
+ * Real bug fixed here (#302): `updatePlaceCatalogEntry` used to spread
+ * `geo` straight into the update whenever the address changed —
+ * `geocodeOrNull` above never returns `null` itself (it returns
+ * `{lat: null, lng: null}` on a failure/empty result), so that spread was
+ * unconditionally true and unconditionally wrote whatever `geo` held. A
+ * missing address, an unresolvable one, a missing API key, or a network
+ * hiccup would silently overwrite a place's existing, correct coordinates
+ * with null — the exact "I tried to correct the address and the
+ * coordinates disappeared" report. Geocoding is documented as a
+ * best-effort *enhancement* two comments up; this is what actually makes
+ * it one on the write path too: a failed attempt leaves the place's
+ * current lat/lng untouched rather than clobbering them, and a caller can
+ * tell the two cases apart from this function's own return (`{}` vs a
+ * real pair) without re-deriving the logic itself.
+ */
+export function resolveGeoUpdate(
+  attempted: boolean,
+  geo: { lat: number | null; lng: number | null } | null
+): { lat?: number | null; lng?: number | null } {
+  if (!attempted || !geo || geo.lat === null || geo.lng === null) return {};
+  return { lat: geo.lat, lng: geo.lng };
+}
+
 // Legacy's own root-creation flow only ever produced places with
 // category "Region", subcategory "Country" at the top of the tree
 // (new_place_form.ejs's "Add New Country" button opens a modal literally
@@ -2391,7 +2452,13 @@ export async function createPlaceCatalogEntry(input: PlaceCatalogInput): Promise
   assertValidMetro(input.category, input.subcategory, input.metroId);
   const db = getDb();
   const trimmed = input.name.trim();
-  const { lat, lng } = await geocodeOrNull(input.address);
+  // No address to search with yet — fall back to name+path (see
+  // buildFallbackGeocodeQuery) rather than skipping geocoding for every
+  // place that doesn't have a street address. Nothing to lose on a new
+  // place either way: there are no existing coordinates a failed attempt
+  // could clobber.
+  const searchQuery = input.address ?? (await buildFallbackGeocodeQuery(trimmed, input.parentId));
+  const { lat, lng } = await geocodeOrNull(searchQuery);
   const [inserted] = await db
     .insert(places)
     .values({
@@ -2552,7 +2619,19 @@ export async function getPlaceChildren(id: number): Promise<PlaceCatalogItem[]> 
   return db.select(PLACE_COLUMNS).from(places).where(eq(places.parentId, id)).orderBy(asc(places.name));
 }
 
-export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<PlaceCatalogItem> {
+/**
+ * `geocodeFailed` is true when the address changed and re-geocoding it
+ * came back empty (or errored) — the place's existing lat/lng were kept
+ * rather than cleared (see `resolveGeoUpdate`), but the caller may still
+ * want to tell a human the address they just typed didn't resolve to a
+ * location, since nothing about `item` on its own reveals that: a
+ * genuinely unchanged pair of coordinates looks identical whether the
+ * geocode was skipped, succeeded and confirmed the same spot, or failed
+ * and fell back to what was already there.
+ */
+export type UpdatePlaceCatalogResult = { item: PlaceCatalogItem; geocodeFailed: boolean };
+
+export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInput): Promise<UpdatePlaceCatalogResult> {
   assertValidRoot(input.category, input.subcategory, input.parentId, input.color);
   assertValidMetro(input.category, input.subcategory, input.metroId);
   const db = getDb();
@@ -2568,20 +2647,47 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
   }
 
   const [existing] = await db
-    .select({ address: places.address, name: places.name, parentId: places.parentId })
+    .select({ address: places.address, name: places.name, parentId: places.parentId, lat: places.lat, lng: places.lng })
     .from(places)
     .where(eq(places.id, id));
-  // Only re-geocode when the address actually changed — the whole point of
-  // fixing legacy's "re-geocode on every save regardless" bug (see
-  // src/lib/geocode.ts).
-  const addressChanged = existing?.address !== input.address;
-  const geo = addressChanged ? await geocodeOrNull(input.address) : null;
 
   const trimmedName = input.name.trim();
   // A rename or a re-parent both change this place's own idPath/namePath,
   // and every descendant's too (cascaded below) — anything else about the
-  // place doesn't touch path at all.
+  // place doesn't touch path at all. Also feeds the fallback-geocode
+  // trigger below: a rename/re-parent changes what buildFallbackGeocodeQuery
+  // would search for.
   const pathAffectingChange = existing?.name !== trimmedName || existing?.parentId !== input.parentId;
+
+  // Only re-geocode when there's an actual reason to — the whole point of
+  // fixing legacy's "re-geocode on every save regardless" bug (see
+  // src/lib/geocode.ts). Three cases warrant an attempt:
+  //   - the address itself changed (including to/from blank), or
+  //   - no address, but the name/parent changed — the fallback query
+  //     (see buildFallbackGeocodeQuery) is built from exactly those, so a
+  //     previously-resolved result no longer reflects what's being saved, or
+  //   - no address, and the place has never gotten coordinates at all —
+  //     worth trying at least once even if this particular save didn't
+  //     touch anything geocode-relevant (a color change, say).
+  // Anything else (address unchanged, name/parent unchanged, coordinates
+  // already set) skips the API call entirely.
+  const addressChanged = existing?.address !== input.address;
+  const usingFallbackQuery = !input.address;
+  const needsGeocodeAttempt =
+    addressChanged || (usingFallbackQuery && (pathAffectingChange || existing?.lat === null || existing?.lng === null));
+
+  let geo: { lat: number | null; lng: number | null } | null = null;
+  if (needsGeocodeAttempt) {
+    const query = input.address ?? (await buildFallbackGeocodeQuery(trimmedName, input.parentId));
+    geo = await geocodeOrNull(query);
+  }
+  // A real attempt (address-based or the name+path fallback) that came
+  // back with nothing to show for it — see `resolveGeoUpdate`'s own
+  // comment for why this is a distinct, worth-reporting outcome rather
+  // than silently falling back. `needsGeocodeAttempt` being false already
+  // excludes "nothing worth trying yet" (an unrelated edit to a place that
+  // already has coordinates) from reading as a failure.
+  const geocodeFailed = needsGeocodeAttempt && geo !== null && (geo.lat === null || geo.lng === null);
 
   const [updated] = await db
     .update(places)
@@ -2595,12 +2701,12 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
       subregionName: input.subregionName,
       color: input.color,
       metroId: input.metroId,
-      ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
+      ...resolveGeoUpdate(needsGeocodeAttempt, geo),
     })
     .where(eq(places.id, id))
     .returning(PLACE_COLUMNS);
 
-  if (!pathAffectingChange) return updated;
+  if (!pathAffectingChange) return { item: updated, geocodeFailed };
 
   const parentPath = updated.parentId !== null ? await fetchPlacePathParts(updated.parentId) : null;
   const { idPath, namePath } = buildPlacePath(parentPath, updated.id, updated.name);
@@ -2610,7 +2716,7 @@ export async function updatePlaceCatalogEntry(id: number, input: PlaceCatalogInp
     .where(eq(places.id, updated.id))
     .returning(PLACE_COLUMNS);
   await cascadePlacePaths({ id: withPath.id, idPath, namePath });
-  return withPath;
+  return { item: withPath, geocodeFailed };
 }
 
 // A place is referenced three ways: as one of a day's 2 place slots
