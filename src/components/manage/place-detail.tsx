@@ -508,15 +508,19 @@ export function PlaceDetail({
               </dl>
               {/* Outside the dt/dd grid on purpose — this can be true even
                   when there are no coordinates at all to pair it with (the
-                  place never had any, and this save's re-geocode attempt
-                  came up empty too). text-muted-foreground rather than
-                  text-destructive: the save itself succeeded, this is
+                  place never had any, and this save's geocode attempt came
+                  up empty too). Deliberately doesn't say "address" — the
+                  attempt behind this could just as well have been the
+                  name+path fallback search for an addressless place (see
+                  buildFallbackGeocodeQuery in src/lib/days.ts), and this
+                  component isn't told which. text-muted-foreground rather
+                  than text-destructive: the save itself succeeded, this is
                   informational, and this app doesn't have (or want) a
                   separate warning color — see color.ts's own header on
                   why the palette stays to its fixed categorical slots. */}
               {geocodeWarning ? (
                 <p className="text-xs text-muted-foreground">
-                  That address didn&rsquo;t resolve to a location —{" "}
+                  Couldn&rsquo;t find a location for this place —{" "}
                   {place.lat !== null && place.lng !== null
                     ? "kept the previous coordinates."
                     : "no coordinates are set."}

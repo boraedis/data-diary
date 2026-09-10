@@ -1,13 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { MockDb } from "@/lib/test-utils/mock-db";
-import { resolveGeoUpdate, updatePlaceCatalogEntry } from "@/lib/days";
+import { buildFallbackGeocodeQueryFromPath, createPlaceCatalogEntry, resolveGeoUpdate, updatePlaceCatalogEntry } from "@/lib/days";
 import { geocodeAddress } from "@/lib/geocode";
 
-// Pins #302's fix: editing a place's address used to null out its existing
-// coordinates whenever the re-geocode attempt came back empty — a missing
-// GOOGLE_MAPS_API_KEY, an address Google doesn't recognize, or a network
-// hiccup, all silently wiped a place's previously-correct lat/lng. See
-// resolveGeoUpdate's own doc comment in days.ts for the full story.
+// Pins two related #302 fixes in updatePlaceCatalogEntry:
+//
+// 1. Editing a place's address used to null out its existing coordinates
+//    whenever the re-geocode attempt came back empty — a missing
+//    GOOGLE_MAPS_API_KEY, an address Google doesn't recognize, or a
+//    network hiccup, all silently wiped a place's previously-correct
+//    lat/lng. See resolveGeoUpdate's own doc comment in days.ts.
+// 2. A place with no address at all (a friend's house, a trailhead) used
+//    to never get geocoded — now falls back to a "<name>, <city>,
+//    <state>, <country>" search built from its own name and ancestor
+//    path. See buildFallbackGeocodeQuery(FromPath)'s doc comment.
 //
 // Same mocked-drizzle-client strategy days-validation.test.ts uses (see
 // that file's own header for why); this one also mocks @/lib/geocode,
@@ -55,6 +61,33 @@ describe("resolveGeoUpdate", () => {
   });
 });
 
+describe("buildFallbackGeocodeQueryFromPath", () => {
+  it("falls back to just the name when there's no ancestor path (a root place)", () => {
+    expect(buildFallbackGeocodeQueryFromPath("USA", null)).toBe("USA");
+  });
+
+  it("joins name + up to 3 ancestors, most-specific-first", () => {
+    // namePath is root-first ("country/state/city/..."); the query itself
+    // should read the way a person would type it, city first.
+    expect(buildFallbackGeocodeQueryFromPath("Georgia Tech", "USA/Georgia/Atlanta/")).toBe(
+      "Georgia Tech, Atlanta, Georgia, USA"
+    );
+  });
+
+  it("uses whatever ancestors exist when there are fewer than 3", () => {
+    expect(buildFallbackGeocodeQueryFromPath("Atlanta", "USA/Georgia/")).toBe("Atlanta, Georgia, USA");
+  });
+
+  it("stops at the top 3 levels from the root, even when the place sits deeper than that", () => {
+    // "Treasurers" is 5 levels down (USA/Georgia/Atlanta/Georgia Tech/Delta
+    // Tau Delta/Treasurers) — only country/state/city should make it in,
+    // not "Georgia Tech" or "Delta Tau Delta".
+    expect(buildFallbackGeocodeQueryFromPath("Treasurers", "USA/Georgia/Atlanta/Georgia Tech/Delta Tau Delta/")).toBe(
+      "Treasurers, Atlanta, Georgia, USA"
+    );
+  });
+});
+
 // A root ("Region" -> "Country") place with `parentId: null` in the input
 // — assertValidRoot requires this shape whenever the target parentId is
 // null, and it's also what keeps updatePlaceCatalogEntry's own DB call
@@ -76,7 +109,11 @@ const BASE_INPUT = {
   metroId: null,
 };
 
-const EXISTING_ROW = { address: "Old Address", name: "Testland", parentId: null };
+// Existing lat/lng (10, 20) matches updatedRow()'s own defaults below, so
+// a test that doesn't override either represents "this place already has
+// coordinates, saved earlier" — the baseline the trigger-condition tests
+// further down build off of.
+const EXISTING_ROW = { address: "Old Address", name: "Testland", parentId: null, lat: 10, lng: 20 };
 
 function updatedRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -111,9 +148,14 @@ function updatedRow(overrides: Partial<Record<string, unknown>> = {}) {
  * row is whatever the test hardcoded. Capturing the actual `.set()`
  * argument is what makes these tests test the fix rather than the mock.
  */
-function createSetCapturingDb(selectResults: unknown[][], updateResults: unknown[][]): { db: MockDb; setCalls: Record<string, unknown>[] } {
+function createSetCapturingDb(
+  selectResults: unknown[][],
+  updateResults: unknown[][],
+  insertResults: unknown[][] = []
+): { db: MockDb; setCalls: Record<string, unknown>[] } {
   const selectQueue = [...selectResults];
   const updateQueue = [...updateResults];
+  const insertQueue = [...insertResults];
   const setCalls: Record<string, unknown>[] = [];
 
   function readChain(result: unknown) {
@@ -156,7 +198,7 @@ function createSetCapturingDb(selectResults: unknown[][], updateResults: unknown
 
   const db: MockDb = {
     select: () => readChain(selectQueue.shift()),
-    insert: () => readChain(undefined),
+    insert: () => readChain(insertQueue.shift()),
     update: () => updateChain(updateQueue.shift()),
     delete: () => readChain(undefined),
   };
@@ -219,25 +261,114 @@ describe("updatePlaceCatalogEntry", () => {
     expect(geocodeFailed).toBe(true);
   });
 
-  it("omits lat/lng (keeps existing coordinates) when the address is cleared entirely", async () => {
-    // Deliberate, and the same principle as the failure cases above rather
-    // than an exception to it: clearing the address text doesn't mean the
-    // coordinates are wrong — they may well have been hand-verified
-    // separately — so blanking the address alone shouldn't blank them too.
-    // geocodeOrNull(null) short-circuits to {lat: null, lng: null} without
-    // ever calling geocodeAddress, and resolveGeoUpdate treats that
-    // exactly like a failed re-geocode: nothing to write, existing values
-    // stand.
+  it("clearing the address tries the name+path fallback rather than skipping geocoding", async () => {
+    // Clearing the address still counts as an address change, so it's
+    // worth at least trying the fallback for a place that might not need
+    // a street address at all — see the "needsGeocodeAttempt" comment in
+    // updatePlaceCatalogEntry. BASE_INPUT is a root place (parentId:
+    // null), so the fallback query is just the name, with no ancestors to
+    // add — verified against the actual geocodeAddress call, not assumed.
+    const { db, setCalls } = createSetCapturingDb([[EXISTING_ROW]], [[updatedRow({ address: null, lat: 1, lng: 2 })]]);
+    dbState.current = db;
+    vi.mocked(geocodeAddress).mockResolvedValue({ lat: 1, lng: 2 });
+    const { item, geocodeFailed } = await updatePlaceCatalogEntry(1, { ...BASE_INPUT, address: null });
+    expect(geocodeAddress).toHaveBeenCalledWith("Testland");
+    expect(setCalls[0]).toMatchObject({ lat: 1, lng: 2 });
+    expect(item.lat).toBe(1);
+    expect(item.lng).toBe(2);
+    expect(geocodeFailed).toBe(false);
+  });
+
+  it("clearing the address, when the fallback also fails, keeps the existing coordinates rather than nulling them", async () => {
+    // Same #302 protection as the address-based failure cases above, just
+    // reached via the fallback path instead of a typed address.
     const { db, setCalls } = createSetCapturingDb([[EXISTING_ROW]], [[updatedRow({ address: null })]]);
     dbState.current = db;
+    vi.mocked(geocodeAddress).mockResolvedValue(null); // Google: ZERO_RESULTS for "Testland" alone
     const { item, geocodeFailed } = await updatePlaceCatalogEntry(1, { ...BASE_INPUT, address: null });
-    expect(geocodeAddress).not.toHaveBeenCalled();
     expect(setCalls[0]).not.toHaveProperty("lat");
     expect(setCalls[0]).not.toHaveProperty("lng");
     expect(item.lat).toBe(10);
     expect(item.lng).toBe(20);
-    // Not "failed" — clearing the address is a deliberate action, not an
-    // attempt that came up empty, so there's nothing to warn about.
+    expect(geocodeFailed).toBe(true);
+  });
+
+  it("skips geocoding when the address is already blank, coordinates already exist, and nothing else changed", async () => {
+    // The "don't re-fire needlessly" half of the fallback: EXISTING_ROW
+    // already has lat/lng, and this save is address-blank-to-blank with
+    // the same name/parent — no addressChanged, no pathAffectingChange,
+    // coordinates already present, so there's nothing worth re-attempting.
+    const blankExisting = { ...EXISTING_ROW, address: null };
+    const { db, setCalls } = createSetCapturingDb([[blankExisting]], [[updatedRow({ address: null })]]);
+    dbState.current = db;
+    const { geocodeFailed } = await updatePlaceCatalogEntry(1, { ...BASE_INPUT, address: null });
+    expect(geocodeAddress).not.toHaveBeenCalled();
+    expect(setCalls[0]).not.toHaveProperty("lat");
+    expect(setCalls[0]).not.toHaveProperty("lng");
     expect(geocodeFailed).toBe(false);
+  });
+
+  it("re-tries the fallback on a rename, even though the address was already blank and coordinates already exist", async () => {
+    // A rename changes what the fallback query itself would search for
+    // (the place's own name is the first segment), so it's worth trying
+    // again even though neither addressChanged nor "no coordinates yet"
+    // would otherwise trigger it.
+    // A rename is also a path-affecting change, so updatePlaceCatalogEntry
+    // issues a second db.update(...) after this one, to write the place's
+    // own recomputed idPath/namePath (and, since it's a root place with no
+    // parent, skips the fetchPlacePathParts select that a non-root rename
+    // would also need) — queue a result for that second update too.
+    // cascadePlacePaths then looks for this (now-renamed) place's own
+    // children to propagate the path update to — an empty result ends
+    // that BFS after one query, since this place has none.
+    const blankExisting = { ...EXISTING_ROW, address: null };
+    const { db, setCalls } = createSetCapturingDb(
+      [[blankExisting], []],
+      [[updatedRow({ address: null, name: "New Name", lat: 5, lng: 6 })], [updatedRow({ name: "New Name", lat: 5, lng: 6 })]]
+    );
+    dbState.current = db;
+    vi.mocked(geocodeAddress).mockResolvedValue({ lat: 5, lng: 6 });
+    const { item } = await updatePlaceCatalogEntry(1, { ...BASE_INPUT, name: "New Name", address: null });
+    expect(geocodeAddress).toHaveBeenCalledWith("New Name");
+    expect(setCalls[0]).toMatchObject({ lat: 5, lng: 6 });
+    expect(item.lat).toBe(5);
+    expect(item.lng).toBe(6);
+  });
+
+  it("still tries the fallback for a place that's never had coordinates, even on an unrelated edit", async () => {
+    // No address, no coordinates, and this save doesn't touch name/parent
+    // at all (just, say, a color change via BASE_INPUT) — worth trying at
+    // least once rather than leaving it permanently unresolved.
+    const neverGeocoded = { ...EXISTING_ROW, address: null, lat: null, lng: null };
+    const { db, setCalls } = createSetCapturingDb(
+      [[neverGeocoded]],
+      [[updatedRow({ address: null, lat: 7, lng: 8 })]]
+    );
+    dbState.current = db;
+    vi.mocked(geocodeAddress).mockResolvedValue({ lat: 7, lng: 8 });
+    const { item } = await updatePlaceCatalogEntry(1, { ...BASE_INPUT, address: null });
+    expect(geocodeAddress).toHaveBeenCalledWith("Testland");
+    expect(setCalls[0]).toMatchObject({ lat: 7, lng: 8 });
+    expect(item.lat).toBe(7);
+    expect(item.lng).toBe(8);
+  });
+});
+
+describe("createPlaceCatalogEntry", () => {
+  it("uses the name+path fallback for a brand-new place with no address", async () => {
+    // Root place (parentId: null), so the fallback query is just the
+    // trimmed name — no ancestor select needed, and no existing
+    // coordinates for a failed attempt to protect either way.
+    const { db } = createSetCapturingDb(
+      [],
+      [[{ id: 1, name: "Testland", idPath: "1/", namePath: "Testland/", lat: 40, lng: -70 }]],
+      [[{ id: 1, name: "Testland", parentId: null, lat: 40, lng: -70 }]]
+    );
+    dbState.current = db;
+    vi.mocked(geocodeAddress).mockResolvedValue({ lat: 40, lng: -70 });
+    const created = await createPlaceCatalogEntry({ ...BASE_INPUT, address: null });
+    expect(geocodeAddress).toHaveBeenCalledWith("Testland");
+    expect(created.lat).toBe(40);
+    expect(created.lng).toBe(-70);
   });
 });
