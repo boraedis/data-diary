@@ -14,6 +14,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate } from "@/lib/date";
+import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 /**
  * "What was this made up of, over time" — a stacked area with a share/count
@@ -51,6 +52,7 @@ export function CompositionExplorer({
   categories,
   title,
   description,
+  methodology,
   valueFormat,
   extraFilters,
   initialPeriod = "month",
@@ -60,6 +62,9 @@ export function CompositionExplorer({
   categories: InteractiveAreaCategory[];
   title: string;
   description: string;
+  /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
+   * Falls back to a visible placeholder when omitted. */
+  methodology?: string;
   valueFormat: (value: number) => string;
   /** Extra controls rendered before the built-in ones. The caller owns
    * their state and reshapes `rows` accordingly. */
@@ -89,6 +94,8 @@ export function CompositionExplorer({
   return (
     <ChartPage
       title={title}
+      description={description}
+      info={{ interactionGuide: AREA_INTERACTION_GUIDE, methodology }}
       filters={
         <>
           {extraFilters}
@@ -97,7 +104,7 @@ export function CompositionExplorer({
         </>
       }
     >
-      <ChartCard title={title} description={description} empty={points.length === 0}>
+      <ChartCard empty={points.length === 0}>
         <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
           {({ width, height }) => (
             <InteractiveArea

@@ -25,6 +25,7 @@ import { InteractiveBarRace } from "@/components/charts/interactive/interactive-
 import type { RaceFrame } from "@/lib/viz/race";
 import { daysBetween, parseDate } from "@/lib/date";
 import type { PeopleDay } from "@/lib/charts";
+import { BAR_RACE_INTERACTION_GUIDE, RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -296,15 +297,13 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
   return (
     <ChartPage
       title="People table"
+      description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
+      info={{ interactionGuide: RANKED_INTERACTION_GUIDE }}
       filters={
         <GroupByPicker value={limit} onChange={setLimit} options={LIMIT_OPTIONS} label="Show" />
       }
     >
-      <ChartCard
-        title="People table"
-        description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
-        empty={shown.length === 0}
-      >
+      <ChartCard empty={shown.length === 0}>
         <InteractiveRanked
           entries={shown}
           valueLabel="Days"
@@ -457,12 +456,13 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
   );
 
   return (
-    <ChartPage title="People race" filters={null}>
-      <ChartCard
-        title="People race"
-        description="Who mattered most, week by week — each person's score sums the impact of every day you logged them, with older days fading, so the board reflects who was around lately rather than an all-time total."
-        empty={frames.length === 0}
-      >
+    <ChartPage
+      title="People race"
+      description="Who mattered most, week by week — each person's score sums the impact of every day you logged them, with older days fading, so the board reflects who was around lately rather than an all-time total."
+      info={{ interactionGuide: BAR_RACE_INTERACTION_GUIDE }}
+      filters={null}
+    >
+      <ChartCard empty={frames.length === 0}>
         {/* Taller than the app's usual `h-[min(62vh,640px)]` chart class,
             which every other chart page shares. Deliberate, and the one
             place it's worth breaking: 20 rows carrying a name and a number

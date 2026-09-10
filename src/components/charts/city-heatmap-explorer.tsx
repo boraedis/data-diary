@@ -16,6 +16,7 @@ import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import type { CityHeatmapData } from "@/lib/charts";
+import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // The page body (title, city-picker filter row, and chart card) is one
 // client component rather than split between a server page and a chart
@@ -111,6 +112,8 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
   return (
     <ChartPage
       title="City heatmap"
+      description={`${CITIES[city].label} — neighborhoods colored by days logged there; dot size shows how often you've visited.`}
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
       filters={
         <>
           <GroupByPicker value={city} onChange={setCity} options={CITY_OPTIONS} label="City" />
@@ -124,11 +127,7 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
         </>
       }
     >
-      <ChartCard
-        title={CITIES[city].label}
-        description="Neighborhoods colored by days logged there; dot size shows how often you've visited. Scroll to zoom, drag to pan, hover for detail."
-        empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}
-      >
+      <ChartCard empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
         <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
           {({ width, height }) => (
             <InteractiveGeo<CityProperties>

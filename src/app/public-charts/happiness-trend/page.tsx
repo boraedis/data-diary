@@ -3,6 +3,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { HappinessAveragerChart } from "@/components/charts/happiness-averager-chart";
 import { getPublicHappinessTrendData } from "@/lib/public-charts";
+import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 export const metadata: Metadata = {
   title: "Happiness trend — Data Diary",
@@ -16,12 +17,14 @@ export default async function PublicHappinessTrendChartPage() {
   const data = await getPublicHappinessTrendData();
 
   return (
-    <ChartPage title="Happiness trend" backHref="/public-charts" backLabel="Charts">
-      <ChartCard
-        title="Happiness trend"
-        description="Monthly average, marker size shows how many days fed each point; shaded band shows that month's day-to-day range."
-        empty={data.length === 0}
-      >
+    <ChartPage
+      title="Happiness trend"
+      description="Monthly average happiness."
+      info={{ interactionGuide: LINE_INTERACTION_GUIDE }}
+      backHref="/public-charts"
+      backLabel="Charts"
+    >
+      <ChartCard empty={data.length === 0}>
         <HappinessAveragerChart data={data} />
       </ChartCard>
     </ChartPage>

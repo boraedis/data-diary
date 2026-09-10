@@ -3,6 +3,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { SleepCalendarChart } from "@/components/charts/sleep-calendar-chart";
 import { getPublicSleepData } from "@/lib/public-charts";
+import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 export const metadata: Metadata = {
   title: "Sleep calendar — Data Diary",
@@ -16,12 +17,14 @@ export default async function PublicSleepChartPage() {
   const data = await getPublicSleepData();
 
   return (
-    <ChartPage title="Sleep calendar" backHref="/public-charts" backLabel="Charts">
-      <ChartCard
-        title="Sleep calendar"
-        description="Nightly sleep duration, darker = less sleep, brighter = more."
-        empty={data.length === 0}
-      >
+    <ChartPage
+      title="Sleep calendar"
+      description="Nightly sleep duration, darker = less sleep, brighter = more."
+      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE }}
+      backHref="/public-charts"
+      backLabel="Charts"
+    >
+      <ChartCard empty={data.length === 0}>
         <SleepCalendarChart data={data} />
       </ChartCard>
     </ChartPage>

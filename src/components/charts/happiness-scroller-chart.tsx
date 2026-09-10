@@ -9,6 +9,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups } from "@/lib/charts";
+import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // Second real consumer of InteractiveScroller (#117 follow-up) — the raw-
 // daily counterpart to happiness-averager-chart.tsx's monthly bucketing,
@@ -90,6 +91,8 @@ export function HappinessScrollerChart({
   return (
     <ChartPage
       title="Daily happiness"
+      description="Every logged day's happiness score."
+      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE }}
       backHref={backHref}
       backLabel={backLabel}
       filters={
@@ -98,11 +101,7 @@ export function HappinessScrollerChart({
         ) : null
       }
     >
-      <ChartCard
-        title="Daily happiness"
-        description="Scroll or drag on the chart to zoom, or drag the strip below it; double-click to reset."
-        empty={series[0].points.length === 0}
-      >
+      <ChartCard empty={series[0].points.length === 0}>
         <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
           {({ width, height }) => (
             <InteractiveScroller

@@ -6,17 +6,25 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-/** Shared chrome around every chart page's main chart: title, one-line
- * description of what it shows, and an "empty" fallback so a chart with no
- * data yet (e.g. before any real --commit of the historical migration) reads
- * as "nothing logged" rather than a blank card or a crash. */
+/** Shared chrome around every chart page's main chart: an "empty" fallback
+ * so a chart with no data yet (e.g. before any real --commit of the
+ * historical migration) reads as "nothing logged" rather than a blank card
+ * or a crash.
+ *
+ * `title`/`description` are optional and render a `CardHeader` when
+ * present — but every `/charts/*` page now puts its title and description
+ * in `ChartPage` instead (#315 removed the duplicate header this used to
+ * render there). The props stay for the other, legitimate use of this
+ * component: the recap report's section cards (`recap-health-section.tsx`
+ * and siblings), which aren't paired with `ChartPage` and have no other
+ * title of their own. */
 export function ChartCard({
   title,
   description,
   empty,
   children,
 }: {
-  title: string;
+  title?: string;
   description?: string;
   /** Pass true when there's no data to plot; renders a short message
    * instead of `children`. */
@@ -31,10 +39,12 @@ export function ChartCard({
     // this hands roughly 40px back to the plot on a 375px screen, which is
     // over 13% more width for every chart in the app.
     <Card className="w-full [--card-spacing:--spacing(3)] sm:[--card-spacing:--spacing(6)]">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
+      {title || description ? (
+        <CardHeader>
+          {title ? <CardTitle>{title}</CardTitle> : null}
+          {description ? <CardDescription>{description}</CardDescription> : null}
+        </CardHeader>
+      ) : null}
       <CardContent>
         {empty ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
