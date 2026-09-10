@@ -3,14 +3,23 @@
 // `GOOGLE_MAPS_API_KEY` at call time (never at module load, never
 // client-side) via the Geocoding API's plain HTTP endpoint, no SDK needed.
 //
+// No reverse-geocoding here, and no address reconstruction anywhere in
+// this app — #302 settled that the expected value for `address` going
+// forward is a full address pasted in as-is from Google Maps, not
+// anything derived from coordinates or assembled from a hierarchy path.
+// This module's only job is the one direction: address -> lat/lng.
+//
 // This deliberately does NOT mirror the legacy app's behavior of
 // re-geocoding on every single place edit regardless of what changed —
 // two different hardcoded API keys, one in new_place_form.js and a
 // different one in places.js, both client-side-exposed, and both re-fired
 // unconditionally (the `if (old_address != new_address)` short-circuit
 // that would have skipped the redundant call was commented out). See
-// geocodePlaceIfNeeded in src/lib/catalog-admin.ts for the "only when the
-// address actually changed" gate that replaces that legacy bug.
+// `updatePlaceCatalogEntry`'s `addressChanged` gate in src/lib/days.ts for
+// the "only when the address actually changed" fix — and its
+// `resolveGeoUpdate` helper for a second legacy bug fixed alongside it
+// (#302): a re-geocode that came back empty used to null out whatever
+// coordinates were already there instead of leaving them alone.
 
 const GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 

@@ -47,8 +47,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   try {
-    const updated = await updatePlaceCatalogEntry(id, parsed.value);
-    return NextResponse.json(updated);
+    const { item, geocodeFailed } = await updatePlaceCatalogEntry(id, parsed.value);
+    // The JSON body stays exactly PlaceCatalogItem (both callers —
+    // place-detail.tsx and move-place-modal.tsx — parse it as that
+    // directly) — a header carries the one extra bit of information
+    // rather than reshaping the response envelope for it. See
+    // updatePlaceCatalogEntry's UpdatePlaceCatalogResult comment for what
+    // this actually means: the address change was saved, but it couldn't
+    // be located, so the place's existing coordinates were left alone.
+    const response = NextResponse.json(item);
+    if (geocodeFailed) response.headers.set("X-Geocode-Warning", "1");
+    return response;
   } catch (error) {
     // updatePlaceCatalogEntry throws a plain Error for the two
     // hierarchy-move guards (self-parent, move-into-own-subtree) — those
