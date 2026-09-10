@@ -5,7 +5,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 
 /** Shared chrome around every chart page's main chart: an "empty" fallback
  * so a chart with no data yet (e.g. before any real --commit of the
@@ -18,12 +17,19 @@ import { cn } from "@/lib/utils";
  * render there). The props stay for the other, legitimate use of this
  * component: the recap report's section cards (`recap-health-section.tsx`
  * and siblings), which aren't paired with `ChartPage` and have no other
- * title of their own. */
+ * title of their own.
+ *
+ * A CSS-only attempt to also make this card stretch to fill the viewport
+ * (a `fillHeight` prop, flexing `Card`/`CardContent` to fill whatever
+ * height an ancestor resolved) shipped and then got reverted — see
+ * chart-page.tsx's and responsive-chart.tsx's own comments on why. The
+ * chart's height is sized directly on `ResponsiveChart` now
+ * (`fillViewport`), so this component doesn't need to participate in
+ * that at all. */
 export function ChartCard({
   title,
   description,
   empty,
-  fillHeight,
   children,
 }: {
   title?: string;
@@ -31,19 +37,6 @@ export function ChartCard({
   /** Pass true when there's no data to plot; renders a short message
    * instead of `children`. */
   empty?: boolean;
-  /** Stretches this card, and the `CardContent` box around `children`, to
-   * fill whatever height its container resolves to instead of sizing to
-   * content — #315 follow-up feedback that a chart page's card should be
-   * at least a full viewport tall (minus `ChartPage`'s own chrome; see
-   * that file's own layout). Only for a canvas-style chart whose own
-   * content actually wants "as much room as I'm given" (paired with
-   * `h-full` on that chart's `ResponsiveChart`, see `CHART_HEIGHT_CLASS`
-   * in responsive-chart.tsx) — leave the default `false` for a
-   * content-sized chart (a calendar, an aspect-ratio-bound donut) or any
-   * other `ChartCard` use (the recap report's section cards), where
-   * forcing a fill would just pad the card out with empty space below
-   * shorter content instead of doing anything useful. */
-  fillHeight?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -53,19 +46,14 @@ export function ChartCard({
     // chart's left edge. Combined with ChartPage's narrower mobile gutter
     // this hands roughly 40px back to the plot on a 375px screen, which is
     // over 13% more width for every chart in the app.
-    <Card
-      className={cn(
-        "w-full [--card-spacing:--spacing(3)] sm:[--card-spacing:--spacing(6)]",
-        fillHeight && "flex h-full flex-col",
-      )}
-    >
+    <Card className="w-full [--card-spacing:--spacing(3)] sm:[--card-spacing:--spacing(6)]">
       {title || description ? (
         <CardHeader>
           {title ? <CardTitle>{title}</CardTitle> : null}
           {description ? <CardDescription>{description}</CardDescription> : null}
         </CardHeader>
       ) : null}
-      <CardContent className={cn(fillHeight && "min-h-0 flex-1")}>
+      <CardContent>
         {empty ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             Nothing logged yet.

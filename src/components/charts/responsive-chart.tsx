@@ -3,43 +3,56 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * The standard chart height, shared by every `ResponsiveChart` whose size
- * should come from available screen space (a canvas-style chart — line,
- * area, network, geo, ranked, bar-race, scroller, combo — as opposed to
- * one whose height is intrinsic to its content, like a calendar's year
- * count, or tied to its width, like a square donut — those don't use this
- * class at all).
- *
- * Just `h-full` with a floor: the actual "fill the screen" sizing lives in
- * `ChartPage` (`main` itself is `flex-1` against the root layout's
- * sticky-footer flex recipe, with the header/filters rows `shrink-0` and a
- * `flex-1 min-h-0` wrapper around its `children` — see that file's own
- * comment) and `ChartCard`'s `fillHeight` prop, which the caller of *this*
- * class needs to also pass to its `<ChartCard>` — that chain is what turns
- * `h-full` here into an actual pixel height. Without it (a `ChartCard`
- * used outside `ChartPage`, or with `fillHeight` omitted), `h-full`
- * resolves to `auto` and this is a no-op, so nothing breaks; it just won't
- * fill anything.
- *
- * `min-h-[320px]` is a floor, not a target: on a short viewport with a lot
- * of chrome above it, the actual available space can end up smaller than
- * this, and the chart simply overflows the viewport a little (`ChartPage`
- * never sets `overflow-hidden`) rather than being crushed unreadable.
+ * Fallback/floor className for a `fillViewport` chart, applied before its
+ * real height lands (server render, first paint, or JS disabled) so there
+ * is never a zero-height flash. `fillViewport`'s own measurement (see
+ * below) replaces this with an inline pixel height once it runs; without
+ * JS, this is what the chart is stuck at.
  */
-export const CHART_HEIGHT_CLASS = "h-full min-h-[320px]";
+export const CHART_HEIGHT_CLASS = "min-h-[320px]";
+
+/** `fillViewport`'s floor — never size a chart shorter than this even if
+ * the measured available space comes out smaller (a lot of chrome above
+ * it on a short screen). The chart overflows the viewport a little
+ * instead of being crushed unreadable. */
+const FILL_VIEWPORT_MIN_HEIGHT = 320;
+
+/**
+ * `fillViewport`'s bottom margin, in px — deliberately generous rather
+ * than trying to re-derive the exact padding stack below the chart
+ * (`ChartCard`'s own bottom `--card-spacing` plus `ChartPage`'s `main`
+ * bottom padding, whichever call site this chart is inside). Erring high
+ * costs a few px of otherwise-usable height; erring low means the card's
+ * own bottom padding pushes past the viewport's bottom edge, which reads
+ * as broken. Not worth the coupling a pixel-perfect version would need
+ * between this file and every page's own padding choices.
+ */
+const FILL_VIEWPORT_BOTTOM_MARGIN = 48;
 
 type ResponsiveChartProps = {
   /** Fixed chart height in px — use this for a chart whose height should
    * come from its own content (a calendar's row count, a small-multiples
-   * grid's mini-chart size), not from available screen space. Omit it to
-   * size height from the container's own CSS instead: give `className` a
-   * height utility (e.g. "h-[min(62vh,640px)]") and the container's
-   * *rendered* height drives `children`'s height argument the same way
-   * width already works — so the chart actually grows to fill available
-   * vertical space on a tall desktop viewport instead of sitting at a
-   * small fixed number. (User feedback on the chart pages: width alone
-   * being responsive wasn't enough — "still not max height.") */
+   * grid's mini-chart size), not from available screen space. */
   height?: number;
+  /**
+   * Measures how far this chart's own top sits from the viewport's top
+   * edge (`getBoundingClientRect().top`, not a CSS percentage/flex
+   * computation) and sizes the chart to fill what's left of the screen
+   * below that point, minus `FILL_VIEWPORT_BOTTOM_MARGIN` — so the chart
+   * fills the screen regardless of how much "chrome" (nav bar, page
+   * title, description, filters row) happens to render above it on a
+   * given page, without this component or its caller needing to know any
+   * of those heights. Real DOM measurement rather than a CSS `height:
+   * 100%`/`flex: 1` chain deliberately: the latter needs every ancestor
+   * between this element and the viewport to resolve a definite height
+   * correctly, which turned out fragile in practice across `ChartPage`,
+   * `ChartCard`, and the root layout's own flex setup — this is the
+   * "measure the one number that actually matters" alternative. Re-runs
+   * on window resize and on this element's own position shifting (e.g. a
+   * filters row wrapping to a second line changes the chart's top offset
+   * without the window itself resizing). Ignored when `height` is set.
+   */
+  fillViewport?: boolean;
   minWidth?: number;
   className?: string;
   /** Optional callback ref to the measured wrapper div (the `position:
@@ -65,6 +78,7 @@ type ResponsiveChartProps = {
  * wrapper for that. */
 export function ResponsiveChart({
   height,
+  fillViewport = false,
   minWidth = 280,
   className,
   wrapperRef,
@@ -73,6 +87,7 @@ export function ResponsiveChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [measuredHeight, setMeasuredHeight] = useState(0);
+  const [viewportFillHeight, setViewportFillHeight] = useState(0);
 
   const setRefs = useCallback(
     (el: HTMLDivElement | null) => {
@@ -90,24 +105,54 @@ export function ResponsiveChart({
       if (!entry) return;
       setWidth(Math.max(minWidth, Math.floor(entry.contentRect.width)));
       // Only track measured height when the caller isn't pinning it to a
-      // fixed number — a fixed-height chart sizes its own SVG and the
-      // container just follows that, so re-measuring here would be
-      // circular (and pointless).
-      if (height === undefined) {
+      // fixed number or filling the viewport — a fixed-height chart sizes
+      // its own SVG and the container just follows that, and a
+      // fillViewport chart's height comes from the effect below instead;
+      // re-measuring the container's own (not-yet-sized) height here
+      // would be circular in both cases.
+      if (height === undefined && !fillViewport) {
         setMeasuredHeight(Math.floor(entry.contentRect.height));
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [minWidth, height]);
+  }, [minWidth, height, fillViewport]);
 
-  const resolvedHeight = height ?? measuredHeight;
+  useEffect(() => {
+    if (!fillViewport) return;
+    const el = containerRef.current;
+    if (!el) return;
+    function recompute() {
+      const top = el!.getBoundingClientRect().top;
+      const available = window.innerHeight - top - FILL_VIEWPORT_BOTTOM_MARGIN;
+      setViewportFillHeight(Math.max(FILL_VIEWPORT_MIN_HEIGHT, Math.floor(available)));
+    }
+    recompute();
+    window.addEventListener("resize", recompute);
+    // Catches this element's own top offset moving without a window
+    // resize — a filters row wrapping to a second line, the description
+    // line appearing/disappearing, etc. `document.body` rather than `el`
+    // itself: `el`'s own size is what we're setting, so observing it
+    // would just re-trigger on our own writes.
+    const observer = new ResizeObserver(recompute);
+    observer.observe(document.body);
+    return () => {
+      window.removeEventListener("resize", recompute);
+      observer.disconnect();
+    };
+  }, [fillViewport]);
+
+  const resolvedHeight = height ?? (fillViewport ? viewportFillHeight : measuredHeight);
 
   return (
     <div
       ref={setRefs}
       className={className}
-      style={{ width: "100%", position: "relative", ...(height !== undefined ? { height } : {}) }}
+      style={{
+        width: "100%",
+        position: "relative",
+        ...(height !== undefined || (fillViewport && resolvedHeight > 0) ? { height: resolvedHeight } : {}),
+      }}
     >
       {width > 0 && resolvedHeight > 0 ? (
         children({ width, height: resolvedHeight })

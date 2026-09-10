@@ -30,7 +30,7 @@ export function HistogramChart({ values }: { values: number[] }) {
   }, [values]);
 
   return (
-    <ResponsiveChart className={CHART_HEIGHT_CLASS}>
+    <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
       {({ width, height }) => (
         <InteractiveHist
           values={values}

@@ -91,7 +91,7 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
 
   return (
     <>
-      <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={360}>
+      <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
         {({ width, height }) => (
           <InteractiveGeo<UsStateProperties>
             features={features}

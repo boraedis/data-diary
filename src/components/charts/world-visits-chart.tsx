@@ -85,6 +85,7 @@ const FIT_BOUNDS: Feature<Polygon> = {
 export function WorldVisitsChart({
   data,
   usStates,
+  fillViewport = true,
   heightClassName = CHART_HEIGHT_CLASS,
 }: {
   data: CountryVisitEntry[];
@@ -96,12 +97,15 @@ export function WorldVisitsChart({
    * period-scoped countries and quietly contradict them. Better no
    * expansion than one that disagrees with the map around it. */
   usStates?: UsStateVisitEntry[];
-  /** Defaults to the app-standard full-viewport `CHART_HEIGHT_CLASS`
-   * (#315) — right for this chart's own dedicated `/charts/world` page,
-   * wrong for the recap report, which embeds this same component as one
-   * section among several rather than the page's only content. The recap
-   * passes its own bounded height explicitly rather than inheriting
-   * whatever this component's default happens to be. */
+  /** Defaults to `true` — right for this chart's own dedicated
+   * `/charts/world` page, wrong for the recap report, which embeds this
+   * same component as one section among several rather than the page's
+   * only content. The recap passes `false` (plus its own bounded
+   * `heightClassName`) rather than inheriting whatever this component's
+   * default happens to be. */
+  fillViewport?: boolean;
+  /** The non-fill-viewport fallback/floor className — only matters when
+   * `fillViewport` is `false` (or before it's measured). */
   heightClassName?: string;
 }) {
   const features = useMemo(() => feature(worldTopology, worldTopology.objects.countries), []);
@@ -148,7 +152,7 @@ export function WorldVisitsChart({
   );
 
   return (
-    <ResponsiveChart className={heightClassName} minWidth={360}>
+    <ResponsiveChart className={heightClassName} fillViewport={fillViewport} minWidth={360}>
       {({ width, height }) => (
         <InteractiveGeo<CountryProperties>
           features={features}

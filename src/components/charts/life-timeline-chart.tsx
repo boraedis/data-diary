@@ -150,8 +150,8 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
         </>
       }
     >
-      <ChartCard fillHeight empty={entries.length === 0}>
-        <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={360}>
+      <ChartCard empty={entries.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
           {({ width, height }) => (
             <InteractiveTimeline
               items={items}

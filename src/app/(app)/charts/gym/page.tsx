@@ -16,7 +16,7 @@ export default async function GymWeightChartPage() {
       description="Weight (line, left axis) against workouts logged per month (bars, right axis)."
       info={{ interactionGuide: COMBO_INTERACTION_GUIDE }}
     >
-      <ChartCard fillHeight empty={empty}>
+      <ChartCard empty={empty}>
         <GymWeightComboChart data={data} />
       </ChartCard>
     </ChartPage>

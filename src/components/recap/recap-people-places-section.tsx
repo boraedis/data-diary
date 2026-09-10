@@ -77,7 +77,11 @@ export function RecapPeoplePlacesSection({
             <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
               Travel footprint
             </h3>
-            <WorldVisitsChart data={data.countryVisits} heightClassName="h-[min(62vh,640px)] min-h-[320px]" />
+            <WorldVisitsChart
+              data={data.countryVisits}
+              fillViewport={false}
+              heightClassName="h-[min(62vh,640px)] min-h-[320px]"
+            />
           </section>
         ) : null}
       </div>

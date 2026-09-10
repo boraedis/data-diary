@@ -20,7 +20,7 @@ export default async function PeopleNetworkChartPage() {
       description="The 100 most-logged people; connected when logged together on more than one day."
       info={{ interactionGuide: NETWORK_INTERACTION_GUIDE }}
     >
-      <ChartCard fillHeight empty={data.nodes.length === 0}>
+      <ChartCard empty={data.nodes.length === 0}>
         <PeopleNetworkChart data={data} />
       </ChartCard>
     </ChartPage>

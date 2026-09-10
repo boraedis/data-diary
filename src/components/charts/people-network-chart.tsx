@@ -22,7 +22,7 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkData }) {
   const colorByPersonId = new Map<string | number, string | null>(data.nodes.map((n) => [n.id, n.color]));
 
   return (
-    <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={360}>
+    <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
       {({ width, height }) => (
         <InteractiveNetwork
           nodes={data.nodes.map((n) => ({ id: n.id, label: n.name, count: n.count }))}

@@ -44,7 +44,7 @@ export function HappinessAveragerChart({ data }: { data: MonthlyAverage[] }) {
   );
 
   return (
-    <ResponsiveChart className={CHART_HEIGHT_CLASS}>
+    <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
       {({ width, height }) => (
         <InteractiveLine
           series={[

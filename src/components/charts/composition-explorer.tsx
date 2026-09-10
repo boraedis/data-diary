@@ -104,8 +104,8 @@ export function CompositionExplorer({
         </>
       }
     >
-      <ChartCard fillHeight empty={points.length === 0}>
-        <ResponsiveChart className={CHART_HEIGHT_CLASS}>
+      <ChartCard empty={points.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveArea
               categories={categories}

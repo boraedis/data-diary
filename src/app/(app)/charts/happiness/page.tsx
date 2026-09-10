@@ -15,7 +15,7 @@ export default async function HappinessChartPage() {
       description={`${values.length} day${values.length === 1 ? "" : "s"} logged, one bar per point.`}
       info={{ interactionGuide: HIST_INTERACTION_GUIDE }}
     >
-      <ChartCard fillHeight empty={values.length === 0}>
+      <ChartCard empty={values.length === 0}>
         <HistogramChart values={values} />
       </ChartCard>
     </ChartPage>

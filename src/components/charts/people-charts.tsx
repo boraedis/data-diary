@@ -462,14 +462,14 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
       info={{ interactionGuide: BAR_RACE_INTERACTION_GUIDE }}
       filters={null}
     >
-      <ChartCard fillHeight empty={frames.length === 0}>
+      <ChartCard empty={frames.length === 0}>
         {/* Used to be taller than the app's shared chart-height class, back
             when that class was capped well short of the viewport — 20 rows
             carrying a name and a number inside each bar wanted more room
             than a line or calendar chart typically needs. #315 made the
             shared class fill the remaining viewport height by default, so
             this is no longer a special case. */}
-        <ResponsiveChart className={CHART_HEIGHT_CLASS}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveBarRace
               frames={frames}

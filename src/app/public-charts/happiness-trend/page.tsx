@@ -24,7 +24,7 @@ export default async function PublicHappinessTrendChartPage() {
       backHref="/public-charts"
       backLabel="Charts"
     >
-      <ChartCard fillHeight empty={data.length === 0}>
+      <ChartCard empty={data.length === 0}>
         <HappinessAveragerChart data={data} />
       </ChartCard>
     </ChartPage>
