@@ -87,21 +87,21 @@ export interface ChartEntry {
 
 export const CHARTS: ChartEntry[] = [
   {
-    href: "/charts/happiness",
-    title: "Happiness distribution",
-    description: "How your day-to-day happiness score is spread out, 0-100.",
+    href: "/charts/happiness-hist",
+    title: "Happiness histogram",
+    description: "The distribution of happiness ratings across every day logged.",
     category: "happiness",
   },
   {
     href: "/charts/happiness-trend",
     title: "Happiness trend",
-    description: "Monthly average happiness over time.",
+    description: "The long-run trend in happiness over time, aggregated by period.",
     category: "happiness",
   },
   {
     href: "/charts/happiness-daily",
     title: "Daily happiness",
-    description: "Zoomable line of every logged day's happiness score.",
+    description: "A detailed, day-by-day look at happiness ratings.",
     category: "happiness",
   },
   {
@@ -112,7 +112,7 @@ export const CHARTS: ChartEntry[] = [
   },
   {
     href: "/charts/day-types",
-    title: "Day types",
+    title: "Day types calendar",
     description: "Work, days off, vacation and travel across the years.",
     category: "happiness",
   },

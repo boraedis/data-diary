@@ -4,10 +4,11 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { HappinessAveragerChart } from "@/components/charts/happiness-averager-chart";
 import { getPublicHappinessTrendData } from "@/lib/public-charts";
 import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const metadata: Metadata = {
   title: "Happiness trend — Data Diary",
-  description: "Monthly average happiness over time.",
+  description: "The long-run trend in happiness over time, aggregated by period.",
 };
 
 // Public counterpart to src/app/charts/happiness-trend/page.tsx (#84/#12).
@@ -19,8 +20,8 @@ export default async function PublicHappinessTrendChartPage() {
   return (
     <ChartPage
       title="Happiness trend"
-      description="Monthly average happiness."
-      info={{ interactionGuide: LINE_INTERACTION_GUIDE }}
+      description="The long-run trend in happiness over time, aggregated by period."
+      info={{ interactionGuide: LINE_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
       backHref="/public-charts"
       backLabel="Charts"
     >

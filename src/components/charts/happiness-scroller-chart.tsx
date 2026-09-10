@@ -10,6 +10,7 @@ import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups } from "@/lib/charts";
 import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
 
 // Second real consumer of InteractiveScroller (#117 follow-up) — the raw-
 // daily counterpart to happiness-averager-chart.tsx's monthly bucketing,
@@ -91,8 +92,8 @@ export function HappinessScrollerChart({
   return (
     <ChartPage
       title="Daily happiness"
-      description="Every logged day's happiness score."
-      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE }}
+      description="A detailed, day-by-day look at happiness ratings."
+      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
       backHref={backHref}
       backLabel={backLabel}
       filters={

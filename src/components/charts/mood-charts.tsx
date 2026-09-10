@@ -5,6 +5,7 @@ import { CalendarExplorer } from "@/components/charts/calendar-explorer";
 import { Legend } from "@/components/charts/interactive/legend";
 import { categoricalColor } from "@/lib/viz/color";
 import type { DailyValue, DayTypeDay } from "@/lib/charts";
+import { DAY_TYPE_METHODOLOGY, HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -16,6 +17,7 @@ export function HappinessCalendarChart({ data }: { data: DailyValue[] }) {
       data={data}
       title="Happiness calendar"
       description="Every logged day's happiness score. Hover a day for the exact value."
+      methodology={HAPPINESS_METHODOLOGY}
       formatValue={(v) => `${Math.round(v)} / 100`}
       valueLabel="happiness"
       ariaLabel="Calendar heatmap of daily happiness scores."
@@ -91,8 +93,9 @@ export function DayTypeCalendarChart({ data }: { data: DayTypeDay[] }) {
   return (
     <CalendarExplorer
       data={points}
-      title="Day types"
+      title="Day types calendar"
       description="How each day was classified. Days with no type set are left blank."
+      methodology={DAY_TYPE_METHODOLOGY}
       formatValue={() => ""}
       valueLabel=""
       extraFilters={
