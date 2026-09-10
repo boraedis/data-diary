@@ -38,14 +38,13 @@ import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/l
 //    y axis is ordinal lanes, and stretching those tells you nothing).
 //
 // Sizing: rows share the height the caller offers and the chart draws as
-// tall as those rows need, centred in that space. Rows are allowed to grow
-// generously (ROW.maxHeight) so a chart with a handful of lanes actually
-// uses a tall card rather than sitting small in the middle of it — what
-// keeps that from turning into slabs is the separate cap on bar thickness
-// (ROW.maxBarHeight), so the extra height becomes air between rows instead
-// of fatter bars. Past the row-height floor the SVG grows instead of
-// compressing bars into invisibility, and the wrapper scrolls within the
-// space it was given.
+// tall as those rows need, centred in that space. Rows grow until the bar
+// inside them hits ROW.maxBarHeight and then stop (MAX_ROW_HEIGHT), since
+// past that point extra height is only padding between rows, not a bigger
+// bar. So a timeline with many lanes fills a tall card and one with few
+// lanes sits at its natural size rather than being stretched to fit. Past
+// the row-height floor the SVG grows instead of compressing bars into
+// invisibility, and the wrapper scrolls within the space it was given.
 
 const DEFAULT_MARGIN = { top: 8, right: 16, bottom: 28, left: 96 };
 
@@ -54,22 +53,32 @@ const ROW = {
   /** Below this a bar stops being readable, so the chart gets taller and
    * scrolls rather than compressing further. */
   minHeight: 22,
-  /** Above this, rows stop growing and the leftover becomes padding around
-   * a centred chart. Generous rather than tight: a timeline with a handful
-   * of lanes should still use the space it was given instead of sitting
-   * small in the middle of a tall card. What stops that turning into
-   * slabs is `maxBarHeight` below, not this. */
-  maxHeight: 140,
   /** Share of a row the bar itself occupies; the rest is the gap that
    * separates it from the row above and below (MARK_SPECS.bar.surfaceGap's
    * reasoning, applied vertically). */
   barRatio: 0.62,
-  /** Hard cap on bar thickness, independent of row height. Past roughly
-   * this, a horizontal bar stops reading as a span of time and starts
-   * reading as a block — so a tall container buys breathing room between
-   * rows rather than fatter bars. */
+  /** Hard cap on bar thickness. Past roughly this, a horizontal bar stops
+   * reading as a span of time and starts reading as a block. */
   maxBarHeight: 40,
 };
+
+/**
+ * The row height at which the bar has already reached `ROW.maxBarHeight`,
+ * and therefore the height past which rows stop growing.
+ *
+ * Derived rather than picked, because every pixel beyond this point is
+ * padding: the bar is capped, so a taller row only pushes its neighbours
+ * further away. An earlier version set this to a flat 140 to make the
+ * chart fill a tall card, which did make the bars bigger — up to the cap —
+ * and then kept going, spending the remaining ~100px per row on
+ * whitespace.
+ *
+ * The consequence is deliberate: a timeline with few lanes no longer fills
+ * a tall container, it sits at its natural size and is centred. There is
+ * no way to have both, and bars at a readable thickness with tight gaps
+ * reads better than the same bars adrift in a field of padding.
+ */
+const MAX_ROW_HEIGHT = ROW.maxBarHeight / ROW.barRatio;
 
 /** Bars narrower than this get no inline label — see the module comment on
  * why legacy's shrink-to-fit text was worth dropping. */
@@ -229,7 +238,7 @@ export function InteractiveTimeline({
   // the floor the SVG grows and the wrapper scrolls. See the module comment.
   const availableHeight = Math.max(0, height - MARGIN.top - MARGIN.bottom);
   const rowHeight = layout.totalRows
-    ? Math.min(ROW.maxHeight, Math.max(ROW.minHeight, availableHeight / layout.totalRows))
+    ? Math.min(MAX_ROW_HEIGHT, Math.max(ROW.minHeight, availableHeight / layout.totalRows))
     : ROW.minHeight;
   const innerHeight = layout.totalRows * rowHeight;
   // The SVG is exactly as tall as its content; the wrapper keeps the full
