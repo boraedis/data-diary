@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveTimeline } from "@/components/charts/interactive/interactive-timeline";
 import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
@@ -151,7 +151,7 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
       }
     >
       <ChartCard empty={entries.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={360}>
           {({ width, height }) => (
             <InteractiveTimeline
               items={items}

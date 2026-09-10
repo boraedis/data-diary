@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import * as d3 from "d3";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveHist } from "@/components/charts/interactive/interactive-hist";
 import { categoricalColor } from "@/lib/viz/color";
 
@@ -30,7 +30,7 @@ export function HistogramChart({ values }: { values: number[] }) {
   }, [values]);
 
   return (
-    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+    <ResponsiveChart className={CHART_HEIGHT_CLASS}>
       {({ width, height }) => (
         <InteractiveHist
           values={values}

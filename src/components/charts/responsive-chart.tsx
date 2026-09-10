@@ -2,6 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/**
+ * The standard chart height, shared by every `ResponsiveChart` whose size
+ * should come from available screen space (a canvas-style chart — line,
+ * area, network, geo, ranked, bar-race, scroller — as opposed to one whose
+ * height is intrinsic to its content, like a calendar's year count, or
+ * tied to its width, like a square donut).
+ *
+ * Deliberately keyed off the viewport height minus `ChartPage`'s own
+ * vertical padding ONLY (`py-4`/`md:py-6`, see chart-page.tsx) — not the
+ * title, description, or filters row rendered above it. #315 follow-up
+ * feedback: the chart card should be at least a full page tall regardless
+ * of that "chrome," so a page with a filters row simply scrolls a little
+ * further to reveal the whole card, rather than the chart shrinking to
+ * make room for what's above it. If `ChartPage`'s padding ever changes,
+ * update this to match.
+ */
+export const CHART_HEIGHT_CLASS = "h-[calc(100dvh-2rem)] md:h-[calc(100dvh-3rem)] min-h-[320px]";
+
 type ResponsiveChartProps = {
   /** Fixed chart height in px — use this for a chart whose height should
    * come from its own content (a calendar's row count, a small-multiples

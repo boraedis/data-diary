@@ -20,7 +20,7 @@ import {
 import { personImpact, recencyWeight } from "@/lib/impact";
 import { computeRankings, type RankWindow } from "@/lib/ranking";
 import { categoricalColor } from "@/lib/viz/color";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveBarRace } from "@/components/charts/interactive/interactive-bar-race";
 import type { RaceFrame } from "@/lib/viz/race";
 import { daysBetween, parseDate } from "@/lib/date";
@@ -463,15 +463,13 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
       filters={null}
     >
       <ChartCard empty={frames.length === 0}>
-        {/* Taller than the app's usual `h-[min(62vh,640px)]` chart class,
-            which every other chart page shares. Deliberate, and the one
-            place it's worth breaking: 20 rows carrying a name and a number
-            inside each bar need the height, and unlike a line or a
-            calendar this chart has nothing else on the page competing for
-            the viewport. Capped so it still fits a laptop screen with the
-            card header above it, rather than forcing a scroll to see the
-            controls. */}
-        <ResponsiveChart className="h-[min(72vh,820px)] min-h-[420px]">
+        {/* Used to be taller than the app's shared chart-height class, back
+            when that class was capped well short of the viewport — 20 rows
+            carrying a name and a number inside each bar wanted more room
+            than a line or calendar chart typically needs. #315 made the
+            shared class fill the remaining viewport height by default, so
+            this is no longer a special case. */}
+        <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveBarRace
               frames={frames}

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveArea,
   type InteractiveAreaCategory,
@@ -105,7 +105,7 @@ export function CompositionExplorer({
       }
     >
       <ChartCard empty={points.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+        <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveArea
               categories={categories}

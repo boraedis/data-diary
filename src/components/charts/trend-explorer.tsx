@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveLine, type InteractiveLinePoint } from "@/components/charts/interactive/interactive-line";
 import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
@@ -135,7 +135,7 @@ export function TrendExplorer<T extends { date: string }>({
       }
     >
       <ChartCard empty={points.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+        <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveLine
               series={[

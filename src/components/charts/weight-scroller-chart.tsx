@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveScroller, type InteractiveScrollerPoint, type InteractiveScrollerSeries } from "@/components/charts/interactive/interactive-scroller";
 import { MultiSelectPicker, type MultiSelectOption } from "@/components/charts/interactive/multi-select-picker";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
@@ -165,7 +165,7 @@ export function WeightScrollerChart({
       }
     >
       <ChartCard empty={series.every((s) => s.points.length === 0)}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+        <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveScroller
               series={series}

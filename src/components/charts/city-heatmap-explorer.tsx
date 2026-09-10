@@ -11,7 +11,7 @@ import nycTopoRaw from "@/data/geo/nyc.topo.json";
 import istanbulTopoRaw from "@/data/geo/istanbul.topo.json";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ChartCard } from "@/components/charts/chart-card";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
@@ -128,7 +128,7 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
       }
     >
       <ChartCard empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={360}>
           {({ width, height }) => (
             <InteractiveGeo<CityProperties>
               features={features}

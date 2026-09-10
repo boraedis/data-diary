@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ChartCard } from "@/components/charts/chart-card";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveArea,
   type InteractiveAreaCategory,
@@ -178,7 +178,7 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
       }
     >
       <ChartCard empty={rows.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={240}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={240}>
           {({ width, height }) => (
             <InteractiveArea
               categories={categories}

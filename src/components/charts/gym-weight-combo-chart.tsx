@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { styleAxis } from "@/components/charts/interactive/axis";
 import { MARK_SPECS, attachMarkHover, roundedBarPath } from "@/components/charts/interactive/marks";
 import { ChartTooltip } from "@/components/charts/interactive/tooltip";
@@ -166,7 +166,7 @@ export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" wrapperRef={setContainerEl}>
+      <ResponsiveChart className={CHART_HEIGHT_CLASS} wrapperRef={setContainerEl}>
         {({ width, height }) => (
           <>
             <Combo
