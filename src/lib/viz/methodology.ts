@@ -26,6 +26,9 @@ export const COFFEE_METHODOLOGY =
 export const DISTANCE_METHODOLOGY =
   "Distance walked comes from my iPhone's own tracking, logged once per day. It has the usual limitations of phone-based tracking — a day with the phone left behind or spent walking indoors can undercount — but it's a consistent enough source to see real patterns over time.";
 
+export const WEIGHT_METHODOLOGY =
+  "Weight is logged as often as I remember to step on the scale — there's no fixed schedule, so gaps and clusters in the data reflect how consistent I was at the time, not anything about my weight itself. It's a digital scale that also estimates body fat % and muscle mass alongside the weight reading, using whatever method the scale itself uses — those two are rougher estimates than the weight number itself.";
+
 export const TRAINING_METHODOLOGY =
   "Every workout is logged here, whether that's a structured gym session, a sport, or a casual jog. Most of it comes from an app I already track things in — Strava for cardio, Hevy for lifting — copied or imported over, but anything more casual, like playing volleyball in the park with friends, gets logged directly.";
 
