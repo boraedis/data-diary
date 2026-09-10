@@ -61,6 +61,14 @@ export function HevyImportModal({
       setErrors(["Paste some Hevy workout text first"]);
       return;
     }
+    // Required, not optional (see issue #229's own open question, and #228):
+    // leaving it blank was legacy's quirk that produced non-timed workouts
+    // with no duration at all, which is exactly what #228 found. Import is
+    // the one place this can be prevented outright, so it's enforced here.
+    if (sessionTotalMinutes === null) {
+      setErrors(["Session total duration is required"]);
+      return;
+    }
     const result = parseHevyImport(text, exerciseCatalog, {
       locationId,
       sessionTotalMinutes,
@@ -114,9 +122,7 @@ export function HevyImportModal({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="hevy-duration">
-            Session total duration (optional — sets without a timed duration get no duration recorded if left blank)
-          </Label>
+          <Label htmlFor="hevy-duration">Session total duration</Label>
           <DurationInput
             id="hevy-duration"
             totalMinutes={sessionTotalMinutes}
@@ -138,7 +144,7 @@ export function HevyImportModal({
           <Button type="button" variant="outline" onClick={handleClose}>
             Close
           </Button>
-          <Button type="button" onClick={handleImport} disabled={!text.trim()}>
+          <Button type="button" onClick={handleImport} disabled={!text.trim() || sessionTotalMinutes === null}>
             Import
           </Button>
         </div>
