@@ -4,12 +4,13 @@ import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveLine, type InteractiveLinePoint } from "@/components/charts/interactive/interactive-line";
 import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate } from "@/lib/date";
+import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 /**
  * Legacy's "averager" shape with real controls: a value per period, over a
@@ -30,6 +31,7 @@ export function TrendExplorer<T extends { date: string }>({
   data,
   title,
   description,
+  methodology,
   seriesId,
   label,
   color,
@@ -43,6 +45,9 @@ export function TrendExplorer<T extends { date: string }>({
   data: T[];
   title: string;
   description: string;
+  /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
+   * Falls back to a visible placeholder when omitted. */
+  methodology?: string;
   seriesId: string;
   label: string;
   color: string;
@@ -117,6 +122,8 @@ export function TrendExplorer<T extends { date: string }>({
   return (
     <ChartPage
       title={title}
+      description={description}
+      info={{ interactionGuide: LINE_INTERACTION_GUIDE, methodology }}
       filters={
         domain ? (
           <>
@@ -127,8 +134,8 @@ export function TrendExplorer<T extends { date: string }>({
         ) : null
       }
     >
-      <ChartCard title={title} description={description} empty={points.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+      <ChartCard empty={points.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveLine
               series={[

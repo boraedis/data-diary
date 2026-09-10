@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import worldTopologyRaw from "world-atlas/countries-110m.json";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
 import { loadUsStateFeatures, usStatesExpansion } from "@/components/charts/us-geo-levels";
 import { normalizeCountryName } from "@/lib/geo/country-names";
@@ -85,6 +85,8 @@ const FIT_BOUNDS: Feature<Polygon> = {
 export function WorldVisitsChart({
   data,
   usStates,
+  fillViewport = true,
+  heightClassName = CHART_HEIGHT_CLASS,
 }: {
   data: CountryVisitEntry[];
   /** Per-state day counts, enabling the US drill-down. Omit to keep this
@@ -95,6 +97,16 @@ export function WorldVisitsChart({
    * period-scoped countries and quietly contradict them. Better no
    * expansion than one that disagrees with the map around it. */
   usStates?: UsStateVisitEntry[];
+  /** Defaults to `true` — right for this chart's own dedicated
+   * `/charts/world` page, wrong for the recap report, which embeds this
+   * same component as one section among several rather than the page's
+   * only content. The recap passes `false` (plus its own bounded
+   * `heightClassName`) rather than inheriting whatever this component's
+   * default happens to be. */
+  fillViewport?: boolean;
+  /** The non-fill-viewport fallback/floor className — only matters when
+   * `fillViewport` is `false` (or before it's measured). */
+  heightClassName?: string;
 }) {
   const features = useMemo(() => feature(worldTopology, worldTopology.objects.countries), []);
 
@@ -140,7 +152,7 @@ export function WorldVisitsChart({
   );
 
   return (
-    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
+    <ResponsiveChart className={heightClassName} fillViewport={fillViewport} minWidth={360}>
       {({ width, height }) => (
         <InteractiveGeo<CountryProperties>
           features={features}

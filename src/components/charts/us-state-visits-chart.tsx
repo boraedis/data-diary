@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import statesTopologyRaw from "us-atlas/states-10m.json";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
 import {
   isAlbersUsaDrawable,
@@ -91,7 +91,7 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
 
   return (
     <>
-      <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={360}>
+      <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
         {({ width, height }) => (
           <InteractiveGeo<UsStateProperties>
             features={features}

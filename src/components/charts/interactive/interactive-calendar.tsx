@@ -449,7 +449,18 @@ export function InteractiveCalendar({
           formatValue={formatValue}
           valueT={legendT}
           className="fixed bottom-0 z-10 border-t border-border bg-background/95 px-3 py-2 backdrop-blur"
-          style={{ left: containerRect.left + gridLeft, width: gridWidth }}
+          // Clamped to the container's own visible width, not `gridWidth`
+          // outright — `position: fixed` escapes the grid's own
+          // `overflow-x-auto` (that's the whole reason it's fixed rather
+          // than sticky, see the comment above), so at the MIN_CELL_SIZE
+          // floor, where `gridWidth` can exceed what's actually on
+          // screen, an unclamped legend rendered its full intended width
+          // regardless — visibly spilling past the card's (and on a
+          // phone, the viewport's) right edge instead of scrolling into
+          // view the way the grid itself does. Below that floor, `width -
+          // LEFT_LABEL_WIDTH >= gridWidth` always holds, so this is a
+          // no-op and matches the previous, un-clamped value exactly.
+          style={{ left: containerRect.left + gridLeft, width: Math.min(gridWidth, Math.max(0, width - LEFT_LABEL_WIDTH)) }}
         />
       ) : null}
     </div>

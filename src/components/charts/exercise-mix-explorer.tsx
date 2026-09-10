@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ChartCard } from "@/components/charts/chart-card";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveArea,
   type InteractiveAreaCategory,
@@ -17,6 +17,7 @@ import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate, toDateString } from "@/lib/date";
 import { formatDate } from "@/lib/viz/format";
 import { EXERCISE_CATEGORY_LABELS, EXERCISE_CATEGORY_ORDER, type ExerciseWorkoutRow } from "@/lib/charts";
+import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // ExerciseMixExplorer - the real InteractiveArea (#19) consumer, and the
 // proving ground for #19's "core tools" ask: a period-granularity picker,
@@ -165,6 +166,8 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
   return (
     <ChartPage
       title="Exercise mix"
+      description="Workout count by category, exercise, or subtype - bucketed by week, month, quarter, or year."
+      info={{ interactionGuide: AREA_INTERACTION_GUIDE }}
       filters={
         <>
           <PeriodPicker value={period} onChange={setPeriod} />
@@ -174,12 +177,8 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
         </>
       }
     >
-      <ChartCard
-        title="Exercise mix"
-        description="Workout count by category, exercise, or subtype - bucketed by week, month, quarter, or year. Click a legend entry to hide it."
-        empty={rows.length === 0}
-      >
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]" minWidth={240}>
+      <ChartCard empty={rows.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={240}>
           {({ width, height }) => (
             <InteractiveArea
               categories={categories}

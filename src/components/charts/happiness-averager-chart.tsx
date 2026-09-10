@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import * as d3 from "d3";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveLine, type InteractiveLinePoint } from "@/components/charts/interactive/interactive-line";
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
@@ -44,7 +44,7 @@ export function HappinessAveragerChart({ data }: { data: MonthlyAverage[] }) {
   );
 
   return (
-    <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+    <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
       {({ width, height }) => (
         <InteractiveLine
           series={[

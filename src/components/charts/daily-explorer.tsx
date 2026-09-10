@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveScroller,
   type InteractiveScrollerPoint,
@@ -11,6 +11,7 @@ import {
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
+import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 /**
  * Legacy's "scroller" shape with controls: every logged day, zoomable, with
@@ -38,6 +39,7 @@ export function DailyExplorer({
   data,
   title,
   description,
+  methodology,
   seriesId,
   label,
   color,
@@ -49,6 +51,9 @@ export function DailyExplorer({
   data: DailyValue[];
   title: string;
   description: string;
+  /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
+   * Falls back to a visible placeholder when omitted. */
+  methodology?: string;
   seriesId: string;
   label: string;
   color: string;
@@ -75,6 +80,8 @@ export function DailyExplorer({
   return (
     <ChartPage
       title={title}
+      description={description}
+      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology }}
       filters={
         <>
           {extraFilters}
@@ -87,8 +94,8 @@ export function DailyExplorer({
         </>
       }
     >
-      <ChartCard title={title} description={description} empty={points.length === 0}>
-        <ResponsiveChart className="h-[min(62vh,640px)] min-h-[320px]">
+      <ChartCard empty={points.length === 0}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveScroller
               series={[{ id: seriesId, label, color, points, movingAverage: window > 0 }]}

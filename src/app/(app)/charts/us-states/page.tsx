@@ -2,6 +2,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { UsStateVisitsChart } from "@/components/charts/us-state-visits-chart";
 import { getUsCountyVisitData, getUsStateVisitData } from "@/lib/charts";
+import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +15,12 @@ export default async function UsStateVisitsChartPage() {
   const [data, counties] = await Promise.all([getUsStateVisitData(), getUsCountyVisitData()]);
 
   return (
-    <ChartPage title="Days per state">
+    <ChartPage
+      title="Days per state"
+      description="Distinct days logged in each US state. Click a state to drill into its counties."
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
+    >
       <ChartCard
-        title="Days per state"
-        description="Distinct days logged in each US state. Click a state to drill into its counties, scroll to zoom, drag to pan, hover for the exact count."
         // Only the whole-country case is empty here — a state you've never
         // been to is a real, meaningful zero, and InteractiveGeo already
         // renders it as a muted "no data" fill with its own tooltip row

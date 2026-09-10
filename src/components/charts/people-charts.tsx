@@ -20,11 +20,12 @@ import {
 import { personImpact, recencyWeight } from "@/lib/impact";
 import { computeRankings, type RankWindow } from "@/lib/ranking";
 import { categoricalColor } from "@/lib/viz/color";
-import { ResponsiveChart } from "@/components/charts/responsive-chart";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveBarRace } from "@/components/charts/interactive/interactive-bar-race";
 import type { RaceFrame } from "@/lib/viz/race";
 import { daysBetween, parseDate } from "@/lib/date";
 import type { PeopleDay } from "@/lib/charts";
+import { BAR_RACE_INTERACTION_GUIDE, RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -296,15 +297,13 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
   return (
     <ChartPage
       title="People table"
+      description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
+      info={{ interactionGuide: RANKED_INTERACTION_GUIDE }}
       filters={
         <GroupByPicker value={limit} onChange={setLimit} options={LIMIT_OPTIONS} label="Show" />
       }
     >
-      <ChartCard
-        title="People table"
-        description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
-        empty={shown.length === 0}
-      >
+      <ChartCard empty={shown.length === 0}>
         <InteractiveRanked
           entries={shown}
           valueLabel="Days"
@@ -457,21 +456,20 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
   );
 
   return (
-    <ChartPage title="People race" filters={null}>
-      <ChartCard
-        title="People race"
-        description="Who mattered most, week by week — each person's score sums the impact of every day you logged them, with older days fading, so the board reflects who was around lately rather than an all-time total."
-        empty={frames.length === 0}
-      >
-        {/* Taller than the app's usual `h-[min(62vh,640px)]` chart class,
-            which every other chart page shares. Deliberate, and the one
-            place it's worth breaking: 20 rows carrying a name and a number
-            inside each bar need the height, and unlike a line or a
-            calendar this chart has nothing else on the page competing for
-            the viewport. Capped so it still fits a laptop screen with the
-            card header above it, rather than forcing a scroll to see the
-            controls. */}
-        <ResponsiveChart className="h-[min(72vh,820px)] min-h-[420px]">
+    <ChartPage
+      title="People race"
+      description="Who mattered most, week by week — each person's score sums the impact of every day you logged them, with older days fading, so the board reflects who was around lately rather than an all-time total."
+      info={{ interactionGuide: BAR_RACE_INTERACTION_GUIDE }}
+      filters={null}
+    >
+      <ChartCard empty={frames.length === 0}>
+        {/* Used to be taller than the app's shared chart-height class, back
+            when that class was capped well short of the viewport — 20 rows
+            carrying a name and a number inside each bar wanted more room
+            than a line or calendar chart typically needs. #315 made the
+            shared class fill the remaining viewport height by default, so
+            this is no longer a special case. */}
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveBarRace
               frames={frames}

@@ -14,6 +14,7 @@ import {
   type HierarchyDatum,
 } from "@/lib/viz/hierarchy";
 import type { PlaceHierarchyRow } from "@/lib/charts";
+import { DONUT_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 
 // PlaceHierarchyExplorer — the real InteractiveDonut (#118) consumer, and
 // the reason that primitive is a Sunburst rather than a single-ring donut:
@@ -141,6 +142,12 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
   return (
     <ChartPage
       title="Place hierarchy"
+      description={
+        grouping === "geography"
+          ? "Where your days happen, nested country to venue."
+          : "Places by category and subcategory."
+      }
+      info={{ interactionGuide: DONUT_INTERACTION_GUIDE }}
       filters={
         <>
           <GroupByPicker value={grouping} onChange={setGrouping} options={GROUPING_OPTIONS} label="Break down by" />
@@ -148,15 +155,7 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
         </>
       }
     >
-      <ChartCard
-        title="Place hierarchy"
-        description={
-          grouping === "geography"
-            ? "Where your days happen, nested country to venue. Click a slice to zoom in, the center to zoom back out."
-            : "Places by category and subcategory. Click a slice to zoom in, the center to zoom back out."
-        }
-        empty={tree === null}
-      >
+      <ChartCard empty={tree === null}>
         {/* Not the h-[min(62vh,640px)] every other chart page here uses.
             A sunburst's radius is min(width, height), so height and width
             have to be spent together — which cuts both ways:
