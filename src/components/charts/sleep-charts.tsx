@@ -13,6 +13,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { SleepNight } from "@/lib/charts";
+import { SLEEP_LOCATION_METHODOLOGY, SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
 
 // See coffee-charts.tsx for why this thin client layer exists: the
 // explorers take formatter functions, which a server-component page can't
@@ -28,6 +29,7 @@ export function SleepTrendChart({ data }: { data: SleepNight[] }) {
       data={data}
       title="Sleep trend"
       description="Average time asleep per night. Marker size shows how many nights fed each point; the band shows that bucket's range."
+      methodology={SLEEP_METHODOLOGY}
       seriesId="sleep"
       label="Sleep"
       color={SLEEP_COLOR}
@@ -51,6 +53,7 @@ export function SleepDailyChart({ data }: { data: SleepNight[] }) {
       data={points}
       title="Nightly sleep"
       description="Every logged night. Scroll or drag to zoom, and use the strip below to move through the range."
+      methodology={SLEEP_METHODOLOGY}
       seriesId="sleep"
       label="Sleep"
       color={SLEEP_COLOR}
@@ -121,6 +124,7 @@ export function SleepLocationChart({ data }: { data: SleepNight[] }) {
       categories={categories}
       title="Sleep locations"
       description="Where you slept, as a share of nights. Only nights with a location recorded — that wasn't tracked before mid-2023."
+      methodology={SLEEP_LOCATION_METHODOLOGY}
       valueFormat={(v) =>
         metric === "nights" ? `${Math.round(v)} night${v === 1 ? "" : "s"}` : formatHours(v)
       }

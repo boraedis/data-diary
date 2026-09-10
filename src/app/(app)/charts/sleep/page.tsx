@@ -3,6 +3,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { SleepCalendarChart } from "@/components/charts/sleep-calendar-chart";
 import { getSleepCalendarData } from "@/lib/charts";
 import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function SleepChartPage() {
     <ChartPage
       title="Sleep calendar"
       description="Nightly sleep duration, darker = less sleep, brighter = more."
-      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE }}
+      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology: SLEEP_METHODOLOGY }}
     >
       <ChartCard empty={data.length === 0}>
         <SleepCalendarChart data={data} />
