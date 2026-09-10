@@ -100,13 +100,17 @@ describe("chainRoles", () => {
 });
 
 describe("buildTimelineView", () => {
+  // Deliberately newest-first, because that is exactly how the data
+  // arrives: every list function in src/lib/profile.ts `reverse()`s for the
+  // admin UI. Ordering assertions below are meaningless against a fixture
+  // that is already sorted the way the answer should come out.
   const DATA = [
-    entry({ id: "occupation-1", label: "Co-op", kind: "occupation", company: "Delta", metro: "Atlanta" }),
-    entry({ id: "occupation-2", label: "Consultant", kind: "occupation", company: "CapTech", metro: "Atlanta" }),
-    entry({ id: "occupation-3", label: "Engineer", kind: "occupation", company: "Capital One", metro: "Washington DC" }),
-    entry({ id: "residence-1", label: "Dorm", kind: "residence", neighborhood: "Georgia Tech", state: "Georgia", country: "USA", metro: "Atlanta" }),
-    entry({ id: "residence-2", label: "Ballston", kind: "residence", neighborhood: "Ballston", state: "Virginia", country: "USA", metro: "Washington DC" }),
-    entry({ id: "relationship-1", label: "Someone", kind: "relationship" }),
+    entry({ id: "occupation-3", label: "Engineer", kind: "occupation", company: "Capital One", metro: "Washington DC", start: "2024-01-01" }),
+    entry({ id: "occupation-2", label: "Consultant", kind: "occupation", company: "CapTech", metro: "Atlanta", start: "2022-01-01" }),
+    entry({ id: "occupation-1", label: "Co-op", kind: "occupation", company: "Delta", metro: "Atlanta", start: "2020-01-01" }),
+    entry({ id: "residence-2", label: "Ballston", kind: "residence", neighborhood: "Ballston", state: "Virginia", country: "USA", metro: "Washington DC", start: "2024-01-01" }),
+    entry({ id: "residence-1", label: "Dorm", kind: "residence", neighborhood: "Georgia Tech", state: "Georgia", country: "USA", metro: "Atlanta", start: "2020-01-01" }),
+    entry({ id: "relationship-1", label: "Someone", kind: "relationship", start: "2021-01-01" }),
   ];
 
   it("lanes by timeline kind in overview mode", () => {
@@ -117,7 +121,7 @@ describe("buildTimelineView", () => {
 
   it("shows only the focused timeline in a focused mode", () => {
     const view = buildTimelineView(DATA, { mode: "residence", groupBy: "entry" });
-    expect(view.map((i) => i.id)).toEqual(["residence-1", "residence-2"]);
+    expect(new Set(view.map((i) => i.id))).toEqual(new Set(["residence-1", "residence-2"]));
   });
 
   it("gives each entry its own lane under the entry grouping", () => {
@@ -127,11 +131,35 @@ describe("buildTimelineView", () => {
     expect(view.map((i) => i.lane)).toEqual(["Dorm", "Ballston"]);
   });
 
+  it("puts the oldest lane at the top of a focused mode, whatever order the data arrives in", () => {
+    // Reading down the chart should read forwards through time, matching
+    // the axis. The data arrives newest-first (see DATA above), so this
+    // only holds because the ordering is imposed rather than inherited —
+    // before the fix every drill-down rendered upside down.
+    expect(buildTimelineView(DATA, { mode: "residence", groupBy: "entry" }).map((i) => i.lane)).toEqual([
+      "Dorm",
+      "Ballston",
+    ]);
+    expect(buildTimelineView(DATA, { mode: "occupation", groupBy: "company" }).map((i) => i.lane)).toEqual([
+      "Delta",
+      "CapTech",
+      "Capital One",
+    ]);
+  });
+
+  it("ranks a merged lane by its earliest entry, not its latest", () => {
+    // Atlanta's first job predates Washington DC's, so Atlanta leads even
+    // though it also holds a later entry.
+    const view = buildTimelineView(DATA, { mode: "occupation", groupBy: "metro" });
+    expect(view.map((i) => i.lane)).toEqual(["Atlanta", "Atlanta", "Washington DC"]);
+  });
+
   it("merges entries that share a grouping value into one lane", () => {
     // The point of metro grouping: Arlington, Reston and Tysons Corner are
     // one place as far as "where did I live" is concerned.
     const view = buildTimelineView(DATA, { mode: "occupation", groupBy: "metro" });
-    expect(view.map((i) => i.lane)).toEqual(["Atlanta", "Atlanta", "Washington DC"]);
+    expect(view.filter((i) => i.lane === "Atlanta")).toHaveLength(2);
+    expect(view.filter((i) => i.lane === "Washington DC")).toHaveLength(1);
   });
 
   it("groups occupations by company", () => {
@@ -148,12 +176,19 @@ describe("buildTimelineView", () => {
     expect(view.map((i) => i.lane)).toEqual(expected);
   });
 
-  it("orders lanes by when each first appears, not alphabetically", () => {
-    // layoutTimeline keys the y-axis off first appearance, and entries
-    // arrive start-ascending — so lanes come out in the order they entered
-    // your life, which is the right reading for a timeline.
+  it("orders lanes chronologically, not alphabetically", () => {
+    // Alphabetical would put Capital One first; chronological is the right
+    // reading for a timeline.
     const view = buildTimelineView(DATA, { mode: "occupation", groupBy: "company" });
     expect(view.map((i) => i.lane)).toEqual(["Delta", "CapTech", "Capital One"]);
+  });
+
+  it("keeps overview mode's three lanes in kind order, not chronological order", () => {
+    // Residence and occupation both start in 2020 here and the
+    // relationship starts later, but the overview's grouping is about kind
+    // rather than chronology, so the order is fixed.
+    const view = buildTimelineView(DATA, { mode: "all", groupBy: "entry" });
+    expect([...new Set(view.map((i) => i.lane))]).toEqual(["Occupation", "Residence", "Relationship"]);
   });
 
   it("buckets entries with nothing recorded for the grouping, rather than dropping them", () => {
@@ -168,8 +203,8 @@ describe("buildTimelineView", () => {
 
   it("forces the not-recorded lane last, however early its entries start", () => {
     const data = [
-      entry({ id: "occupation-1", label: "Unknown", company: null }),
-      entry({ id: "occupation-2", label: "Known", company: "Delta" }),
+      entry({ id: "occupation-1", label: "Unknown", company: null, start: "2001-01-01" }),
+      entry({ id: "occupation-2", label: "Known", company: "Delta", start: "2020-01-01" }),
     ];
     const view = buildTimelineView(data, { mode: "occupation", groupBy: "company" });
     expect(view.map((i) => i.lane)).toEqual(["Delta", UNGROUPED_LANE]);

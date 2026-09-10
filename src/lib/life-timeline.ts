@@ -121,14 +121,23 @@ function laneFor(entry: LifeTimelineEntry, groupBy: LifeTimelineGroupBy): string
  * Turns the fetched entries into the intervals the chart draws, for one
  * mode + grouping.
  *
- * Lane order is the order lanes are first seen here, because that's what
- * `layoutTimeline` keys the y-axis off. Entries arrive start-ascending, so
- * grouped lanes come out in order of *when that lane first appears in your
- * life* — countries in the order you lived in them, companies in the order
- * you joined them. That reads far better than alphabetical for a timeline,
- * and needs no sorting to achieve; it's just a property of not re-sorting.
+ * In a focused mode, lanes are ordered **oldest first** — the lane whose
+ * earliest entry begins soonest sits at the top, so reading down the chart
+ * reads forwards through time, matching the left-to-right axis.
  *
- * `UNGROUPED_LANE` is the exception: it's forced last, since "Not
+ * That ordering is imposed here rather than inherited from the input. The
+ * first version leaned on `layoutTimeline` ordering lanes by first
+ * appearance and assumed the entries arrived start-ascending; they don't —
+ * `src/lib/profile.ts`'s list functions all `reverse()` to newest-first for
+ * the admin UI, so every drill-down came out upside down, newest at the
+ * top.
+ *
+ * Overview mode is the exception: its three lanes are fixed
+ * (occupation, residence, relationship) and stay in that order regardless
+ * of which timeline happens to start earliest, since that grouping is
+ * about kind, not chronology.
+ *
+ * `UNGROUPED_LANE` is the other exception: always last, since "Not
  * recorded" is a footnote rather than a step in the sequence.
  */
 export function buildTimelineView(
@@ -163,8 +172,37 @@ export function buildTimelineView(
           end: entry.end,
         }));
 
-  const ungrouped = intervals.filter((i) => i.lane === UNGROUPED_LANE);
-  return ungrouped.length === 0 ? intervals : [...intervals.filter((i) => i.lane !== UNGROUPED_LANE), ...ungrouped];
+  return orderLanes(intervals, mode);
+}
+
+/**
+ * Re-emits `intervals` so that `layoutTimeline`, which lanes by first
+ * appearance, lays the lanes out in the order this decides: oldest lane
+ * first in a focused mode, the fixed kind order in overview mode, and
+ * `UNGROUPED_LANE` last either way.
+ */
+function orderLanes(intervals: TimelineInterval[], mode: LifeTimelineMode): TimelineInterval[] {
+  const earliestByLane = new Map<string, string>();
+  for (const interval of intervals) {
+    const known = earliestByLane.get(interval.lane);
+    if (known === undefined || interval.start < known) earliestByLane.set(interval.lane, interval.start);
+  }
+
+  const kindOrder = Object.values(KIND_LANES);
+  const rank = (lane: string): [number, string] => {
+    if (lane === UNGROUPED_LANE) return [2, ""];
+    if (mode === "all") return [1, String(kindOrder.indexOf(lane)).padStart(3, "0")];
+    return [1, earliestByLane.get(lane) ?? ""];
+  };
+
+  const lanes = [...earliestByLane.keys()].sort((a, b) => {
+    const [groupA, keyA] = rank(a);
+    const [groupB, keyB] = rank(b);
+    if (groupA !== groupB) return groupA - groupB;
+    return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
+  });
+
+  return lanes.flatMap((lane) => intervals.filter((interval) => interval.lane === lane));
 }
 
 /** The groupings offered for each mode, in the order they're shown. */

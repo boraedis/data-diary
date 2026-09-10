@@ -37,13 +37,15 @@ import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/l
 //    zooms and pans on x (the only axis where zooming means anything: the
 //    y axis is ordinal lanes, and stretching those tells you nothing).
 //
-// Sizing: rows share the height the caller offers, within a readable band,
-// and the chart then draws only as tall as it actually needs, centred in
-// that space. A timeline has no natural way to fill arbitrary vertical
-// space — three lanes are three lanes — so stretching rows to fill a tall
-// card would just produce three slabs. Past the row-height floor the SVG
-// grows instead of compressing bars into invisibility, and the wrapper
-// scrolls within the space it was given.
+// Sizing: rows share the height the caller offers and the chart draws as
+// tall as those rows need, centred in that space. Rows are allowed to grow
+// generously (ROW.maxHeight) so a chart with a handful of lanes actually
+// uses a tall card rather than sitting small in the middle of it — what
+// keeps that from turning into slabs is the separate cap on bar thickness
+// (ROW.maxBarHeight), so the extra height becomes air between rows instead
+// of fatter bars. Past the row-height floor the SVG grows instead of
+// compressing bars into invisibility, and the wrapper scrolls within the
+// space it was given.
 
 const DEFAULT_MARGIN = { top: 8, right: 16, bottom: 28, left: 96 };
 
@@ -52,14 +54,21 @@ const ROW = {
   /** Below this a bar stops being readable, so the chart gets taller and
    * scrolls rather than compressing further. */
   minHeight: 22,
-  /** Above this, rows stop growing and the extra space becomes padding —
-   * a three-lane timeline in a tall container shouldn't render three
-   * 200px slabs. */
-  maxHeight: 44,
+  /** Above this, rows stop growing and the leftover becomes padding around
+   * a centred chart. Generous rather than tight: a timeline with a handful
+   * of lanes should still use the space it was given instead of sitting
+   * small in the middle of a tall card. What stops that turning into
+   * slabs is `maxBarHeight` below, not this. */
+  maxHeight: 140,
   /** Share of a row the bar itself occupies; the rest is the gap that
    * separates it from the row above and below (MARK_SPECS.bar.surfaceGap's
    * reasoning, applied vertically). */
   barRatio: 0.62,
+  /** Hard cap on bar thickness, independent of row height. Past roughly
+   * this, a horizontal bar stops reading as a span of time and starts
+   * reading as a block — so a tall container buys breathing room between
+   * rows rather than fatter bars. */
+  maxBarHeight: 40,
 };
 
 /** Bars narrower than this get no inline label — see the module comment on
@@ -335,7 +344,7 @@ export function InteractiveTimeline({
       const axisG = g.append("g").attr("transform", `translate(0,${innerHeight})`);
       styleAxis(axisG, d3.axisBottom(x).ticks(Math.max(2, Math.floor(innerWidth / 90))));
 
-      const barHeight = Math.max(6, rowHeight * ROW.barRatio);
+      const barHeight = Math.min(ROW.maxBarHeight, Math.max(6, rowHeight * ROW.barRatio));
       const barOffset = (rowHeight - barHeight) / 2;
       const allItems = layout.lanes.flatMap((lane) => lane.items);
 
