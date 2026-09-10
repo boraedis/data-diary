@@ -462,7 +462,7 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
       info={{ interactionGuide: BAR_RACE_INTERACTION_GUIDE }}
       filters={null}
     >
-      <ChartCard empty={frames.length === 0}>
+      <ChartCard fillHeight empty={frames.length === 0}>
         {/* Used to be taller than the app's shared chart-height class, back
             when that class was capped well short of the viewport — 20 rows
             carrying a name and a number inside each bar wanted more room

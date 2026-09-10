@@ -127,7 +127,7 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
         </>
       }
     >
-      <ChartCard empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
+      <ChartCard fillHeight empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={360}>
           {({ width, height }) => (
             <InteractiveGeo<CityProperties>

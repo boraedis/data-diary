@@ -5,20 +5,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * The standard chart height, shared by every `ResponsiveChart` whose size
  * should come from available screen space (a canvas-style chart — line,
- * area, network, geo, ranked, bar-race, scroller — as opposed to one whose
- * height is intrinsic to its content, like a calendar's year count, or
- * tied to its width, like a square donut).
+ * area, network, geo, ranked, bar-race, scroller, combo — as opposed to
+ * one whose height is intrinsic to its content, like a calendar's year
+ * count, or tied to its width, like a square donut — those don't use this
+ * class at all).
  *
- * Deliberately keyed off the viewport height minus `ChartPage`'s own
- * vertical padding ONLY (`py-4`/`md:py-6`, see chart-page.tsx) — not the
- * title, description, or filters row rendered above it. #315 follow-up
- * feedback: the chart card should be at least a full page tall regardless
- * of that "chrome," so a page with a filters row simply scrolls a little
- * further to reveal the whole card, rather than the chart shrinking to
- * make room for what's above it. If `ChartPage`'s padding ever changes,
- * update this to match.
+ * Just `h-full` with a floor: the actual "fill the screen" sizing lives in
+ * `ChartPage` (`main` itself is `flex-1` against the root layout's
+ * sticky-footer flex recipe, with the header/filters rows `shrink-0` and a
+ * `flex-1 min-h-0` wrapper around its `children` — see that file's own
+ * comment) and `ChartCard`'s `fillHeight` prop, which the caller of *this*
+ * class needs to also pass to its `<ChartCard>` — that chain is what turns
+ * `h-full` here into an actual pixel height. Without it (a `ChartCard`
+ * used outside `ChartPage`, or with `fillHeight` omitted), `h-full`
+ * resolves to `auto` and this is a no-op, so nothing breaks; it just won't
+ * fill anything.
+ *
+ * `min-h-[320px]` is a floor, not a target: on a short viewport with a lot
+ * of chrome above it, the actual available space can end up smaller than
+ * this, and the chart simply overflows the viewport a little (`ChartPage`
+ * never sets `overflow-hidden`) rather than being crushed unreadable.
  */
-export const CHART_HEIGHT_CLASS = "h-[calc(100dvh-2rem)] md:h-[calc(100dvh-3rem)] min-h-[320px]";
+export const CHART_HEIGHT_CLASS = "h-full min-h-[320px]";
 
 type ResponsiveChartProps = {
   /** Fixed chart height in px — use this for a chart whose height should

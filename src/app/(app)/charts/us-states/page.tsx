@@ -21,6 +21,7 @@ export default async function UsStateVisitsChartPage() {
       info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
     >
       <ChartCard
+        fillHeight
         // Only the whole-country case is empty here — a state you've never
         // been to is a real, meaningful zero, and InteractiveGeo already
         // renders it as a muted "no data" fill with its own tooltip row

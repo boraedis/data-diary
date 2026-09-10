@@ -94,7 +94,7 @@ export function DailyExplorer({
         </>
       }
     >
-      <ChartCard empty={points.length === 0}>
+      <ChartCard fillHeight empty={points.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveScroller

@@ -101,7 +101,7 @@ export function HappinessScrollerChart({
         ) : null
       }
     >
-      <ChartCard empty={series[0].points.length === 0}>
+      <ChartCard fillHeight empty={series[0].points.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveScroller

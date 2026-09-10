@@ -15,7 +15,7 @@ export default async function HappinessTrendChartPage() {
       description="Monthly average happiness."
       info={{ interactionGuide: LINE_INTERACTION_GUIDE }}
     >
-      <ChartCard empty={data.length === 0}>
+      <ChartCard fillHeight empty={data.length === 0}>
         <HappinessAveragerChart data={data} />
       </ChartCard>
     </ChartPage>

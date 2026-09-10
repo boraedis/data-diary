@@ -165,7 +165,7 @@ export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
   const containerRect = containerEl?.getBoundingClientRect();
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex h-full flex-col gap-2">
       <ResponsiveChart className={CHART_HEIGHT_CLASS} wrapperRef={setContainerEl}>
         {({ width, height }) => (
           <>

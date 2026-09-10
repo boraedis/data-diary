@@ -18,7 +18,7 @@ export default async function WorldVisitsChartPage() {
       description="Distinct days logged in each country. Click the US to drill into its states."
       info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
     >
-      <ChartCard empty={data.length === 0}>
+      <ChartCard fillHeight empty={data.length === 0}>
         <WorldVisitsChart data={data} usStates={usStates} />
       </ChartCard>
     </ChartPage>

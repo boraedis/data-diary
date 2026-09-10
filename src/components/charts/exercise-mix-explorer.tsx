@@ -177,7 +177,7 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
         </>
       }
     >
-      <ChartCard empty={rows.length === 0}>
+      <ChartCard fillHeight empty={rows.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} minWidth={240}>
           {({ width, height }) => (
             <InteractiveArea

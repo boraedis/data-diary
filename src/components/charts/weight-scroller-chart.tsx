@@ -164,7 +164,7 @@ export function WeightScrollerChart({
         </>
       }
     >
-      <ChartCard empty={series.every((s) => s.points.length === 0)}>
+      <ChartCard fillHeight empty={series.every((s) => s.points.length === 0)}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS}>
           {({ width, height }) => (
             <InteractiveScroller

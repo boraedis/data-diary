@@ -28,6 +28,39 @@ import { ChartInfo } from "@/components/charts/chart-info";
 // header of its own. Page padding is also tighter than the original pass
 // above: with the duplicate header gone there's less to compress, but the
 // remaining vertical padding was still more than the chart needs.
+//
+// #315 follow-up: `main` is `flex-1`, not just padded, so that the
+// header/description/filters "chrome" above it and the chart card
+// genuinely share one screen — the card fills whatever's left after that
+// chrome, rather than the chrome being layered on top of an
+// already-full-viewport card (which just pushed the page taller than one
+// screen, with a scrollbar, for no reason).
+//
+// `flex-1` works here — rather than `main` needing to know the viewport
+// height itself — because the root layout (`src/app/layout.tsx`) already
+// sets up the standard sticky-footer flex recipe: `<html class="h-full">`
+// / `<body class="min-h-full flex flex-col">`. `<TopNav>` (rendered above
+// `{children}` in `src/app/(app)/layout.tsx`) and this `<main>` are direct
+// flex-column children of that `<body>`, so `main` growing via `flex-1`
+// naturally fills exactly "the viewport minus TopNav" — accounting for
+// TopNav's height for free, without this file hardcoding a pixel/rem
+// guess at it. `min-height` (not a fixed `height`) on `body` is what makes
+// this safe for taller-than-one-screen content too: a page whose content
+// (this one included) needs more than one screen just grows `body` past
+// `min-h-full`, scrolling normally, rather than anything being clipped.
+//
+// Within `main` itself: the header and filters rows are `shrink-0` so a
+// long title or a wrapped filters row is never squeezed to make room;
+// only the `{children}` wrapper is allowed to shrink (`min-h-0`), and it
+// degrades gracefully when it does — a canvas-style chart's own
+// `min-h-[320px]` floor (`CHART_HEIGHT_CLASS`, responsive-chart.tsx)
+// simply overflows a little on a very short screen with a lot of chrome
+// above it, rather than the chart being crushed unreadable. The recap
+// report, which reuses this same shell for several stacked sections
+// rather than one chart, relies on exactly this: its sections' combined
+// natural height is normally well over one screen, so this wrapper (and
+// `main`, and `body`) all grow to fit them, and the page scrolls normally
+// — nothing here ever sets `overflow: hidden`.
 
 export function ChartPage({
   title,
@@ -64,8 +97,8 @@ export function ChartPage({
     // a full-bleed band. Vertical padding trimmed further under #315 now
     // that the header below is a single line, not a title + a duplicate
     // card header.
-    <main className="mx-auto flex w-full flex-col gap-4 px-2 py-4 sm:px-4 md:gap-6 md:px-8 md:py-6 lg:px-10">
-      <div className="flex flex-col gap-1">
+    <main className="mx-auto flex w-full flex-1 flex-col gap-4 px-2 py-4 sm:px-4 md:gap-6 md:px-8 md:py-6 lg:px-10">
+      <div className="flex shrink-0 flex-col gap-1">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-1.5">
             <h1 className="font-heading text-2xl font-medium tracking-tight text-balance md:text-3xl">
@@ -89,9 +122,11 @@ export function ChartPage({
         {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {filters === null ? null : (
-        <div className="flex flex-wrap items-center gap-2">{filters ?? <ChartFiltersPlaceholder />}</div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {filters ?? <ChartFiltersPlaceholder />}
+        </div>
       )}
-      {children}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 md:gap-6">{children}</div>
     </main>
   );
 }
