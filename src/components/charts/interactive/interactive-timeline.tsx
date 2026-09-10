@@ -8,7 +8,7 @@ import { attachMarkHover, MARK_SPECS, roundedBarPath } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDate } from "@/lib/viz/format";
-import { daysBetween } from "@/lib/date";
+import { daysBetween, todayDateString } from "@/lib/date";
 import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/lib/viz/timeline";
 
 // InteractiveTimeline (#119) — the Gantt-style interval primitive, and the
@@ -37,14 +37,14 @@ import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/l
 //    zooms and pans on x (the only axis where zooming means anything: the
 //    y axis is ordinal lanes, and stretching those tells you nothing).
 //
-// Sizing: rows share the height the caller offers, within a readable band,
-// and the chart then takes only the height it actually needs. A timeline
-// has no natural way to fill arbitrary vertical space — three lanes are
-// three lanes — so stretching rows to fill a tall card would just produce
-// three slabs, and pinning the wrapper to the full height would leave the
-// chart marooned in the top third of it. Past the row-height floor the SVG
-// grows instead of compressing bars into invisibility, and the wrapper
-// scrolls within the space it was given.
+// Sizing: rows share the height the caller offers and the chart draws as
+// tall as those rows need, centred in that space. Rows grow until the bar
+// inside them hits ROW.maxBarHeight and then stop (MAX_ROW_HEIGHT), since
+// past that point extra height is only padding between rows, not a bigger
+// bar. So a timeline with many lanes fills a tall card and one with few
+// lanes sits at its natural size rather than being stretched to fit. Past
+// the row-height floor the SVG grows instead of compressing bars into
+// invisibility, and the wrapper scrolls within the space it was given.
 
 const DEFAULT_MARGIN = { top: 8, right: 16, bottom: 28, left: 96 };
 
@@ -53,15 +53,32 @@ const ROW = {
   /** Below this a bar stops being readable, so the chart gets taller and
    * scrolls rather than compressing further. */
   minHeight: 22,
-  /** Above this, rows stop growing and the extra space becomes padding —
-   * a three-lane timeline in a tall container shouldn't render three
-   * 200px slabs. */
-  maxHeight: 44,
   /** Share of a row the bar itself occupies; the rest is the gap that
    * separates it from the row above and below (MARK_SPECS.bar.surfaceGap's
    * reasoning, applied vertically). */
   barRatio: 0.62,
+  /** Hard cap on bar thickness. Past roughly this, a horizontal bar stops
+   * reading as a span of time and starts reading as a block. */
+  maxBarHeight: 40,
 };
+
+/**
+ * The row height at which the bar has already reached `ROW.maxBarHeight`,
+ * and therefore the height past which rows stop growing.
+ *
+ * Derived rather than picked, because every pixel beyond this point is
+ * padding: the bar is capped, so a taller row only pushes its neighbours
+ * further away. An earlier version set this to a flat 140 to make the
+ * chart fill a tall card, which did make the bars bigger — up to the cap —
+ * and then kept going, spending the remaining ~100px per row on
+ * whitespace.
+ *
+ * The consequence is deliberate: a timeline with few lanes no longer fills
+ * a tall container, it sits at its natural size and is centred. There is
+ * no way to have both, and bars at a readable thickness with tight gaps
+ * reads better than the same bars adrift in a field of padding.
+ */
+const MAX_ROW_HEIGHT = ROW.maxBarHeight / ROW.barRatio;
 
 /** Bars narrower than this get no inline label — see the module comment on
  * why legacy's shrink-to-fit text was worth dropping. */
@@ -89,6 +106,16 @@ export type InteractiveTimelineProps = {
    * individually would hand most of them the same muted grey and imply a
    * grouping that isn't there. A lane is the actual series here. */
   color?: string | ((item: LaidOutInterval, laneIndex: number) => string);
+  /** The visible x window, or `null` for the whole extent.
+   *
+   * Optional and *controlled*: pass it together with `onDomainChange` and
+   * the caller owns the window, so an external control (a range slider,
+   * a "since 2016" default) and the chart's own wheel-zoom stay one piece
+   * of state instead of two that drift apart. Omit both and the chart
+   * keeps the window internally, which is all a caller with no external
+   * controls needs. */
+  domain?: [Date, Date] | null;
+  onDomainChange?: (domain: [Date, Date] | null) => void;
   /** Tooltip row label for the interval's span. Defaults to "span". */
   valueLabel?: string;
   margin?: Partial<typeof DEFAULT_MARGIN>;
@@ -96,6 +123,38 @@ export type InteractiveTimelineProps = {
 };
 
 type Hovered = { item: LaidOutInterval; color: string; clientPos: { x: number; y: number } };
+
+/**
+ * Black or white for a label sitting *on* `fill`, whichever the reader can
+ * actually see.
+ *
+ * A fixed label colour doesn't work here. The first version used
+ * `var(--card)`, which is white in light mode (fine on a saturated bar) but
+ * near-black in dark mode — so every label went dark-on-dark the moment the
+ * chart was viewed in the theme most of this app is used in. And even a
+ * fixed white would fail on the pale colours a user can pick for an entry
+ * in the profile admin UI.
+ *
+ * `fill` is read back off the painted element with `getComputedStyle`
+ * rather than taken from the colour we set, because that colour is often a
+ * `var(--chart-N)` reference that only the browser can resolve. Where
+ * there's no resolved colour to measure (jsdom computes no styles), white
+ * is the safer guess: the default palette is mid-to-dark.
+ *
+ * The 0.179 threshold is the real WCAG crossover — the luminance at which
+ * contrast against black overtakes contrast against white — not a
+ * hand-tuned number.
+ */
+function contrastingTextColor(fill: string): string {
+  const rgb = d3.color(fill)?.rgb();
+  if (!rgb || Number.isNaN(rgb.r)) return "#ffffff";
+  const channel = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+  return luminance > 0.179 ? "#111111" : "#ffffff";
+}
 
 /** "3 yrs 2 mos", "8 mos", "24 days" — a span, not a date. Deliberately
  * local rather than added to viz/format.ts: `formatDuration` there means
@@ -117,38 +176,77 @@ export function InteractiveTimeline({
   height,
   openEnd,
   color,
+  domain: controlledDomain,
+  onDomainChange,
   valueLabel = "span",
   margin,
   ariaLabel = "Timeline. Each bar is one interval, grouped into lanes down the left. Scroll or pinch to zoom the time axis, drag to pan. Hover or focus a bar for its dates.",
 }: InteractiveTimelineProps) {
-  const MARGIN = { ...DEFAULT_MARGIN, ...margin };
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // A state-backed callback ref, not a plain useRef — see interactive-
   // hist's own comment on why this needs to be state, not a ref read
   // during render.
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
-  // Visible x extent, or null for "everything". Held here rather than read
-  // off the zoom transform inside the render function so the axis and the
-  // bars are always drawn from the same domain.
-  const [visibleDomain, setVisibleDomain] = useState<[Date, Date] | null>(null);
+  // Visible x extent, or null for "everything". Held as state rather than
+  // read off the zoom transform inside the render function so the axis and
+  // the bars are always drawn from the same domain.
+  //
+  // The internal copy is only in play when the caller isn't controlling
+  // the window — the standard uncontrolled/controlled pair. `isControlled`
+  // keys off `onDomainChange` rather than `domain`, since a controlled
+  // caller's domain is legitimately `null` whenever the full extent is
+  // showing, and that mustn't read as "uncontrolled".
+  const [internalDomain, setInternalDomain] = useState<[Date, Date] | null>(null);
+  const isControlled = onDomainChange !== undefined;
+  const visibleDomain = isControlled ? controlledDomain ?? null : internalDomain;
+  const setVisibleDomain = useCallback(
+    (next: [Date, Date] | null) => {
+      if (onDomainChange) onDomainChange(next);
+      else setInternalDomain(next);
+    },
+    [onDomainChange],
+  );
 
-  const layout = useMemo(() => layoutTimeline(items, { openEnd }), [items, openEnd]);
+  // Resolved once, here, rather than letting `layoutTimeline` apply its own
+  // "default to today" internally while the tooltip separately falls back
+  // to something else. Two independent defaults for the same idea is
+  // exactly how an ongoing entry's tooltip came to report "0 days".
+  const resolvedOpenEnd = openEnd ?? todayDateString();
+  const layout = useMemo(
+    () => layoutTimeline(items, { openEnd: resolvedOpenEnd }),
+    [items, resolvedOpenEnd],
+  );
+
+  // The left margin holds the lane labels, so it has to be sized by them.
+  // A fixed width was fine when lanes were "Occupation"/"Residence", and
+  // broke the moment a consumer laned by something from the data — job and
+  // company names ran off the left edge and were clipped by the SVG.
+  //
+  // Estimated from character count rather than measured: the real
+  // measurement only exists once the text is in the DOM, which is after
+  // every layout number here has already been used. The estimate is
+  // deliberately generous, the labels are truncated to whatever it yields
+  // (see the lane-label block below), and the cap keeps a pathological
+  // lane name from eating the plot.
+  const longestLane = layout.lanes.reduce((max, lane) => Math.max(max, lane.lane.length), 0);
+  const laneLabelWidth = Math.min(longestLane * 6.4 + 20, width * 0.3);
+  const requestedMargin = { ...DEFAULT_MARGIN, ...margin };
+  const MARGIN = { ...requestedMargin, left: Math.max(requestedMargin.left, laneLabelWidth) };
 
   const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
   // Rows share the height the caller gave, within the readable band; past
   // the floor the SVG grows and the wrapper scrolls. See the module comment.
   const availableHeight = Math.max(0, height - MARGIN.top - MARGIN.bottom);
   const rowHeight = layout.totalRows
-    ? Math.min(ROW.maxHeight, Math.max(ROW.minHeight, availableHeight / layout.totalRows))
+    ? Math.min(MAX_ROW_HEIGHT, Math.max(ROW.minHeight, availableHeight / layout.totalRows))
     : ROW.minHeight;
   const innerHeight = layout.totalRows * rowHeight;
-  // The SVG is exactly as tall as its content, and the wrapper takes the
-  // smaller of that and the height the caller offered. So a three-lane
-  // timeline sits at its natural height instead of floating in the top
-  // third of a 640px card, and a forty-row one scrolls inside the space it
-  // was given rather than blowing the page layout open.
+  // The SVG is exactly as tall as its content; the wrapper keeps the full
+  // height it was given and centres that content inside it. A forty-row
+  // timeline scrolls within that space rather than blowing the page layout
+  // open; a three-lane one sits in the middle of its card instead of
+  // clinging to the top with a void underneath.
   const svgHeight = innerHeight + MARGIN.top + MARGIN.bottom;
-  const wrapperHeight = Math.min(height, svgHeight);
 
   const laneIndexByName = useMemo(
     () => new Map(layout.lanes.map((lane, i) => [lane.lane, i])),
@@ -177,10 +275,15 @@ export function InteractiveTimeline({
   // than in an effect: an effect would paint the new data through the old
   // window for a frame and then correct itself, and
   // react-hooks/set-state-in-effect rightly flags that.
+  //
+  // Only when the chart owns the window: a controlled caller decides for
+  // itself whether a data change should reset the view, and calling its
+  // onDomainChange from inside a render would be a side effect during
+  // render, not just a state adjustment.
   const [itemsSeen, setItemsSeen] = useState(items);
   if (itemsSeen !== items) {
     setItemsSeen(items);
-    setVisibleDomain(null);
+    if (!isControlled) setInternalDomain(null);
   }
 
   const zoomRef = useRef<{
@@ -215,7 +318,7 @@ export function InteractiveTimeline({
             .attr("stroke", "var(--border)")
             .attr("stroke-width", MARK_SPECS.axis.strokeWidth);
         }
-        laneG
+        const laneLabel = laneG
           .append("text")
           .attr("x", -12)
           .attr("y", top + laneHeight / 2)
@@ -224,6 +327,24 @@ export function InteractiveTimeline({
           .attr("fill", "var(--muted-foreground)")
           .style("font-size", MARK_SPECS.axis.tickFontSize)
           .text(lane.lane);
+
+        // Truncated to the margin actually available, so a long lane name
+        // is shortened rather than running off the left edge of the SVG
+        // and being clipped mid-word. The estimate that sized the margin
+        // is only an estimate; this is the guarantee. The untruncated name
+        // stays reachable as a native tooltip.
+        laneLabel.each(function () {
+          const node = this as SVGTextElement;
+          const available = MARGIN.left - 16;
+          let text = lane.lane;
+          while (text.length > 1 && node.getComputedTextLength() > available) {
+            text = text.slice(0, -1);
+            node.textContent = `${text}…`;
+          }
+          if (node.textContent !== lane.lane) {
+            d3.select(node).append("title").text(lane.lane);
+          }
+        });
       }
 
       // Time axis along the bottom of the *plot*, which may be shorter than
@@ -232,7 +353,7 @@ export function InteractiveTimeline({
       const axisG = g.append("g").attr("transform", `translate(0,${innerHeight})`);
       styleAxis(axisG, d3.axisBottom(x).ticks(Math.max(2, Math.floor(innerWidth / 90))));
 
-      const barHeight = Math.max(6, rowHeight * ROW.barRatio);
+      const barHeight = Math.min(ROW.maxBarHeight, Math.max(6, rowHeight * ROW.barRatio));
       const barOffset = (rowHeight - barHeight) / 2;
       const allItems = layout.lanes.flatMap((lane) => lane.items);
 
@@ -298,7 +419,6 @@ export function InteractiveTimeline({
         .attr("x", (d) => edges(d)[0] + 6)
         .attr("y", (d) => d.absoluteRow * rowHeight + rowHeight / 2)
         .attr("dominant-baseline", "middle")
-        .attr("fill", "var(--card)")
         .style("font-size", MARK_SPECS.axis.tickFontSize)
         .style("pointer-events", "none")
         .text((d) => d.label)
@@ -308,6 +428,15 @@ export function InteractiveTimeline({
           const [x0, x1] = edges(d);
           const available = x1 - x0 - 12;
           const node = this as SVGTextElement;
+
+          // Contrast is resolved per bar, against that bar's own painted
+          // colour — see contrastingTextColor.
+          const shape = (node.parentNode as Element | null)?.querySelector("path.timeline-bar-shape");
+          node.setAttribute(
+            "fill",
+            contrastingTextColor(shape ? getComputedStyle(shape).fill : ""),
+          );
+
           let text = d.label;
           while (text.length > 1 && node.getComputedTextLength() > available) {
             text = text.slice(0, -1);
@@ -347,20 +476,64 @@ export function InteractiveTimeline({
         .translateExtent([
           [0, 0],
           [innerWidth, Math.max(1, innerHeight)],
-        ])
-        .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
-          const base = d3.scaleTime().domain(fullDomain).range([0, innerWidth]);
-          const [d0, d1] = event.transform.rescaleX(base).domain() as [Date, Date];
-          setVisibleDomain(
-            event.transform.k === 1 ? null : [d0 < fullDomain[0] ? fullDomain[0] : d0, d1 > fullDomain[1] ? fullDomain[1] : d1],
-          );
-        });
+        ]);
 
       // Applied to the svg, and d3-zoom's own double-click handler removed
       // on the SELECTION rather than the generator — see
       // interactive-scroller.tsx's long comment for why the generator's
       // `.on("dblclick.zoom", null)` throws instead.
       const selection = svg.call(behavior).on("dblclick.zoom", null);
+
+      // Push the window being drawn into d3-zoom's own transform, but ONLY
+      // when the transform doesn't already say the same thing.
+      //
+      // The seeding itself is needed: a window set from outside (the range
+      // slider, or a "since 2016" default) leaves d3's transform at
+      // identity, so the next wheel tick would recompute from the full
+      // extent and the view would jump.
+      //
+      // The guard is what makes it safe, and it is not optional. This
+      // effect re-runs on every domain change — including the ones this
+      // chart's own wheel-zoom just caused — and `behavior.transform`
+      // reuses any gesture still live on the node. A wheel gesture stays
+      // live for d3's wheelDelay (150ms) after the last tick, so re-seeding
+      // during that window dispatches through the *previous* behavior's
+      // listeners, which are still wired to setVisibleDomain: one wheel
+      // tick became ~200 renders and React tore the page down with
+      // "Maximum update depth exceeded". Comparing first means a
+      // self-inflicted domain change seeds nothing, because the transform
+      // already agrees.
+      //
+      // Compared in pixels rather than by date equality: the transform
+      // round-trips through floating-point pixel maths, so the domain that
+      // comes back is never exactly the one that went in.
+      const baseX = d3.scaleTime().domain(fullDomain).range([0, innerWidth]);
+      const node = selection.node();
+      const target = visibleDomain ?? fullDomain;
+      const targetSpanPx = baseX(target[1]) - baseX(target[0]);
+      if (node && targetSpanPx > 0) {
+        const [shown0, shown1] = d3.zoomTransform(node).rescaleX(baseX).domain() as [Date, Date];
+        const alreadyShowing =
+          Math.abs(baseX(shown0) - baseX(target[0])) < 0.5 &&
+          Math.abs(baseX(shown1) - baseX(target[1])) < 0.5;
+        if (!alreadyShowing) {
+          const k = innerWidth / targetSpanPx;
+          selection.call(
+            behavior.transform,
+            d3.zoomIdentity.translate(-baseX(target[0]) * k, 0).scale(k),
+          );
+        }
+      }
+
+      behavior.on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        const [d0, d1] = event.transform.rescaleX(baseX).domain() as [Date, Date];
+        setVisibleDomain(
+          event.transform.k === 1
+            ? null
+            : [d0 < fullDomain[0] ? fullDomain[0] : d0, d1 > fullDomain[1] ? fullDomain[1] : d1],
+        );
+      });
+
       zoomRef.current = { behavior, selection };
 
       return () => {
@@ -376,7 +549,7 @@ export function InteractiveTimeline({
       zoomRef.current.selection.call(zoomRef.current.behavior.transform, d3.zoomIdentity);
     }
     setVisibleDomain(null);
-  }, []);
+  }, [setVisibleDomain]);
 
   const containerRect = containerEl?.getBoundingClientRect();
   const zoomed = visibleDomain !== null;
@@ -392,7 +565,18 @@ export function InteractiveTimeline({
   return (
     <div
       ref={setContainerEl}
-      style={{ position: "relative", width, height: wrapperHeight }}
+      style={{
+        position: "relative",
+        width,
+        height,
+        display: "flex",
+        flexDirection: "column",
+        // `safe` matters here: a plain `center` centres an overflowing
+        // child by pushing its top out of the scroll container, where it
+        // can't be scrolled back to. `safe` falls back to start-alignment
+        // exactly when the content is taller than the box.
+        justifyContent: "safe center",
+      }}
       // Scrolls only when rows have pushed the SVG past the height the
       // caller gave — see the module comment on sizing.
       className="overflow-y-auto"
@@ -423,7 +607,7 @@ export function InteractiveTimeline({
             },
             {
               label: hovered.item.ongoing ? "so far" : "length",
-              value: formatSpan(hovered.item.start, hovered.item.end ?? (openEnd ?? hovered.item.start)),
+              value: formatSpan(hovered.item.start, hovered.item.end ?? resolvedOpenEnd),
               color: hovered.color,
               variant: "swatch",
             },

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import * as d3 from "d3";
 import { InteractiveTimeline } from "./interactive-timeline";
@@ -187,9 +187,117 @@ describe("InteractiveTimeline", () => {
     expect(tooltip().getByText("First job")).toBeTruthy();
   });
 
+  it("measures an ongoing entry against today when no openEnd is given", () => {
+    // Regression: with `openEnd` omitted, the tooltip used to fall back to
+    // the entry's own start date while the layout separately defaulted to
+    // today — so a job that began months ago reported "0 days". Every
+    // other test here passes `openEnd` explicitly, which hid it.
+    const { container } = renderTimeline({
+      openEnd: undefined,
+      items: [{ id: "x", lane: "Work", label: "Current job", start: "2020-01-01", end: null }],
+    });
+    fireEvent.pointerEnter(bars(container)[0]);
+    expect(tooltip().queryByText("0 days")).toBeNull();
+    expect(tooltip().getByText(/yrs/)).toBeTruthy();
+  });
+
   it("offers no reset control until the view is actually zoomed", () => {
     renderTimeline();
     expect(screen.queryByRole("button", { name: /reset zoom/i })).toBeNull();
+  });
+
+  it("draws the window a controlling caller passes, not the full extent", () => {
+    // The data spans 2018-2026; this asks for 2021 only.
+    const { container } = renderTimeline({
+      domain: [new Date(2021, 0, 1), new Date(2021, 11, 31)],
+      onDomainChange: () => {},
+    });
+    const years = [...container.querySelectorAll("text")]
+      .map((t) => t.textContent ?? "")
+      .filter((t) => /^\d{4}$/.test(t));
+    expect(years.every((y) => y === "2021" || y === "2022")).toBe(true);
+    expect(years.length).toBeGreaterThan(0);
+  });
+
+  it("shows the reset control when a controlling caller has narrowed the window", () => {
+    renderTimeline({ domain: [new Date(2021, 0, 1), new Date(2021, 11, 31)], onDomainChange: () => {} });
+    expect(screen.getByRole("button", { name: /reset zoom/i })).toBeTruthy();
+  });
+
+  it("reports a reset through onDomainChange rather than keeping its own window", () => {
+    // The whole point of the controlled pair: an external control and the
+    // chart's own zoom have to be one piece of state, not two.
+    const onDomainChange = vi.fn();
+    renderTimeline({ domain: [new Date(2021, 0, 1), new Date(2021, 11, 31)], onDomainChange });
+    fireEvent.click(screen.getByRole("button", { name: /reset zoom/i }));
+    expect(onDomainChange).toHaveBeenCalledWith(null);
+  });
+
+  it("lets a controlling caller keep its window when the data changes underneath", () => {
+    // Uncontrolled, the chart resets its view on new data. Controlled, that
+    // call belongs to the caller — the mode pickers on the life timeline
+    // swap `items` constantly and must not lose the chosen period.
+    const domain: [Date, Date] = [new Date(2021, 0, 1), new Date(2021, 11, 31)];
+    const onDomainChange = vi.fn();
+    const { rerender, container } = render(
+      <InteractiveTimeline items={ITEMS} width={900} height={400} openEnd={OPEN_END} domain={domain} onDomainChange={onDomainChange} />,
+    );
+    rerender(
+      <InteractiveTimeline items={[...ITEMS]} width={900} height={400} openEnd={OPEN_END} domain={domain} onDomainChange={onDomainChange} />,
+    );
+    expect(onDomainChange).not.toHaveBeenCalled();
+    const years = [...container.querySelectorAll("text")]
+      .map((t) => t.textContent ?? "")
+      .filter((t) => /^\d{4}$/.test(t));
+    expect(years.every((y) => y === "2021" || y === "2022")).toBe(true);
+  });
+
+  it("does not push the domain back at a controlling caller that already set it", () => {
+    // Regression for a page-killing loop. This effect re-runs on every
+    // domain change — including ones the chart's own wheel-zoom caused —
+    // and it used to re-seed d3-zoom's transform unconditionally.
+    // `behavior.transform` reuses any gesture still live on the node, and a
+    // wheel gesture stays live for d3's 150ms wheelDelay, so re-seeding mid
+    // gesture dispatched through the previous behavior's listeners, which
+    // were still wired to setVisibleDomain: one wheel tick became ~200
+    // renders and React tore the page down with "Maximum update depth
+    // exceeded". The fix is to seed only when the transform doesn't already
+    // agree; this pins the "already agrees" half of that.
+    const onDomainChange = vi.fn();
+    const domain: [Date, Date] = [new Date(2020, 0, 1), new Date(2021, 0, 1)];
+    const { rerender } = render(
+      <InteractiveTimeline items={ITEMS} width={900} height={400} openEnd={OPEN_END} domain={domain} onDomainChange={onDomainChange} />,
+    );
+    // A fresh array holding the same instants — what a caller re-deriving
+    // its state produces, and what an identity check alone would miss.
+    rerender(
+      <InteractiveTimeline
+        items={ITEMS}
+        width={900}
+        height={400}
+        openEnd={OPEN_END}
+        domain={[new Date(2020, 0, 1), new Date(2021, 0, 1)]}
+        onDomainChange={onDomainChange}
+      />,
+    );
+    expect(onDomainChange).not.toHaveBeenCalled();
+  });
+
+  it("sizes the left margin to the longest lane label so it can't clip", () => {
+    // Lanes became data-driven once callers could group by company or job
+    // name; a fixed margin clipped those mid-word.
+    const longLane = "A Very Long Company Name Indeed Ltd";
+    const { container } = renderTimeline({
+      items: [{ id: "x", lane: longLane, label: "Role", start: "2020-01-01", end: "2021-01-01" }],
+    });
+    const label = [...container.querySelectorAll("text")].find((t) =>
+      longLane.startsWith((t.textContent ?? "").replace("…", "")),
+    );
+    expect(label).toBeTruthy();
+    // Whatever the label ends up saying, its right edge sits left of the
+    // plot and its left edge is on-canvas.
+    const x = Number(label!.getAttribute("x"));
+    expect(x).toBeLessThan(0);
   });
 
   it("renders an honest empty state rather than an empty axis", () => {

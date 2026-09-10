@@ -8,6 +8,13 @@
 // keeps the vocabulary consistent across the app. `subs`, `entertainment`
 // and `work` are deliberately omitted: no chart types exist for them yet
 // (see #109, #120), and a category with zero charts has nothing to link to.
+//
+// `life` is the one category with no day-entry counterpart, and that's the
+// point of it: every other chart here aggregates `days` rows, while the
+// life timeline (#310) is sourced from the profile tables — declared
+// intervals about the person, not logged days. Filing it under `places`
+// for the residences, or a hypothetical `work` for the jobs, would each
+// name a third of the chart and misfile the rest.
 export type ChartCategory =
   | "happiness"
   | "sleep"
@@ -16,7 +23,8 @@ export type ChartCategory =
   | "technology"
   | "social-media"
   | "places"
-  | "people";
+  | "people"
+  | "life";
 
 export const CHART_CATEGORIES: Record<ChartCategory, { label: string; description: string }> = {
   happiness: {
@@ -51,6 +59,10 @@ export const CHART_CATEGORIES: Record<ChartCategory, { label: string; descriptio
     label: "People",
     description: "Who you log your days with.",
   },
+  life: {
+    label: "Life",
+    description: "Jobs, homes and relationships, as spans of time.",
+  },
 };
 
 // Rendered in this order on the landing page's category grid.
@@ -63,6 +75,7 @@ export const CHART_CATEGORY_ORDER: ChartCategory[] = [
   "social-media",
   "places",
   "people",
+  "life",
 ];
 
 export interface ChartEntry {
@@ -270,6 +283,12 @@ export const CHARTS: ChartEntry[] = [
     title: "City heatmap",
     description: "Neighborhood-level maps for Atlanta, DC metro, Dubai, NYC, and Istanbul, with your top destinations marked.",
     category: "places",
+  },
+  {
+    href: "/charts/life-timeline",
+    title: "Life timeline",
+    description: "Jobs, homes and relationships as overlapping spans of time.",
+    category: "life",
   },
 ] as const satisfies ChartEntry[];
 
