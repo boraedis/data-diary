@@ -1,25 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { CalendarExplorer } from "@/components/charts/calendar-explorer";
+import { ChartCard } from "@/components/charts/chart-card";
+import { ChartPage } from "@/components/charts/chart-page";
 import {
   CompositionExplorer,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { DailyExplorer } from "@/components/charts/daily-explorer";
-import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
+import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
+import {
+  InteractiveScroller,
+  type InteractiveScrollerPoint,
+  type InteractiveScrollerSeries,
+} from "@/components/charts/interactive/interactive-scroller";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
+import { parseDate } from "@/lib/date";
 import type { DailyValue, DeviceDay } from "@/lib/charts";
+import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import {
   INSTAGRAM_METHODOLOGY,
   SCREEN_TIME_METHODOLOGY,
 } from "@/lib/viz/methodology";
-import {
-  INSTAGRAM_TRACKING_SPAN,
-  INSTAGRAM_USAGE_TRACKING_SPAN,
-  SCREEN_TIME_TRACKING_SPAN,
-} from "@/lib/viz/tracking-span";
+import { INSTAGRAM_TRACKING_SPAN, SCREEN_TIME_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -29,7 +34,7 @@ const PHONE = "Phone";
 const LAPTOP = "Laptop";
 const INSTAGRAM = "Instagram";
 
-// Fixed slots, assigned here rather than by array position, so the
+// Fixed slots, assigned here rather than by array position, so the two
 // devices keep their colours across all three charts below — the same
 // "colour follows the entity" rule the composition explorer applies within
 // a single chart, extended across a set of them.
@@ -39,23 +44,8 @@ const DEVICE_COLORS: Record<string, string> = {
   [INSTAGRAM]: categoricalColor(1),
 };
 
-/** Instagram usage is a *subset* of phone usage, not an independent total
- * (#326) — stacking it as a third sibling category alongside Phone would
- * double-count minutes already counted in Phone. Every chart below instead
- * splits Phone into "Phone" (non-Instagram) and "Instagram", which still
- * sums to the same phone total. Days before Instagram tracking started
- * (`instagramMinutes === null`) put all their phone time under "Phone"
- * unsplit, so the new category never appears retroactively on history
- * where it simply wasn't tracked. */
-function splitPhoneMinutes(day: DeviceDay): { phone: number; instagram: number } {
-  const phone = day.phoneMinutes ?? 0;
-  const instagram = day.instagramMinutes ?? 0;
-  return { phone: phone - instagram, instagram };
-}
-
 const DEVICE_CATEGORIES = [
   { id: PHONE, label: PHONE, color: DEVICE_COLORS[PHONE] },
-  { id: INSTAGRAM, label: INSTAGRAM, color: DEVICE_COLORS[INSTAGRAM] },
   { id: LAPTOP, label: LAPTOP, color: DEVICE_COLORS[LAPTOP] },
 ];
 
@@ -65,25 +55,27 @@ const formatHours = (hours: number) => formatDuration(hours);
 /**
  * Screen time split by device, over time.
  *
- * A stacked area rather than separate lines: the interesting question is
- * the balance between them as much as any one total, and share mode
- * answers it directly. Instagram is broken out of Phone rather than
- * stacked alongside it — see `splitPhoneMinutes`.
+ * A stacked area rather than two lines: the interesting question is the
+ * balance between the two as much as either total, and share mode answers
+ * it directly. Two categories also sit comfortably inside the palette, so
+ * nothing folds.
+ *
+ * Instagram usage deliberately isn't a third category here (#326) — it's a
+ * *subset* of Phone, not an independent total, and a stacked/share chart
+ * would double-count it against Phone if it were. It gets its own line
+ * on the daily scroller below instead, where three independently
+ * toggleable lines can overlap without implying a sum.
  */
 export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
   const rows = useMemo<CompositionRow[]>(
     () =>
-      data.map((day) => {
-        const { phone, instagram } = splitPhoneMinutes(day);
-        return {
-          date: day.date,
-          values: {
-            [PHONE]: asHours(phone),
-            [INSTAGRAM]: asHours(instagram),
-            [LAPTOP]: asHours(day.laptopMinutes ?? 0),
-          },
-        };
-      }),
+      data.map((day) => ({
+        date: day.date,
+        values: {
+          [PHONE]: asHours(day.phoneMinutes ?? 0),
+          [LAPTOP]: asHours(day.laptopMinutes ?? 0),
+        },
+      })),
     [data],
   );
 
@@ -92,64 +84,63 @@ export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
       rows={rows}
       categories={DEVICE_CATEGORIES}
       title="Screen Time Mix"
-      description="A breakdown of phone, Instagram, and laptop usage, aggregated by period."
+      description="A breakdown of phone vs. laptop usage, aggregated by period."
       methodology={SCREEN_TIME_METHODOLOGY}
       trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       valueFormat={formatHours}
-      ariaLabel="Time spent on phone, Instagram, and laptop over time."
+      ariaLabel="Time spent on phone and laptop over time."
     />
   );
 }
 
-type DeviceChoice = "total" | typeof PHONE | typeof LAPTOP | typeof INSTAGRAM;
-
-const DEVICE_OPTIONS: GroupByOption<DeviceChoice>[] = [
-  { id: "total", label: "Both" },
-  { id: PHONE, label: PHONE },
-  { id: LAPTOP, label: LAPTOP },
-  { id: INSTAGRAM, label: INSTAGRAM },
-];
-
-/** Every logged day's screen time, zoomable, for one device, Instagram, or
- * both devices combined. "Both" stays phone + laptop, unaffected by the
- * Instagram split — Instagram is already inside that phone figure. */
+/**
+ * Every logged day's screen time, zoomable — phone, laptop, and Instagram
+ * as three simultaneous lines (#326), rather than a single-select picker.
+ * Unlike the mix/calendar charts above, nothing here is stacked or summed,
+ * so Instagram overlapping inside Phone's own line isn't a double-counting
+ * problem — it's just two lines that happen to move together. The shared
+ * legend (`InteractiveScroller`'s own, click-to-toggle) is how you isolate
+ * one line or compare two, rather than a separate device-picker control.
+ */
 export function DeviceDailyChart({ data }: { data: DeviceDay[] }) {
-  const [device, setDevice] = useState<DeviceChoice>("total");
+  const series = useMemo<InteractiveScrollerSeries[]>(() => {
+    const toPoints = (pick: (day: DeviceDay) => number | null): InteractiveScrollerPoint[] =>
+      data
+        .filter((day) => pick(day) !== null)
+        .map((day) => ({ x: parseDate(day.date), y: asHours(pick(day) as number) }));
 
-  const points = useMemo(
-    () =>
-      data.map((day) => {
-        const phone = day.phoneMinutes ?? 0;
-        const laptop = day.laptopMinutes ?? 0;
-        const minutes =
-          device === PHONE
-            ? phone
-            : device === LAPTOP
-              ? laptop
-              : device === INSTAGRAM
-                ? (day.instagramMinutes ?? 0)
-                : phone + laptop;
-        return { date: day.date, value: asHours(minutes) };
-      }),
-    [data, device],
-  );
+    return [
+      { id: "phone", label: PHONE, color: DEVICE_COLORS[PHONE], movingAverage: true, points: toPoints((d) => d.phoneMinutes) },
+      { id: "laptop", label: LAPTOP, color: DEVICE_COLORS[LAPTOP], movingAverage: true, points: toPoints((d) => d.laptopMinutes) },
+      { id: "instagram", label: INSTAGRAM, color: DEVICE_COLORS[INSTAGRAM], movingAverage: true, points: toPoints((d) => d.instagramMinutes) },
+    ];
+  }, [data]);
 
   return (
-    <DailyExplorer
-      data={points}
+    <ChartPage
       title="Daily Screen Time"
-      description="A day-by-day look at screen time. Scroll or drag to zoom, and use the strip below to move through the range."
-      methodology={SCREEN_TIME_METHODOLOGY}
-      trackingSpan={device === INSTAGRAM ? INSTAGRAM_USAGE_TRACKING_SPAN : SCREEN_TIME_TRACKING_SPAN}
-      seriesId="screen-time"
-      label={device === "total" ? "Screen time" : device}
-      color={device === "total" ? categoricalColor(4) : DEVICE_COLORS[device]}
-      valueFormat={formatHours}
-      extraFilters={
-        <GroupByPicker value={device} onChange={setDevice} options={DEVICE_OPTIONS} label="Device" />
-      }
-      ariaLabel="Daily screen time. Scroll or pinch to zoom, drag to pan, hover a day for its exact total."
-    />
+      description="A day-by-day look at phone, laptop, and Instagram usage. Use the legend to isolate or compare lines."
+      info={{
+        interactionGuide: SCROLLER_INTERACTION_GUIDE,
+        methodology: SCREEN_TIME_METHODOLOGY,
+        trackingSpan: SCREEN_TIME_TRACKING_SPAN,
+      }}
+      filters={null}
+    >
+      <ChartCard empty={series.every((s) => s.points.length === 0)}>
+        <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
+          {({ width, height }) => (
+            <InteractiveScroller
+              series={series}
+              width={width}
+              height={height}
+              valueFormat={formatHours}
+              ariaLabel="Daily screen time. Phone, laptop, and Instagram usage as three lines; use the legend to hide any of them. Scroll or pinch to zoom, drag to pan, hover a day for its exact totals."
+            />
+          )}
+        </ResponsiveChart>
+      </ChartCard>
+    </ChartPage>
   );
 }
 
@@ -158,30 +149,28 @@ export function DeviceDailyChart({ data }: { data: DeviceDay[] }) {
  * together rather than as two near-identical grids.
  *
  * Uses the blended-cell mode (#210) with **weights**: the hue leans toward
- * whichever device (or Instagram) the day actually went on, and the cell's
- * intensity carries the combined total. So a heavy laptop day and a heavy
- * Instagram day are different colours at similar strength, and a quiet day
- * is faint — which is exactly the pair of questions separate calendars
- * would have made you answer by flicking between them. Instagram is broken
- * out of Phone rather than stacked alongside it — see `splitPhoneMinutes`
- * — so the cell's total (phone + laptop) is unaffected by the split.
+ * whichever device the day actually went on, and the cell's intensity
+ * carries the combined total. So a heavy laptop day and a heavy phone day
+ * are different colours at similar strength, and a quiet day of either is
+ * faint — which is exactly the pair of questions two separate calendars
+ * would have made you answer by flicking between them. Instagram isn't a
+ * third category here for the same reason it isn't on the mix chart above
+ * — see `DeviceUsageChart`'s own comment.
  */
 export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
   const points = useMemo(
     () =>
       data.map((day) => {
-        const { phone, instagram } = splitPhoneMinutes(day);
+        const phone = day.phoneMinutes ?? 0;
         const laptop = day.laptopMinutes ?? 0;
         const categories = [
           { label: PHONE, color: DEVICE_COLORS[PHONE], weight: phone },
-          { label: INSTAGRAM, color: DEVICE_COLORS[INSTAGRAM], weight: instagram },
           { label: LAPTOP, color: DEVICE_COLORS[LAPTOP], weight: laptop },
           // A zero-weight category is dropped by the blend, so a
-          // single-device day (or a day before Instagram was tracked)
-          // reads as that device's own colour rather than a mix pulled
-          // halfway toward one that wasn't used.
+          // single-device day reads as that device's own colour rather
+          // than a mix pulled halfway toward one that wasn't used.
         ].filter((c) => c.weight > 0);
-        return { date: day.date, value: asHours(phone + instagram + laptop), categories };
+        return { date: day.date, value: asHours(phone + laptop), categories };
       }),
     [data],
   );
@@ -190,7 +179,7 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
     <CalendarExplorer
       data={points}
       title="Screen Time Calendar"
-      description="Phone, Instagram, and laptop on one grid: colour leans toward whichever you used most, strength shows the combined total."
+      description="Both devices on one grid: colour leans toward whichever you used more, strength shows the combined total."
       methodology={SCREEN_TIME_METHODOLOGY}
       trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       formatValue={formatHours}
