@@ -3,7 +3,7 @@ import { HappinessScrollerChart } from "@/components/charts/happiness-scroller-c
 import { getPublicHappinessScrollerData } from "@/lib/public-charts";
 
 export const metadata: Metadata = {
-  title: "Daily happiness — Data Diary",
+  title: "Daily Happiness — Data Diary",
   description: "A zoomable line chart of daily happiness scores logged over time.",
 };
 

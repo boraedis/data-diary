@@ -12,6 +12,7 @@ import { TimeRangePicker } from "@/components/charts/interactive/time-range-pick
 import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
 import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import type { TrackingSpan } from "@/lib/viz/tracking-span";
 
 /** A `DailyValue` optionally carrying the categories that made up the day,
  * which the primitive blends into one cell colour. */
@@ -37,6 +38,7 @@ export function CalendarExplorer({
   title,
   description,
   methodology,
+  trackingSpan,
   formatValue,
   valueLabel,
   extraFilters,
@@ -51,6 +53,9 @@ export function CalendarExplorer({
   /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
    * Falls back to a visible placeholder when omitted. */
   methodology?: string;
+  /** Per-field "tracked since" copy for the `ChartInfo` popup. Falls back
+   * to a visible placeholder when omitted. */
+  trackingSpan?: TrackingSpan;
   formatValue: (value: number) => string;
   valueLabel: string;
   /** Extra controls rendered before the range picker. The caller owns
@@ -81,7 +86,7 @@ export function CalendarExplorer({
     <ChartPage
       title={title}
       description={description}
-      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology }}
+      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology, trackingSpan }}
       filters={
         domain ? (
           <>

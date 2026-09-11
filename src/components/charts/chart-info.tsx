@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { PLACEHOLDER_METHODOLOGY } from "@/lib/viz/interaction-guides";
+import { formatTrackingSpan, PLACEHOLDER_TRACKING_SPAN, type TrackingSpan } from "@/lib/viz/tracking-span";
 
 /**
  * The standardized "about this chart" trigger + popup (#315) — every chart
- * page gets one, next to its title. Two sections: how to interact with the
- * chart (generic per-primitive copy, see `src/lib/viz/interaction-guides.ts`)
- * and the methodology behind what's plotted (per-chart, filled in by #316).
+ * page gets one, next to its title. Three sections: how to interact with
+ * the chart (generic per-primitive copy, see
+ * `src/lib/viz/interaction-guides.ts`), the methodology behind what's
+ * plotted (per-field, see `src/lib/viz/methodology.ts`), and when the
+ * underlying field started (and, rarely, stopped) being recorded (see
+ * `src/lib/viz/tracking-span.ts`).
  *
  * Built on the existing `Modal` rather than a new dialog/popover primitive
  * — same reasoning that component already documents: small, static content,
@@ -19,6 +23,7 @@ export function ChartInfo({
   title,
   interactionGuide,
   methodology,
+  trackingSpan,
 }: {
   /** The chart's own title — doubles as the popup heading and the
    * `localStorage` key for the first-time-view highlight below. */
@@ -27,6 +32,9 @@ export function ChartInfo({
   /** Falls back to a visible "pending" placeholder rather than omitting
    * the section — see #316, the content follow-up this ships ahead of. */
   methodology?: string;
+  /** Falls back to a visible "pending" placeholder rather than omitting
+   * the section, same as `methodology` above. */
+  trackingSpan?: TrackingSpan;
 }) {
   const [open, setOpen] = useState(false);
   // Starts "seen" so server and first client render agree (no highlight
@@ -90,6 +98,14 @@ export function ChartInfo({
               Methodology
             </h3>
             <p className="mt-1 text-foreground/90">{methodology ?? PLACEHOLDER_METHODOLOGY}</p>
+          </section>
+          <section>
+            <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+              Tracked since
+            </h3>
+            <p className="mt-1 text-foreground/90 whitespace-pre-line">
+              {trackingSpan ? formatTrackingSpan(trackingSpan) : PLACEHOLDER_TRACKING_SPAN}
+            </p>
           </section>
         </div>
       </Modal>

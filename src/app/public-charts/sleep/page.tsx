@@ -4,9 +4,11 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { SleepCalendarChart } from "@/components/charts/sleep-calendar-chart";
 import { getPublicSleepData } from "@/lib/public-charts";
 import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
+import { SLEEP_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const metadata: Metadata = {
-  title: "Sleep calendar — Data Diary",
+  title: "Sleep Calendar — Data Diary",
   description: "A year-by-year heatmap of nightly sleep duration.",
 };
 
@@ -18,9 +20,13 @@ export default async function PublicSleepChartPage() {
 
   return (
     <ChartPage
-      title="Sleep calendar"
+      title="Sleep Calendar"
       description="Nightly sleep duration, darker = less sleep, brighter = more."
-      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE }}
+      info={{
+        interactionGuide: CALENDAR_INTERACTION_GUIDE,
+        methodology: SLEEP_METHODOLOGY,
+        trackingSpan: SLEEP_TRACKING_SPAN,
+      }}
       backHref="/public-charts"
       backLabel="Charts"
     >

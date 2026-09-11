@@ -17,6 +17,8 @@ import {
   type LifeTimelineMode,
 } from "@/lib/life-timeline";
 import { TIMELINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { LIFE_METHODOLOGY } from "@/lib/viz/methodology";
+import { LIFE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // The first real consumer of InteractiveTimeline (#310) — the profile's
 // occupation/residence/relationship history, the dataset legacy's
@@ -125,9 +127,13 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
 
   return (
     <ChartPage
-      title="Life timeline"
-      description="Occupation, residence and relationship history. Overlapping entries stack within their lane; an entry with no end date is still running."
-      info={{ interactionGuide: TIMELINE_INTERACTION_GUIDE }}
+      title="Life Timeline"
+      description="An interactive timeline of my various occupations, residences and relationships. Overlapping entries stack within their lane; an entry with no end date is still running."
+      info={{
+        interactionGuide: TIMELINE_INTERACTION_GUIDE,
+        methodology: LIFE_METHODOLOGY,
+        trackingSpan: LIFE_TRACKING_SPAN,
+      }}
       filters={
         <>
           <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="Timeline" />

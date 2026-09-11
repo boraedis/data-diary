@@ -15,6 +15,7 @@ import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate } from "@/lib/date";
 import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import type { TrackingSpan } from "@/lib/viz/tracking-span";
 
 /**
  * "What was this made up of, over time" — a stacked area with a share/count
@@ -53,6 +54,7 @@ export function CompositionExplorer({
   title,
   description,
   methodology,
+  trackingSpan,
   valueFormat,
   extraFilters,
   initialPeriod = "month",
@@ -65,6 +67,9 @@ export function CompositionExplorer({
   /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
    * Falls back to a visible placeholder when omitted. */
   methodology?: string;
+  /** Per-field "tracked since" copy for the `ChartInfo` popup. Falls back
+   * to a visible placeholder when omitted. */
+  trackingSpan?: TrackingSpan;
   valueFormat: (value: number) => string;
   /** Extra controls rendered before the built-in ones. The caller owns
    * their state and reshapes `rows` accordingly. */
@@ -95,7 +100,7 @@ export function CompositionExplorer({
     <ChartPage
       title={title}
       description={description}
-      info={{ interactionGuide: AREA_INTERACTION_GUIDE, methodology }}
+      info={{ interactionGuide: AREA_INTERACTION_GUIDE, methodology, trackingSpan }}
       filters={
         <>
           {extraFilters}
