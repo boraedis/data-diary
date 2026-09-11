@@ -32,5 +32,11 @@ export const WEIGHT_METHODOLOGY =
 export const TRAINING_METHODOLOGY =
   "Every workout is logged here, whether that's a structured gym session, a sport, or a casual jog. Most of it comes from an app I already track things in — Strava for cardio, Hevy for lifting — copied or imported over, but anything more casual, like playing volleyball in the park with friends, gets logged directly.";
 
+export const SCREEN_TIME_METHODOLOGY =
+  "Phone and laptop usage come from each device's own built-in screen-time tracking, logged as minutes per day. Instagram usage is tracked the same way, added more recently once I wanted to actively watch and limit it specifically — it's a slice of phone time, not a separate total on top of it.";
+
+export const INSTAGRAM_METHODOLOGY =
+  "Follower and following counts are logged straight from the Instagram app, tracking how both have grown or shrunk over time.";
+
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";

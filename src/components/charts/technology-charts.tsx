@@ -11,6 +11,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { DailyValue, DeviceDay } from "@/lib/charts";
+import { INSTAGRAM_METHODOLOGY, SCREEN_TIME_METHODOLOGY } from "@/lib/viz/methodology";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -63,6 +64,7 @@ export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
       categories={DEVICE_CATEGORIES}
       title="Screen time"
       description="Time on phone and laptop. Share mode shows how the balance between them has shifted."
+      methodology={SCREEN_TIME_METHODOLOGY}
       valueFormat={formatHours}
       ariaLabel="Time spent on phone and laptop over time."
     />
@@ -97,6 +99,7 @@ export function DeviceDailyChart({ data }: { data: DeviceDay[] }) {
       data={points}
       title="Daily screen time"
       description="Every logged day. Scroll or drag to zoom, and use the strip below to move through the range."
+      methodology={SCREEN_TIME_METHODOLOGY}
       seriesId="screen-time"
       label={device === "total" ? "Screen time" : device}
       color={device === "total" ? categoricalColor(4) : DEVICE_COLORS[device]}
@@ -143,6 +146,7 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
       data={points}
       title="Screen time calendar"
       description="Both devices on one grid: colour leans toward whichever you used more, strength shows the combined total."
+      methodology={SCREEN_TIME_METHODOLOGY}
       formatValue={formatHours}
       valueLabel="screen time"
       ariaLabel="Calendar of daily screen time, coloured by which device dominated and shaded by the total."
@@ -164,6 +168,7 @@ export function InstagramFollowersChart({ data }: { data: DailyValue[] }) {
       data={data}
       title="Instagram followers"
       description="Follower count over time. A running total, so it only moves when it moves."
+      methodology={INSTAGRAM_METHODOLOGY}
       seriesId="followers"
       label="Followers"
       color={categoricalColor(3)}
