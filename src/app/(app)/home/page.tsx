@@ -5,6 +5,19 @@ import { getHomeDashboardData, type BirthdayEntry, type RecentDay } from "@/lib/
 
 export const dynamic = "force-dynamic";
 
+// Every root-level section, not just the couple that fit in the persistent
+// top nav (#348 trimmed that down to Charts/Manage since a flat tab list
+// doesn't scale). This is the actual index: add a new root section here
+// and it's reachable — the grid it feeds wraps to a 3rd column on `sm`
+// rather than needing a hand-tuned column count each time (#347).
+const SECTION_LINKS = [
+  { href: "/charts", label: "Charts" },
+  { href: "/journal", label: "Journal" },
+  { href: "/recap", label: "Recap" },
+  { href: "/manage", label: "Manage" },
+  { href: "/profile", label: "Profile" },
+] as const;
+
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -123,14 +136,8 @@ export default async function HomePage() {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 gap-2">
-            {(
-              [
-                { href: "/charts", label: "Charts" },
-                { href: "/manage", label: "Manage" },
-                { href: "/profile", label: "Profile" },
-              ] as const
-            ).map(({ href, label }) => (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {SECTION_LINKS.map(({ href, label }) => (
               <Link key={href} href={href}>
                 <Card className="h-full transition-colors hover:bg-accent">
                   <CardContent className="py-3 text-sm font-medium">{label}</CardContent>
