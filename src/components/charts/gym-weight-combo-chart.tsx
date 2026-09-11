@@ -50,6 +50,15 @@ function Combo({
         .domain([domain[0] ?? new Date(), domain[1] ?? new Date()])
         .range([0, innerWidth]);
 
+      // Each series' range covers only 3/4 of the chart height rather than
+      // the full height, offset to opposite ends — weight (line) keeps
+      // clear of the bottom quarter, hours (bars) keep clear of the top
+      // quarter. The two 3/4 spans still overlap through the middle
+      // (where a real crossing reads fine), but a line trough and a bar
+      // peak no longer compete for the same pixels at the extremes, which
+      // is where the two series were hardest to tell apart on one plot.
+      const LANE_FRACTION = 0.75;
+
       const weightExtent = weight.length
         ? (d3.extent(weight, (w) => w.weightKg) as [number, number])
         : [0, 1];
@@ -57,13 +66,13 @@ function Combo({
       const yWeight = d3
         .scaleLinear()
         .domain([weightExtent[0] - weightPad, weightExtent[1] + weightPad])
-        .range([innerHeight, 0]);
+        .range([innerHeight * LANE_FRACTION, 0]);
 
       const yHours = d3
         .scaleLinear()
         .domain([0, d3.max(months, (m) => m.hours) ?? 1])
         .nice()
-        .range([innerHeight, 0]);
+        .range([innerHeight, innerHeight * (1 - LANE_FRACTION)]);
 
       const g = svg
         .attr("width", width)
