@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { BarChart3, BookOpen, CircleUser, Database, LogOut, Sparkles } from "lucide-react";
+import { BarChart3, Database, LogOut } from "lucide-react";
 import { ConfirmLink } from "@/components/confirm-link";
 
 // Persistent cross-site nav (#138 ask #1) — the legacy app had a top bar
@@ -14,12 +14,14 @@ import { ConfirmLink } from "@/components/confirm-link";
 // The "Data Diary" wordmark doubles as the Home link (moved here from
 // home/page.tsx's own h1, so it's one site-wide brand mark instead of a
 // title that only existed on one page) — no separate "Home" nav item.
+//
+// Kept deliberately short (#348) — Charts and Manage only. Every other
+// root-level section (Journal, Recap, Profile, and whatever's added next)
+// lives one click away via /home instead of growing this bar forever; see
+// #347 for giving those sections a proper home there.
 const NAV_ITEMS = [
   { href: "/manage", label: "Manage", icon: Database },
   { href: "/charts", label: "Charts", icon: BarChart3 },
-  { href: "/journal", label: "Journal", icon: BookOpen },
-  { href: "/recap", label: "Recap", icon: Sparkles },
-  { href: "/profile", label: "Profile", icon: CircleUser },
 ] as const;
 
 export function TopNav() {
