@@ -50,5 +50,8 @@ export const PEOPLE_METHODOLOGY =
 export const PEOPLE_IMPACT_METHODOLOGY =
   "This score isn't a simple day count — it combines which of the seven ranked slots a person occupied with how that day was rated for happiness, using a scoring formula carried over unchanged from the original version of this app. Presence counts for more on a day's best or hardest moments than on an unremarkable one, since that's when someone's presence tends to actually matter.";
 
+export const LIFE_METHODOLOGY =
+  "This tracks the start and end of engagements in three areas of my life: occupation (any job or educational engagement), residence (a living situation that was my primary home at the time), and relationship (a romantic engagement). An occupation can also carry its own roles — promotions or title changes within the same job, logged separately so a raise doesn't read as starting a whole new career.";
+
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";
