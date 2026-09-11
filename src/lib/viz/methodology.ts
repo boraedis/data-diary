@@ -44,5 +44,11 @@ export const PLACES_METHODOLOGY =
 export const CITY_HEATMAP_METHODOLOGY =
   "For the cities I've spent significant time in — Istanbul, Dubai, Atlanta, DC, and NYC — I've mapped out neighborhood boundaries by hand, letting the same daily place logs show which neighborhoods I actually frequented in each one.";
 
+export const PEOPLE_METHODOLOGY =
+  "Each day, I pick up to seven people, in order, who impacted me the most that day — the same ranked-slot idea as places. Every person is also tagged with a label for how I know them (family, a friend group, work, and so on). There are also three rarely-used slots for people who had a notably negative impact on a day, but across the whole history that's only ever been used a handful of times.";
+
+export const PEOPLE_IMPACT_METHODOLOGY =
+  "This score isn't a simple day count — it combines which of the seven ranked slots a person occupied with how that day was rated for happiness, using a scoring formula carried over unchanged from the original version of this app. Presence counts for more on a day's best or hardest moments than on an unremarkable one, since that's when someone's presence tends to actually matter.";
+
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";
