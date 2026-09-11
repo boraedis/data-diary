@@ -6,7 +6,9 @@ import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
 import { RecapMomentsCard } from "@/components/recap/recap-moments-card";
 import { RecapPeoplePlacesSection } from "@/components/recap/recap-people-places-section";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
+import { RecapStoryView } from "@/components/recap/recap-story";
 import { RecapSubsSection } from "@/components/recap/recap-subs-section";
+import { buildRecapStory } from "@/lib/recap-story";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
 import { getRecapHealth } from "@/lib/recap-health";
@@ -24,10 +26,17 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// The detailed recap report (issue #169, epic #130) — the second of the
-// two tiers #130 settled on, and the one that reuses this app's existing
-// page chrome rather than inventing any. The story tier (#175) is the only
-// genuinely new surface in the epic and is not part of this shell.
+// Both tiers #130 settled on, in the order it settled on them: the story
+// (#175) up front, the detailed report (#169) expandable underneath it.
+//
+// The split of responsibilities is the point. This page still does all the
+// fetching and still composes the report out of the same section components
+// it always did — `RecapStoryView` is a client wrapper that takes the
+// already-server-rendered report as `children`, so expanding it costs no
+// refetch and the report is identical whether or not a story sits above it.
+// Which cards the story is made of is decided by `buildRecapStory`, a pure
+// function with its own tests; a period too sparse to earn one gets an empty
+// list back and the view opens straight into the report.
 //
 // Every section is now real: health (#201), subs (#170), entertainment
 // (#171), people & places (#172), moments (#174) and life events (#173).
@@ -74,31 +83,46 @@ export default async function RecapYearPage({ params }: { params: Promise<{ year
     priorLoggedDays,
   });
 
+  const story = buildRecapStory({
+    periodLabel: period.label,
+    priorLabel: prior.label,
+    loggedDays,
+    priorLoggedDays,
+    health,
+    entertainment,
+    peoplePlaces,
+    subs,
+    moments,
+    lifeEvents,
+  });
+
   return (
     <ChartPage title={`Recap ${period.label}`} backHref="/recap" backLabel="Recap" filters={null}>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <RecapStatCard label="Days logged" stat={daysLogged} priorLabel={prior.label} />
-      </div>
+      <RecapStoryView cards={story} periodLabel={period.label}>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <RecapStatCard label="Days logged" stat={daysLogged} priorLabel={prior.label} />
+        </div>
 
-      <RecapHealthSection health={health} periodLabel={period.label} priorLabel={prior.label} />
+        <RecapHealthSection health={health} periodLabel={period.label} priorLabel={prior.label} />
 
-      <RecapSubsSection subs={subs} periodLabel={period.label} priorLabel={prior.label} />
+        <RecapSubsSection subs={subs} periodLabel={period.label} priorLabel={prior.label} />
 
-      <RecapEntertainmentSection
-        entertainment={entertainment}
-        periodLabel={period.label}
-        priorLabel={prior.label}
-      />
+        <RecapEntertainmentSection
+          entertainment={entertainment}
+          periodLabel={period.label}
+          priorLabel={prior.label}
+        />
 
-      <RecapPeoplePlacesSection
-        data={peoplePlaces}
-        periodLabel={period.label}
-        priorLabel={prior.label}
-      />
+        <RecapPeoplePlacesSection
+          data={peoplePlaces}
+          periodLabel={period.label}
+          priorLabel={prior.label}
+        />
 
-      <RecapMomentsCard moments={moments} periodLabel={period.label} />
+        <RecapMomentsCard moments={moments} periodLabel={period.label} />
 
-      <RecapLifeEventsCard events={lifeEvents} periodLabel={period.label} />
+        <RecapLifeEventsCard events={lifeEvents} periodLabel={period.label} />
+      </RecapStoryView>
     </ChartPage>
   );
 }
