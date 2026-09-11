@@ -3,6 +3,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { GymWeightComboChart } from "@/components/charts/gym-weight-combo-chart";
 import { getGymWeightComboData } from "@/lib/charts";
 import { COMBO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { TRAINING_METHODOLOGY, WEIGHT_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,11 @@ export default async function GymWeightChartPage() {
   return (
     <ChartPage
       title="Weight and Training Volume"
-      description="Weight (line, left axis) against workouts logged per month (bars, right axis)."
-      info={{ interactionGuide: COMBO_INTERACTION_GUIDE }}
+      description="My weight against total weightlifting hours each month — a way to see whether time at the gym is helping build muscle."
+      info={{
+        interactionGuide: COMBO_INTERACTION_GUIDE,
+        methodology: `${WEIGHT_METHODOLOGY} ${TRAINING_METHODOLOGY}`,
+      }}
     >
       <ChartCard empty={empty}>
         <GymWeightComboChart data={data} />

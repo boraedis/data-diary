@@ -179,7 +179,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/gym",
     title: "Weight and Training Volume",
-    description: "Body weight against how many workouts you logged each month.",
+    description: "My weight against total weightlifting hours each month, to see whether time at the gym is helping build muscle.",
     category: "weight",
   },
   {
