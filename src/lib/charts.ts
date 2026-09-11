@@ -1,7 +1,7 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
-import { days, exercises, metros, people, places, tags, workouts } from "@/db/schema";
+import { days, exercises, metros, people, places, tags, workoutSets, workouts } from "@/db/schema";
 import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
@@ -451,7 +451,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
 
 // --- Weight + workout volume combo ---------------------------------------------------
 
-export type WorkoutMonth = { month: string; count: number }; // month = "YYYY-MM"
+export type WorkoutMonth = { month: string; hours: number }; // month = "YYYY-MM"
 
 // Plain {date, weightKg} — this combo chart only ever needed the one
 // field, unlike WeightMetricsPoint above (widened for the scroller's
@@ -465,29 +465,66 @@ export type GymWeightComboData = {
   workoutsByMonth: WorkoutMonth[];
 };
 
-/** Weight (line) alongside workout frequency (bars, one per calendar month —
- * daily workout counts would be too sparse/spiky to read as bars over a
+/** Weight (line) alongside weightlifting volume (bars, one per calendar
+ * month — daily hours would be too sparse/spiky to read as bars over a
  * multi-year range, monthly is the legacy chart's effective resolution
  * too). Two independently-shaped series sharing one time x-axis and two
  * y-axes, ported from the legacy app's bespoke `LineBarChart` in
- * gym-weight_chart.js. */
+ * gym-weight_chart.js.
+ *
+ * The bars are hours spent on strength-category workouts, not a count of
+ * all logged workouts (#325 — the original version counted every workout
+ * row regardless of category, which read as a workout frequency chart
+ * despite being labeled "training volume"). Per workout, hours come from
+ * `workouts.durationMinutes` when it's set — despite the schema's own
+ * comment on `workouts` claiming strength never uses that column, the
+ * Hevy importer (hevy-import.ts) actually does populate it for strength
+ * workouts too, apportioning the pasted session's total time across each
+ * exercise (and, for an exercise with explicitly timed sets like a plank,
+ * setting it straight from that set's own `durationSeconds`) — that's the
+ * real duration signal for most logged strength workouts. Only a workout
+ * with no `durationMinutes` at all (manually entered, no Hevy import)
+ * falls back to summing its own sets' `durationSeconds`, so a purely
+ * rep/weight-only manual entry with neither contributes zero rather than
+ * a guessed estimate. */
 export async function getGymWeightComboData(): Promise<GymWeightComboData> {
   const db = getDb();
-  const [weightRows, workoutDates] = await Promise.all([
+  const [weightRows, strengthWorkouts, strengthSetDurations] = await Promise.all([
     db
       .select({ date: days.date, weightKg: days.weightKg })
       .from(days)
       .where(isNotNull(days.weightKg))
       .orderBy(asc(days.date)),
-    db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)),
+    db
+      .select({ id: workouts.id, date: workouts.date, durationMinutes: workouts.durationMinutes })
+      .from(workouts)
+      .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+      .where(eq(exercises.category, "strength"))
+      .orderBy(asc(workouts.date)),
+    db
+      .select({ workoutId: workoutSets.workoutId, durationSeconds: workoutSets.durationSeconds })
+      .from(workoutSets)
+      .innerJoin(workouts, eq(workoutSets.workoutId, workouts.id))
+      .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+      .where(eq(exercises.category, "strength")),
   ]);
+
+  const setSecondsByWorkoutId = new Map<number, number>();
+  for (const s of strengthSetDurations) {
+    if (s.durationSeconds === null) continue;
+    setSecondsByWorkoutId.set(s.workoutId, (setSecondsByWorkoutId.get(s.workoutId) ?? 0) + s.durationSeconds);
+  }
+  const strengthWorkoutHours = strengthWorkouts.map((w) => ({
+    date: w.date,
+    hours: w.durationMinutes !== null ? w.durationMinutes / 60 : (setSecondsByWorkoutId.get(w.id) ?? 0) / 3600,
+  }));
 
   // Monthly bucketing via the shared groupByPeriod helper (#16) — this
   // used to be its own hand-rolled `Map<string, number>` here, duplicating
   // the same "bucket by month" logic getHappinessAveragerData had below.
-  const workoutsByMonth = groupByPeriod(workoutDates, "month", (r) => r.date).map(({ key, items }) => ({
+  const workoutsByMonth = groupByPeriod(strengthWorkoutHours, "month", (r) => r.date).map(({ key, items }) => ({
     month: key,
-    count: items.length,
+    hours: items.reduce((sum, r) => sum + r.hours, 0),
   }));
 
   return {
