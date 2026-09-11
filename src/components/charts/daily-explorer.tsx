@@ -12,6 +12,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
 import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import type { TrackingSpan } from "@/lib/viz/tracking-span";
 
 /**
  * Legacy's "scroller" shape with controls: every logged day, zoomable, with
@@ -40,6 +41,7 @@ export function DailyExplorer({
   title,
   description,
   methodology,
+  trackingSpan,
   seriesId,
   label,
   color,
@@ -54,6 +56,9 @@ export function DailyExplorer({
   /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
    * Falls back to a visible placeholder when omitted. */
   methodology?: string;
+  /** Per-field "tracked since" copy for the `ChartInfo` popup. Falls back
+   * to a visible placeholder when omitted. */
+  trackingSpan?: TrackingSpan;
   seriesId: string;
   label: string;
   color: string;
@@ -81,7 +86,7 @@ export function DailyExplorer({
     <ChartPage
       title={title}
       description={description}
-      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology }}
+      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology, trackingSpan }}
       filters={
         <>
           {extraFilters}
