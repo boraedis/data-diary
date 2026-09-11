@@ -9,7 +9,7 @@ import { MARK_SPECS, attachMarkHover, roundedBarPath } from "@/components/charts
 import { ChartTooltip } from "@/components/charts/interactive/tooltip";
 import { Legend } from "@/components/charts/interactive/legend";
 import { categoricalColor } from "@/lib/viz/color";
-import { formatDuration } from "@/lib/viz/format";
+import { formatDate, formatDuration } from "@/lib/viz/format";
 import type { GymWeightComboData } from "@/lib/charts";
 
 const MARGIN = { top: 12, right: 48, bottom: 28, left: 48 };
@@ -19,7 +19,7 @@ function parseMonth(month: string): Date {
   return new Date(y, m - 1, 1);
 }
 
-type WeightPt = { date: Date; weightKg: number };
+type WeightPt = { date: Date; dateStr: string; weightKg: number };
 type MonthBar = { start: Date; end: Date; hours: number };
 type Hovered = { label: string; value: string; color: string; clientPos: { x: number; y: number } };
 
@@ -147,6 +147,32 @@ function Combo({
           .attr("stroke", "var(--chart-1)")
           .attr("stroke-width", MARK_SPECS.line.strokeWidth)
           .attr("d", line);
+
+        // Per-point hit targets so the line gets the same hover/tooltip
+        // treatment as the bars (#332 — the line previously had no pointer
+        // handlers at all). Invisible until hover, at which point
+        // attachMarkHover's own opacity lift doubles as the "you're on a
+        // point" affordance instead of needing a separately-drawn dot.
+        const points = g
+          .selectAll("circle")
+          .data(weight)
+          .join("circle")
+          .attr("cx", (d) => x(d.date))
+          .attr("cy", (d) => yWeight(d.weightKg))
+          .attr("r", MARK_SPECS.hover.minHitTarget / 2)
+          .attr("fill", "var(--chart-1)")
+          .attr("fill-opacity", 0);
+
+        attachMarkHover<WeightPt>(points, {
+          onHover: (d, clientPos) =>
+            onHover({
+              label: formatDate(d.dateStr),
+              value: `${d.weightKg.toFixed(1)} kg`,
+              color: categoricalColor(0),
+              clientPos,
+            }),
+          onLeave,
+        });
       }
     },
     [weight, months, width, height, onHover, onLeave],
@@ -162,7 +188,7 @@ function Combo({
  * surface instead of copied as one-off code. */
 export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
   const weight = useMemo<WeightPt[]>(
-    () => data.weight.map((w) => ({ date: new Date(w.date), weightKg: w.weightKg })),
+    () => data.weight.map((w) => ({ date: new Date(w.date), dateStr: w.date, weightKg: w.weightKg })),
     [data.weight],
   );
   const months = useMemo<MonthBar[]>(
