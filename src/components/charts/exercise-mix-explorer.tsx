@@ -19,6 +19,7 @@ import { formatDate } from "@/lib/viz/format";
 import { EXERCISE_CATEGORY_LABELS, EXERCISE_CATEGORY_ORDER, type ExerciseWorkoutRow } from "@/lib/charts";
 import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { TRAINING_METHODOLOGY } from "@/lib/viz/methodology";
+import { TRAINING_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // ExerciseMixExplorer - the real InteractiveArea (#19) consumer, and the
 // proving ground for #19's "core tools" ask: a period-granularity picker,
@@ -168,7 +169,11 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
     <ChartPage
       title="Exercise Mix"
       description="A breakdown of how I exercised, aggregated by period."
-      info={{ interactionGuide: AREA_INTERACTION_GUIDE, methodology: TRAINING_METHODOLOGY }}
+      info={{
+        interactionGuide: AREA_INTERACTION_GUIDE,
+        methodology: TRAINING_METHODOLOGY,
+        trackingSpan: TRAINING_TRACKING_SPAN,
+      }}
       filters={
         <>
           <PeriodPicker value={period} onChange={setPeriod} />

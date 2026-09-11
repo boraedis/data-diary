@@ -12,6 +12,7 @@ import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups, WeightMetricsPoint } from "@/lib/charts";
 import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { WEIGHT_METHODOLOGY } from "@/lib/viz/methodology";
+import { WEIGHT_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // First real consumer of InteractiveScroller (#117) — weight is exactly
 // this primitive's use case (raw daily density, not a pre-bucketed
@@ -152,7 +153,11 @@ export function WeightScrollerChart({
     <ChartPage
       title="Daily Weight"
       description="A day-by-day look at weight, body fat %, and muscle mass."
-      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology: WEIGHT_METHODOLOGY }}
+      info={{
+        interactionGuide: SCROLLER_INTERACTION_GUIDE,
+        methodology: WEIGHT_METHODOLOGY,
+        trackingSpan: WEIGHT_TRACKING_SPAN,
+      }}
       backHref={backHref}
       backLabel={backLabel}
       filters={

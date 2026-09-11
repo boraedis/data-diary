@@ -27,6 +27,7 @@ import { daysBetween, parseDate } from "@/lib/date";
 import type { PeopleDay } from "@/lib/charts";
 import { BAR_RACE_INTERACTION_GUIDE, RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PEOPLE_IMPACT_METHODOLOGY, PEOPLE_METHODOLOGY } from "@/lib/viz/methodology";
+import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -73,6 +74,7 @@ export function PeopleAreaChart({ data }: { data: PeopleDay[] }) {
       title="People Trend"
       description="A breakdown of who you spent your time with, aggregated by period. Everyone outside the top five is folded into Other."
       methodology={PEOPLE_METHODOLOGY}
+      trackingSpan={PEOPLE_TRACKING_SPAN}
       valueFormat={(v) => `${Math.round(v)} day${v === 1 ? "" : "s"}`}
       ariaLabel="Who you spent time with over time, as a share of people logged."
     />
@@ -139,6 +141,7 @@ export function PeopleCalendarChart({ data }: { data: PeopleDay[] }) {
       formatValue={(n) => `${n} ${n === 1 ? "person" : "people"}`}
       valueLabel="people"
       methodology={PEOPLE_METHODOLOGY}
+      trackingSpan={PEOPLE_TRACKING_SPAN}
       extraFilters={
         <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="Colour by" />
       }
@@ -208,6 +211,7 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
       title="People Impact"
       description="How much each person contributed to how your days went, using the original scoring from the legacy app. Everyone outside the top five is folded into Other."
       methodology={PEOPLE_IMPACT_METHODOLOGY}
+      trackingSpan={PEOPLE_TRACKING_SPAN}
       valueFormat={(v) => v.toFixed(1)}
       initialPeriod="week"
       ariaLabel="How much each person contributed to how your days went, over time."
@@ -302,7 +306,11 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
     <ChartPage
       title="People Leaderboard"
       description="A leaderboard of the people you've logged the most. Each window shows days gained in that period and how the overall ranking has moved since then."
-      info={{ interactionGuide: RANKED_INTERACTION_GUIDE, methodology: PEOPLE_METHODOLOGY }}
+      info={{
+        interactionGuide: RANKED_INTERACTION_GUIDE,
+        methodology: PEOPLE_METHODOLOGY,
+        trackingSpan: PEOPLE_TRACKING_SPAN,
+      }}
       filters={
         <GroupByPicker value={limit} onChange={setLimit} options={LIMIT_OPTIONS} label="Show" />
       }
@@ -463,7 +471,11 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
     <ChartPage
       title="People Race"
       description="An animated ranking of who impacted me the most."
-      info={{ interactionGuide: BAR_RACE_INTERACTION_GUIDE, methodology: PEOPLE_IMPACT_METHODOLOGY }}
+      info={{
+        interactionGuide: BAR_RACE_INTERACTION_GUIDE,
+        methodology: PEOPLE_IMPACT_METHODOLOGY,
+        trackingSpan: PEOPLE_TRACKING_SPAN,
+      }}
       filters={null}
     >
       <ChartCard empty={frames.length === 0}>

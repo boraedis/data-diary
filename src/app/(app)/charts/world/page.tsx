@@ -4,6 +4,7 @@ import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
+import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,11 @@ export default async function WorldVisitsChartPage() {
     <ChartPage
       title="World Heatmap"
       description="A heatmap of the world describing which countries I have visited and spent time in. Click the US to drill into its states."
-      info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
+      info={{
+        interactionGuide: GEO_INTERACTION_GUIDE,
+        methodology: PLACES_METHODOLOGY,
+        trackingSpan: PLACES_TRACKING_SPAN,
+      }}
     >
       <ChartCard empty={data.length === 0}>
         <WorldVisitsChart data={data} usStates={usStates} />

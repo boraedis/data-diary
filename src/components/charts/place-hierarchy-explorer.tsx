@@ -16,6 +16,7 @@ import {
 import type { PlaceHierarchyRow } from "@/lib/charts";
 import { DONUT_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
+import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // PlaceHierarchyExplorer — the real InteractiveDonut (#118) consumer, and
 // the reason that primitive is a Sunburst rather than a single-ring donut:
@@ -144,7 +145,11 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
     <ChartPage
       title="Place Sunburst"
       description="A zoomable donut chart that lets you explore where I spent my time."
-      info={{ interactionGuide: DONUT_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
+      info={{
+        interactionGuide: DONUT_INTERACTION_GUIDE,
+        methodology: PLACES_METHODOLOGY,
+        trackingSpan: PLACES_TRACKING_SPAN,
+      }}
       filters={
         <>
           <GroupByPicker value={grouping} onChange={setGrouping} options={GROUPING_OPTIONS} label="Break down by" />

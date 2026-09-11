@@ -9,6 +9,7 @@ import {
 } from "@/components/charts/composition-explorer";
 import type { CountryDay } from "@/lib/charts";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
+import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -66,6 +67,7 @@ export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
       title="Location Mix"
       description="A breakdown of which countries you spent your time in, aggregated by period. A day spanning two countries counts in both."
       methodology={PLACES_METHODOLOGY}
+      trackingSpan={PLACES_TRACKING_SPAN}
       valueFormat={(v) => `${Math.round(v)} day${v === 1 ? "" : "s"}`}
       ariaLabel="Which countries you were in over time, as a share of logged days."
     />

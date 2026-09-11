@@ -5,6 +5,7 @@ import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { categoricalColor } from "@/lib/viz/color";
 import type { DailyValue } from "@/lib/charts";
 import { DISTANCE_METHODOLOGY } from "@/lib/viz/methodology";
+import { DISTANCE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // See coffee-charts.tsx for why this thin client layer exists.
 
@@ -18,6 +19,7 @@ export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
       title="Distance Walked Trend"
       description="Trend in distance walked over time, aggregated by period. Marker size shows how many days fed each point; the band shows that bucket's range."
       methodology={DISTANCE_METHODOLOGY}
+      trackingSpan={DISTANCE_TRACKING_SPAN}
       seriesId="distance"
       label="Distance walked"
       color={DISTANCE_COLOR}
@@ -36,6 +38,7 @@ export function DistanceDailyChart({ data }: { data: DailyValue[] }) {
       title="Daily Distance Walked"
       description="A day-by-day look at distance walked. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={DISTANCE_METHODOLOGY}
+      trackingSpan={DISTANCE_TRACKING_SPAN}
       seriesId="distance"
       label="Distance walked"
       color={DISTANCE_COLOR}

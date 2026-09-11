@@ -4,6 +4,7 @@ import { PeopleNetworkChart } from "@/components/charts/people-network-chart";
 import { getPeopleNetworkData } from "@/lib/charts";
 import { NETWORK_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PEOPLE_METHODOLOGY } from "@/lib/viz/methodology";
+import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,11 @@ export default async function PeopleNetworkChartPage() {
     <ChartPage
       title="People Network"
       description="A network graph showing the relationship between people who get logged on the same days often."
-      info={{ interactionGuide: NETWORK_INTERACTION_GUIDE, methodology: PEOPLE_METHODOLOGY }}
+      info={{
+        interactionGuide: NETWORK_INTERACTION_GUIDE,
+        methodology: PEOPLE_METHODOLOGY,
+        trackingSpan: PEOPLE_TRACKING_SPAN,
+      }}
     >
       <ChartCard empty={data.nodes.length === 0}>
         <PeopleNetworkChart data={data} />

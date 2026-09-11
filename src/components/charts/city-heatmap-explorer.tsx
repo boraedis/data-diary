@@ -18,6 +18,7 @@ import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import type { CityHeatmapData } from "@/lib/charts";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { CITY_HEATMAP_METHODOLOGY } from "@/lib/viz/methodology";
+import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // The page body (title, city-picker filter row, and chart card) is one
 // client component rather than split between a server page and a chart
@@ -114,7 +115,11 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
     <ChartPage
       title="City Heatmap"
       description="A heatmap of the neighborhoods of Atlanta, DC, Dubai, NYC, and Istanbul describing where I have visited and spent time in."
-      info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: CITY_HEATMAP_METHODOLOGY }}
+      info={{
+        interactionGuide: GEO_INTERACTION_GUIDE,
+        methodology: CITY_HEATMAP_METHODOLOGY,
+        trackingSpan: PLACES_TRACKING_SPAN,
+      }}
       filters={
         <>
           <GroupByPicker value={city} onChange={setCity} options={CITY_OPTIONS} label="City" />

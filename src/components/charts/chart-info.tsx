@@ -103,7 +103,7 @@ export function ChartInfo({
             <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
               Tracked since
             </h3>
-            <p className="mt-1 text-foreground/90">
+            <p className="mt-1 text-foreground/90 whitespace-pre-line">
               {trackingSpan ? formatTrackingSpan(trackingSpan) : PLACEHOLDER_TRACKING_SPAN}
             </p>
           </section>

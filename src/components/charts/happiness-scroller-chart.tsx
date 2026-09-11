@@ -11,6 +11,7 @@ import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups } from "@/lib/charts";
 import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
+import { HAPPINESS_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // Second real consumer of InteractiveScroller (#117 follow-up) — the raw-
 // daily counterpart to happiness-averager-chart.tsx's monthly bucketing,
@@ -93,7 +94,11 @@ export function HappinessScrollerChart({
     <ChartPage
       title="Daily Happiness"
       description="A detailed, day-by-day look at happiness ratings."
-      info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
+      info={{
+        interactionGuide: SCROLLER_INTERACTION_GUIDE,
+        methodology: HAPPINESS_METHODOLOGY,
+        trackingSpan: HAPPINESS_TRACKING_SPAN,
+      }}
       backHref={backHref}
       backLabel={backLabel}
       filters={

@@ -4,6 +4,7 @@ import { HappinessAveragerChart } from "@/components/charts/happiness-averager-c
 import { getHappinessAveragerData } from "@/lib/charts";
 import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
+import { HAPPINESS_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,11 @@ export default async function HappinessTrendChartPage() {
     <ChartPage
       title="Happiness Trend"
       description="Trend in happiness over time, aggregated by period."
-      info={{ interactionGuide: LINE_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
+      info={{
+        interactionGuide: LINE_INTERACTION_GUIDE,
+        methodology: HAPPINESS_METHODOLOGY,
+        trackingSpan: HAPPINESS_TRACKING_SPAN,
+      }}
     >
       <ChartCard empty={data.length === 0}>
         <HappinessAveragerChart data={data} />

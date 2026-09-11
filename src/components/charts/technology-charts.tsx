@@ -12,6 +12,7 @@ import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { DailyValue, DeviceDay } from "@/lib/charts";
 import { INSTAGRAM_METHODOLOGY, SCREEN_TIME_METHODOLOGY } from "@/lib/viz/methodology";
+import { INSTAGRAM_TRACKING_SPAN, SCREEN_TIME_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -65,6 +66,7 @@ export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
       title="Screen Time Mix"
       description="A breakdown of phone vs. laptop usage, aggregated by period."
       methodology={SCREEN_TIME_METHODOLOGY}
+      trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       valueFormat={formatHours}
       ariaLabel="Time spent on phone and laptop over time."
     />
@@ -100,6 +102,7 @@ export function DeviceDailyChart({ data }: { data: DeviceDay[] }) {
       title="Daily Screen Time"
       description="A day-by-day look at screen time. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={SCREEN_TIME_METHODOLOGY}
+      trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       seriesId="screen-time"
       label={device === "total" ? "Screen time" : device}
       color={device === "total" ? categoricalColor(4) : DEVICE_COLORS[device]}
@@ -147,6 +150,7 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
       title="Screen Time Calendar"
       description="Both devices on one grid: colour leans toward whichever you used more, strength shows the combined total."
       methodology={SCREEN_TIME_METHODOLOGY}
+      trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       formatValue={formatHours}
       valueLabel="screen time"
       ariaLabel="Calendar of daily screen time, coloured by which device dominated and shaded by the total."
@@ -169,6 +173,7 @@ export function InstagramFollowersChart({ data }: { data: DailyValue[] }) {
       title="Instagram Followers"
       description="A day-by-day look at Instagram followers. A running total, so it only moves when it moves."
       methodology={INSTAGRAM_METHODOLOGY}
+      trackingSpan={INSTAGRAM_TRACKING_SPAN}
       seriesId="followers"
       label="Followers"
       color={categoricalColor(3)}

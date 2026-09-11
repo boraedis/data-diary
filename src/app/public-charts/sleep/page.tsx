@@ -5,6 +5,7 @@ import { SleepCalendarChart } from "@/components/charts/sleep-calendar-chart";
 import { getPublicSleepData } from "@/lib/public-charts";
 import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
+import { SLEEP_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const metadata: Metadata = {
   title: "Sleep Calendar — Data Diary",
@@ -21,7 +22,11 @@ export default async function PublicSleepChartPage() {
     <ChartPage
       title="Sleep Calendar"
       description="Nightly sleep duration, darker = less sleep, brighter = more."
-      info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology: SLEEP_METHODOLOGY }}
+      info={{
+        interactionGuide: CALENDAR_INTERACTION_GUIDE,
+        methodology: SLEEP_METHODOLOGY,
+        trackingSpan: SLEEP_TRACKING_SPAN,
+      }}
       backHref="/public-charts"
       backLabel="Charts"
     >

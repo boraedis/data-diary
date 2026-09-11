@@ -4,6 +4,7 @@ import { PlaceLeaderboard } from "@/components/charts/place-leaderboard";
 import { getPlaceLeaderboardData } from "@/lib/charts";
 import { RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
+import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,11 @@ export default async function PlacesChartPage() {
     <ChartPage
       title="Place Leaderboard"
       description="A leaderboard of my most mentioned locations."
-      info={{ interactionGuide: RANKED_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
+      info={{
+        interactionGuide: RANKED_INTERACTION_GUIDE,
+        methodology: PLACES_METHODOLOGY,
+        trackingSpan: PLACES_TRACKING_SPAN,
+      }}
     >
       <ChartCard empty={entries.length === 0}>
         <PlaceLeaderboard entries={entries} />

@@ -14,6 +14,7 @@ import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { SleepNight } from "@/lib/charts";
 import { SLEEP_LOCATION_METHODOLOGY, SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
+import { SLEEP_LOCATION_TRACKING_SPAN, SLEEP_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // See coffee-charts.tsx for why this thin client layer exists: the
 // explorers take formatter functions, which a server-component page can't
@@ -30,6 +31,7 @@ export function SleepTrendChart({ data }: { data: SleepNight[] }) {
       title="Sleep Trend"
       description="Trend in sleep duration over time, aggregated by period. Marker size shows how many nights fed each point; the band shows that bucket's range."
       methodology={SLEEP_METHODOLOGY}
+      trackingSpan={SLEEP_TRACKING_SPAN}
       seriesId="sleep"
       label="Sleep"
       color={SLEEP_COLOR}
@@ -54,6 +56,7 @@ export function SleepDailyChart({ data }: { data: SleepNight[] }) {
       title="Nightly Sleep"
       description="A night-by-night look at sleep duration. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={SLEEP_METHODOLOGY}
+      trackingSpan={SLEEP_TRACKING_SPAN}
       seriesId="sleep"
       label="Sleep"
       color={SLEEP_COLOR}
@@ -125,6 +128,7 @@ export function SleepLocationChart({ data }: { data: SleepNight[] }) {
       title="Sleep Locations"
       description="Where you slept, as a share of nights. Only nights with a location recorded — that wasn't tracked before mid-2023."
       methodology={SLEEP_LOCATION_METHODOLOGY}
+      trackingSpan={SLEEP_LOCATION_TRACKING_SPAN}
       valueFormat={(v) =>
         metric === "nights" ? `${Math.round(v)} night${v === 1 ? "" : "s"}` : formatHours(v)
       }
