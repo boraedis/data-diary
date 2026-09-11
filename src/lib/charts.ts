@@ -1513,11 +1513,15 @@ export async function getDayTypeCalendarData(): Promise<DayTypeDay[]> {
 // --- Technology (#219) ----------------------------------------------------
 
 /** A day's screen time, split by device. Either side may be null on a day
- * where only one was recorded. */
+ * where only one was recorded. `instagramMinutes` is a *subset* of
+ * `phoneMinutes`, not an independent total — it wasn't tracked at all
+ * before 2025 (null on those days), and even once tracked it should never
+ * be added on top of phone time, only broken out of it (see #326). */
 export type DeviceDay = {
   date: string;
   phoneMinutes: number | null;
   laptopMinutes: number | null;
+  instagramMinutes: number | null;
 };
 
 /** Days with at least one device recorded, oldest first. */
@@ -1528,6 +1532,7 @@ export async function getDeviceUsageData(): Promise<DeviceDay[]> {
       date: days.date,
       phoneMinutes: days.phoneUsageMinutes,
       laptopMinutes: days.laptopUsageMinutes,
+      instagramMinutes: days.instagramUsageMinutes,
     })
     .from(days)
     .where(or(isNotNull(days.phoneUsageMinutes), isNotNull(days.laptopUsageMinutes)))
