@@ -191,7 +191,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/screen-time",
     title: "Screen Time Mix",
-    description: "A breakdown of phone vs. laptop usage, aggregated by period.",
+    description: "A breakdown of phone, Instagram, and laptop usage, aggregated by period.",
     category: "technology",
   },
   {
@@ -203,7 +203,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/screen-time-calendar",
     title: "Screen Time Calendar",
-    description: "Both devices on one grid, coloured by which dominated.",
+    description: "Phone, Instagram, and laptop on one grid, coloured by which dominated.",
     category: "technology",
   },
   {
