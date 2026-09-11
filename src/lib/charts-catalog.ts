@@ -197,7 +197,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/screen-time-daily",
     title: "Daily Screen Time",
-    description: "A day-by-day look at screen time.",
+    description: "A day-by-day look at phone, laptop, and Instagram usage.",
     category: "technology",
   },
   {
