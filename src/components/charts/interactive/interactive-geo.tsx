@@ -131,7 +131,19 @@ const DEFAULT_PROJECTION = () => d3.geoMercator();
 // every render, including one triggered by this primitive's own `hovered`
 // state, tearing the whole map down and rebuilding it on nearly every
 // pointermove). Learned the hard way there; applied here from the start.
-const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 8];
+// 64x, not the 8x this shipped with. 8 was set when the only things on a
+// map were countries and states, where it's plenty; it stopped being
+// enough once a map could draw all 3,142 US counties (#313) or a city's
+// neighborhoods (#177), where the whole point is getting close to one
+// small polygon. The US is ~4,500km across and a county is tens of km, so
+// 8x doesn't even bring one county to a readable size.
+//
+// Nothing degrades at the higher ceiling: region borders carry
+// `vector-effect: non-scaling-stroke` so they hold a constant on-screen
+// width however far in you go, and markers are counter-scaled by the
+// transform's own k on every zoom tick. 64 also matches the scaleExtent
+// InteractiveScroller and InteractiveTimeline already use.
+const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 64];
 
 // Smaller than interactive-network.tsx's own [3, 16] node range — a geo
 // marker sits on top of an already-busy choropleth fill + legend, where
