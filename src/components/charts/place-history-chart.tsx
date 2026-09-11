@@ -8,6 +8,7 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import type { CountryDay } from "@/lib/charts";
+import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
@@ -64,6 +65,7 @@ export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
       categories={categories}
       title="Where you were"
       description="Days spent in each country over time. A day spanning two countries counts in both."
+      methodology={PLACES_METHODOLOGY}
       valueFormat={(v) => `${Math.round(v)} day${v === 1 ? "" : "s"}`}
       ariaLabel="Which countries you were in over time, as a share of logged days."
     />

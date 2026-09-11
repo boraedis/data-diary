@@ -38,5 +38,11 @@ export const SCREEN_TIME_METHODOLOGY =
 export const INSTAGRAM_METHODOLOGY =
   "Follower and following counts are logged straight from the Instagram app, tracking how both have grown or shrunk over time.";
 
+export const PLACES_METHODOLOGY =
+  "Each day, I pick the two places that had the biggest impact on it — not necessarily where I spent the most time, but usually wherever the day's main activity happened. The first slot counts double toward totals, the second counts once. Every place sits in a hierarchy, typically country, then state or province, then municipality, then neighborhood for larger cities, then a specific location, and sometimes a sub-location for a room or unit within a building — so time can be drilled down from an entire country to a single room.";
+
+export const CITY_HEATMAP_METHODOLOGY =
+  "For the cities I've spent significant time in — Istanbul, Dubai, Atlanta, DC, and NYC — I've mapped out neighborhood boundaries by hand, letting the same daily place logs show which neighborhoods I actually frequented in each one.";
+
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";

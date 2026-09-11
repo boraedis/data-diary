@@ -21,6 +21,7 @@ import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
 import { CBSA_AREAS } from "@/lib/geo/us-cbsa";
 import type { FeatureCollection, Geometry } from "geojson";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 import type { UsCountyVisitData, UsStateVisitEntry } from "@/lib/charts";
 
 // us-atlas's states-10m.json (~114KB), the standard/published-geography
@@ -217,7 +218,7 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
     <ChartPage
       title="Days per state"
       description={DESCRIPTIONS[mode]}
-      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
       filters={<GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />}
     >
       <ChartCard

@@ -3,6 +3,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { PlaceLeaderboard } from "@/components/charts/place-leaderboard";
 import { getPlaceLeaderboardData } from "@/lib/charts";
 import { RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function PlacesChartPage() {
     <ChartPage
       title="Most-visited places"
       description="Top 30, weighted 2x for a day's first place slot and 1x for the second."
-      info={{ interactionGuide: RANKED_INTERACTION_GUIDE }}
+      info={{ interactionGuide: RANKED_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
     >
       <ChartCard empty={entries.length === 0}>
         <PlaceLeaderboard entries={entries} />

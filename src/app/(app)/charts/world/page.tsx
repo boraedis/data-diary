@@ -3,6 +3,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default async function WorldVisitsChartPage() {
     <ChartPage
       title="Days per country"
       description="Distinct days logged in each country. Click the US to drill into its states."
-      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
     >
       <ChartCard empty={data.length === 0}>
         <WorldVisitsChart data={data} usStates={usStates} />

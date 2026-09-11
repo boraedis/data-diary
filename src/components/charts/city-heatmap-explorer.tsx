@@ -17,6 +17,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import type { CityHeatmapData } from "@/lib/charts";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { CITY_HEATMAP_METHODOLOGY } from "@/lib/viz/methodology";
 
 // The page body (title, city-picker filter row, and chart card) is one
 // client component rather than split between a server page and a chart
@@ -113,7 +114,7 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
     <ChartPage
       title="City heatmap"
       description={`${CITIES[city].label} — neighborhoods colored by days logged there; dot size shows how often you've visited.`}
-      info={{ interactionGuide: GEO_INTERACTION_GUIDE }}
+      info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: CITY_HEATMAP_METHODOLOGY }}
       filters={
         <>
           <GroupByPicker value={city} onChange={setCity} options={CITY_OPTIONS} label="City" />
