@@ -12,7 +12,7 @@ export default async function HappinessHistChartPage() {
 
   return (
     <ChartPage
-      title="Happiness histogram"
+      title="Happiness Histogram"
       description="The distribution of happiness ratings across every day logged."
       info={{ interactionGuide: HIST_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
     >

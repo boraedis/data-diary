@@ -17,8 +17,8 @@ export default async function PeopleNetworkChartPage() {
 
   return (
     <ChartPage
-      title="People network"
-      description="The 100 most-logged people; connected when logged together on more than one day."
+      title="People Network"
+      description="A network graph showing the relationship between people who get logged on the same days often."
       info={{ interactionGuide: NETWORK_INTERACTION_GUIDE, methodology: PEOPLE_METHODOLOGY }}
     >
       <ChartCard empty={data.nodes.length === 0}>

@@ -150,8 +150,8 @@ export function WeightScrollerChart({
 
   return (
     <ChartPage
-      title="Weight over time"
-      description="Body weight, body fat %, and muscle mass over time."
+      title="Daily Weight"
+      description="A day-by-day look at weight, body fat %, and muscle mass."
       info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology: WEIGHT_METHODOLOGY }}
       backHref={backHref}
       backLabel={backLabel}

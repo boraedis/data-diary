@@ -3,8 +3,8 @@ import { WeightScrollerChart } from "@/components/charts/weight-scroller-chart";
 import { getPublicWeightData } from "@/lib/public-charts";
 
 export const metadata: Metadata = {
-  title: "Weight over time — Data Diary",
-  description: "A zoomable line chart of weight, body fat %, and muscle mass logged over time.",
+  title: "Daily Weight — Data Diary",
+  description: "A day-by-day look at weight, body fat %, and muscle mass.",
 };
 
 // Public counterpart to src/app/charts/weight/page.tsx (#84/#12) — same

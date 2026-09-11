@@ -7,8 +7,8 @@ import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const metadata: Metadata = {
-  title: "Happiness trend — Data Diary",
-  description: "The long-run trend in happiness over time, aggregated by period.",
+  title: "Happiness Trend — Data Diary",
+  description: "Trend in happiness over time, aggregated by period.",
 };
 
 // Public counterpart to src/app/charts/happiness-trend/page.tsx (#84/#12).
@@ -19,8 +19,8 @@ export default async function PublicHappinessTrendChartPage() {
 
   return (
     <ChartPage
-      title="Happiness trend"
-      description="The long-run trend in happiness over time, aggregated by period."
+      title="Happiness Trend"
+      description="Trend in happiness over time, aggregated by period."
       info={{ interactionGuide: LINE_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
       backHref="/public-charts"
       backLabel="Charts"

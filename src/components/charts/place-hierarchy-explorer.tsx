@@ -142,12 +142,8 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
 
   return (
     <ChartPage
-      title="Place hierarchy"
-      description={
-        grouping === "geography"
-          ? "Where your days happen, nested country to venue."
-          : "Places by category and subcategory."
-      }
+      title="Place Sunburst"
+      description="A zoomable donut chart that lets you explore where I spent my time."
       info={{ interactionGuide: DONUT_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
       filters={
         <>

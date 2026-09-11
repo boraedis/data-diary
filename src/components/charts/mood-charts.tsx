@@ -15,7 +15,7 @@ export function HappinessCalendarChart({ data }: { data: DailyValue[] }) {
   return (
     <CalendarExplorer
       data={data}
-      title="Happiness calendar"
+      title="Happiness Calendar"
       description="Every logged day's happiness score. Hover a day for the exact value."
       methodology={HAPPINESS_METHODOLOGY}
       formatValue={(v) => `${Math.round(v)} / 100`}
@@ -93,7 +93,7 @@ export function DayTypeCalendarChart({ data }: { data: DayTypeDay[] }) {
   return (
     <CalendarExplorer
       data={points}
-      title="Day types calendar"
+      title="Day Types Calendar"
       description="How each day was classified. Days with no type set are left blank."
       methodology={DAY_TYPE_METHODOLOGY}
       formatValue={() => ""}

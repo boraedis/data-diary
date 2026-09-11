@@ -7,7 +7,7 @@ import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
 
 export const metadata: Metadata = {
-  title: "Sleep calendar — Data Diary",
+  title: "Sleep Calendar — Data Diary",
   description: "A year-by-year heatmap of nightly sleep duration.",
 };
 
@@ -19,7 +19,7 @@ export default async function PublicSleepChartPage() {
 
   return (
     <ChartPage
-      title="Sleep calendar"
+      title="Sleep Calendar"
       description="Nightly sleep duration, darker = less sleep, brighter = more."
       info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology: SLEEP_METHODOLOGY }}
       backHref="/public-charts"

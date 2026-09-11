@@ -62,8 +62,8 @@ export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
     <CompositionExplorer
       rows={rows}
       categories={DEVICE_CATEGORIES}
-      title="Screen time"
-      description="Time on phone and laptop. Share mode shows how the balance between them has shifted."
+      title="Screen Time Mix"
+      description="A breakdown of phone vs. laptop usage, aggregated by period."
       methodology={SCREEN_TIME_METHODOLOGY}
       valueFormat={formatHours}
       ariaLabel="Time spent on phone and laptop over time."
@@ -97,8 +97,8 @@ export function DeviceDailyChart({ data }: { data: DeviceDay[] }) {
   return (
     <DailyExplorer
       data={points}
-      title="Daily screen time"
-      description="Every logged day. Scroll or drag to zoom, and use the strip below to move through the range."
+      title="Daily Screen Time"
+      description="A day-by-day look at screen time. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={SCREEN_TIME_METHODOLOGY}
       seriesId="screen-time"
       label={device === "total" ? "Screen time" : device}
@@ -144,7 +144,7 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
   return (
     <CalendarExplorer
       data={points}
-      title="Screen time calendar"
+      title="Screen Time Calendar"
       description="Both devices on one grid: colour leans toward whichever you used more, strength shows the combined total."
       methodology={SCREEN_TIME_METHODOLOGY}
       formatValue={formatHours}
@@ -166,8 +166,8 @@ export function InstagramFollowersChart({ data }: { data: DailyValue[] }) {
   return (
     <DailyExplorer
       data={data}
-      title="Instagram followers"
-      description="Follower count over time. A running total, so it only moves when it moves."
+      title="Instagram Followers"
+      description="A day-by-day look at Instagram followers. A running total, so it only moves when it moves."
       methodology={INSTAGRAM_METHODOLOGY}
       seriesId="followers"
       label="Followers"

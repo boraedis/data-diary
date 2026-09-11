@@ -12,7 +12,7 @@ export default async function SleepChartPage() {
 
   return (
     <ChartPage
-      title="Sleep calendar"
+      title="Sleep Calendar"
       description="Nightly sleep duration, darker = less sleep, brighter = more."
       info={{ interactionGuide: CALENDAR_INTERACTION_GUIDE, methodology: SLEEP_METHODOLOGY }}
     >

@@ -21,8 +21,8 @@ export function CoffeeTrendChart({ data }: { data: DailyValue[] }) {
   return (
     <TrendExplorer
       data={data}
-      title="Coffee trend"
-      description="Average cups per day. Marker size shows how many days fed each point; the band shows that bucket's range."
+      title="Coffee Trend"
+      description="Trend in coffee over time, aggregated by period. Marker size shows how many days fed each point; the band shows that bucket's range."
       methodology={COFFEE_METHODOLOGY}
       seriesId="coffee"
       label="Coffee"
@@ -39,7 +39,7 @@ export function CoffeeCalendarChart({ data }: { data: DailyValue[] }) {
   return (
     <CalendarExplorer
       data={data}
-      title="Coffee calendar"
+      title="Coffee Calendar"
       description="A year-by-year heatmap of cups per day. Hover a day for the exact count."
       methodology={COFFEE_METHODOLOGY}
       formatValue={(n) => `${n} cup${n === 1 ? "" : "s"}`}

@@ -15,8 +15,8 @@ export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
   return (
     <TrendExplorer
       data={data}
-      title="Distance walked trend"
-      description="Average kilometres per day. Marker size shows how many days fed each point; the band shows that bucket's range."
+      title="Distance Walked Trend"
+      description="Trend in distance walked over time, aggregated by period. Marker size shows how many days fed each point; the band shows that bucket's range."
       methodology={DISTANCE_METHODOLOGY}
       seriesId="distance"
       label="Distance walked"
@@ -33,8 +33,8 @@ export function DistanceDailyChart({ data }: { data: DailyValue[] }) {
   return (
     <DailyExplorer
       data={data}
-      title="Daily distance walked"
-      description="Every logged day. Scroll or drag to zoom, and use the strip below to move through the range."
+      title="Daily Distance Walked"
+      description="A day-by-day look at distance walked. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={DISTANCE_METHODOLOGY}
       seriesId="distance"
       label="Distance walked"

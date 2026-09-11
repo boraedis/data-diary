@@ -15,8 +15,8 @@ export default async function WorldVisitsChartPage() {
 
   return (
     <ChartPage
-      title="Days per country"
-      description="Distinct days logged in each country. Click the US to drill into its states."
+      title="World Heatmap"
+      description="A heatmap of the world describing which countries I have visited and spent time in. Click the US to drill into its states."
       info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
     >
       <ChartCard empty={data.length === 0}>

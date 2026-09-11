@@ -63,8 +63,8 @@ export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
     <CompositionExplorer
       rows={rows}
       categories={categories}
-      title="Where you were"
-      description="Days spent in each country over time. A day spanning two countries counts in both."
+      title="Location Mix"
+      description="A breakdown of which countries you spent your time in, aggregated by period. A day spanning two countries counts in both."
       methodology={PLACES_METHODOLOGY}
       valueFormat={(v) => `${Math.round(v)} day${v === 1 ? "" : "s"}`}
       ariaLabel="Which countries you were in over time, as a share of logged days."

@@ -70,8 +70,8 @@ export function PeopleAreaChart({ data }: { data: PeopleDay[] }) {
     <CompositionExplorer
       rows={rows}
       categories={categories}
-      title="Who you saw"
-      description="Days logged with each person, as a share of all people logged. Everyone outside the top five is folded into Other."
+      title="People Trend"
+      description="A breakdown of who you spent your time with, aggregated by period. Everyone outside the top five is folded into Other."
       methodology={PEOPLE_METHODOLOGY}
       valueFormat={(v) => `${Math.round(v)} day${v === 1 ? "" : "s"}`}
       ariaLabel="Who you spent time with over time, as a share of people logged."
@@ -133,7 +133,7 @@ export function PeopleCalendarChart({ data }: { data: PeopleDay[] }) {
       title="People calendar"
       description={
         mode === "count"
-          ? "How many people you logged each day. Hover a day for the count."
+          ? "A year-by-year heatmap of how many people you logged each day."
           : "Which tagged groups you saw each day — a day spanning several groups shows their mix. Hover for the breakdown."
       }
       formatValue={(n) => `${n} ${n === 1 ? "person" : "people"}`}
@@ -205,7 +205,7 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
     <CompositionExplorer
       rows={rows}
       categories={categories}
-      title="People impact"
+      title="People Impact"
       description="How much each person contributed to how your days went, using the original scoring from the legacy app. Everyone outside the top five is folded into Other."
       methodology={PEOPLE_IMPACT_METHODOLOGY}
       valueFormat={(v) => v.toFixed(1)}
@@ -300,8 +300,8 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
 
   return (
     <ChartPage
-      title="People table"
-      description="Everyone ranked by days logged. Each window shows days gained in that period and how the overall ranking has moved since then."
+      title="People Leaderboard"
+      description="A leaderboard of the people you've logged the most. Each window shows days gained in that period and how the overall ranking has moved since then."
       info={{ interactionGuide: RANKED_INTERACTION_GUIDE, methodology: PEOPLE_METHODOLOGY }}
       filters={
         <GroupByPicker value={limit} onChange={setLimit} options={LIMIT_OPTIONS} label="Show" />
@@ -461,8 +461,8 @@ export function PeopleRaceChart({ data }: { data: PeopleDay[] }) {
 
   return (
     <ChartPage
-      title="People race"
-      description="Who mattered most, week by week — each person's score sums the impact of every day you logged them, with older days fading, so the board reflects who was around lately rather than an all-time total."
+      title="People Race"
+      description="An animated ranking of who impacted me the most."
       info={{ interactionGuide: BAR_RACE_INTERACTION_GUIDE, methodology: PEOPLE_IMPACT_METHODOLOGY }}
       filters={null}
     >

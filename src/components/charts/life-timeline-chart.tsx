@@ -126,8 +126,8 @@ export function LifeTimelineChart({ entries }: { entries: LifeTimelineEntry[] })
 
   return (
     <ChartPage
-      title="Life timeline"
-      description="Occupation, residence and relationship history. Overlapping entries stack within their lane; an entry with no end date is still running."
+      title="Life Timeline"
+      description="An interactive timeline of my various occupations, residences and relationships. Overlapping entries stack within their lane; an entry with no end date is still running."
       info={{ interactionGuide: TIMELINE_INTERACTION_GUIDE, methodology: LIFE_METHODOLOGY }}
       filters={
         <>

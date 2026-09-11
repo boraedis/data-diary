@@ -112,8 +112,8 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
 
   return (
     <ChartPage
-      title="City heatmap"
-      description={`${CITIES[city].label} — neighborhoods colored by days logged there; dot size shows how often you've visited.`}
+      title="City Heatmap"
+      description="A heatmap of the neighborhoods of Atlanta, DC, Dubai, NYC, and Istanbul describing where I have visited and spent time in."
       info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: CITY_HEATMAP_METHODOLOGY }}
       filters={
         <>

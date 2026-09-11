@@ -12,8 +12,8 @@ export default async function PlacesChartPage() {
 
   return (
     <ChartPage
-      title="Most-visited places"
-      description="Top 30, weighted 2x for a day's first place slot and 1x for the second."
+      title="Place Leaderboard"
+      description="A leaderboard of my most mentioned locations."
       info={{ interactionGuide: RANKED_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
     >
       <ChartCard empty={entries.length === 0}>

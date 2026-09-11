@@ -12,8 +12,8 @@ export default async function HappinessTrendChartPage() {
 
   return (
     <ChartPage
-      title="Happiness trend"
-      description="The long-run trend in happiness over time, aggregated by period."
+      title="Happiness Trend"
+      description="Trend in happiness over time, aggregated by period."
       info={{ interactionGuide: LINE_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
     >
       <ChartCard empty={data.length === 0}>

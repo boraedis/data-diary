@@ -24,8 +24,8 @@ export function TrainingVolumeChart({ data }: { data: TrainingDay[] }) {
   return (
     <TrendExplorer
       data={data}
-      title="Training volume"
-      description="Total time trained. Hover a point for the days, exercises and average session length behind it."
+      title="Exercise Trend"
+      description="Trend in training hours over time, aggregated by period. Hover a point for the days, exercises and average session length behind it."
       methodology={TRAINING_METHODOLOGY}
       seriesId="training"
       label="Time trained"

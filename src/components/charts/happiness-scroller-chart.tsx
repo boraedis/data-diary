@@ -91,7 +91,7 @@ export function HappinessScrollerChart({
 
   return (
     <ChartPage
-      title="Daily happiness"
+      title="Daily Happiness"
       description="A detailed, day-by-day look at happiness ratings."
       info={{ interactionGuide: SCROLLER_INTERACTION_GUIDE, methodology: HAPPINESS_METHODOLOGY }}
       backHref={backHref}

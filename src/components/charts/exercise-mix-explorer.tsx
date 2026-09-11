@@ -166,8 +166,8 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
 
   return (
     <ChartPage
-      title="Exercise mix"
-      description="Workout count by category, exercise, or subtype - bucketed by week, month, quarter, or year."
+      title="Exercise Mix"
+      description="A breakdown of how I exercised, aggregated by period."
       info={{ interactionGuide: AREA_INTERACTION_GUIDE, methodology: TRAINING_METHODOLOGY }}
       filters={
         <>

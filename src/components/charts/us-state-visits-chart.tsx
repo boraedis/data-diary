@@ -216,7 +216,7 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
 
   return (
     <ChartPage
-      title="Days per state"
+      title="US Heatmap"
       description={DESCRIPTIONS[mode]}
       info={{ interactionGuide: GEO_INTERACTION_GUIDE, methodology: PLACES_METHODOLOGY }}
       filters={<GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />}
