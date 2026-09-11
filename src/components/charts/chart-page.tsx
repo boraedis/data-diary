@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SlidersHorizontal } from "lucide-react";
 import { ChartInfo } from "@/components/charts/chart-info";
+import type { TrackingSpan } from "@/lib/viz/tracking-span";
 
 // Shared page shell for every /charts/* page (user feedback on PR #40's
 // preview: charts should use as much of the desktop viewport as
@@ -63,7 +64,7 @@ export function ChartPage({
    * chart page per #315's scope ("every chart should come with an
    * interaction guide") — omit only for a page with no chart to explain
    * (e.g. the recap report, which reuses this shell for its own layout). */
-  info?: { interactionGuide: string; methodology?: string };
+  info?: { interactionGuide: string; methodology?: string; trackingSpan?: TrackingSpan };
   /** Filter/sort/tool row for this chart — a single left-aligned row
    * rendered above the chart content. Omit for the default empty-state
    * skeleton below (a labeled placeholder future issues build real
@@ -91,6 +92,7 @@ export function ChartPage({
                 title={title}
                 interactionGuide={info.interactionGuide}
                 methodology={info.methodology}
+                trackingSpan={info.trackingSpan}
               />
             ) : null}
           </div>
