@@ -13,7 +13,7 @@ export default async function GymWeightChartPage() {
   return (
     <ChartPage
       title="Weight & training volume"
-      description="Weight (line, left axis) against workouts logged per month (bars, right axis)."
+      description="Weight (line, left axis) against hours of weightlifting per month (bars, right axis)."
       info={{ interactionGuide: COMBO_INTERACTION_GUIDE }}
     >
       <ChartCard empty={empty}>

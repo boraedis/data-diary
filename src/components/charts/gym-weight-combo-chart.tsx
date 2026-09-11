@@ -9,6 +9,7 @@ import { MARK_SPECS, attachMarkHover, roundedBarPath } from "@/components/charts
 import { ChartTooltip } from "@/components/charts/interactive/tooltip";
 import { Legend } from "@/components/charts/interactive/legend";
 import { categoricalColor } from "@/lib/viz/color";
+import { formatDuration } from "@/lib/viz/format";
 import type { GymWeightComboData } from "@/lib/charts";
 
 const MARGIN = { top: 12, right: 48, bottom: 28, left: 48 };
@@ -19,7 +20,7 @@ function parseMonth(month: string): Date {
 }
 
 type WeightPt = { date: Date; weightKg: number };
-type MonthBar = { start: Date; end: Date; count: number };
+type MonthBar = { start: Date; end: Date; hours: number };
 type Hovered = { label: string; value: string; color: string; clientPos: { x: number; y: number } };
 
 function Combo({
@@ -58,9 +59,9 @@ function Combo({
         .domain([weightExtent[0] - weightPad, weightExtent[1] + weightPad])
         .range([innerHeight, 0]);
 
-      const yCount = d3
+      const yHours = d3
         .scaleLinear()
-        .domain([0, d3.max(months, (m) => m.count) ?? 1])
+        .domain([0, d3.max(months, (m) => m.hours) ?? 1])
         .nice()
         .range([innerHeight, 0]);
 
@@ -70,8 +71,8 @@ function Combo({
         .append("g")
         .attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
 
-      // Dual-axis on purpose here (weight/kg vs. workouts/month, two
-      // unrelated units) — NOT a pattern to extend to new charts; the
+      // Dual-axis on purpose here (weight/kg vs. weightlifting hours/month,
+      // two unrelated units) — NOT a pattern to extend to new charts; the
       // dataviz skill's #1 non-negotiable is never a dual-axis chart, and
       // this pre-existing one is why drawStandardAxes (axis.ts) only
       // covers the single-axis case and this file calls styleAxis
@@ -86,11 +87,15 @@ function Combo({
         textColor: "var(--chart-1)",
       });
 
-      const yCountAxisG = g.append("g").attr("transform", `translate(${innerWidth},0)`);
-      styleAxis(yCountAxisG, d3.axisRight(yCount).ticks(5), { textColor: "var(--chart-2)" });
+      const yHoursAxisG = g.append("g").attr("transform", `translate(${innerWidth},0)`);
+      styleAxis(yHoursAxisG, d3.axisRight(yHours).ticks(5).tickFormat((d) => `${d}h`), {
+        textColor: "var(--chart-2)",
+      });
 
-      // Bars: workouts logged per calendar month. Each bar is its own hit
-      // target (no crosshair on a bar chart) — attachMarkHover wires the
+      // Bars: hours of strength-category workouts logged per calendar
+      // month (#325 — this used to plot a raw count of every logged
+      // workout, across every category). Each bar is its own hit target
+      // (no crosshair on a bar chart) — attachMarkHover wires the
       // lift-on-hover + pointermove/focus callback.
       const bars = g
         .selectAll("path")
@@ -102,8 +107,8 @@ function Combo({
           const slotWidth = Math.max(0, slotX1 - slotX0 - MARK_SPECS.bar.surfaceGap);
           const barWidth = Math.min(slotWidth, MARK_SPECS.bar.maxThickness);
           const barX = slotX0 + (slotX1 - slotX0 - barWidth) / 2;
-          const barHeight = innerHeight - yCount(d.count);
-          return roundedBarPath(barX, yCount(d.count), barWidth, barHeight, "up");
+          const barHeight = innerHeight - yHours(d.hours);
+          return roundedBarPath(barX, yHours(d.hours), barWidth, barHeight, "up");
         })
         .attr("fill", categoricalColor(1))
         .attr("fill-opacity", 0.55);
@@ -111,8 +116,8 @@ function Combo({
       attachMarkHover<MonthBar>(bars, {
         onHover: (d, clientPos) =>
           onHover({
-            label: `${d.count} workout${d.count === 1 ? "" : "s"}`,
-            value: `${d.count}`,
+            label: formatDuration(d.hours),
+            value: formatDuration(d.hours),
             color: categoricalColor(1),
             clientPos,
           }),
@@ -141,10 +146,11 @@ function Combo({
   return <svg ref={ref} />;
 }
 
-/** Body weight (line, left axis) alongside workout frequency (bars, right
- * axis, one per calendar month) — the legacy app's bespoke dual-axis
- * `LineBarChart` from gym-weight_chart.js, generalized into this shared
- * component's config surface instead of copied as one-off code. */
+/** Body weight (line, left axis) alongside weightlifting volume (bars,
+ * right axis, hours of strength-category workouts per calendar month) —
+ * the legacy app's bespoke dual-axis `LineBarChart` from
+ * gym-weight_chart.js, generalized into this shared component's config
+ * surface instead of copied as one-off code. */
 export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
   const weight = useMemo<WeightPt[]>(
     () => data.weight.map((w) => ({ date: new Date(w.date), weightKg: w.weightKg })),
@@ -155,7 +161,7 @@ export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
       data.workoutsByMonth.map((m) => {
         const start = parseMonth(m.month);
         const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
-        return { start, end, count: m.count };
+        return { start, end, hours: m.hours };
       }),
     [data.workoutsByMonth],
   );
@@ -191,7 +197,7 @@ export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
       <Legend
         series={[
           { label: "weight", color: categoricalColor(0) },
-          { label: "workouts", color: categoricalColor(1) },
+          { label: "weightlifting hours", color: categoricalColor(1) },
         ]}
       />
     </div>
