@@ -6,7 +6,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveScroller,
-  type InteractiveScrollerPoint,
+  type InteractiveScrollerSeries,
 } from "@/components/charts/interactive/interactive-scroller";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { parseDate } from "@/lib/date";
@@ -36,21 +36,25 @@ const WINDOW_OPTIONS: GroupByOption<WindowId>[] = [
   { id: "90", label: "90-day" },
 ];
 
+/** One named line on a `DailyExplorer` chart — usually just one (a coffee
+ * count, a sleep duration), but a chart tracking two related running totals
+ * (Instagram followers/following, #331) passes more than one so they share
+ * one x-axis, zoom, and rolling-average window instead of two side-by-side
+ * charts a reader has to line up by eye. */
+export type DailyExplorerSeries = { id: string; label: string; color: string; data: DailyValue[] };
+
 export function DailyExplorer({
-  data,
+  series,
   title,
   description,
   methodology,
   trackingSpan,
-  seriesId,
-  label,
-  color,
   valueFormat,
   extraFilters,
   initialWindow = 30,
   ariaLabel,
 }: {
-  data: DailyValue[];
+  series: DailyExplorerSeries[];
   title: string;
   description: string;
   /** Per-chart methodology copy for the `ChartInfo` popup — see #316.
@@ -59,9 +63,8 @@ export function DailyExplorer({
   /** Per-field "tracked since" copy for the `ChartInfo` popup. Falls back
    * to a visible placeholder when omitted. */
   trackingSpan?: TrackingSpan;
-  seriesId: string;
-  label: string;
-  color: string;
+  /** Shared across every series — this chart is one column read at
+   * different times/counts, not unrelated units needing their own format. */
   valueFormat: (value: number) => string;
   /** Extra controls rendered before the window picker. The caller owns
    * their state and reshapes `data` accordingly. */
@@ -77,9 +80,16 @@ export function DailyExplorer({
   );
   const window = windowId === "none" ? 0 : Number(windowId);
 
-  const points = useMemo<InteractiveScrollerPoint[]>(
-    () => data.map((d) => ({ x: parseDate(d.date), y: d.value })),
-    [data],
+  const scrollerSeries = useMemo<InteractiveScrollerSeries[]>(
+    () =>
+      series.map((s) => ({
+        id: s.id,
+        label: s.label,
+        color: s.color,
+        points: s.data.map((d) => ({ x: parseDate(d.date), y: d.value })),
+        movingAverage: window > 0,
+      })),
+    [series, window],
   );
 
   return (
@@ -99,11 +109,11 @@ export function DailyExplorer({
         </>
       }
     >
-      <ChartCard empty={points.length === 0}>
+      <ChartCard empty={scrollerSeries.every((s) => s.points.length === 0)}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>
           {({ width, height }) => (
             <InteractiveScroller
-              series={[{ id: seriesId, label, color, points, movingAverage: window > 0 }]}
+              series={scrollerSeries}
               movingAverageWindow={window > 0 ? window : undefined}
               width={width}
               height={height}
