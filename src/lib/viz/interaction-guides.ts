@@ -36,7 +36,7 @@ export const DONUT_INTERACTION_GUIDE =
   "Click a slice to zoom into it; click the center (or press Escape) to zoom back out. Hover a slice for its exact value.";
 
 export const GEO_INTERACTION_GUIDE =
-  "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value.";
+  "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show.";
 
 export const BAR_RACE_INTERACTION_GUIDE =
   "Use the playback controls to run, pause, or scrub the animation. Hover a bar for its exact value at that point in time.";

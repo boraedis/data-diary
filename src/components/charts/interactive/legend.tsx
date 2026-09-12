@@ -155,6 +155,7 @@ export function SequentialLegend({
   colorScale,
   formatValue,
   valueT,
+  swatches,
   className,
   style,
 }: {
@@ -171,6 +172,20 @@ export function SequentialLegend({
    * this rather than this component deriving it from `domain`, since that
    * mapping depends on whether the underlying scale is linear or log. */
   valueT: number | null;
+  /** Discrete states that sit *outside* the gradient — a fill the scale
+   * has no value for, like "no data" or #364's "travelled through".
+   *
+   * These exist because a sequential legend that only shows its ramp
+   * silently under-documents a chart that paints more than the ramp. The
+   * geo primitive has always had a muted no-data fill and never named it
+   * anywhere but a tooltip, so a region you never hovered was simply
+   * unexplained; adding a second off-ramp fill made that gap worse rather
+   * than introducing it.
+   *
+   * Rendered after the gradient, in the order given, using the same
+   * `SeriesKey` swatch the categorical `Legend` above uses — one swatch
+   * implementation across both legends, per this file's own header. */
+  swatches?: { label: string; color: string }[];
   className?: string;
   style?: React.CSSProperties;
 }) {
@@ -184,7 +199,7 @@ export function SequentialLegend({
   }, [colorScale]);
 
   return (
-    <div className={cn("flex items-center gap-3 text-xs text-muted-foreground", className)} style={style}>
+    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", className)} style={style}>
       <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
       <span className="relative h-2 min-w-0 flex-1">
         <span
@@ -201,6 +216,18 @@ export function SequentialLegend({
         ) : null}
       </span>
       <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
+      {/* `shrink-0` on each row, and wrapping allowed on the container, so
+          a narrow map drops these below the bar rather than crushing the
+          gradient — the bar is `flex-1` and would otherwise give up all
+          its width to them first. */}
+      {swatches?.length
+        ? swatches.map((s) => (
+            <span key={s.label} className="flex shrink-0 items-center gap-1.5">
+              <SeriesKey color={s.color} variant="swatch" />
+              {s.label}
+            </span>
+          ))
+        : null}
     </div>
   );
 }

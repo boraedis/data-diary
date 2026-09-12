@@ -7,7 +7,7 @@ import { useD3 } from "@/hooks/use-d3";
 import { attachMarkHover, MARK_SPECS } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { categoricalColor, sequentialLogScale, type ColorMode } from "@/lib/viz/color";
+import { categoricalColor, sequentialLogScale, travelledFill, type ColorMode } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 
 // InteractiveGeo (#24) — the shared choropleth primitive. Generic over any
@@ -160,6 +160,16 @@ const DEFAULT_MARKER_RADIUS_RANGE: [number, number] = [3, 10];
 // together within that same budget instead of the legend overflowing it.
 const LEGEND_AREA_HEIGHT = 36;
 
+// Extra height reserved when the legend also carries discrete swatches
+// (#364's "travelled through" / "no data" keys). They sit in the same
+// flex row as the gradient bar and wrap below it once the map is narrow —
+// which, on a hard-capped container, would push the legend out of the
+// bottom rather than shrink the map. Reserving a second row's worth
+// unconditionally-when-present is deterministic; measuring the wrap
+// isn't available here, and guessing from `width` would have to model
+// font metrics for caller-supplied labels.
+const LEGEND_SWATCH_ROW_HEIGHT = 20;
+
 /** Anything d3's own `fitSize` will take as a fit target. */
 export type GeoFitTarget = Parameters<d3.GeoProjection["fitSize"]>[1];
 
@@ -193,6 +203,12 @@ export type GeoExpansion = {
   features: FeatureCollection<Geometry, GeoJsonProperties>;
   getValue: (feature: GeoFeature) => number | null | undefined;
   getLabel: (feature: GeoFeature) => string;
+  /** Whether a subdivision is "visited but unmeasured" — see the
+   * component prop of the same name. Carried per-expansion rather than
+   * inherited from the map, for the same reason `getValue` is: a state's
+   * counties and the countries around them are on screen together and
+   * answer this question from different data. */
+  isTravelled?: (feature: GeoFeature) => boolean;
   /** Tooltip value label for these subdivisions, if it differs from the
    * map's own (it usually doesn't — "days" is "days" at either scale). */
   valueLabel?: string;
@@ -219,6 +235,7 @@ export function geoExpansion<P extends GeoJsonProperties>(spec: {
   features: FeatureCollection<Geometry, P>;
   getValue: (feature: Feature<Geometry, P>) => number | null | undefined;
   getLabel: (feature: Feature<Geometry, P>) => string;
+  isTravelled?: (feature: Feature<Geometry, P>) => boolean;
   valueLabel?: string;
 }): GeoExpansion {
   return spec as unknown as GeoExpansion;
@@ -233,6 +250,7 @@ type DrawnFeature = {
   feature: GeoFeature;
   getValue: (feature: GeoFeature) => number | null | undefined;
   getLabel: (feature: GeoFeature) => string;
+  isTravelled?: (feature: GeoFeature) => boolean;
   valueLabel?: string;
   /** Identity of the base feature this can expand into, or null for a
    * feature that's already a subdivision (the bottom of the chain). */
@@ -259,6 +277,36 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * representation for zero/negative), renders as "no data" (a muted
    * neutral fill), distinct from a real, measured positive value. */
   getValue: (feature: Feature<Geometry, P>) => number | null | undefined;
+  /** Whether a feature is known-visited but has no measured value —
+   * #364's third fill state, drawn in its own flat tint with its own
+   * legend entry (see `travelledFill` in viz/color.ts for why the tint
+   * is a cool hue rather than a paler step of the ramp).
+   *
+   * **Deliberately a separate accessor rather than a sentinel `getValue`
+   * returns.** A magic number would enter the sequential scale's domain
+   * and the legend would then present it as a measurement — inventing a
+   * quantity for something whose entire premise is that no quantity was
+   * recorded. Legacy did exactly that (floored these regions at 0.3 on
+   * the day-count ramp); this is the fix, not a port of it.
+   *
+   * **A real value always wins.** A feature with a positive `getValue`
+   * keeps its place on the ramp even if this returns true, so a region
+   * with genuinely logged data is never downgraded to the tint by an
+   * overlapping travelled record. Callers therefore don't have to
+   * pre-empt the overlap themselves — see #365's containment rule, which
+   * is this precedence applied at each view tier.
+   *
+   * Omit for a plain two-state choropleth; every pre-#364 caller does
+   * and renders exactly as before. */
+  isTravelled?: (feature: Feature<Geometry, P>) => boolean;
+  /** Legend/tooltip wording for the `isTravelled` state. Defaults to
+   * "travelled through" — this primitive's only domain-flavoured
+   * default, kept overridable so a future non-travel use of the third
+   * state isn't stuck with the word. */
+  travelledLabel?: string;
+  /** Legend wording for the muted no-data fill. Rendered whenever some
+   * region on screen actually has no data — see `legendSwatches`. */
+  noDataLabel?: string;
   /** Label for a feature's tooltip title — typically its name. */
   getLabel: (feature: Feature<Geometry, P>) => string;
   formatValue?: (value: number) => string;
@@ -369,6 +417,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   width,
   height,
   getValue,
+  isTravelled,
+  travelledLabel = "travelled through",
+  noDataLabel = "no data",
   getLabel,
   formatValue = formatThousandsNumber,
   valueLabel = "value",
@@ -432,6 +483,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         feature: f,
         getValue: getValue as DrawnFeature["getValue"],
         getLabel: getLabel as DrawnFeature["getLabel"],
+        isTravelled: isTravelled as DrawnFeature["isTravelled"],
         valueLabel,
         expandableKey: key,
       });
@@ -441,6 +493,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         feature: f,
         getValue: expansion!.value.getValue,
         getLabel: expansion!.value.getLabel,
+        // No fallback to the map's own `isTravelled`: an expansion's
+        // subdivisions are a different geography answered by different
+        // data, so a map-level accessor asked about a county it has
+        // never heard of would answer for the wrong feature. An
+        // expansion that wants the tint says so itself.
+        isTravelled: expansion!.value.isTravelled,
         valueLabel: expansion!.value.valueLabel ?? valueLabel,
         // A subdivision is the bottom of the chain — see
         // resolveExpansion's own prop comment.
@@ -448,7 +506,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       });
     }
     return entries;
-  }, [features, expansion, featureKey, getValue, getLabel, valueLabel]);
+  }, [features, expansion, featureKey, getValue, getLabel, isTravelled, valueLabel]);
 
   // Computed here (not inside useD3 below) so the legend can read the same
   // domain/scale without duplicating the computation — same split
@@ -469,7 +527,57 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     return values.length ? [Math.min(...values), Math.max(...values)] : [1, 10];
   }, [drawn]);
   const colorScale = useMemo(() => sequentialLogScale(domain, colorMode), [domain, colorMode]);
-  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT);
+  const travelledColor = travelledFill(colorMode);
+
+  /** The three-state fill, in one place because the D3 paint and the
+   * tooltip's own swatch have to agree — they read the same polygon and
+   * a second copy of this precedence would be a silent way for the
+   * tooltip to describe a colour the map isn't showing.
+   *
+   * Precedence is value -> travelled -> no data. See `isTravelled`'s prop
+   * comment for why a real value wins. */
+  const resolveFill = useCallback(
+    (d: DrawnFeature): { color: string; state: "value" | "travelled" | "none"; value: number | null } => {
+      const v = d.getValue(d.feature);
+      if (v != null && v > 0) return { color: colorScale(v), state: "value", value: v };
+      if (d.isTravelled?.(d.feature)) return { color: travelledColor, state: "travelled", value: null };
+      return { color: "var(--muted)", state: "none", value: null };
+    },
+    [colorScale, travelledColor],
+  );
+
+  /** The off-ramp fills to name in the legend — only the ones actually
+   * on screen.
+   *
+   * Naming a state nothing is currently in would be worse than naming
+   * none: a "travelled through" key beside a map with no travelled
+   * region reads as "and none of these are travelled", which is a claim
+   * about the data rather than a key to it. So this scans what's drawn
+   * rather than keying off whether an `isTravelled` prop was passed.
+   *
+   * "no data" appears here for every geo chart, not just travelled ones.
+   * That fill has existed since #24 and has never been named anywhere
+   * but a tooltip, so a region you never happened to hover was simply
+   * unexplained — a pre-existing gap this issue's legend slot closes on
+   * the way past, rather than one it introduces.
+   *
+   * O(drawn), same as `domain` above and memoized alongside it. */
+  const legendSwatches = useMemo(() => {
+    let travelled = false;
+    let none = false;
+    for (const d of drawn) {
+      const { state } = resolveFill(d);
+      if (state === "travelled") travelled = true;
+      else if (state === "none") none = true;
+      if (travelled && none) break;
+    }
+    const out: { label: string; color: string }[] = [];
+    if (travelled) out.push({ label: travelledLabel, color: travelledColor });
+    if (none) out.push({ label: noDataLabel, color: "var(--muted)" });
+    return out;
+  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel]);
+
+  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - (legendSwatches.length ? LEGEND_SWATCH_ROW_HEIGHT : 0));
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
 
   /** Show one region as its own subdivisions, restoring whichever region
@@ -585,10 +693,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .join("path")
         .attr("class", "geo-region")
         .attr("d", (d) => path(d.feature))
-        .attr("fill", (d) => {
-          const v = d.getValue(d.feature);
-          return v == null || v <= 0 ? "var(--muted)" : colorScale(v);
-        })
+        .attr("fill", (d) => resolveFill(d).color)
         .attr("stroke", "var(--border)")
         .attr("stroke-width", 0.5)
         // Borders stay 0.5 *screen* pixels at every zoom level instead of
@@ -848,7 +953,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       expansion,
       width,
       mapHeight,
-      colorScale,
+      // resolveFill, not colorScale: the paint reads the three-state
+      // resolver now, and it already closes over the scale.
+      resolveFill,
       zoomExtent,
       projection,
       resolveExpansion,
@@ -863,8 +970,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
-  const hoveredValue = hovered?.kind === "region" ? hovered.drawn.getValue(hovered.drawn.feature) : null;
-  const hoveredColor = hoveredValue != null && hoveredValue > 0 ? colorScale(hoveredValue) : undefined;
+  // Read through resolveFill so the tooltip's swatch is literally the
+  // colour on the map, including the travelled tint.
+  const hoveredFill = hovered?.kind === "region" ? resolveFill(hovered.drawn) : null;
+  const hoveredValue = hoveredFill?.value ?? null;
+  const hoveredColor = hoveredFill?.state === "value" ? hoveredFill.color : undefined;
   const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
   const hoveredMarkerSecondary = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
 
@@ -880,6 +990,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           Math.max(0, (Math.log(hoveredValue) - Math.log(domain[0])) / (Math.log(domain[1]) - Math.log(domain[0]) || 1)),
         )
       : null;
+
 
   return (
     // Fixed to the full `height` given (not auto-growing) — map + legend
@@ -917,15 +1028,24 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
             title={hovered.kind === "region" ? hovered.drawn.getLabel(hovered.drawn.feature) : hovered.marker.label}
             rows={
               hovered.kind === "region"
-                ? hoveredValue == null || hoveredValue <= 0
-                  ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" }]
-                  : [
+                ? hoveredFill?.state === "value" && hoveredValue != null
+                  ? [
                       {
                         label: hovered.drawn.valueLabel ?? valueLabel,
                         value: formatValue(hoveredValue),
                         color: hoveredColor ?? "",
-                        variant: "swatch",
+                        variant: "swatch" as const,
                       },
+                    ]
+                  : // A travelled region says so instead of reading "no
+                    // data", which is the opposite of true for it — the
+                    // whole point is that something is known about it.
+                    // Its swatch is the tint itself, so the row matches
+                    // the polygon under the pointer.
+                    [
+                      hoveredFill?.state === "travelled"
+                        ? { label: travelledLabel, value: "", color: hoveredFill.color, variant: "swatch" as const }
+                        : { label: noDataLabel, value: "", color: "var(--muted-foreground)", variant: "swatch" as const },
                     ]
                 : [
                     ...(hoveredMarkerValue == null
@@ -954,7 +1074,14 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           />
         ) : null}
       </div>
-      <SequentialLegend domain={domain} colorScale={colorScale} formatValue={formatValue} valueT={legendT} className="pt-2" />
+      <SequentialLegend
+        domain={domain}
+        colorScale={colorScale}
+        formatValue={formatValue}
+        valueT={legendT}
+        swatches={legendSwatches}
+        className="pt-2"
+      />
     </div>
   );
 }

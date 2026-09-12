@@ -89,6 +89,64 @@ export function sequentialLogScale(domain: [number, number], mode: ColorMode = "
   return scaleSequentialLog(interpolateHcl(low, high)).domain(domain);
 }
 
+/**
+ * The fill for a region that's known-visited but carries no measured
+ * value — #364's third choropleth state, distinct from both the
+ * sequential ramp and the muted "no data" fill.
+ *
+ * **Why a cool hue rather than a paler step of the ramp.** The original
+ * plan (issue #323) was "a flat tint, visibly lighter than the ramp's
+ * lowest real value". Measured against the real tokens, there is no such
+ * tint to pick: the ramp's low end sits at oklch L 0.93 and `--muted` at
+ * L 0.95, so the whole window is 0.02 of lightness hard against white,
+ * and anything placed inside it is indistinguishable from one neighbour
+ * or the other. Going *cool* leaves that window entirely — the ramp is
+ * terracotta (h 40) and `--muted` is a near-neutral warm gray (h 60), so
+ * a blue reads as categorically not-on-the-ramp, which is exactly the
+ * claim being made: this is not a magnitude.
+ *
+ * Lightness is then the lightest step that still separates: light mode
+ * is the palest blue clearing the validator's normal-vision floor
+ * against both neighbours, so it stays recessive and never competes with
+ * a real value. Dark mode steps down instead of up, since that ramp runs
+ * dark -> bright.
+ *
+ * Validated with the dataviz skill's `validate_palette.js` against this
+ * app's own card surfaces (light `#fffffc`, dark `#1f1611`), pairwise
+ * against the ramp's low end and `--muted`:
+ *
+ * | pair | normal ΔE | worst CVD ΔE |
+ * |---|---|---|
+ * | light vs ramp low `#fee1d7` | 15.9 PASS | 9.5 protan PASS |
+ * | light vs no-data `#f5ede7`  | 15.9 PASS | 11.3 protan PASS |
+ * | dark vs ramp low `#331e17`  | 19.2 PASS | 17.1 deutan PASS |
+ * | dark vs no-data `#291f1a`   | 19.3 PASS | 17.8 deutan PASS |
+ *
+ * The validator also reports lightness-band and chroma-floor failures for
+ * all three fills. Those checks score *categorical series* palettes,
+ * where every slot has to hold its own as a small mark on a surface; a
+ * choropleth's near-white low end fails them by construction and always
+ * has — both pre-existing fills fail them too. The pairwise separation
+ * numbers above are the ones that matter here.
+ *
+ * Not a `var(--...)` token like `--muted`, because it has to be sampled
+ * by name in D3 fill attributes *and* mirrored in a legend swatch, and
+ * because the two modes are separately chosen steps rather than one
+ * token the theme flips — same reasoning `SEQUENTIAL_ENDPOINTS` above is
+ * a TS constant rather than CSS.
+ */
+const TRAVELLED_FILL: Record<ColorMode, string> = {
+  // oklch(0.82 0.08 225)
+  light: "#8ad0eb",
+  // oklch(0.42 0.07 225)
+  dark: "#16556a",
+};
+
+/** Fill for a "visited but unmeasured" region — see TRAVELLED_FILL. */
+export function travelledFill(mode: ColorMode = "light"): string {
+  return TRAVELLED_FILL[mode];
+}
+
 const DIVERGING_ENDPOINTS: Record<ColorMode, { cool: string; warm: string; neutral: string }> = {
   // Cool pole = dusty-teal family (chart-5's hue, 225°); warm pole =
   // terracotta family (chart-1's hue, 40°) — this app's own warm/cool
