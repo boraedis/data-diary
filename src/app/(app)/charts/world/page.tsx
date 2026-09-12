@@ -1,5 +1,6 @@
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
+import { ManageUnloggedTravelLink } from "@/components/charts/manage-unlogged-travel-link";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -23,6 +24,10 @@ export default async function WorldVisitsChartPage() {
         methodology: PLACES_METHODOLOGY,
         trackingSpan: PLACES_TRACKING_SPAN,
       }}
+      // This map has no view/period controls of its own, so the row exists
+      // only to carry the manage link — see ManageUnloggedTravelLink on why
+      // it belongs on the chart page at all.
+      filters={<ManageUnloggedTravelLink />}
     >
       <ChartCard empty={data.length === 0}>
         <WorldVisitsChart data={data} usStates={usStates} />

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_POSTAL_CODES,
   countyNameKey,
+  describeCountyFips,
   parseLegacyCountyKey,
   resolveCountyByName,
+  searchCounties,
 } from "./us-county-lookup";
 import { US_STATE_FIPS_BY_NAME } from "./us-state-names";
 
@@ -22,6 +24,19 @@ describe("countyNameKey", () => {
     expect(countyNameKey("Ste. Genevieve")).toBe(countyNameKey("Sainte Genevieve"));
     // The one that would otherwise collide: Ste. must not reduce to St.
     expect(countyNameKey("Ste. Genevieve")).not.toBe(countyNameKey("St. Genevieve"));
+  });
+
+  it("accepts a saint abbreviation with no period, as hand-written lists write it", () => {
+    expect(countyNameKey("St Louis")).toBe(countyNameKey("St. Louis"));
+    expect(countyNameKey("Ste Genevieve")).toBe(countyNameKey("Ste. Genevieve"));
+  });
+
+  it("does not read an ordinary name starting with 'st' as an abbreviation", () => {
+    // The trailing separator is what protects these — without it, "st"
+    // would be stripped out of the front of every one.
+    expect(countyNameKey("Stark")).toBe("stark");
+    expect(countyNameKey("Stephens")).toBe("stephens");
+    expect(countyNameKey("Sterling")).toBe("sterling");
   });
 
   it("ignores apostrophes and case", () => {
@@ -106,6 +121,13 @@ describe("resolveCountyByName", () => {
     expect(resolveCountyByName("Fulton", "ZZ")).toEqual({ kind: "unknown-state" });
   });
 
+  it("resolves a saint county written without its period", () => {
+    // A hand-written list writes "St Louis" as often as "St. Louis"; both
+    // have to reach the same two candidates.
+    expect(resolveCountyByName("St Louis", "MO").kind).toBe("ambiguous");
+    expect(resolveCountyByName("St Charles", "MO")).toMatchObject({ kind: "match", fips: "29183" });
+  });
+
   it("accepts a lowercase postal code", () => {
     expect(resolveCountyByName("Fulton", "ga")).toMatchObject({ kind: "match", fips: "13121" });
   });
@@ -147,5 +169,70 @@ describe("parseLegacyCountyKey", () => {
     expect(parseLegacyCountyKey("Fulton__GA__extra")).toBeNull();
     expect(parseLegacyCountyKey("__GA")).toBeNull();
     expect(parseLegacyCountyKey("Fulton__")).toBeNull();
+  });
+});
+
+describe("describeCountyFips", () => {
+  it("turns a stored code back into a readable place", () => {
+    expect(describeCountyFips("13121")).toEqual({ name: "Fulton", stateName: "Georgia" });
+  });
+
+  it("distinguishes the two halves of an ambiguous pair", () => {
+    // Same name, same state, different FIPS — the display has to be able
+    // to tell them apart even though the name can't.
+    expect(describeCountyFips("51159")?.stateName).toBe("Virginia");
+    expect(describeCountyFips("51760")?.stateName).toBe("Virginia");
+    expect(describeCountyFips("51159")).not.toBeNull();
+    expect(describeCountyFips("51760")).not.toBeNull();
+  });
+
+  it("returns null for a code us-atlas doesn't have, rather than inventing a name", () => {
+    expect(describeCountyFips("99999")).toBeNull();
+  });
+
+  it("round-trips whatever resolveCountyByName produced", () => {
+    const resolved = resolveCountyByName("Orleans Parish", "LA");
+    if (resolved.kind !== "match") throw new Error("expected a match");
+    expect(describeCountyFips(resolved.fips)?.name).toBe(resolved.name);
+  });
+});
+
+describe("searchCounties", () => {
+  it("finds a county by name alone", () => {
+    expect(searchCounties("fulton").some((c) => c.fips === "13121")).toBe(true);
+  });
+
+  it("narrows by state, in either word order", () => {
+    const forward = searchCounties("fulton ga");
+    const reverse = searchCounties("georgia fulton");
+    expect(forward.map((c) => c.fips)).toContain("13121");
+    expect(reverse.map((c) => c.fips)).toContain("13121");
+  });
+
+  it("uses the same normalization the name-join does", () => {
+    expect(searchCounties("st louis mo").map((c) => c.fips)).toContain("29189");
+  });
+
+  it("returns both halves of an ambiguous pair, each with its own code", () => {
+    // The picker's whole job for these six: show both and let a person
+    // choose, rather than resolving to one silently.
+    const richmonds = searchCounties("richmond va").filter((c) => c.name === "Richmond");
+    expect(richmonds).toHaveLength(2);
+    expect(new Set(richmonds.map((c) => c.fips))).toEqual(new Set(["51159", "51760"]));
+  });
+
+  it("ranks an exact name match above a partial one", () => {
+    const results = searchCounties("lake");
+    expect(results.length).toBeGreaterThan(1);
+    expect(results[0].name).toBe("Lake");
+  });
+
+  it("returns nothing for an empty query rather than everything", () => {
+    expect(searchCounties("")).toEqual([]);
+    expect(searchCounties("   ")).toEqual([]);
+  });
+
+  it("caps its result count", () => {
+    expect(searchCounties("a", 5).length).toBeLessThanOrEqual(5);
   });
 });

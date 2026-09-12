@@ -133,7 +133,10 @@ const COUNTY_SUFFIXES = [
  * - Case- and whitespace-insensitive.
  * - "St." / "Ste." expand to "saint" / "sainte", so "St. Louis" and
  *   "Saint Louis" agree. us-atlas uses the abbreviated form; hand-written
- *   lists use both, inconsistently, often within the same list.
+ *   lists use both, inconsistently, often within the same list — and drop
+ *   the period as often as not, so it's optional. The trailing separator
+ *   is required, which is what keeps "Stark" and "Stephens" from being
+ *   read as abbreviated saints.
  * - Punctuation is dropped, so "Prince George's" matches "Prince Georges"
  *   and "O'Brien" matches "OBrien" — apostrophes are the single most
  *   common transcription difference in US county names.
@@ -148,8 +151,9 @@ const COUNTY_SUFFIXES = [
 export function countyNameKey(name: string): string {
   let key = name
     .toLowerCase()
-    .replace(/\bste\.\s*/g, "sainte ")
-    .replace(/\bst\.\s*/g, "saint ")
+    // "ste" first, or "st" would eat the front of it and leave an "e".
+    .replace(/\bste(?:\.\s*|\s+)/g, "sainte ")
+    .replace(/\bst(?:\.\s*|\s+)/g, "saint ")
     .replace(/[^a-z0-9\s]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -183,6 +187,29 @@ export type CountyLookupResult =
   | { kind: "ambiguous"; candidates: { fips: string; name: string }[] };
 
 let cachedByStateFips: Map<string, { fips: string; name: string }[]> | null = null;
+let cachedStateNameByFips: Map<string, string> | null = null;
+let cachedPostalByStateFips: Map<string, string> | null = null;
+
+/** FIPS -> postal abbreviation, so search can match what people actually
+ * type. "GA" is not a substring of "Georgia", so matching the state name
+ * alone silently fails the most natural query there is. */
+function postalByStateFips(): Map<string, string> {
+  cachedPostalByStateFips ??= new Map(
+    Object.entries(STATE_NAME_BY_POSTAL).flatMap(([postal, name]) => {
+      const fips = US_STATE_FIPS_BY_NAME.get(name);
+      return fips ? [[fips, postal.toLowerCase()] as [string, string]] : [];
+    }),
+  );
+  return cachedPostalByStateFips;
+}
+
+/** FIPS -> state name, the inverse of `US_STATE_FIPS_BY_NAME`. Derived
+ * from that map rather than re-read from us-atlas, so the two can't
+ * disagree about what a code means. */
+function stateNameByFips(): Map<string, string> {
+  cachedStateNameByFips ??= new Map([...US_STATE_FIPS_BY_NAME].map(([name, fips]) => [fips, name]));
+  return cachedStateNameByFips;
+}
 
 /** Decoded once per process on first use, like `us-counties.ts` — a seed
  * run resolving 323 names shouldn't re-decode the topology 323 times. */
@@ -226,6 +253,86 @@ export function resolveCountyByName(countyName: string, postalCode: string): Cou
   if (matches.length === 1) return { kind: "match", fips: matches[0].fips, name: matches[0].name };
   if (matches.length === 0) return { kind: "no-county" };
   return { kind: "ambiguous", candidates: matches };
+}
+
+/**
+ * The reverse direction: a stored FIPS code back to something a person can
+ * read.
+ *
+ * Needed because `unlogged_travel` stores codes, so every surface that
+ * shows a row — the manage list, a map tooltip — has to turn "13121" back
+ * into "Fulton, Georgia". Returns null for a code us-atlas doesn't have,
+ * which the caller should show as the raw code rather than hiding: a row
+ * pointing at a county that no longer exists in the geometry is a real
+ * problem worth seeing, not one to paper over.
+ *
+ * The state name is included because a bare county name is ambiguous to a
+ * reader in exactly the way it's ambiguous to a name-join — "Lake" alone
+ * says almost nothing.
+ */
+export function describeCountyFips(fips: string): { name: string; stateName: string } | null {
+  const stateFips = fips.slice(0, 2);
+  const county = (countiesByStateFips().get(stateFips) ?? []).find((c) => c.fips === fips);
+  if (!county) return null;
+  return { name: county.name, stateName: stateNameByFips().get(stateFips) ?? stateFips };
+}
+
+export type CountySearchResult = {
+  fips: string;
+  name: string;
+  stateName: string;
+};
+
+/**
+ * Substring search over every US county, for the manage surface's picker.
+ *
+ * Server-side rather than shipping the list to the browser: 3,231 counties
+ * with their state names is ~100KB of JSON, which is a lot to send for a
+ * picker most sessions never open — and the geometry it derives from is
+ * already loaded server-side for the spatial join.
+ *
+ * Matches against the county name, its state name, and its postal
+ * abbreviation, so "fulton", "fulton ga" and "georgia fulton" all work.
+ * The postal code has to be matched separately rather than folded into
+ * the state name: "ga" is not a substring of "georgia", so a name-only
+ * match fails the most natural query someone types. Uses the same
+ * normalization the name-join does, so "st louis" finds "St. Louis".
+ *
+ * **Every match is returned with its own FIPS, including the six
+ * same-named pairs** (Baltimore MD, St. Louis MO, and Virginia's Richmond,
+ * Franklin, Roanoke and Fairfax). The picker must show both rows and let a
+ * person choose — picking the wrong one of those by hand is exactly as
+ * silent as a bad import guessing, which is the failure `resolveCountyByName`
+ * refuses to make.
+ */
+export function searchCounties(query: string, limit = 20): CountySearchResult[] {
+  const q = countyNameKey(query);
+  if (!q) return [];
+  const results: CountySearchResult[] = [];
+  const terms = q.split(" ");
+  for (const [stateFips, counties] of countiesByStateFips()) {
+    const stateName = stateNameByFips().get(stateFips) ?? stateFips;
+    const stateKey = countyNameKey(stateName);
+    const postal = postalByStateFips().get(stateFips);
+    for (const county of counties) {
+      const key = countyNameKey(county.name);
+      // Every whitespace-separated term has to hit one of the three, in
+      // any order — so word order doesn't matter and a partial county
+      // name still narrows.
+      const hit = terms.every((term) => key.includes(term) || stateKey.includes(term) || postal === term);
+      if (hit) results.push({ fips: county.fips, name: county.name, stateName });
+    }
+  }
+  // Exact name matches first — typing "fulton" should not bury Fulton
+  // under "Fultondale"-style partial hits — then alphabetically, so the
+  // two halves of an ambiguous pair land next to each other.
+  results.sort((a, b) => {
+    const aExact = countyNameKey(a.name) === q ? 0 : 1;
+    const bExact = countyNameKey(b.name) === q ? 0 : 1;
+    if (aExact !== bExact) return aExact - bExact;
+    return a.name.localeCompare(b.name) || a.stateName.localeCompare(b.stateName);
+  });
+  return results.slice(0, limit);
 }
 
 /** Splits a legacy `"CountyName__ST"` key into its two halves, or null if

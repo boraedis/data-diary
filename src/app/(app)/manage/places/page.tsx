@@ -35,6 +35,9 @@ export default async function ManagePlacesPage() {
         <Link href="/manage/places/world" className={buttonVariants({ variant: "outline", size: "xs" })}>
           World View
         </Link>
+        <Link href="/manage/places/unlogged-travel" className={buttonVariants({ variant: "outline", size: "xs" })}>
+          Unlogged Travel
+        </Link>
         <Link href="/manage/places/categories" className={buttonVariants({ variant: "outline", size: "xs" })}>
           Manage Categories
         </Link>
