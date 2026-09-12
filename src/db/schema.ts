@@ -8,6 +8,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   serial,
   smallint,
@@ -1347,6 +1348,69 @@ export const profileRelationships = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("profile_relationships_start_idx").on(table.start)]
+);
+
+
+// --- Unlogged travel (#323/#363) -------------------------------------------
+// Places travelled *to or through* that never made a day's top-two place
+// slots, so the maps can show them as visited-but-unlogged rather than as
+// blank. Legacy kept this as a hardcoded 323-county object in chart source
+// (`us_heatmap.js`'s LEGACY_TRAVEL) plus a 9-entry non-US sibling; a table
+// instead, so adding one is not a code change and a deploy — the same
+// DB-vs-repo call AGENTS.md records for projectSettings.
+//
+// Named for the defining property, not the origin: a country added by hand
+// next year is an unlogged-travel row too, and reading this as an archive
+// of the old app's data would be wrong.
+//
+// **One table with a `kind`, not two.** Counties and countries carry
+// identically-shaped rows and differ only in what `code` means, so
+// splitting them would triplicate schema, data layer and admin UI to store
+// the same four fields twice.
+//
+// **Codes, never names.** County names repeat across states (Lake County
+// exists in a dozen) and country spellings drift between sources, so both
+// kinds key off a code — see the `code` comment below.
+//
+// Deliberately *not* a third place slot on `days`: the top-two model is
+// intentional, and the premise here is that these don't qualify for it.
+export const unloggedTravelKindEnum = pgEnum("unlogged_travel_kind", ["us_county", "country"]);
+
+export const unloggedTravel = pgTable(
+  "unlogged_travel",
+  {
+    kind: unloggedTravelKindEnum("kind").notNull(),
+    // For "us_county": the 5-digit county FIPS, zero-padded ("13021").
+    // For "country": world-atlas's own feature key — the ISO 3166-1
+    // numeric code as a string ("840" for the USA), falling back to the
+    // feature's name for the three world-atlas ships with no id at all
+    // (N. Cyprus, Somaliland, Kosovo — partially-recognized territories
+    // with no ISO numeric code to carry). That fallback is not sloppiness:
+    // it is exactly the rule InteractiveGeo already keys features by
+    // (`String(f.id ?? getLabel(f))`), so the join is one shared rule
+    // rather than two that can drift, and Kosovo stays addressable
+    // instead of being unrepresentable.
+    code: text("code").notNull(),
+    // Nullable on purpose: some of this travel predates the diary, so a
+    // hard reference to days.date would make those rows unrepresentable.
+    // A plain date, not an FK, for the same reason. It exists so a future
+    // visited-counter can answer "how many had I been to by 2021" rather
+    // than only "how many in total" — the one decision here that is
+    // expensive to add later, since backfilling hundreds of rows from
+    // memory is far worse than capturing dates as they are added.
+    firstVisited: date("first_visited", { mode: "string" }),
+    // Free text, e.g. "I-16 through to Savannah" — why this row exists at
+    // all, for a place with no logged day to jog the memory.
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Composite key rather than a surrogate id: (kind, code) *is* the
+  // identity, and making it the primary key is what makes a re-run of the
+  // seed an upsert instead of a duplicate. The two kinds' code spaces
+  // don't collide anyway (5-digit FIPS vs 3-digit ISO), but keying on the
+  // pair keeps that a property of the data rather than something the
+  // schema is quietly relying on.
+  (table) => [primaryKey({ columns: [table.kind, table.code] })]
 );
 
 
