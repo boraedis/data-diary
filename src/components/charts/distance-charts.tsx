@@ -34,14 +34,11 @@ export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
 export function DistanceDailyChart({ data }: { data: DailyValue[] }) {
   return (
     <DailyExplorer
-      data={data}
+      series={[{ id: "distance", label: "Distance walked", color: DISTANCE_COLOR, data }]}
       title="Daily Distance Walked"
       description="A day-by-day look at distance walked. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={DISTANCE_METHODOLOGY}
       trackingSpan={DISTANCE_TRACKING_SPAN}
-      seriesId="distance"
-      label="Distance walked"
-      color={DISTANCE_COLOR}
       valueFormat={km}
       ariaLabel="Daily distance walked. Scroll or pinch to zoom, drag to pan, hover a day for its exact distance."
     />

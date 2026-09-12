@@ -1,5 +1,5 @@
 import { InstagramFollowersChart } from "@/components/charts/technology-charts";
-import { getInstagramFollowersData } from "@/lib/charts";
+import { getInstagramFollowersData, getInstagramFollowingData } from "@/lib/charts";
 
 export const dynamic = "force-dynamic";
 
@@ -7,6 +7,6 @@ export const dynamic = "force-dynamic";
 // same way /charts/weight does: the filters row and the chart share state,
 // and only plain data can cross the server/client boundary.
 export default async function Page() {
-  const data = await getInstagramFollowersData();
-  return <InstagramFollowersChart data={data} />;
+  const [followers, following] = await Promise.all([getInstagramFollowersData(), getInstagramFollowingData()]);
+  return <InstagramFollowersChart followers={followers} following={following} />;
 }
