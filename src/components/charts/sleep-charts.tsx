@@ -52,14 +52,11 @@ export function SleepDailyChart({ data }: { data: SleepNight[] }) {
 
   return (
     <DailyExplorer
-      data={points}
+      series={[{ id: "sleep", label: "Sleep", color: SLEEP_COLOR, data: points }]}
       title="Nightly Sleep"
       description="A night-by-night look at sleep duration. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={SLEEP_METHODOLOGY}
       trackingSpan={SLEEP_TRACKING_SPAN}
-      seriesId="sleep"
-      label="Sleep"
-      color={SLEEP_COLOR}
       valueFormat={formatHours}
       ariaLabel="Time asleep each night. Scroll or pinch to zoom, drag to pan, hover a night for its exact duration."
     />

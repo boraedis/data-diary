@@ -1551,6 +1551,16 @@ export function getInstagramFollowersData(): Promise<DailyValue[]> {
   return dailyValuesOf(days.instagramFollowers);
 }
 
+/**
+ * Instagram following count per day — `days.instagramFollowing`'s own
+ * series, tracked alongside followers but never previously surfaced (#331).
+ * Same cumulative-running-total shape and caveats as
+ * `getInstagramFollowersData`.
+ */
+export function getInstagramFollowingData(): Promise<DailyValue[]> {
+  return dailyValuesOf(days.instagramFollowing);
+}
+
 // --- Where you were, over time (#221) --------------------------------------
 
 /** One day and the countries it touched. Deduplicated: a day whose two

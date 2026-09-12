@@ -189,28 +189,41 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
   );
 }
 
+// The legacy app's own two Instagram colors, kept verbatim rather than
+// pulled from the categorical palette (#331) — followers/following are the
+// same two lines readers already associate with these exact hues from years
+// of the old chart.
+const INSTAGRAM_FOLLOWERS_COLOR = "#C13584";
+const INSTAGRAM_FOLLOWING_COLOR = "#5B51D8";
+
 /**
- * Instagram followers over time.
+ * Instagram followers and following over time.
  *
- * Rolling average off by default: the series is cumulative, so smoothing a
- * line that only ever rises says nothing the line doesn't already. It stays
- * available for anyone who wants to read the rate of change rather than the
- * level.
+ * Rolling average off by default: both series are cumulative, so smoothing
+ * a line that only ever rises (or, for following, occasionally falls in
+ * small steps) says nothing the line doesn't already. It stays available
+ * for anyone who wants to read the rate of change rather than the level.
  */
-export function InstagramFollowersChart({ data }: { data: DailyValue[] }) {
+export function InstagramFollowersChart({
+  followers,
+  following,
+}: {
+  followers: DailyValue[];
+  following: DailyValue[];
+}) {
   return (
     <DailyExplorer
-      data={data}
+      series={[
+        { id: "followers", label: "Followers", color: INSTAGRAM_FOLLOWERS_COLOR, data: followers },
+        { id: "following", label: "Following", color: INSTAGRAM_FOLLOWING_COLOR, data: following },
+      ]}
       title="Instagram Followers"
-      description="A day-by-day look at Instagram followers. A running total, so it only moves when it moves."
+      description="A day-by-day look at Instagram followers and following. Both are running totals, so they only move when they move."
       methodology={INSTAGRAM_METHODOLOGY}
       trackingSpan={INSTAGRAM_TRACKING_SPAN}
-      seriesId="followers"
-      label="Followers"
-      color={categoricalColor(3)}
       valueFormat={(v) => Math.round(v).toLocaleString()}
       initialWindow={0}
-      ariaLabel="Instagram follower count over time. Scroll or pinch to zoom, drag to pan."
+      ariaLabel="Instagram follower and following counts over time. Scroll or pinch to zoom, drag to pan."
     />
   );
 }
