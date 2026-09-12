@@ -557,6 +557,12 @@ export type ExerciseWorkoutRow = {
    * as the exerciseSubtypes catalog table, which workouts.subtype isn't
    * actually linked to yet (also see that comment). */
   subtype: string | null;
+  /** Hours spent on this workout — same fallback `getGymWeightComboData`
+   * already uses (#334, generalized here to every category rather than
+   * strength-only): workout-level `durationMinutes` when set, else summed
+   * `workoutSets.durationSeconds`, else 0 for a purely rep/weight-only
+   * manual entry with neither. */
+  hours: number;
 };
 
 /** Every workout on record, oldest first, with its exercise's category and
@@ -574,17 +580,37 @@ export type ExerciseWorkoutRow = {
  * for them. */
 export async function getExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {
   const db = getDb();
-  return db
-    .select({
-      date: workouts.date,
-      category: exercises.category,
-      exerciseId: exercises.id,
-      exerciseName: exercises.name,
-      subtype: workouts.subtype,
-    })
-    .from(workouts)
-    .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
-    .orderBy(asc(workouts.date));
+  const [rows, setDurations] = await Promise.all([
+    db
+      .select({
+        id: workouts.id,
+        date: workouts.date,
+        category: exercises.category,
+        exerciseId: exercises.id,
+        exerciseName: exercises.name,
+        subtype: workouts.subtype,
+        durationMinutes: workouts.durationMinutes,
+      })
+      .from(workouts)
+      .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
+      .orderBy(asc(workouts.date)),
+    db.select({ workoutId: workoutSets.workoutId, durationSeconds: workoutSets.durationSeconds }).from(workoutSets),
+  ]);
+
+  const setSecondsByWorkoutId = new Map<number, number>();
+  for (const s of setDurations) {
+    if (s.durationSeconds === null) continue;
+    setSecondsByWorkoutId.set(s.workoutId, (setSecondsByWorkoutId.get(s.workoutId) ?? 0) + s.durationSeconds);
+  }
+
+  return rows.map((r) => ({
+    date: r.date,
+    category: r.category,
+    exerciseId: r.exerciseId,
+    exerciseName: r.exerciseName,
+    subtype: r.subtype,
+    hours: r.durationMinutes !== null ? r.durationMinutes / 60 : (setSecondsByWorkoutId.get(r.id) ?? 0) / 3600,
+  }));
 }
 
 // --- Place leaderboard ---------------------------------------------------
