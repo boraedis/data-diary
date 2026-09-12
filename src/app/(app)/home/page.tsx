@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GoToDate } from "@/components/go-to-date";
-import { getHomeDashboardData, type BirthdayEntry, type RecentDay } from "@/lib/home";
+import { RecentDaysScroller } from "@/components/recent-days-scroller";
+import { getHomeDashboardData, type BirthdayEntry } from "@/lib/home";
 
 export const dynamic = "force-dynamic";
 
@@ -17,15 +18,6 @@ const SECTION_LINKS = [
   { href: "/manage", label: "Manage" },
   { href: "/profile", label: "Profile" },
 ] as const;
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function shortLabel(dateStr: string): { weekday: string; day: string; month: string } {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  const d = new Date(year, month - 1, day);
-  return { weekday: WEEKDAYS[d.getDay()], day: String(day), month: MONTHS[month - 1] };
-}
 
 function formatLifePct(n: number | null): string {
   if (n === null) return "—";
@@ -53,24 +45,6 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DayTab({ day, isToday }: { day: RecentDay; isToday: boolean }) {
-  const label = shortLabel(day.date);
-  const pct = (day.score / 10) * 100;
-  return (
-    <Link
-      href={`/day/${day.date}`}
-      className={`flex min-w-[52px] flex-shrink-0 flex-col items-center gap-1.5 rounded-lg border px-2 py-2 text-center transition-colors hover:bg-accent ${isToday ? "border-primary/50 bg-primary/5" : ""}`}
-    >
-      <span className="text-[10px] font-medium text-muted-foreground">{label.weekday}</span>
-      <span className="text-sm font-semibold">{label.day}</span>
-      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-[10px] text-muted-foreground">{label.month}</span>
-    </Link>
-  );
-}
-
 export default async function HomePage() {
   const data = await getHomeDashboardData();
   const todayDate = data.recentDays[data.recentDays.length - 1]?.date ?? "";
@@ -90,11 +64,7 @@ export default async function HomePage() {
           <CardTitle>Recent days</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {data.recentDays.map((day) => (
-              <DayTab key={day.date} day={day} isToday={day.date === todayDate} />
-            ))}
-          </div>
+          <RecentDaysScroller days={data.recentDays} todayDate={todayDate} />
         </CardContent>
       </Card>
 
