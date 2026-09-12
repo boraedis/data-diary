@@ -15,7 +15,7 @@ import { TimeRangePicker } from "@/components/charts/interactive/time-range-pick
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate, toDateString } from "@/lib/date";
-import { formatDate } from "@/lib/viz/format";
+import { formatDate, formatDuration } from "@/lib/viz/format";
 import { EXERCISE_CATEGORY_LABELS, EXERCISE_CATEGORY_ORDER, type ExerciseWorkoutRow } from "@/lib/charts";
 import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { TRAINING_METHODOLOGY } from "@/lib/viz/methodology";
@@ -36,7 +36,7 @@ import { TRAINING_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // too, not just the exercise-specific dimensions below - GroupByPicker's
 // whole point is being generic over *any* small fixed set of options.
 const VIEW_OPTIONS: GroupByOption<InteractiveAreaMode>[] = [
-  { id: "stacked", label: "Count" },
+  { id: "stacked", label: "Duration" },
   { id: "proportional", label: "% share" },
 ];
 
@@ -51,15 +51,15 @@ const GROUP_BY_OPTIONS: GroupByOption<GroupByDimension>[] = [
 // NOTE on what's deliberately NOT a group-by option here: exercise focus/
 // subfocus. Category and subtype are both single-valued per workout (a
 // workout's exercise has exactly one category, and workouts.subtype is a
-// single free-text field) - clean partitions, so their per-bucket counts
-// sum to the bucket's true total, which a stack requires. Focus is a
-// many-to-many tag on the *exercise catalog entry* (exerciseFocusLinks -
+// single free-text field) - clean partitions, so their per-bucket duration
+// sums add up to the bucket's true total, which a stack requires. Focus is
+// a many-to-many tag on the *exercise catalog entry* (exerciseFocusLinks -
 // see schema.ts's own comment: "an exercise can carry more than one focus/
 // subfocus pair"), so a workout whose exercise has two focus tags would
-// get counted in *both* bands - summing by focus would overcount total
-// workouts, not just re-slice them. Not included until there's a real
-// answer for that (e.g. picking one "primary" focus per exercise) rather
-// than shipping a stack that silently double-counts.
+// get its duration counted in *both* bands - summing by focus would
+// overcount total time spent, not just re-slice it. Not included until
+// there's a real answer for that (e.g. picking one "primary" focus per
+// exercise) rather than shipping a stack that silently double-counts.
 
 function dimensionKey(row: ExerciseWorkoutRow, dim: GroupByDimension): { id: string; label: string } {
   switch (dim) {
@@ -73,11 +73,12 @@ function dimensionKey(row: ExerciseWorkoutRow, dim: GroupByDimension): { id: str
 }
 
 /** The fixed set of bands for the current grouping dimension - computed
- * from total volume across every (already time-range-filtered) row, not
- * per-bucket, so a band's presence/color doesn't flicker per period. Only
- * "category" gets a truly fixed order (matches exerciseCategoryEnum);
- * "exercise"/"subtype" have no inherent order, so they're ranked by
- * volume - most-logged first.
+ * from total volume (duration, #334 - this used to be a plain workout
+ * count) across every (already time-range-filtered) row, not per-bucket,
+ * so a band's presence/color doesn't flicker per period. Only "category"
+ * gets a truly fixed order (matches exerciseCategoryEnum); "exercise"/
+ * "subtype" have no inherent order, so they're ranked by volume - most
+ * time spent first.
  *
  * No top-N/"Other" cut here - every distinct value gets its own band, per
  * explicit follow-up feedback ("get rid of the other just put everything
@@ -95,14 +96,14 @@ function buildCategories(rows: ExerciseWorkoutRow[], dim: GroupByDimension): Int
   if (dim === "category") {
     return EXERCISE_CATEGORY_ORDER.map((id) => ({ id, label: EXERCISE_CATEGORY_LABELS[id] }));
   }
-  const totals = new Map<string, { label: string; count: number }>();
+  const totals = new Map<string, { label: string; hours: number }>();
   for (const row of rows) {
     const { id, label } = dimensionKey(row, dim);
     const existing = totals.get(id);
-    if (existing) existing.count += 1;
-    else totals.set(id, { label, count: 1 });
+    if (existing) existing.hours += row.hours;
+    else totals.set(id, { label, hours: row.hours });
   }
-  const ranked = [...totals.entries()].sort((a, b) => b[1].count - a[1].count);
+  const ranked = [...totals.entries()].sort((a, b) => b[1].hours - a[1].hours);
   return ranked.map(([id, v]) => ({ id, label: v.label }));
 }
 
@@ -111,7 +112,7 @@ function buildPoints(rows: ExerciseWorkoutRow[], dim: GroupByDimension, period: 
     const values: Record<string, number> = {};
     for (const row of items) {
       const { id } = dimensionKey(row, dim);
-      values[id] = (values[id] ?? 0) + 1;
+      values[id] = (values[id] ?? 0) + row.hours;
     }
     return { x: parseDate(start), values };
   });
@@ -168,7 +169,7 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
   return (
     <ChartPage
       title="Exercise Mix"
-      description="A breakdown of how I exercised, aggregated by period."
+      description="A breakdown of how I exercised by time spent, aggregated by period."
       info={{
         interactionGuide: AREA_INTERACTION_GUIDE,
         methodology: TRAINING_METHODOLOGY,
@@ -192,9 +193,9 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
               width={width}
               height={height}
               mode={mode}
-              valueFormat={(v) => `${v} workout${v === 1 ? "" : "s"}`}
+              valueFormat={formatDuration}
               titleFormat={titleFormat}
-              ariaLabel="Workouts over time, broken down by the selected grouping. Hover or focus a band and use arrow keys to inspect it, click a legend entry to hide a category."
+              ariaLabel="Time spent exercising over time, broken down by the selected grouping. Hover or focus a band and use arrow keys to inspect it, click a legend entry to hide a category."
             />
           )}
         </ResponsiveChart>
