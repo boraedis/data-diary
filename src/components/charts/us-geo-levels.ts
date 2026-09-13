@@ -155,6 +155,12 @@ export function usCountiesExpansion(
   stateFips: string,
   features: FeatureCollection<Geometry, UsCountyProperties>,
   daysByCountyFips: ReadonlyMap<string, number>,
+  /** Unlogged-travel county FIPS (#365). The expansion carries its own
+   * copy rather than inheriting the map's, for the reason GeoExpansion's
+   * own `isTravelled` comment gives: a state's counties are a different
+   * geography from the states around them, and a state-level accessor
+   * asked about a county would answer for the wrong feature. */
+  travelledCountyFips?: ReadonlySet<string>,
 ): GeoExpansion {
   return geoExpansion<UsCountyProperties>({
     key: `us-counties-${stateFips}`,
@@ -162,6 +168,7 @@ export function usCountiesExpansion(
     features,
     // Keyed by FIPS id, not name — see loadUsCountyFeatures above.
     getValue: (f) => daysByCountyFips.get(String(f.id)) ?? null,
+    isTravelled: travelledCountyFips ? (f) => travelledCountyFips.has(String(f.id)) : undefined,
     getLabel: (f) => f.properties.name,
     valueLabel: "days",
   });
