@@ -6,9 +6,9 @@ import type { Topology, GeometryCollection } from "topojson-specification";
 import worldTopologyRaw from "world-atlas/countries-110m.json";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
-import { loadUsStateFeatures, usStatesExpansion } from "@/components/charts/us-geo-levels";
+import { loadUsStateFeatures, travelledStateFips, usStatesExpansion } from "@/components/charts/us-geo-levels";
 import { normalizeCountryName } from "@/lib/geo/country-names";
-import type { Feature, Polygon } from "geojson";
+import type { Feature, Geometry, Polygon } from "geojson";
 import type { CountryVisitEntry, UsStateVisitEntry } from "@/lib/charts";
 
 type CountryProperties = { name: string };
@@ -71,6 +71,23 @@ const FIT_BOUNDS: Feature<Polygon> = {
   },
 };
 
+/** Appended to the map's own aria label when unlogged travel (#366) is
+ * actually on it.
+ *
+ * Conditional rather than always present, the same call
+ * us-state-visits-chart.tsx makes: describing a tint on a map that has
+ * none is a claim about the data rather than a description of the map,
+ * and InteractiveGeo's legend is conditional for the same reason. */
+const TRAVELLED_ARIA_SUFFIX =
+  " Regions with no logged days that you travelled through are tinted separately, and say so on hover.";
+
+/** The default for both travelled props, hoisted to module scope so a
+ * caller that passes neither keeps one stable array identity across
+ * renders. An inline `= []` default would be a fresh array every time,
+ * which would defeat the memos below and hand `resolveExpansion` a new
+ * identity on every render. */
+const NO_TRAVEL: string[] = [];
+
 /** Choropleth of days logged per country — #24's first real InteractiveGeo
  * consumer. `data` is the server-fetched day count per (already
  * catalog-named) country; joined against world-atlas's own GeoJSON
@@ -85,6 +102,8 @@ const FIT_BOUNDS: Feature<Polygon> = {
 export function WorldVisitsChart({
   data,
   usStates,
+  travelledCountries = NO_TRAVEL,
+  travelledCounties = NO_TRAVEL,
   fillViewport = true,
   heightClassName = CHART_HEIGHT_CLASS,
 }: {
@@ -97,6 +116,38 @@ export function WorldVisitsChart({
    * period-scoped countries and quietly contradict them. Better no
    * expansion than one that disagrees with the map around it. */
   usStates?: UsStateVisitEntry[];
+  /**
+   * Unlogged-travel country codes (#366/#323) — countries travelled to or
+   * through that never made a day's top-two place slots.
+   *
+   * These are `unlogged_travel.code` values, which for a country means
+   * world-atlas's own feature `id` (ISO 3166-1 numeric as a string), or
+   * the feature's name for the three territories that carry no id — see
+   * src/lib/geo/country-lookup.ts. **Not** catalog names: unlike `data`,
+   * which has to go through `normalizeCountryName` because the place
+   * catalog is free-text, this is a controlled list picked against the
+   * atlas itself, so it joins on the code directly.
+   *
+   * An array rather than the `Set` the data layer returns, because this
+   * crosses the server/client boundary as a prop; it's re-Set below where
+   * the membership tests happen.
+   *
+   * **The recap embed deliberately passes nothing here** (#366's own
+   * decision, not a fallthrough). Its `data` is scoped to one recap
+   * period, while an unlogged-travel entry's `first_visited` is nullable
+   * by design — most of this travel predates the diary. Painting those
+   * countries into a period-scoped map would assert a visit inside a
+   * window the data cannot support, which is the same reasoning that
+   * already makes the recap pass no `usStates`. Defaulting to empty means
+   * that embed renders exactly as it did before this feature existed.
+   */
+  travelledCountries?: string[];
+  /** Unlogged-travel county FIPS, for the US expansion's state tier
+   * (#366). Only has an effect alongside `usStates` — with no expansion
+   * there are no states on screen to tint. Rolled up to states by
+   * `travelledStateFips`, the same helper /charts/us-states' own drill
+   * view uses, so both maps agree about the same state. */
+  travelledCounties?: string[];
   /** Defaults to `true` — right for this chart's own dedicated
    * `/charts/world` page, wrong for the recap report, which embeds this
    * same component as one section among several rather than the page's
@@ -131,6 +182,33 @@ export function WorldVisitsChart({
     return map;
   }, [usStates]);
 
+  const travelledCountryCodes = useMemo(() => new Set(travelledCountries), [travelledCountries]);
+
+  /** Which states the US expansion should tint. Unlogged travel is only
+   * ever stored per county, so a state is travelled when it contains one
+   * — #323's containment rule, rolled up by the shared helper. */
+  const travelledStates = useMemo(() => travelledStateFips(travelledCounties), [travelledCounties]);
+
+  /**
+   * Whether a *country* is travelled-through.
+   *
+   * Joined on the feature's own id, with a fallback to its name for the
+   * three world-atlas features that have no id at all (Kosovo,
+   * Somaliland, N. Cyprus). That fallback isn't invented here: it's the
+   * same `String(f.id ?? getLabel(f))` rule InteractiveGeo already keys
+   * features by internally and country-lookup.ts stores codes under, so
+   * there's one rule rather than two that can drift.
+   *
+   * Answers only "is there travelled evidence" and never looks at day
+   * counts — the other half of the containment rule (a country with real
+   * logged days keeps its place on the ramp) is InteractiveGeo's own
+   * precedence, not something this needs to pre-empt.
+   */
+  const isTravelled = useCallback(
+    (f: Feature<Geometry, CountryProperties>) => travelledCountryCodes.has(String(f.id ?? f.properties.name)),
+    [travelledCountryCodes],
+  );
+
   /**
    * The US is the only country that expands, and that's a real limit
    * rather than a stub: subdivision geometry for everyone else means
@@ -146,10 +224,20 @@ export function WorldVisitsChart({
   const resolveExpansion = useCallback(
     (f: GeoFeature): Promise<GeoExpansion | null> | null => {
       if (String(f.properties?.name ?? "") !== UNITED_STATES) return null;
-      return loadUsStateFeatures().then((stateFeatures) => usStatesExpansion(stateFeatures, daysByState));
+      return loadUsStateFeatures().then((stateFeatures) =>
+        usStatesExpansion(stateFeatures, daysByState, travelledStates),
+      );
     },
-    [daysByState],
+    [daysByState, travelledStates],
   );
+
+  const baseAriaLabel = usStates
+    ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to break it into its states in place; clicking any other country zooms to it. Hover a country or state to see how many days you've logged there."
+    : "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there.";
+
+  // The state half only counts when there's an expansion to reveal it in:
+  // travelled counties with no `usStates` put nothing on screen.
+  const hasTravelled = travelledCountryCodes.size > 0 || (Boolean(usStates) && travelledStates.size > 0);
 
   return (
     <ResponsiveChart className={heightClassName} fillViewport={fillViewport} minWidth={360}>
@@ -160,14 +248,11 @@ export function WorldVisitsChart({
           width={width}
           height={height}
           getValue={(f) => daysByCountry.get(f.properties.name) ?? null}
+          isTravelled={isTravelled}
           getLabel={(f) => f.properties.name}
           valueLabel="days"
           resolveExpansion={usStates ? resolveExpansion : undefined}
-          ariaLabel={
-            usStates
-              ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to break it into its states in place; clicking any other country zooms to it. Hover a country or state to see how many days you've logged there."
-              : "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there."
-          }
+          ariaLabel={baseAriaLabel + (hasTravelled ? TRAVELLED_ARIA_SUFFIX : "")}
         />
       )}
     </ResponsiveChart>
