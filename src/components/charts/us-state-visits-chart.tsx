@@ -18,6 +18,7 @@ import {
   type UsStateProperties,
 } from "@/components/charts/us-geo-levels";
 import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
+import { ManageUnloggedTravelLink } from "@/components/charts/manage-unlogged-travel-link";
 import { CBSA_AREAS } from "@/lib/geo/us-cbsa";
 import type { FeatureCollection, Geometry } from "geojson";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -224,7 +225,12 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
         methodology: PLACES_METHODOLOGY,
         trackingSpan: PLACES_TRACKING_SPAN,
       }}
-      filters={<GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />}
+      filters={
+        <>
+          <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />
+          <ManageUnloggedTravelLink />
+        </>
+      }
     >
       <ChartCard
         // Only the whole-country case is empty here — a state you've never
