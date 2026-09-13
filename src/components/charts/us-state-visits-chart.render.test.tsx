@@ -48,8 +48,12 @@ const NO_COUNTIES: UsCountyVisitData = { counties: [], unresolvedDays: 0 };
 
 /** Most tests here only care about the state level, so county data
  * defaults to empty rather than every call site repeating it. */
-function renderChart(data: UsStateVisitEntry[], counties: UsCountyVisitData = NO_COUNTIES) {
-  return render(<UsStateVisitsChart data={data} counties={counties} />);
+function renderChart(
+  data: UsStateVisitEntry[],
+  counties: UsCountyVisitData = NO_COUNTIES,
+  travelledCounties: string[] = [],
+) {
+  return render(<UsStateVisitsChart data={data} counties={counties} travelledCounties={travelledCounties} />);
 }
 
 /** The map's own <svg>. Found through InteractiveGeo's labelled wrapper
@@ -294,6 +298,90 @@ describe("UsStateVisitsChart", () => {
       // operate and nothing to close.
       expect(screen.queryByRole("navigation")).toBeNull();
       expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
+    });
+  });
+
+  describe("unlogged travel (#365)", () => {
+    // #323's containment rule: a polygon whose only evidence of a visit is
+    // travelled counties takes the tint; one with real logged days keeps
+    // its real colour and is never downgraded.
+    //
+    // Fulton is in Georgia (FIPS 13121, so state 13); Mobile is in Alabama
+    // (01097, state 01). Both are real us-atlas counties, which is what
+    // makes the state roll-up assertions meaningful rather than circular.
+    const FULTON = "13121";
+    const MOBILE = "01097";
+
+    function fillFor(container: HTMLElement, name: string): string | null | undefined {
+      return regions(container).find((p) => nameOf(p) === name)?.getAttribute("fill");
+    }
+
+    it("tints a state whose only evidence is a travelled county", () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, [MOBILE]);
+
+      // Alabama has no logged days, but contains a travelled county — so
+      // it reads as travelled rather than as no-data.
+      const alabama = fillFor(container, "Alabama");
+      expect(alabama).not.toBe("var(--muted)");
+      // ...and is distinct from a state that has neither.
+      expect(fillFor(container, "Wisconsin")).toBe("var(--muted)");
+      expect(alabama).not.toBe(fillFor(container, "Wisconsin"));
+    });
+
+    it("never downgrades a state that has real logged days", () => {
+      // The half of the rule most likely to regress: Georgia has both 100
+      // logged days and a travelled county in it, and must keep its place
+      // on the sequential ramp.
+      const withTravel = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, [FULTON]);
+      const withoutTravel = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, []);
+
+      expect(fillFor(withTravel.container, "Georgia")).toBe(fillFor(withoutTravel.container, "Georgia"));
+    });
+
+    it("leaves every state alone when nothing is travelled", () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, []);
+      // Same assertion the pre-#365 no-data test makes — the default path
+      // has to be untouched for a caller that passes no travelled data.
+      expect(fillFor(container, "Alabama")).toBe("var(--muted)");
+    });
+
+    it("only describes the travelled tint in the aria label when some exists", () => {
+      const without = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, []);
+      expect(without.container.querySelector('div[role="img"]')?.getAttribute("aria-label")).not.toMatch(
+        /travelled through/i,
+      );
+
+      const withTravel = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, [MOBILE]);
+      expect(withTravel.container.querySelector('div[role="img"]')?.getAttribute("aria-label")).toMatch(
+        /travelled through/i,
+      );
+    });
+
+    it("carries the travelled set into a drilled-in state's counties", async () => {
+      const { container } = renderChart(
+        [{ state: "Georgia", days: 100 }],
+        { counties: [], unresolvedDays: 0 },
+        [FULTON],
+      );
+
+      fireEvent.click(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Fulton"));
+
+      // Fulton has no logged days here, but is travelled — so inside the
+      // expansion it must read as travelled, not as no-data. This is the
+      // wiring that would silently do nothing if the expansion didn't
+      // carry its own accessor.
+      const fulton = fillFor(container, "Fulton");
+      expect(fulton).not.toBe("var(--muted)");
+
+      // Some other polygon on the map — a neighbouring state, or one of
+      // Georgia's other counties — with neither days nor travel is still
+      // muted, so the above isn't just "everything got tinted".
+      const others = regions(container).filter((p) => {
+        const name = nameOf(p);
+        return name !== undefined && name !== "Fulton" && name !== "Georgia";
+      });
+      expect(others.some((p) => p.getAttribute("fill") === "var(--muted)")).toBe(true);
     });
   });
 });

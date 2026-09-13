@@ -75,6 +75,16 @@ const DESCRIPTIONS: Record<UsMapMode, string> = {
     "Distinct days logged in each US metropolitan and micropolitan area. Counties belonging to no such area are drawn on their own.",
 };
 
+/** Appended to the mode's own label when unlogged travel is actually on
+ * the map (#365).
+ *
+ * Conditional rather than baked into every label for the same reason
+ * InteractiveGeo only lists a legend entry for a state something is
+ * currently in: describing a travelled tint on a map that has none is a
+ * claim about the data, not a description of the map. */
+const TRAVELLED_ARIA_SUFFIX =
+  " Regions with no logged days that you travelled through are tinted separately, and say so on hover.";
+
 const ARIA_LABELS: Record<UsMapMode, string> = {
   drill:
     "Map of the United States, with each state shaded by how many days you've logged there. Scroll or pinch to zoom, drag to pan. Click a state to break it into its counties in place; neighbouring states stay on the map and can be opened too. Hover a state or county to see its exact count.",
@@ -90,7 +100,22 @@ const ARIA_LABELS: Record<UsMapMode, string> = {
 type NamedProperties = { name: string };
 type NamedFeatures = FeatureCollection<Geometry, NamedProperties>;
 
-export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry[]; counties: UsCountyVisitData }) {
+export function UsStateVisitsChart({
+  data,
+  counties,
+  travelledCounties = [],
+}: {
+  data: UsStateVisitEntry[];
+  counties: UsCountyVisitData;
+  /** Unlogged-travel county FIPS (#365/#323) — counties travelled to or
+   * through that never made a day's top-two place slots.
+   *
+   * An array rather than the `Set` the data layer returns, because this
+   * crosses the server/client boundary as a prop; it's re-Set below where
+   * the membership tests actually happen. Defaults to empty so the chart
+   * renders exactly as before for a caller that doesn't pass it. */
+  travelledCounties?: string[];
+}) {
   const [mode, setMode] = useState<UsMapMode>("drill");
   const features = useMemo(() => {
     const decoded = feature(statesTopology, statesTopology.objects.states);
@@ -113,6 +138,53 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
   const daysByCountyFips = useMemo(
     () => new Map(counties.counties.map((c) => [c.fips, c.days])),
     [counties],
+  );
+
+  /**
+   * The travelled set, plus the two roll-ups the coarser views need.
+   *
+   * This is #323's containment rule, and all three tiers are the same
+   * question asked of a different polygon: *does this shape contain any
+   * travelled county?* The other half of the rule — that a polygon with
+   * real logged days keeps its real colour — is not implemented here at
+   * all, because `InteractiveGeo` already resolves a positive `getValue`
+   * ahead of `isTravelled`. So these accessors deliberately answer only
+   * "is there travelled evidence", and never look at day counts.
+   *
+   * A state's FIPS is the first two digits of its counties' (see
+   * US_STATE_FIPS_BY_NAME), so the state roll-up is a string slice rather
+   * than a lookup. The CBSA roll-up walks the same membership lists
+   * `metroValues` sums days over.
+   */
+  const travelled = useMemo(() => {
+    const byCountyFips = new Set(travelledCounties);
+    const byStateFips = new Set([...byCountyFips].map((fips) => fips.slice(0, 2)));
+    const byCbsaCode = new Set<string>();
+    if (byCountyFips.size > 0) {
+      for (const [code, area] of Object.entries(CBSA_AREAS)) {
+        if (area.counties.some((fips) => byCountyFips.has(fips))) byCbsaCode.add(code);
+      }
+    }
+    return { byCountyFips, byStateFips, byCbsaCode };
+  }, [travelledCounties]);
+
+  /** Whether the currently-drawn base map's polygon is travelled. Each
+   * mode's features are keyed differently — the drill view's base is
+   * states (matched by name, so via the state's own FIPS id), and both
+   * flat views key by feature id. */
+  const isTravelled = useCallback(
+    (f: { id?: string | number; properties: NamedProperties }) => {
+      if (mode === "drill") return travelled.byStateFips.has(String(f.id));
+      const id = String(f.id);
+      // The metro view is a mix: a dissolved CBSA keyed by its code, and
+      // plain counties keyed by FIPS for the roughly half of the country
+      // belonging to no CBSA. Checking both sets covers the mix without
+      // the chart needing to know which kind this polygon is.
+      return mode === "county"
+        ? travelled.byCountyFips.has(id)
+        : travelled.byCbsaCode.has(id) || travelled.byCountyFips.has(id);
+    },
+    [mode, travelled],
   );
 
   /**
@@ -203,10 +275,10 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
         // polygon rather than being replaced by nothing at all.
         countyFeatures.features.length === 0
           ? null
-          : usCountiesExpansion(stateName, stateFips, countyFeatures, daysByCountyFips),
+          : usCountiesExpansion(stateName, stateFips, countyFeatures, daysByCountyFips, travelled.byCountyFips),
       );
     },
-    [daysByCountyFips],
+    [daysByCountyFips, travelled],
   );
 
   // What's actually drawn, per mode. `drill` keeps the state layer and its
@@ -270,10 +342,13 @@ export function UsStateVisitsChart({ data, counties }: { data: UsStateVisitEntry
                   // county names repeat across states.
                   (mode === "county" ? daysByCountyFips : metroValues).get(String(f.id)) ?? null
             }
+            isTravelled={isTravelled}
             getLabel={(f) => f.properties.name}
             valueLabel="days"
             resolveExpansion={mode === "drill" ? resolveExpansion : undefined}
-            ariaLabel={ARIA_LABELS[mode]}
+            ariaLabel={
+              travelled.byCountyFips.size > 0 ? ARIA_LABELS[mode] + TRAVELLED_ARIA_SUFFIX : ARIA_LABELS[mode]
+            }
           />
         )}
       </ResponsiveChart>
