@@ -17,6 +17,15 @@ import type { RecapCount, RecapDiscovery, RecapPeoplePlaces } from "@/lib/recap-
 // dedicated page, wrong for one section embedded among several others
 // here, so this pins it back to the smaller, bounded size the section was
 // designed around.
+//
+// It also passes no unlogged travel (#366), which is a decision rather
+// than an omission: those entries are dateless by default
+// (`unlogged_travel.first_visited` is nullable, because most of that
+// travel predates the diary), so tinting them into a map whose every
+// other mark is scoped to this recap's period would assert a visit inside
+// a window the data can't support. Same reasoning as the missing
+// `usStates` above. Whole-history unlogged travel lives on
+// /charts/world.
 
 export function RecapPeoplePlacesSection({
   data,

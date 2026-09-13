@@ -13,6 +13,7 @@ import {
   loadAllUsCountyFeatures,
   loadUsCountyFeatures,
   loadUsMetroFeatures,
+  travelledStateFips,
   usCountiesExpansion,
   usProjection,
   type UsStateProperties,
@@ -151,14 +152,14 @@ export function UsStateVisitsChart({
    * ahead of `isTravelled`. So these accessors deliberately answer only
    * "is there travelled evidence", and never look at day counts.
    *
-   * A state's FIPS is the first two digits of its counties' (see
-   * US_STATE_FIPS_BY_NAME), so the state roll-up is a string slice rather
-   * than a lookup. The CBSA roll-up walks the same membership lists
-   * `metroValues` sums days over.
+   * The state roll-up is shared with the world map's US expansion
+   * (`travelledStateFips`, #366) rather than sliced inline here — both
+   * maps have to answer "is this state travelled?" identically. The CBSA
+   * roll-up walks the same membership lists `metroValues` sums days over.
    */
   const travelled = useMemo(() => {
     const byCountyFips = new Set(travelledCounties);
-    const byStateFips = new Set([...byCountyFips].map((fips) => fips.slice(0, 2)));
+    const byStateFips = travelledStateFips(byCountyFips);
     const byCbsaCode = new Set<string>();
     if (byCountyFips.size > 0) {
       for (const [code, area] of Object.entries(CBSA_AREAS)) {

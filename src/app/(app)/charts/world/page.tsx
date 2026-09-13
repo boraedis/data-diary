@@ -3,6 +3,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { ManageUnloggedTravelLink } from "@/components/charts/manage-unlogged-travel-link";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
+import { getUnloggedTravelCodes } from "@/lib/unlogged-travel";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
@@ -13,7 +14,19 @@ export default async function WorldVisitsChartPage() {
   // State counts come with the page so clicking the US only has to fetch
   // geometry (#107) — it's the same few-thousand-row scan the country
   // query already does, and one round trip beats two on a click.
-  const [data, usStates] = await Promise.all([getCountryVisitData(), getUsStateVisitData()]);
+  //
+  // Both unlogged-travel kinds (#366) ride along in the same round trip:
+  // countries for the base map, and counties because the US expansion
+  // tints its states from the county roll-up, the same way
+  // /charts/us-states' drill view does. Codes only — the map's question is
+  // pure membership, so the dates and notes stay behind on the manage
+  // surface.
+  const [data, usStates, travelledCountries, travelledCounties] = await Promise.all([
+    getCountryVisitData(),
+    getUsStateVisitData(),
+    getUnloggedTravelCodes("country"),
+    getUnloggedTravelCodes("us_county"),
+  ]);
 
   return (
     <ChartPage
@@ -30,7 +43,14 @@ export default async function WorldVisitsChartPage() {
       filters={<ManageUnloggedTravelLink />}
     >
       <ChartCard empty={data.length === 0}>
-        <WorldVisitsChart data={data} usStates={usStates} />
+        {/* Sets spread to arrays at the boundary — a Set doesn't cross
+            into a client component as a prop. */}
+        <WorldVisitsChart
+          data={data}
+          usStates={usStates}
+          travelledCountries={[...travelledCountries]}
+          travelledCounties={[...travelledCounties]}
+        />
       </ChartCard>
     </ChartPage>
   );

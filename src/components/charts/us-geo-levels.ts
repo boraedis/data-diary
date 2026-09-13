@@ -132,17 +132,48 @@ export function loadAllUsCountyFeatures(): Promise<FeatureCollection<Geometry, U
   });
 }
 
+/**
+ * The state roll-up of #323's containment rule: which states contain at
+ * least one travelled county.
+ *
+ * A county's FIPS begins with its state's two digits (see
+ * US_STATE_FIPS_BY_NAME), so this is a string slice rather than a lookup.
+ * It lives here rather than in either chart because both maps ask it —
+ * the US map for its drill view's base layer (#365) and the world map for
+ * its US expansion (#366) — and unlogged travel is only ever *stored* at
+ * county granularity, so every state-level answer has to be derived the
+ * same way or the two maps disagree about the same state.
+ */
+export function travelledStateFips(travelledCountyFips: Iterable<string>): Set<string> {
+  return new Set([...travelledCountyFips].map((fips) => fips.slice(0, 2)));
+}
+
 /** The US, broken into its states — the world map's expansion for the
  * United States. */
 export function usStatesExpansion(
   features: FeatureCollection<Geometry, UsStateProperties>,
   daysByState: ReadonlyMap<string, number>,
+  /** States containing unlogged travel (#366), as 2-digit FIPS — build it
+   * with `travelledStateFips` above rather than by hand.
+   *
+   * Carried per-expansion rather than inherited from the world map around
+   * it, for the reason GeoExpansion's own `isTravelled` comment gives:
+   * the countries beside these states answer the same question from
+   * different data (a country code, not a county roll-up), so a
+   * country-level accessor asked about Alabama would answer for the wrong
+   * feature. */
+  travelledStates?: ReadonlySet<string>,
 ): GeoExpansion {
   return geoExpansion<UsStateProperties>({
     key: "us-states",
     label: "United States",
     features,
     getValue: (f) => daysByState.get(f.properties.name) ?? null,
+    // Keyed by FIPS id, not name: `daysByState` is joined by name because
+    // the day counts come from a free-text place catalog, but unlogged
+    // travel is a controlled list of codes and has no reason to take that
+    // detour.
+    isTravelled: travelledStates ? (f) => travelledStates.has(String(f.id)) : undefined,
     getLabel: (f) => f.properties.name,
     valueLabel: "days",
   });
