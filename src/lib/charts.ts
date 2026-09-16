@@ -812,7 +812,16 @@ export async function getPeopleNetworkData(maxNodes = 40): Promise<PeopleNetwork
 
 // --- Country visits (world choropleth, #24) -------------------------------
 
-export type CountryVisitEntry = { country: string; days: number };
+export type CountryVisitEntry = {
+  country: string;
+  days: number;
+  /** Earliest logged day in this country ("YYYY-MM-DD"), or null for a
+   * caller that doesn't fetch it (e.g. a test fixture) — a plain
+   * `Math.min` over the day rows already read above (#370), not a second
+   * query. Optional rather than always-present so existing callers that
+   * only care about `days` don't have to thread a value through. */
+  firstVisited?: string | null;
+};
 
 /** Distinct days logged in each country, resolved the same way the place
  * leaderboard's root-color join does: a day's place1/place2 aren't
@@ -877,19 +886,32 @@ export async function getCountryVisitData(): Promise<CountryVisitEntry[]> {
   }
 
   const counts = new Map<string, number>();
+  // Earliest date per country — a plain min over the same deduped pairs
+  // the count above reads, since a "YYYY-MM-DD" string sorts correctly
+  // under `<` (see src/lib/date.ts's own convention).
+  const firstVisited = new Map<string, string>();
   for (const pair of dayCountryPairs) {
-    const country = normalizeCountryName(pair.split("\0")[1]);
+    const [date, rawCountry] = pair.split("\0");
+    const country = normalizeCountryName(rawCountry);
     counts.set(country, (counts.get(country) ?? 0) + 1);
+    const prev = firstVisited.get(country);
+    if (!prev || date < prev) firstVisited.set(country, date);
   }
 
   return [...counts.entries()]
-    .map(([country, dayCount]) => ({ country, days: dayCount }))
+    .map(([country, dayCount]) => ({ country, days: dayCount, firstVisited: firstVisited.get(country) ?? null }))
     .sort((a, b) => b.days - a.days);
 }
 
 // --- US state visits (state choropleth, #287) -----------------------------
 
-export type UsStateVisitEntry = { state: string; days: number };
+export type UsStateVisitEntry = {
+  state: string;
+  days: number;
+  /** Earliest logged day in this state — same "Math.min over rows already
+   * fetched" reasoning as CountryVisitEntry's own field above (#370). */
+  firstVisited?: string | null;
+};
 
 /**
  * Distinct days logged in each US state — the state-level counterpart to
@@ -955,13 +977,16 @@ export async function getUsStateVisitData(): Promise<UsStateVisitEntry[]> {
   }
 
   const counts = new Map<string, number>();
+  const firstVisited = new Map<string, string>();
   for (const pair of dayStatePairs) {
-    const state = pair.split("\0")[1];
+    const [date, state] = pair.split("\0");
     counts.set(state, (counts.get(state) ?? 0) + 1);
+    const prev = firstVisited.get(state);
+    if (!prev || date < prev) firstVisited.set(state, date);
   }
 
   return [...counts.entries()]
-    .map(([state, dayCount]) => ({ state, days: dayCount }))
+    .map(([state, dayCount]) => ({ state, days: dayCount, firstVisited: firstVisited.get(state) ?? null }))
     .sort((a, b) => b.days - a.days);
 }
 
@@ -974,6 +999,11 @@ export type UsCountyVisitEntry = {
   fips: string;
   name: string;
   days: number;
+  /** Earliest logged day in this county — same reasoning as
+   * CountryVisitEntry's own field (#370); the metro tier rolls this up
+   * client-side from its member counties rather than a second query, the
+   * same way it already rolls up `days`. */
+  firstVisited?: string | null;
 };
 
 export type UsCountyVisitData = {
@@ -1053,14 +1083,22 @@ export async function getUsCountyVisitData(): Promise<UsCountyVisitData> {
   for (const county of countyByPlaceId.values()) nameByFips.set(county.fips, county.name);
 
   const counts = new Map<string, number>();
+  const firstVisited = new Map<string, string>();
   for (const pair of dayCountyPairs) {
-    const fips = pair.split("\0")[1];
+    const [date, fips] = pair.split("\0");
     counts.set(fips, (counts.get(fips) ?? 0) + 1);
+    const prev = firstVisited.get(fips);
+    if (!prev || date < prev) firstVisited.set(fips, date);
   }
 
   return {
     counties: [...counts.entries()]
-      .map(([fips, dayCount]) => ({ fips, name: nameByFips.get(fips) ?? fips, days: dayCount }))
+      .map(([fips, dayCount]) => ({
+        fips,
+        name: nameByFips.get(fips) ?? fips,
+        days: dayCount,
+        firstVisited: firstVisited.get(fips) ?? null,
+      }))
       .sort((a, b) => b.days - a.days),
     unresolvedDays: unresolvedDayPlacePairs.size,
   };
@@ -1102,7 +1140,15 @@ function loadCityGeometryNames(cityKey: CityKey): Map<string, Set<string>> {
 // Washington with an unrelated "Downtown" in Arlington. The consuming
 // chart component keys its own lookup by (root, name) together, the same
 // pair each decoded topojson feature's own `properties` already carries.
-export type CityHeatmapNeighborhood = { root: string; name: string; days: number };
+export type CityHeatmapNeighborhood = {
+  root: string;
+  name: string;
+  days: number;
+  /** Earliest logged day resolving to this neighborhood — same
+   * `Math.min`-over-fetched-rows reasoning as CountryVisitEntry's own
+   * field (#370). */
+  firstVisited: string | null;
+};
 export type CityHeatmapDestination = {
   id: number;
   name: string;
@@ -1213,13 +1259,18 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
   }
 
   const neighborhoodCounts = new Map<string, number>();
+  const firstVisitedByNeighborhood = new Map<string, string>();
   for (const pair of dayNeighborhoodPairs) {
-    const resolvedKey = pair.split("\0").slice(1).join("\0");
+    const [date, ...rest] = pair.split("\0");
+    const resolvedKey = rest.join("\0");
     neighborhoodCounts.set(resolvedKey, (neighborhoodCounts.get(resolvedKey) ?? 0) + 1);
+    const prev = firstVisitedByNeighborhood.get(resolvedKey);
+    if (!prev || date < prev) firstVisitedByNeighborhood.set(resolvedKey, date);
   }
   const neighborhoods = [...neighborhoodCounts.entries()].map(([resolvedKey, dayCount]) => ({
     ...splitResolvedKey(resolvedKey),
     days: dayCount,
+    firstVisited: firstVisitedByNeighborhood.get(resolvedKey) ?? null,
   }));
 
   const placeCounts = new Map<number, number>();

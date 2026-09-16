@@ -8,8 +8,10 @@ import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/respons
 import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
 import { loadUsStateFeatures, travelledStateFips, usStatesExpansion } from "@/components/charts/us-geo-levels";
 import { normalizeCountryName } from "@/lib/geo/country-names";
+import { formatFirstVisited, formatTravelledFirstVisited } from "@/lib/viz/first-visited";
 import type { Feature, Geometry, Polygon } from "geojson";
 import type { CountryVisitEntry, UsStateVisitEntry } from "@/lib/charts";
+import type { UnloggedTravelDetail } from "@/lib/unlogged-travel";
 
 type CountryProperties = { name: string };
 
@@ -88,6 +90,10 @@ const TRAVELLED_ARIA_SUFFIX =
  * identity on every render. */
 const NO_TRAVEL: string[] = [];
 
+/** Same hoisted-empty-array reasoning as NO_TRAVEL, for the (#370)
+ * per-country first_visited/note detail array. */
+const NO_TRAVEL_DETAILS: [string, UnloggedTravelDetail][] = [];
+
 /** Choropleth of days logged per country — #24's first real InteractiveGeo
  * consumer. `data` is the server-fetched day count per (already
  * catalog-named) country; joined against world-atlas's own GeoJSON
@@ -104,6 +110,8 @@ export function WorldVisitsChart({
   usStates,
   travelledCountries = NO_TRAVEL,
   travelledCounties = NO_TRAVEL,
+  travelledCountryDetails = NO_TRAVEL_DETAILS,
+  diaryStartDate = null,
   fillViewport = true,
   heightClassName = CHART_HEIGHT_CLASS,
 }: {
@@ -148,6 +156,24 @@ export function WorldVisitsChart({
    * `travelledStateFips`, the same helper /charts/us-states' own drill
    * view uses, so both maps agree about the same state. */
   travelledCounties?: string[];
+  /**
+   * Per-country `first_visited`/`note` (#370), for the country tier's
+   * tooltip secondary row — an array of `[code, detail]` pairs rather
+   * than the `Map` the data layer returns, same Map-can't-cross-the-
+   * boundary reasoning as `travelledCountries` above, and re-Map'd below
+   * where it's read. Only covers countries: a rolled-up US state's
+   * travelled tint can come from several counties with different dates,
+   * so there's no single honest "first visited" to show for it — see
+   * `us-state-visits-chart.tsx`'s own comment on the same limit at the
+   * county tier, where the granularity actually matches.
+   */
+  travelledCountryDetails?: [string, UnloggedTravelDetail][];
+  /** `profileSettings.diaryStartDate`, for choosing "first visited" vs.
+   * "first logged" wording on a logged region's secondary row — see
+   * `formatFirstVisited`'s own comment. Null (the default) reads as "no
+   * diary start date recorded," which just means every date prints as
+   * "first visited." */
+  diaryStartDate?: string | null;
   /** Defaults to `true` — right for this chart's own dedicated
    * `/charts/world` page, wrong for the recap report, which embeds this
    * same component as one section among several rather than the page's
@@ -176,11 +202,59 @@ export function WorldVisitsChart({
     return map;
   }, [data]);
 
+  const firstVisitedByCountry = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of data) {
+      if (!entry.firstVisited) continue;
+      const name = normalizeCountryName(entry.country);
+      const prev = map.get(name);
+      if (!prev || entry.firstVisited < prev) map.set(name, entry.firstVisited);
+    }
+    return map;
+  }, [data]);
+
+  const travelledCountryDetailByCode = useMemo(() => new Map(travelledCountryDetails), [travelledCountryDetails]);
+
+  /** The country tier's secondary tooltip row (#370) — a logged country's
+   * own first-visit date if it has one, else the travelled entry's, else
+   * nothing. Real logged data wins for the same reason it wins the fill
+   * itself (InteractiveGeo's own value-before-travelled precedence): a
+   * country can be both logged *and* have a stray travelled row, and the
+   * logged date is the more specific fact. */
+  const countrySecondaryValue = useCallback(
+    (f: Feature<Geometry, CountryProperties>) => {
+      const logged = firstVisitedByCountry.get(f.properties.name);
+      if (logged) return formatFirstVisited(logged, diaryStartDate);
+      const code = String(f.id ?? f.properties.name);
+      const detail = travelledCountryDetailByCode.get(code);
+      return detail ? formatTravelledFirstVisited(detail.firstVisited) : null;
+    },
+    [firstVisitedByCountry, travelledCountryDetailByCode, diaryStartDate],
+  );
+
   const daysByState = useMemo(() => {
     const map = new Map<string, number>();
     for (const entry of usStates ?? []) map.set(entry.state, (map.get(entry.state) ?? 0) + entry.days);
     return map;
   }, [usStates]);
+
+  const firstVisitedByState = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of usStates ?? []) {
+      if (!entry.firstVisited) continue;
+      const prev = map.get(entry.state);
+      if (!prev || entry.firstVisited < prev) map.set(entry.state, entry.firstVisited);
+    }
+    return map;
+  }, [usStates]);
+
+  const stateSecondaryValue = useCallback(
+    (f: Feature<Geometry, { name: string }>) => {
+      const logged = firstVisitedByState.get(f.properties.name);
+      return logged ? formatFirstVisited(logged, diaryStartDate) : null;
+    },
+    [firstVisitedByState, diaryStartDate],
+  );
 
   const travelledCountryCodes = useMemo(() => new Set(travelledCountries), [travelledCountries]);
 
@@ -225,10 +299,10 @@ export function WorldVisitsChart({
     (f: GeoFeature): Promise<GeoExpansion | null> | null => {
       if (String(f.properties?.name ?? "") !== UNITED_STATES) return null;
       return loadUsStateFeatures().then((stateFeatures) =>
-        usStatesExpansion(stateFeatures, daysByState, travelledStates),
+        usStatesExpansion(stateFeatures, daysByState, travelledStates, stateSecondaryValue),
       );
     },
-    [daysByState, travelledStates],
+    [daysByState, travelledStates, stateSecondaryValue],
   );
 
   const baseAriaLabel = usStates
@@ -251,6 +325,8 @@ export function WorldVisitsChart({
           isTravelled={isTravelled}
           getLabel={(f) => f.properties.name}
           valueLabel="days"
+          getSecondaryValue={countrySecondaryValue}
+          secondaryLabel=""
           resolveExpansion={usStates ? resolveExpansion : undefined}
           ariaLabel={baseAriaLabel + (hasTravelled ? TRAVELLED_ARIA_SUFFIX : "")}
         />

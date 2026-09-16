@@ -16,6 +16,7 @@ import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import type { CityHeatmapData } from "@/lib/charts";
+import { formatFirstVisited } from "@/lib/viz/first-visited";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { CITY_HEATMAP_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
@@ -67,7 +68,15 @@ function neighborhoodKey(root: string, name: string): string {
   return `${root}\0${name}`;
 }
 
-export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatmapData> }) {
+export function CityHeatmapExplorer({
+  data,
+  diaryStartDate = null,
+}: {
+  data: Record<CityKey, CityHeatmapData>;
+  /** `profileSettings.diaryStartDate` — see WorldVisitsChart's own prop
+   * of the same name (#370). */
+  diaryStartDate?: string | null;
+}) {
   const [city, setCity] = useState<CityKey>("atlanta");
   const [destinations, setDestinations] = useState<"shown" | "hidden">("shown");
   const cityData = data[city];
@@ -80,6 +89,12 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
   const daysByFeature = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of cityData.neighborhoods) map.set(neighborhoodKey(n.root, n.name), n.days);
+    return map;
+  }, [cityData]);
+
+  const firstVisitedByFeature = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of cityData.neighborhoods) if (n.firstVisited) map.set(neighborhoodKey(n.root, n.name), n.firstVisited);
     return map;
   }, [cityData]);
 
@@ -150,6 +165,11 @@ export function CityHeatmapExplorer({ data }: { data: Record<CityKey, CityHeatma
               getValue={(f) => daysByFeature.get(neighborhoodKey(f.properties.root, f.properties.name)) ?? null}
               getLabel={(f) => f.properties.name}
               valueLabel="days"
+              getSecondaryValue={(f) => {
+                const date = firstVisitedByFeature.get(neighborhoodKey(f.properties.root, f.properties.name));
+                return date ? formatFirstVisited(date, diaryStartDate) : null;
+              }}
+              secondaryLabel=""
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"

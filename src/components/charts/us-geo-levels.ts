@@ -163,6 +163,16 @@ export function usStatesExpansion(
    * country-level accessor asked about Alabama would answer for the wrong
    * feature. */
   travelledStates?: ReadonlySet<string>,
+  /** The state tier's tooltip secondary row (#370), built by the caller
+   * (it already has `diaryStartDate` and the formatting helpers) rather
+   * than assembled in here — this module stays free of any wording
+   * decision, same reason `getValue`/`isTravelled` are already handed in
+   * pre-built. Logged-only: a state's travelled tint can come from
+   * several counties with different dates, so there's no single honest
+   * "first visited" a rolled-up state could show — see the world chart's
+   * own comment on `travelledCountryDetails` for the same limit stated in
+   * full. */
+  getSecondaryValue?: (feature: Feature<Geometry, UsStateProperties>) => string | null,
 ): GeoExpansion {
   return geoExpansion<UsStateProperties>({
     key: "us-states",
@@ -176,6 +186,8 @@ export function usStatesExpansion(
     isTravelled: travelledStates ? (f) => travelledStates.has(String(f.id)) : undefined,
     getLabel: (f) => f.properties.name,
     valueLabel: "days",
+    getSecondaryValue,
+    secondaryLabel: "",
   });
 }
 
@@ -192,6 +204,13 @@ export function usCountiesExpansion(
    * geography from the states around them, and a state-level accessor
    * asked about a county would answer for the wrong feature. */
   travelledCountyFips?: ReadonlySet<string>,
+  /** The county tier's tooltip secondary row (#370) — built by the
+   * caller, same reasoning as `usStatesExpansion`'s own parameter of the
+   * same name. Counties are where unlogged travel is actually *stored*,
+   * unlike the state tier above, so this one can honestly carry both a
+   * logged county's own first-visit date and a travelled county's
+   * first_visited/note. */
+  getSecondaryValue?: (feature: Feature<Geometry, UsCountyProperties>) => string | null,
 ): GeoExpansion {
   return geoExpansion<UsCountyProperties>({
     key: `us-counties-${stateFips}`,
@@ -202,6 +221,8 @@ export function usCountiesExpansion(
     isTravelled: travelledCountyFips ? (f) => travelledCountyFips.has(String(f.id)) : undefined,
     getLabel: (f) => f.properties.name,
     valueLabel: "days",
+    getSecondaryValue,
+    secondaryLabel: "",
   });
 }
 

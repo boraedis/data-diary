@@ -173,3 +173,41 @@ describe("InteractiveGeo travelled fill", () => {
     expect(tooltip().queryByText("travelled through")).toBeNull();
   });
 });
+
+// #370's region-level secondary row, the getMarkerSecondaryValue counterpart
+// for a region rather than a marker.
+describe("InteractiveGeo region secondary row", () => {
+  it("shows the accessor's own text below the value row", () => {
+    const { container } = renderMap({
+      getSecondaryValue: (f) => (f.properties.name === "AlsoLogged" ? "First visited Mar 2016" : null),
+      secondaryLabel: "detail",
+    });
+    fireEvent.focus(regionNamed(container, "AlsoLogged"));
+    expect(tooltip().getByText("First visited Mar 2016")).toBeTruthy();
+    expect(tooltip().getByText("detail")).toBeTruthy();
+  });
+
+  it("shows nothing extra for a region the accessor returns null for", () => {
+    const { container } = renderMap({
+      getSecondaryValue: (f) => (f.properties.name === "AlsoLogged" ? "First visited Mar 2016" : null),
+    });
+    fireEvent.focus(regionNamed(container, "Logged"));
+    expect(tooltip().queryByText(/First visited/)).toBeNull();
+  });
+
+  it("also shows on a travelled region, not just a valued one", () => {
+    const { container } = renderMap({
+      getSecondaryValue: (f) => (f.properties.name === "Travelled" ? "First visited date unknown" : null),
+    });
+    fireEvent.focus(regionNamed(container, "Travelled"));
+    expect(tooltip().getByText("travelled through")).toBeTruthy();
+    expect(tooltip().getByText("First visited date unknown")).toBeTruthy();
+  });
+
+  it("renders unchanged for a caller that passes no getSecondaryValue at all", () => {
+    const { container } = renderMap({ getSecondaryValue: undefined });
+    fireEvent.focus(regionNamed(container, "AlsoLogged"));
+    expect(tooltip().getByText("days")).toBeTruthy();
+    expect(tooltip().queryByText("detail")).toBeNull();
+  });
+});

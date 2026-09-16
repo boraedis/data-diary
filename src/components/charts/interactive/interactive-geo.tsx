@@ -212,6 +212,13 @@ export type GeoExpansion = {
   /** Tooltip value label for these subdivisions, if it differs from the
    * map's own (it usually doesn't — "days" is "days" at either scale). */
   valueLabel?: string;
+  /** Second tooltip row for a subdivision — see the component prop of the
+   * same name. No fallback to the map's own `getSecondaryValue`, for the
+   * same reason `isTravelled` has none just above: a county isn't the
+   * same feature as the state around it, and a map-level accessor asked
+   * about it would answer for the wrong region. */
+  getSecondaryValue?: (feature: GeoFeature) => string | null;
+  secondaryLabel?: string;
 };
 
 /**
@@ -237,6 +244,8 @@ export function geoExpansion<P extends GeoJsonProperties>(spec: {
   getLabel: (feature: Feature<Geometry, P>) => string;
   isTravelled?: (feature: Feature<Geometry, P>) => boolean;
   valueLabel?: string;
+  getSecondaryValue?: (feature: Feature<Geometry, P>) => string | null;
+  secondaryLabel?: string;
 }): GeoExpansion {
   return spec as unknown as GeoExpansion;
 }
@@ -252,6 +261,8 @@ type DrawnFeature = {
   getLabel: (feature: GeoFeature) => string;
   isTravelled?: (feature: GeoFeature) => boolean;
   valueLabel?: string;
+  getSecondaryValue?: (feature: GeoFeature) => string | null;
+  secondaryLabel?: string;
   /** Identity of the base feature this can expand into, or null for a
    * feature that's already a subdivision (the bottom of the chain). */
   expandableKey: string | null;
@@ -309,6 +320,24 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   noDataLabel?: string;
   /** Label for a feature's tooltip title — typically its name. */
   getLabel: (feature: Feature<Geometry, P>) => string;
+  /** Optional second tooltip row for a region, below the value/travelled
+   * row — a plain string, not a magnitude, the region-level counterpart
+   * to `getMarkerSecondaryValue` below and built for the same reason
+   * (#370): "first visited" is exactly the kind of extra fact a region
+   * has that doesn't belong in the sequential scale's own domain. Called
+   * for whichever region is hovered regardless of its fill state (a real
+   * value, the travelled tint, or no data at all), so the accessor
+   * decides what's relevant to the feature it's given — e.g. composing
+   * "first visited" vs. "first logged" wording itself, since that choice
+   * varies per feature and this primitive has no opinion on it. Return
+   * null for "nothing to add," the same convention
+   * `getMarkerSecondaryValue` uses. */
+  getSecondaryValue?: (feature: Feature<Geometry, P>) => string | null;
+  /** Label for the secondary row. Defaults to "detail", matching
+   * `getMarkerSecondaryValue`'s own default — most callers compose their
+   * own wording into the returned string instead (see that prop's
+   * comment), so this rarely shows as-is. */
+  secondaryLabel?: string;
   formatValue?: (value: number) => string;
   /** Label for the tooltip's value row, e.g. "days". Defaults to the
    * generic "value". */
@@ -421,6 +450,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   travelledLabel = "travelled through",
   noDataLabel = "no data",
   getLabel,
+  getSecondaryValue,
+  secondaryLabel = "detail",
   formatValue = formatThousandsNumber,
   valueLabel = "value",
   colorMode = "light",
@@ -485,6 +516,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         getLabel: getLabel as DrawnFeature["getLabel"],
         isTravelled: isTravelled as DrawnFeature["isTravelled"],
         valueLabel,
+        getSecondaryValue: getSecondaryValue as DrawnFeature["getSecondaryValue"],
+        secondaryLabel,
         expandableKey: key,
       });
     }
@@ -500,13 +533,17 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         // expansion that wants the tint says so itself.
         isTravelled: expansion!.value.isTravelled,
         valueLabel: expansion!.value.valueLabel ?? valueLabel,
+        // Same no-fallback rule as isTravelled just above, for the same
+        // reason — see GeoExpansion's own comment on this field.
+        getSecondaryValue: expansion!.value.getSecondaryValue,
+        secondaryLabel: expansion!.value.secondaryLabel ?? secondaryLabel,
         // A subdivision is the bottom of the chain — see
         // resolveExpansion's own prop comment.
         expandableKey: null,
       });
     }
     return entries;
-  }, [features, expansion, featureKey, getValue, getLabel, isTravelled, valueLabel]);
+  }, [features, expansion, featureKey, getValue, getLabel, isTravelled, valueLabel, getSecondaryValue, secondaryLabel]);
 
   // Computed here (not inside useD3 below) so the legend can read the same
   // domain/scale without duplicating the computation — same split
@@ -977,6 +1014,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   const hoveredColor = hoveredFill?.state === "value" ? hoveredFill.color : undefined;
   const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
   const hoveredMarkerSecondary = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
+  // Read for either fill state — a real value or the travelled tint can
+  // both have something to add (see getSecondaryValue's own prop comment)
+  // — but only ever from the hovered polygon's own accessor, same as
+  // isTravelled above.
+  const hoveredSecondary =
+    hovered?.kind === "region" ? (hovered.drawn.getSecondaryValue?.(hovered.drawn.feature) ?? null) : null;
 
   // Log-space fraction, matching the log-scaled fill — a linear fraction
   // here would put the indicator tick in the wrong place relative to the
@@ -1028,25 +1071,42 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
             title={hovered.kind === "region" ? hovered.drawn.getLabel(hovered.drawn.feature) : hovered.marker.label}
             rows={
               hovered.kind === "region"
-                ? hoveredFill?.state === "value" && hoveredValue != null
-                  ? [
-                      {
-                        label: hovered.drawn.valueLabel ?? valueLabel,
-                        value: formatValue(hoveredValue),
-                        color: hoveredColor ?? "",
-                        variant: "swatch" as const,
-                      },
-                    ]
-                  : // A travelled region says so instead of reading "no
-                    // data", which is the opposite of true for it — the
-                    // whole point is that something is known about it.
-                    // Its swatch is the tint itself, so the row matches
-                    // the polygon under the pointer.
-                    [
-                      hoveredFill?.state === "travelled"
-                        ? { label: travelledLabel, value: "", color: hoveredFill.color, variant: "swatch" as const }
-                        : { label: noDataLabel, value: "", color: "var(--muted-foreground)", variant: "swatch" as const },
-                    ]
+                ? [
+                    ...(hoveredFill?.state === "value" && hoveredValue != null
+                      ? [
+                          {
+                            label: hovered.drawn.valueLabel ?? valueLabel,
+                            value: formatValue(hoveredValue),
+                            color: hoveredColor ?? "",
+                            variant: "swatch" as const,
+                          },
+                        ]
+                      : // A travelled region says so instead of reading "no
+                        // data", which is the opposite of true for it — the
+                        // whole point is that something is known about it.
+                        // Its swatch is the tint itself, so the row matches
+                        // the polygon under the pointer.
+                        [
+                          hoveredFill?.state === "travelled"
+                            ? { label: travelledLabel, value: "", color: hoveredFill.color, variant: "swatch" as const }
+                            : { label: noDataLabel, value: "", color: "var(--muted-foreground)", variant: "swatch" as const },
+                        ]),
+                    // The optional secondary row — "first visited"-style
+                    // extra context, appended below whichever primary row
+                    // above described the fill. See getSecondaryValue's
+                    // own prop comment for why this is read regardless of
+                    // fill state.
+                    ...(hoveredSecondary != null
+                      ? [
+                          {
+                            label: hovered.drawn.secondaryLabel ?? secondaryLabel,
+                            value: hoveredSecondary,
+                            color: hoveredFill?.color ?? "var(--muted-foreground)",
+                            variant: "swatch" as const,
+                          },
+                        ]
+                      : []),
+                  ]
                 : [
                     ...(hoveredMarkerValue == null
                       ? [{ label: "no data", value: "", color: "var(--muted-foreground)", variant: "swatch" as const }]
