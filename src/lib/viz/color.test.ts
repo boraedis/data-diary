@@ -51,11 +51,11 @@ describe("sequentialLogScale", () => {
 });
 
 describe("divergingScale", () => {
-  it("returns the neutral midpoint color at the domain's mid value", () => {
+  it("returns the mid (gold accent) color at the domain's mid value", () => {
     const scale = divergingScale([-100, 0, 100]);
-    // neutral tint from the module's own DIVERGING_ENDPOINTS (#e0ddda),
+    // gold accent from the module's own DIVERGING_ENDPOINTS (#e6bc36),
     // round-tripped through d3's HCL interpolator as an rgb() string
-    expect(scale(0)).toBe("rgb(224, 221, 218)");
+    expect(scale(0)).toBe("rgb(230, 188, 54)");
   });
 
   it("distinguishes the cool and warm poles", () => {

@@ -39,16 +39,19 @@ import type { SleepDay } from "@/lib/charts";
  * ResizeObserver to report on; InteractiveCalendar's own content is what
  * determines the real height from there. */
 
-/** Legacy's own literal red-white-blue scale, reworked onto this app's
- * warm/cool diverging pair (viz/color.ts's `divergingScale`) instead of the
- * generic red/blue — same "below vs. above a baseline" structure, this
- * app's own hues (cool below the target, warm above — divergingScale's own
- * low->cool/high->warm direction, not reversed, so it stays legend-
- * consistent with every other diverging use of that helper). The baseline
- * is a fixed 8h target rather than your own mean, so the color reads the
- * same thing on every visit regardless of how your average has drifted —
- * a short night always reads cool, a long one always reads warm, not
- * "cool relative to whatever this month happened to average." */
+/** Legacy's own sleep calendar (functions/views/vis/charts/sleep_calendar.js)
+ * used `d3.interpolateRdYlBu` — reworked onto this app's own warm/cool/gold
+ * diverging triple (viz/color.ts's `divergingScale`, see that module's own
+ * comment for why the midpoint is a real gold accent and not a desaturated
+ * gray) instead of the generic red/yellow/blue — same "below vs. above a
+ * baseline" structure, this app's own hues (cool below the target, warm
+ * above — divergingScale's own low->cool/high->warm direction, not
+ * reversed, so it stays legend-consistent with every other diverging use of
+ * that helper). The baseline is a fixed 8h target rather than your own
+ * mean, so the color reads the same thing on every visit regardless of how
+ * your average has drifted — a short night always reads cool, a long one
+ * always reads warm, not "cool relative to whatever this month happened to
+ * average." */
 const TARGET_SLEEP_MINUTES = 8 * 60;
 
 type SleepMetric = "sleep" | "sleepPlusNaps";
