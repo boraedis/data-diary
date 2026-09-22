@@ -21,7 +21,6 @@ export type ChartCategory =
   | "health"
   | "weight"
   | "technology"
-  | "social-media"
   | "places"
   | "people"
   | "life";
@@ -44,12 +43,8 @@ export const CHART_CATEGORIES: Record<ChartCategory, { label: string; descriptio
     description: "Body weight against training volume.",
   },
   technology: {
-    label: "Screen Time",
-    description: "Phone and laptop usage.",
-  },
-  "social-media": {
-    label: "Social Media",
-    description: "Instagram follower growth.",
+    label: "Technology",
+    description: "Screen time and social media usage.",
   },
   places: {
     label: "Places",
@@ -66,13 +61,16 @@ export const CHART_CATEGORIES: Record<ChartCategory, { label: string; descriptio
 };
 
 // Rendered in this order on the landing page's category grid.
+// Order mirrors the day-entry taxonomy from the summarize() function in
+// src/app/(app)/day/[date]/page.tsx, with omitted entry categories (subs,
+// entertainment, work) left out and the profile-only life category last.
+// Social media charts are grouped under technology.
 export const CHART_CATEGORY_ORDER: ChartCategory[] = [
-  "happiness",
   "sleep",
-  "health",
   "weight",
   "technology",
-  "social-media",
+  "health",
+  "happiness",
   "places",
   "people",
   "life",
@@ -210,7 +208,7 @@ export const CHARTS: ChartEntry[] = [
     href: "/charts/instagram",
     title: "Instagram Followers",
     description: "A day-by-day look at Instagram followers.",
-    category: "social-media",
+    category: "technology",
   },
   {
     href: "/charts/places",
