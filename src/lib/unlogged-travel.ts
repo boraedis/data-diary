@@ -18,7 +18,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { unloggedTravel } from "@/db/schema";
 import { describeCountyFips } from "@/lib/geo/us-county-lookup";
-import { listCountryFeatures } from "@/lib/geo/country-lookup";
+import { listCountryFeatures, listPickableCountries } from "@/lib/geo/country-lookup";
 import { getCountryVisitData, getUsCountyVisitData } from "@/lib/charts";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 
@@ -218,7 +218,11 @@ export async function getUnloggedTravelOverview(): Promise<UnloggedTravelOvervie
     if (code) daysByCountryCode.set(code, (daysByCountryCode.get(code) ?? 0) + entry.days);
   }
 
-  const countryByCode = new Map(listCountryFeatures().map((c) => [c.code, c]));
+  // Deduped for display, while `codeByAtlasName` above stays on the full
+  // list: a day count can arrive under a dependency's own name and still
+  // needs to reach its sovereign's code, but a stored code must resolve
+  // back to exactly one label. See listPickableCountries.
+  const countryByCode = new Map(listPickableCountries().map((c) => [c.code, c]));
 
   return {
     counties: countyRows.map((row) => {

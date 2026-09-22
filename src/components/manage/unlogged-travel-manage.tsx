@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type { UnloggedTravelKind, UnloggedTravelRow } from "@/lib/unlogged-travel";
 import type { TravelSearchResult } from "@/app/api/unlogged-travel/search/route";
 
@@ -239,12 +240,16 @@ function EntryModal({
 
 function EntryRow({
   row,
+  kind,
   onEdit,
   onRemove,
 }: {
   row: UnloggedTravelRow;
+  kind: UnloggedTravelKind;
   onEdit: () => void;
-  onRemove: () => void;
+  /** Rejects if the delete fails, which is what surfaces the error inside
+   * DeleteCatalogItem's modal rather than losing it. */
+  onRemove: () => Promise<void>;
 }) {
   return (
     <li className="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2">
@@ -278,9 +283,31 @@ function EntryRow({
         <Button type="button" variant="ghost" size="xs" onClick={onEdit}>
           Edit
         </Button>
-        <Button type="button" variant="ghost" size="xs" onClick={onRemove}>
-          Remove
-        </Button>
+        {/* The same confirm-then-delete flow every other /manage catalog
+            uses. This surface shipped without one (#367): the two buttons
+            sat side by side at the same size and weight, so a misaimed
+            click on a list of near-identical rows deleted an entry with no
+            prompt and nothing to undo it with.
+
+            `isBlocked` is always false, unlike a catalog item's: nothing in
+            the schema references an unlogged_travel row — (kind, code) is
+            the primary key and no other table points at it — so there is
+            never a usage check to run and never anything to show instead
+            of the confirm. */}
+        <DeleteCatalogItem
+          itemLabel={row.label ?? row.code}
+          isBlocked={false}
+          blockedContent={null}
+          warningContent={
+            <p className="text-sm text-muted-foreground">
+              Removes the unlogged-travel entry only — its first-visited date and note go with it, and the{" "}
+              {kind === "us_county" ? "county" : "country"} stops being tinted as travelled through on the map. Any days
+              you&rsquo;ve actually logged there are untouched.
+            </p>
+          }
+          onDelete={onRemove}
+          size="xs"
+        />
       </div>
     </li>
   );
@@ -300,7 +327,15 @@ function KindSection({
 
   const remove = useCallback(
     async (row: UnloggedTravelRow) => {
-      await fetch(`/api/unlogged-travel?kind=${kind}&code=${encodeURIComponent(row.code)}`, { method: "DELETE" });
+      const res = await fetch(`/api/unlogged-travel?kind=${kind}&code=${encodeURIComponent(row.code)}`, {
+        method: "DELETE",
+      });
+      // Thrown rather than swallowed: DeleteCatalogItem turns a rejection
+      // into a visible "Failed to delete" and leaves its modal open. Before
+      // the confirm existed this call ignored `res.ok` entirely, so a
+      // failed delete refreshed the list and the row simply reappeared,
+      // which reads as the click not registering.
+      if (!res.ok) throw new Error("Failed to delete");
       onChanged();
     },
     [kind, onChanged],
@@ -335,6 +370,7 @@ function KindSection({
             <EntryRow
               key={row.code}
               row={row}
+              kind={kind}
               onEdit={() => {
                 setEditing(row);
                 setModalOpen(true);

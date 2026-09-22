@@ -80,7 +80,7 @@ const CALIFORNIA = "California";
  * `unlogged_travel.code` stores for a country. Written out rather than
  * looked up from the atlas at test time: a test that derived the code the
  * same way the component does would pass even if both were wrong about
- * what the table holds. Verified against countries-110m.json. */
+ * what the table holds. Verified against countries-50m.json. */
 const CODE = { france: "250", mexico: "484", canada: "124" };
 
 function fillFor(container: HTMLElement, name: string): string | null | undefined {
@@ -173,6 +173,52 @@ describe("WorldVisitsChart", () => {
     fireEvent.click(countryNamed(container, "United States of America"));
     await Promise.resolve();
     expect(regions(container)).toHaveLength(worldCount);
+  });
+
+  describe("countries the map can't draw (#383)", () => {
+    it("draws the microstates the 110m atlas omitted entirely", () => {
+      // Vatican City is the one that prompted the switch; the rest went
+      // with it at 1:110m for the same size-threshold reason.
+      const { container } = render(<WorldVisitsChart data={COUNTRIES} />);
+      const names = new Set(regions(container).map(nameOf));
+      for (const n of ["Vatican", "San Marino", "Monaco", "Liechtenstein", "Andorra", "Malta", "Singapore"]) {
+        expect(names.has(n), n).toBe(true);
+      }
+    });
+
+    it("lists a country with logged days that it has no polygon for", () => {
+      // The silent-loss guard. "Atlantis" stands in for the real case —
+      // any catalog spelling normalizeCountryName doesn't reconcile.
+      render(<WorldVisitsChart data={[...COUNTRIES, { country: "Atlantis", days: 7 }]} />);
+      expect(screen.getByText(/Not drawn on this map/)).toBeTruthy();
+      expect(screen.getByText(/Atlantis \(7 days\)/)).toBeTruthy();
+    });
+
+    it("says nothing when every country is drawable", () => {
+      // The note is a report of a problem, so its absence has to mean
+      // there isn't one — not that it was never wired up.
+      render(<WorldVisitsChart data={COUNTRIES} />);
+      expect(screen.queryByText(/Not drawn on this map/)).toBeNull();
+    });
+
+    it("counts a day correctly and sums repeats of the same unmatched name", () => {
+      render(
+        <WorldVisitsChart
+          data={[
+            { country: "Atlantis", days: 1 },
+            { country: "Atlantis", days: 2 },
+          ]}
+        />,
+      );
+      expect(screen.getByText(/Atlantis \(3 days\)/)).toBeTruthy();
+    });
+
+    it("resolves an alias before calling it undrawable", () => {
+      // "USA" is not a feature name, but normalizeCountryName maps it to
+      // one — reporting it as missing would be a false alarm.
+      render(<WorldVisitsChart data={[{ country: "USA", days: 5 }]} />);
+      expect(screen.queryByText(/Not drawn on this map/)).toBeNull();
+    });
   });
 
   describe("unlogged travel (#366)", () => {

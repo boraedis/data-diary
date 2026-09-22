@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
-import worldTopologyRaw from "world-atlas/countries-110m.json";
+import worldTopologyRaw from "world-atlas/countries-50m.json";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
 import { loadUsStateFeatures, travelledStateFips, usStatesExpansion } from "@/components/charts/us-geo-levels";
@@ -15,11 +15,25 @@ import type { UnloggedTravelDetail } from "@/lib/unlogged-travel";
 
 type CountryProperties = { name: string };
 
-// world-atlas's countries-110m.json (~108KB) rather than its 10m/50m
-// siblings (3.5MB/740KB) — see #24's own acceptance criteria on not
-// repeating legacy's multi-MB-per-file committed topojson. Decoded to
-// GeoJSON client-side via topojson-client (not on the server, then
-// serialized as page props) specifically because the decoded GeoJSON is
+// world-atlas's countries-50m.json (~756KB raw, ~230KB gzipped), not the
+// countries-110m.json (~108KB / ~38KB) this chart shipped with until
+// #383, and not the 3.5MB 10m.
+//
+// #24 picked 110m on size grounds and that was wrong in a way size alone
+// doesn't show: Natural Earth's 1:110m scale drops countries below a size
+// threshold, so Vatican City, San Marino, Monaco, Liechtenstein, Andorra,
+// Malta and Singapore weren't merely small on that map — they were absent
+// from it, and from the unlogged-travel picker that reads the same file.
+// A visited country that cannot be drawn *or* recorded is a worse defect
+// than 191KB, on the one page whose entire content is this map.
+//
+// That reasoning is specifically about *this* file. It doesn't reopen the
+// 842KB county layer, which #107 defers behind a click precisely because
+// most visitors never drill in; there is no equivalent click to defer
+// this behind, since the world map is the page.
+//
+// Still decoded to GeoJSON client-side via topojson-client (not on the
+// server, then serialized as page props) because the decoded GeoJSON is
 // ~4x larger than the topojson it comes from (topojson's whole point is
 // arc-sharing compression) — shipping the compact topojson over the wire
 // and decoding here keeps that size win instead of throwing it away.
@@ -305,6 +319,31 @@ export function WorldVisitsChart({
     [daysByState, travelledStates, stateSecondaryValue],
   );
 
+  /**
+   * Countries with logged days that this map has no polygon for.
+   *
+   * The same guard /charts/us-states keeps for territories geoAlbersUsa
+   * can't place, and it exists here for the same reason: the render walks
+   * *features* and looks each one's days up, so a country with real days
+   * and no geometry isn't drawn faintly or drawn wrong — it silently
+   * isn't there, and its days leave the page without trace.
+   *
+   * Moving to the 50m atlas (#383) removed the known instances of this,
+   * but not the failure mode: any catalog spelling `normalizeCountryName`
+   * doesn't reconcile disappears exactly the same way, and that table is
+   * hand-maintained against free text. This is what makes that visible
+   * instead of costing someone a day's confusion.
+   */
+  const offMapEntries = useMemo(() => {
+    const drawn = new Set(features.features.map((f) => f.properties.name));
+    const byName = new Map<string, number>();
+    for (const entry of data) {
+      const name = normalizeCountryName(entry.country);
+      if (!drawn.has(name)) byName.set(name, (byName.get(name) ?? 0) + entry.days);
+    }
+    return [...byName].sort((a, b) => b[1] - a[1]);
+  }, [data, features]);
+
   const baseAriaLabel = usStates
     ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to break it into its states in place; clicking any other country zooms to it. Hover a country or state to see how many days you've logged there."
     : "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there.";
@@ -314,6 +353,7 @@ export function WorldVisitsChart({
   const hasTravelled = travelledCountryCodes.size > 0 || (Boolean(usStates) && travelledStates.size > 0);
 
   return (
+    <>
     <ResponsiveChart className={heightClassName} fillViewport={fillViewport} minWidth={360}>
       {({ width, height }) => (
         <InteractiveGeo<CountryProperties>
@@ -331,5 +371,13 @@ export function WorldVisitsChart({
         />
       )}
     </ResponsiveChart>
+    {offMapEntries.length > 0 ? (
+      <p className="pt-3 text-xs text-muted-foreground">
+        Not drawn on this map:{" "}
+        {offMapEntries.map(([name, days]) => `${name} (${days} ${days === 1 ? "day" : "days"})`).join(", ")} — no
+        country by that name in the map&rsquo;s geography.
+      </p>
+    ) : null}
+    </>
   );
 }
