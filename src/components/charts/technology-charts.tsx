@@ -16,7 +16,7 @@ import {
   type InteractiveScrollerSeries,
 } from "@/components/charts/interactive/interactive-scroller";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
-import { categoricalColor } from "@/lib/viz/color";
+import { categoricalColor, categorySequentialInterpolator } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import { parseDate } from "@/lib/date";
 import type { DailyValue, DeviceDay } from "@/lib/charts";
@@ -161,6 +161,20 @@ const DEVICE_METRIC_LABELS: Record<DeviceMetric, string> = {
   instagram: "Instagram usage",
 };
 
+// Same `categoricalColor` slot each metric already carries on the mix/daily
+// charts above (`DEVICE_COLORS`) — phone=0, Instagram=1, laptop=2 — so
+// switching the calendar's measure reads as "that device's own colour," not
+// an unrelated ramp. Total gets slot 3 (chart-4, unused elsewhere in this
+// file): it isn't one of the three tracked devices, so it doesn't inherit
+// any of their colours, but still needs its own fixed slot rather than a
+// generated one.
+const DEVICE_METRIC_COLOR_SLOT: Record<DeviceMetric, number> = {
+  phone: 0,
+  instagram: 1,
+  laptop: 2,
+  total: 3,
+};
+
 /**
  * One calendar, switchable between phone, laptop, Instagram, and their
  * combined total (#333) — a `GroupByPicker` "Measure" control, the same
@@ -173,6 +187,17 @@ const DEVICE_METRIC_LABELS: Record<DeviceMetric, string> = {
  * wasn't tracked at all before 2025, and a day can log one device without
  * the other — rather than filling the gaps with zeros, which would read as
  * "no usage" instead of "not recorded".
+ *
+ * Each metric also gets its own sequential ramp (`categorySequentialInterpolator`)
+ * rather than always the app's default terracotta one — only one ramp is
+ * ever on screen at a time here, so there's no simultaneous-marks CVD
+ * concern the way a legend would have, just "this measure has its own
+ * identity." That ramp's low->high span is also deliberately wider than the
+ * default (see its own doc comment in viz/color.ts) — the earlier version's
+ * blend mode forced every cell to at least 40% color intensity
+ * (`InteractiveCalendar`'s `MIN_INTENSITY`), which read as flat regardless
+ * of how light a day actually was; a plain per-metric ramp with a wider
+ * span makes a quiet day and a heavy day genuinely different shades.
  */
 export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
   const [metric, setMetric] = useState<DeviceMetric>("total");
@@ -198,6 +223,10 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
   }, [data, metric]);
 
   const valueLabel = DEVICE_METRIC_LABELS[metric];
+  const colorInterpolator = useMemo(
+    () => categorySequentialInterpolator(DEVICE_METRIC_COLOR_SLOT[metric], "dark"),
+    [metric],
+  );
 
   return (
     <CalendarExplorer
@@ -208,6 +237,7 @@ export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
       trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       formatValue={formatHours}
       valueLabel={valueLabel}
+      colorInterpolator={colorInterpolator}
       extraFilters={
         <GroupByPicker value={metric} onChange={setMetric} options={DEVICE_METRIC_OPTIONS} label="Measure" />
       }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { categoricalColor, divergingScale, sequentialLogScale, sequentialScale } from "@/lib/viz/color";
+import {
+  categoricalColor,
+  categorySequentialInterpolator,
+  divergingScale,
+  sequentialLogScale,
+  sequentialScale,
+} from "@/lib/viz/color";
 
 describe("categoricalColor", () => {
   it("resolves the first five slots to --chart-1..5 CSS variables in order", () => {
@@ -47,6 +53,31 @@ describe("sequentialLogScale", () => {
     // At the geometric midpoint the log scale should read closer to 50%
     // saturation than the linear scale does at the same raw value.
     expect(log(31.6)).not.toBe(linear(31.6));
+  });
+});
+
+describe("categorySequentialInterpolator", () => {
+  it("maps its own domain endpoints to distinct colors", () => {
+    const interpolator = categorySequentialInterpolator(0);
+    expect(interpolator(0)).not.toBe(interpolator(1));
+  });
+
+  it("gives each fixed slot a different hue rather than the same default ramp", () => {
+    const phone = categorySequentialInterpolator(0, "dark");
+    const laptop = categorySequentialInterpolator(2, "dark");
+    expect(phone(1)).not.toBe(laptop(1));
+  });
+
+  it("wraps rather than throwing past the fixed slot count", () => {
+    const wrapped = categorySequentialInterpolator(4, "dark");
+    const first = categorySequentialInterpolator(0, "dark");
+    expect(wrapped(0.5)).toBe(first(0.5));
+  });
+
+  it("defaults to light mode, differing from an explicit dark-mode ramp", () => {
+    const light = categorySequentialInterpolator(0, "light");
+    const dark = categorySequentialInterpolator(0, "dark");
+    expect(light(0.5)).not.toBe(dark(0.5));
   });
 });
 
