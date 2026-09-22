@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { interpolateRdYlBu } from "d3";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
@@ -39,20 +40,24 @@ import type { SleepDay } from "@/lib/charts";
  * ResizeObserver to report on; InteractiveCalendar's own content is what
  * determines the real height from there. */
 
-/** Legacy's own sleep calendar (functions/views/vis/charts/sleep_calendar.js)
- * used `d3.interpolateRdYlBu` — reworked onto this app's own warm/cool/gold
- * diverging triple (viz/color.ts's `divergingScale`, see that module's own
- * comment for why the midpoint is a real gold accent and not a desaturated
- * gray) instead of the generic red/yellow/blue — same "below vs. above a
- * baseline" structure, this app's own hues (cool below the target, warm
- * above — divergingScale's own low->cool/high->warm direction, not
- * reversed, so it stays legend-consistent with every other diverging use of
- * that helper). The baseline is a fixed 8h target rather than your own
- * mean, so the color reads the same thing on every visit regardless of how
- * your average has drifted — a short night always reads cool, a long one
- * always reads warm, not "cool relative to whatever this month happened to
- * average." */
-const TARGET_SLEEP_MINUTES = 8 * 60;
+/**
+ * Legacy's own sleep calendar (functions/views/vis/charts/sleep_calendar.js)
+ * colored every cell with `d3.scaleSequential(d3.extent(values),
+ * d3.interpolateRdYlBu)` — red for the shortest nights on record, blue for
+ * the longest, straight off the raw data's own min/max, no fixed baseline.
+ *
+ * Two earlier passes at this (this app's own warm/cool diverging pair, then
+ * that same pair with a gold accent at a fixed 8h-target midpoint instead
+ * of a plain gray one) both still read as nothing like the original once
+ * actually seen rendered — a branded, muted reinterpretation isn't what
+ * "replicate legacy" meant. This uses `d3.interpolateRdYlBu` directly, via
+ * `InteractiveCalendar`'s `colorInterpolator` escape hatch, over the data's
+ * own extent rather than a fixed target — i.e. the actual legacy behavior,
+ * not an app-branded stand-in for it. See that prop's own doc comment for
+ * why this bypasses the app's normal colorblind-validated palette system
+ * (viz/color.ts) rather than extending it: this is a deliberate one-off
+ * matching a specific remembered look, not a new default worth branding.
+ */
 
 type SleepMetric = "sleep" | "sleepPlusNaps";
 
@@ -91,7 +96,7 @@ export function SleepCalendarChart({
   return (
     <ChartPage
       title="Sleep Calendar"
-      description="Nightly sleep duration relative to an 8-hour target — cool below it, warm above."
+      description="Nightly sleep duration — red for the shortest nights, blue for the longest."
       info={{
         interactionGuide: CALENDAR_INTERACTION_GUIDE,
         methodology: SLEEP_METHODOLOGY,
@@ -113,7 +118,7 @@ export function SleepCalendarChart({
               width={width}
               formatValue={(minutes) => `${(minutes / 60).toFixed(1)}h`}
               valueLabel={effectiveMetric === "sleepPlusNaps" ? "sleep + naps" : "sleep"}
-              divergingMidpoint={TARGET_SLEEP_MINUTES}
+              colorInterpolator={interpolateRdYlBu}
               ariaLabel="Sleep calendar heatmap. Hover a day to see how long you slept."
             />
           )}

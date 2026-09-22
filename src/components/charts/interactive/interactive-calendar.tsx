@@ -105,8 +105,19 @@ export type InteractiveCalendarProps = {
    * different meanings rather than just "more". Clamped into the data's
    * own `[min, max]` if the target falls outside it. Ignored in blend
    * mode (`categories`), which always paints from the sequential ramp's
-   * low end. */
+   * low end. Ignored when `colorInterpolator` is set (see below). */
   divergingMidpoint?: number;
+  /** Escape hatch to a caller-supplied `(t: number) => string` interpolator
+   * (any d3-scale-chromatic function, e.g. `d3.interpolateRdYlBu`), mapped
+   * over the data's own `[min, max]` as a plain sequential scale — bypasses
+   * `sequentialScale`/`divergingScale`/`colorMode`/`divergingMidpoint`
+   * entirely. This app's own charts should reach for those instead (see
+   * viz/color.ts's own header comment on why: fixed, colorblind-validated,
+   * "this app's own colors" rather than a borrowed generic ramp) — this
+   * exists specifically for sleep-calendar-chart.tsx's legacy-authentic
+   * mode, where matching the original app's exact `d3.interpolateRdYlBu`
+   * look was the explicit ask, not a new default worth branding. */
+  colorInterpolator?: (t: number) => string;
   ariaLabel?: string;
 };
 
@@ -128,6 +139,7 @@ export function InteractiveCalendar({
   valueLabel = "value",
   colorMode = "dark",
   divergingMidpoint,
+  colorInterpolator,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -180,7 +192,9 @@ export function InteractiveCalendar({
   // target (e.g. an 8h sleep goal) can easily fall outside the data's own
   // [min, max] (someone who never sleeps under 8h clamps the cool half
   // away entirely), and d3.scaleDiverging expects its domain triple
-  // monotonic, not an arbitrary midpoint.
+  // monotonic, not an arbitrary midpoint. Meaningless (and unused) when
+  // `colorInterpolator` is set, which is always a plain sequential mapping
+  // over the full domain regardless of any target.
   const clampedMidpoint =
     divergingMidpoint === undefined
       ? undefined
@@ -197,10 +211,12 @@ export function InteractiveCalendar({
   // as a deliberate choice of which pole means what.
   const colorScale = useMemo(
     () =>
-      clampedMidpoint === undefined
-        ? sequentialScale(domain, colorMode)
-        : divergingScale([domain[0], clampedMidpoint, domain[1]], colorMode),
-    [domain, colorMode, clampedMidpoint],
+      colorInterpolator !== undefined
+        ? d3.scaleSequential(domain, colorInterpolator)
+        : clampedMidpoint === undefined
+          ? sequentialScale(domain, colorMode)
+          : divergingScale([domain[0], clampedMidpoint, domain[1]], colorMode),
+    [domain, colorMode, clampedMidpoint, colorInterpolator],
   );
 
   /**
