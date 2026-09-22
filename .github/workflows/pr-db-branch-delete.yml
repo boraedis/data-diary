@@ -2,10 +2,22 @@ name: Delete PR database branch
 
 # Cleans up the disposable Neon branch created by pr-db-branch-create.yml
 # once its PR is closed (merged or not).
+#
+# This only covers the case where the job actually runs but the delete call
+# itself fails (Neon API error, rate limit, etc) — the failure-comment step
+# below can't fire if the run never starts at all. GitHub gates Actions runs
+# on `pull_request` from some bot-authored branches (e.g. Copilot) behind
+# manual approval, and a run stuck in `action_required` never executes any
+# step, so a leak from that cause is invisible here. See #335. The
+# scheduled `pr-db-branch-reconcile.yml` is the real backstop for that case
+# — it runs independently of any single PR's workflow run.
 on:
   pull_request:
     branches: [main]
     types: [closed]
+
+permissions:
+  pull-requests: write
 
 jobs:
   delete-branch:
@@ -16,3 +28,21 @@ jobs:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch: pr-${{ github.event.number }}
           api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Comment on PR if branch deletion failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                "**Deleting this PR's Neon database branch failed.**",
+                "",
+                "The scheduled reconciliation job in `pr-db-branch-reconcile.yml` should catch and delete it on its next run if it's still orphaned — flagging here in case it doesn't. See #335.",
+                "",
+                `Full run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ].join("\n"),
+            });

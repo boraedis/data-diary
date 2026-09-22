@@ -1,0 +1,71 @@
+name: Reconcile PR database branches
+
+# Backstop for pr-db-branch-delete.yml. That workflow deletes a PR's Neon
+# branch when the PR closes, but GitHub gates Actions runs from certain
+# bot-authored branches (e.g. Copilot) behind manual approval — a run stuck
+# in `action_required` never executes, so the delete never happens and
+# nothing notices. Confirmed for PR #36; see #335 for the full writeup.
+#
+# Runs independently of any single PR's workflow run: once a day, list every
+# live `pr-<N>` Neon branch, and delete any whose PR is no longer open. Each
+# deletion is announced on the PR it belonged to (or, if that's not
+# possible, as a standalone issue) so a leak never goes unnoticed again.
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find and delete orphaned pr-* Neon branches
+        id: reconcile
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          all_branches=$(curl -sf -H "Authorization: Bearer $NEON_API_KEY" \
+            "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches")
+
+          pr_branches=$(jq -r '.branches[] | select(.name | test("^pr-[0-9]+$")) | .name' <<< "$all_branches")
+
+          open_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 500 --json number --jq '.[].number')
+
+          deleted=""
+          for b in $pr_branches; do
+            n="${b#pr-}"
+            if grep -qx "$n" <<< "$open_prs"; then
+              continue
+            fi
+            echo "Deleting orphaned branch $b (PR #$n is not open)"
+            branch_id=$(jq -r --arg name "$b" '.branches[] | select(.name == $name) | .id' <<< "$all_branches")
+            curl -sf -X DELETE -H "Authorization: Bearer $NEON_API_KEY" \
+              "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$branch_id"
+            deleted="$deleted $b"
+          done
+
+          echo "deleted=$deleted" >> "$GITHUB_OUTPUT"
+
+      - name: Announce each deletion
+        if: steps.reconcile.outputs.deleted != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for b in ${{ steps.reconcile.outputs.deleted }}; do
+            n="${b#pr-}"
+            body="This PR's Neon database branch (\`$b\`) was orphaned and has been deleted by the scheduled reconciliation job in \`pr-db-branch-reconcile.yml\`, not by \`pr-db-branch-delete.yml\` — that workflow's run for this PR most likely never executed (commonly because GitHub gated it behind manual approval for a bot-authored branch). See #335."
+            if ! gh pr comment "$n" --repo "$GITHUB_REPOSITORY" --body "$body"; then
+              gh issue create --repo "$GITHUB_REPOSITORY" \
+                --title "Orphaned Neon branch $b deleted by reconciliation job" \
+                --body "$body (Could not comment directly on PR #$n — it may be from a fork or otherwise uncommentable.)"
+            fi
+          done
