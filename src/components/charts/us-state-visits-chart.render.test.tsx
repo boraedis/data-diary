@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as d3 from "d3";
 import type { Feature, Geometry } from "geojson";
 import { UsStateVisitsChart } from "./us-state-visits-chart";
@@ -35,13 +35,18 @@ class StubResizeObserver {
 }
 
 const originalResizeObserver = globalThis.ResizeObserver;
+// See interactive-geo.render.test.tsx's own comment on this stub — needed
+// here too for the #370 hover tests below.
+const originalPointerEvent = globalThis.PointerEvent;
 
 beforeEach(() => {
   globalThis.ResizeObserver = StubResizeObserver as unknown as typeof ResizeObserver;
+  globalThis.PointerEvent ??= class extends Event {} as unknown as typeof PointerEvent;
 });
 
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
+  globalThis.PointerEvent = originalPointerEvent;
 });
 
 const NO_COUNTIES: UsCountyVisitData = { counties: [], unresolvedDays: 0 };
@@ -52,8 +57,17 @@ function renderChart(
   data: UsStateVisitEntry[],
   counties: UsCountyVisitData = NO_COUNTIES,
   travelledCounties: string[] = [],
+  extra: { travelledCountyDetails?: [string, { firstVisited: string | null; note: string | null }][]; diaryStartDate?: string | null } = {},
 ) {
-  return render(<UsStateVisitsChart data={data} counties={counties} travelledCounties={travelledCounties} />);
+  return render(
+    <UsStateVisitsChart
+      data={data}
+      counties={counties}
+      travelledCounties={travelledCounties}
+      travelledCountyDetails={extra.travelledCountyDetails}
+      diaryStartDate={extra.diaryStartDate}
+    />,
+  );
 }
 
 /** The map's own <svg>. Found through InteractiveGeo's labelled wrapper
@@ -382,6 +396,100 @@ describe("UsStateVisitsChart", () => {
         return name !== undefined && name !== "Fulton" && name !== "Georgia";
       });
       expect(others.some((p) => p.getAttribute("fill") === "var(--muted)")).toBe(true);
+    });
+  });
+
+  describe("first-visited tooltip row (#370)", () => {
+    const tooltip = () => within(screen.getByRole("status"));
+    // Fulton County, Georgia (FIPS 13121) — a real us-atlas county, same
+    // fixture the county-expansion and unlogged-travel describes above use.
+    const FULTON = "13121";
+    const COUNTIES: UsCountyVisitData = {
+      counties: [{ fips: FULTON, name: "Fulton", days: 1891, firstVisited: "2019-08-01" }],
+      unresolvedDays: 0,
+    };
+
+    it("shows a logged state's own first-visit date in drill mode", () => {
+      const { container } = renderChart(
+        [{ state: "Georgia", days: 100, firstVisited: "2019-08-01" }],
+        NO_COUNTIES,
+        [],
+        { diaryStartDate: "2016-01-01" },
+      );
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Aug 2019")).toBeTruthy();
+    });
+
+    it("shows a logged county's own first-visit date inside the drilled-in expansion", async () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], COUNTIES, [], {
+        diaryStartDate: "2016-01-01",
+      });
+      fireEvent.click(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Fulton"));
+
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Fulton")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Aug 2019")).toBeTruthy();
+    });
+
+    it("falls back to a travelled county's own date when the county has no logged days", async () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2018-02-01", note: null }]],
+      });
+      fireEvent.click(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Fulton"));
+
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Fulton")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Feb 2018")).toBeTruthy();
+    });
+
+    it("shows nothing extra for a state with no first-visit data at all", () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100 }]);
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      expect(tooltip().queryByText(/First (visited|logged)/)).toBeNull();
+    });
+
+    it("rolls up a travelled county's date to its state when the state has no logged days of its own", () => {
+      // Georgia has no entry in `data` at all here — the only evidence
+      // anywhere is Fulton's own travelled record, so the state-level
+      // secondary row has to come from the county roll-up, not the
+      // direct state query (which has nothing to report). Wisconsin
+      // carries the only logged days, just to keep the card past its
+      // empty state — irrelevant to what's being asserted below.
+      const { container } = renderChart([{ state: "Wisconsin", days: 5 }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2018-02-01", note: null }]],
+      });
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Feb 2018")).toBeTruthy();
+    });
+
+    it("takes the earlier of a state's own logged date and a travelled county's date", () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100, firstVisited: "2019-08-01" }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2015-03-01", note: null }]],
+        diaryStartDate: "2016-01-01",
+      });
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      // The travelled county's earlier date wins, and reads as "first
+      // visited" (never "first logged") since it was never a days row.
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Mar 2015")).toBeTruthy();
+      expect(tooltip().queryByText("Aug 2019")).toBeNull();
+    });
+
+    it("rolls up a travelled county's date to its dissolved metro area", async () => {
+      // Fulton (13121) belongs to CBSA 12060, Atlanta-Sandy Springs-Roswell.
+      const { container } = renderChart([{ state: "Wisconsin", days: 5 }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2018-02-01", note: null }]],
+      });
+      fireEvent.click(screen.getByText("Metros"));
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Atlanta-Sandy Springs-Roswell, GA"));
+
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Atlanta-Sandy Springs-Roswell, GA")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Feb 2018")).toBeTruthy();
     });
   });
 });

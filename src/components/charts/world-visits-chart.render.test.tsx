@@ -28,13 +28,18 @@ class StubResizeObserver {
 }
 
 const originalResizeObserver = globalThis.ResizeObserver;
+// See interactive-geo.render.test.tsx's own comment on this stub — needed
+// here too for the #370 hover tests below.
+const originalPointerEvent = globalThis.PointerEvent;
 
 beforeEach(() => {
   globalThis.ResizeObserver = StubResizeObserver as unknown as typeof ResizeObserver;
+  globalThis.PointerEvent ??= class extends Event {} as unknown as typeof PointerEvent;
 });
 
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
+  globalThis.PointerEvent = originalPointerEvent;
 });
 
 /** The region paths only. `path.geo-region` rather than every `svg path`
@@ -310,6 +315,60 @@ describe("WorldVisitsChart", () => {
       // a period-scoped map. This is that decision as a test.
       const { container } = render(<WorldVisitsChart data={COUNTRIES} />);
       expect(regions(container).every((p) => p.getAttribute("fill") !== travelledFill("dark"))).toBe(true);
+    });
+  });
+
+  describe("first-visited tooltip row (#370)", () => {
+    const tooltip = () => within(screen.getByRole("status"));
+    const DATED_COUNTRIES = [
+      { country: "USA", days: 5000, firstVisited: "2020-03-14" },
+      { country: "France", days: 40, firstVisited: "2016-01-01" },
+    ];
+
+    it("shows a logged country's own first-visit date, label and value in separate (unswatched) rows", () => {
+      const { container } = render(<WorldVisitsChart data={DATED_COUNTRIES} diaryStartDate="2016-01-01" />);
+      fireEvent.focus(countryNamed(container, "United States of America"));
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Mar 2020")).toBeTruthy();
+    });
+
+    it("reads 'first logged' once the date lands at or before the diary's own start", () => {
+      const { container } = render(<WorldVisitsChart data={DATED_COUNTRIES} diaryStartDate="2016-01-01" />);
+      fireEvent.focus(countryNamed(container, "France"));
+      expect(tooltip().getByText("First logged")).toBeTruthy();
+      expect(tooltip().getByText("Jan 2016")).toBeTruthy();
+    });
+
+    it("falls back to the travelled entry's own date for a country with no logged days", () => {
+      const { container } = render(
+        <WorldVisitsChart
+          data={COUNTRIES}
+          travelledCountries={[CODE.mexico]}
+          travelledCountryDetails={[[CODE.mexico, { firstVisited: "2019-05-01", note: null }]]}
+        />,
+      );
+      fireEvent.focus(countryNamed(container, "Mexico"));
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("May 2019")).toBeTruthy();
+    });
+
+    it("says the date is unknown rather than omitting the row for a dateless travelled entry", () => {
+      const { container } = render(
+        <WorldVisitsChart
+          data={COUNTRIES}
+          travelledCountries={[CODE.mexico]}
+          travelledCountryDetails={[[CODE.mexico, { firstVisited: null, note: null }]]}
+        />,
+      );
+      fireEvent.focus(countryNamed(container, "Mexico"));
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("date unknown")).toBeTruthy();
+    });
+
+    it("shows nothing extra for a country with neither logged days nor travel", () => {
+      const { container } = render(<WorldVisitsChart data={COUNTRIES} />);
+      fireEvent.focus(countryNamed(container, "Canada"));
+      expect(tooltip().queryByText(/First (visited|logged)/)).toBeNull();
     });
   });
 });

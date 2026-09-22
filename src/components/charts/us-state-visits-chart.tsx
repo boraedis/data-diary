@@ -25,7 +25,9 @@ import type { FeatureCollection, Geometry } from "geojson";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
+import { formatFirstVisited, formatTravelledFirstVisited } from "@/lib/viz/first-visited";
 import type { UsCountyVisitData, UsStateVisitEntry } from "@/lib/charts";
+import type { UnloggedTravelDetail } from "@/lib/unlogged-travel";
 
 // us-atlas's states-10m.json (~114KB), the standard/published-geography
 // path #163 locked in — no custom TopoJSON committed for this chart, the
@@ -105,6 +107,8 @@ export function UsStateVisitsChart({
   data,
   counties,
   travelledCounties = [],
+  travelledCountyDetails = [],
+  diaryStartDate = null,
 }: {
   data: UsStateVisitEntry[];
   counties: UsCountyVisitData;
@@ -116,6 +120,18 @@ export function UsStateVisitsChart({
    * the membership tests actually happen. Defaults to empty so the chart
    * renders exactly as before for a caller that doesn't pass it. */
   travelledCounties?: string[];
+  /** Per-county `first_visited`/`note` (#370), for every tier's tooltip
+   * secondary row — counties are where unlogged travel is actually
+   * stored, so the state and metro tiers roll this up the same way they
+   * already roll up `days` (min, not sum): whichever member county has
+   * the earliest known date, logged or travelled, wins, with the wording
+   * following that source (see `secondaryValue`'s own comment). An array
+   * of `[fips, detail]` pairs, same can't-cross-the-boundary-as-a-Map
+   * reasoning as `travelledCounties`. */
+  travelledCountyDetails?: [string, UnloggedTravelDetail][];
+  /** `profileSettings.diaryStartDate` — see WorldVisitsChart's own prop
+   * of the same name. */
+  diaryStartDate?: string | null;
 }) {
   const [mode, setMode] = useState<UsMapMode>("drill");
   const features = useMemo(() => {
@@ -140,6 +156,95 @@ export function UsStateVisitsChart({
     () => new Map(counties.counties.map((c) => [c.fips, c.days])),
     [counties],
   );
+
+  const firstVisitedByState = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of data) {
+      if (!entry.firstVisited) continue;
+      const prev = map.get(entry.state);
+      if (!prev || entry.firstVisited < prev) map.set(entry.state, entry.firstVisited);
+    }
+    return map;
+  }, [data]);
+
+  const firstVisitedByCountyFips = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of counties.counties) if (c.firstVisited) map.set(c.fips, c.firstVisited);
+    return map;
+  }, [counties]);
+
+  const travelledCountyDetailByFips = useMemo(() => new Map(travelledCountyDetails), [travelledCountyDetails]);
+
+  /** The county tier's secondary row (#370): a logged county's own
+   * first-visit date if it has one — real logged data wins, same
+   * precedence as the fill itself — else the travelled entry's, else
+   * nothing. Shared by the county view, the metro view's unaffiliated
+   * counties, and the drill-down expansion, all three of which key by the
+   * same FIPS. */
+  const countySecondaryValue = useCallback(
+    (fips: string) => {
+      const logged = firstVisitedByCountyFips.get(fips);
+      if (logged) return formatFirstVisited(logged, diaryStartDate);
+      const detail = travelledCountyDetailByFips.get(fips);
+      return detail ? formatTravelledFirstVisited(detail.firstVisited) : null;
+    },
+    [firstVisitedByCountyFips, travelledCountyDetailByFips, diaryStartDate],
+  );
+
+  /** The state tier's own travelled roll-up — min `first_visited` across
+   * every travelled county in the state, keyed by state FIPS (a county's
+   * own FIPS begins with its state's two digits). The logged half already
+   * has one: `firstVisitedByState`, from the state-level query's own
+   * day-row min. This is the piece that was missing (#370 follow-up): a
+   * state with no logged days of its own but a dated travelled county
+   * still has an honest earliest date to show, and previously showed
+   * nothing at all. */
+  const firstVisitedTravelledByStateFips = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [fips, detail] of travelledCountyDetails) {
+      if (!detail.firstVisited) continue;
+      const stateFips = fips.slice(0, 2);
+      const prev = map.get(stateFips);
+      if (!prev || detail.firstVisited < prev) map.set(stateFips, detail.firstVisited);
+    }
+    return map;
+  }, [travelledCountyDetails]);
+
+  /** The metro tier's own roll-up, min not sum. Two parallel mins, logged
+   * and travelled, each per CBSA — kept apart rather than merged into one
+   * because the wording that follows depends on which kind won (see
+   * `secondaryValue` below): a logged date reads "first visited"/"first
+   * logged" against the diary's own start, a travelled one always reads
+   * "first visited," never "logged," since it was never a real `days`
+   * row. Unlike a *single* county's own row, a CBSA-wide roll-up still
+   * only shows when at least one member county has a known date — with
+   * dozens of counties in some areas, "date unknown" would say much less
+   * here than it does for one specific county. */
+  const firstVisitedByCbsa = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [code, area] of Object.entries(CBSA_AREAS)) {
+      let min: string | null = null;
+      for (const fips of area.counties) {
+        const date = firstVisitedByCountyFips.get(fips);
+        if (date && (!min || date < min)) min = date;
+      }
+      if (min) map.set(code, min);
+    }
+    return map;
+  }, [firstVisitedByCountyFips]);
+
+  const firstVisitedTravelledByCbsa = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [code, area] of Object.entries(CBSA_AREAS)) {
+      let min: string | null = null;
+      for (const fips of area.counties) {
+        const date = travelledCountyDetailByFips.get(fips)?.firstVisited;
+        if (date && (!min || date < min)) min = date;
+      }
+      if (min) map.set(code, min);
+    }
+    return map;
+  }, [travelledCountyDetailByFips]);
 
   /**
    * The travelled set, plus the two roll-ups the coarser views need.
@@ -186,6 +291,47 @@ export function UsStateVisitsChart({
         : travelled.byCbsaCode.has(id) || travelled.byCountyFips.has(id);
     },
     [mode, travelled],
+  );
+
+  /** Per-mode tooltip secondary row (#370) — same per-mode key switch as
+   * `isTravelled` just above, since the three views key their polygons
+   * differently. The state and metro tiers each combine their own logged
+   * roll-up with the parallel travelled one, taking whichever date is
+   * earliest — a logged date at or before it wins ties, since it's a real
+   * `days` row and the more specific fact. Whichever source wins decides
+   * the wording: `formatFirstVisited` for a logged date (which itself
+   * picks "first visited" vs. "first logged" against the diary's own
+   * start), `formatTravelledFirstVisited` for a travelled one (always
+   * "first visited" — it was never a logged day at all). */
+  const secondaryValue = useCallback(
+    (f: { id?: string | number; properties: NamedProperties }) => {
+      if (mode === "drill") {
+        const stateFips = String(f.id);
+        const logged = firstVisitedByState.get(f.properties.name) ?? null;
+        const travelledDate = firstVisitedTravelledByStateFips.get(stateFips) ?? null;
+        if (logged && (!travelledDate || logged <= travelledDate)) return formatFirstVisited(logged, diaryStartDate);
+        return travelledDate ? formatTravelledFirstVisited(travelledDate) : null;
+      }
+      const id = String(f.id);
+      if (mode === "county") return countySecondaryValue(id);
+      // Metro: a dissolved CBSA combines its own logged/travelled
+      // roll-ups the same way the state tier does above; a leftover
+      // county belonging to none answers exactly like the county view.
+      const cbsaLogged = firstVisitedByCbsa.get(id) ?? null;
+      const cbsaTravelled = firstVisitedTravelledByCbsa.get(id) ?? null;
+      if (cbsaLogged && (!cbsaTravelled || cbsaLogged <= cbsaTravelled)) return formatFirstVisited(cbsaLogged, diaryStartDate);
+      if (cbsaTravelled) return formatTravelledFirstVisited(cbsaTravelled);
+      return countySecondaryValue(id);
+    },
+    [
+      mode,
+      firstVisitedByState,
+      firstVisitedTravelledByStateFips,
+      countySecondaryValue,
+      firstVisitedByCbsa,
+      firstVisitedTravelledByCbsa,
+      diaryStartDate,
+    ],
   );
 
   /**
@@ -276,10 +422,17 @@ export function UsStateVisitsChart({
         // polygon rather than being replaced by nothing at all.
         countyFeatures.features.length === 0
           ? null
-          : usCountiesExpansion(stateName, stateFips, countyFeatures, daysByCountyFips, travelled.byCountyFips),
+          : usCountiesExpansion(
+              stateName,
+              stateFips,
+              countyFeatures,
+              daysByCountyFips,
+              travelled.byCountyFips,
+              (f) => countySecondaryValue(String(f.id)),
+            ),
       );
     },
-    [daysByCountyFips, travelled],
+    [daysByCountyFips, travelled, countySecondaryValue],
   );
 
   // What's actually drawn, per mode. `drill` keeps the state layer and its
@@ -346,6 +499,7 @@ export function UsStateVisitsChart({
             isTravelled={isTravelled}
             getLabel={(f) => f.properties.name}
             valueLabel="days"
+            getSecondaryValue={secondaryValue}
             resolveExpansion={mode === "drill" ? resolveExpansion : undefined}
             ariaLabel={
               travelled.byCountyFips.size > 0 ? ARIA_LABELS[mode] + TRAVELLED_ARIA_SUFFIX : ARIA_LABELS[mode]

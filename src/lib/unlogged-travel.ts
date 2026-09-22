@@ -109,6 +109,27 @@ export async function getUnloggedTravelCodes(kind: UnloggedTravelKind): Promise<
   return new Set(rows.map((r) => r.code));
 }
 
+export type UnloggedTravelDetail = { firstVisited: string | null; note: string | null };
+
+/**
+ * Per-code `first_visited` + `note` for one kind, as a Map (#370) — what a
+ * choropleth's tooltip needs for the travelled branch's own secondary
+ * row, keyed the same way `getUnloggedTravelCodes` is because the map's
+ * question is still "one lookup per hovered polygon," just with two
+ * fields back instead of membership alone. A separate function rather
+ * than folding this into `getUnloggedTravelCodes` — a caller that only
+ * needs membership (most of them, still) shouldn't pay for two extra
+ * columns it never reads.
+ */
+export async function getUnloggedTravelDetails(kind: UnloggedTravelKind): Promise<Map<string, UnloggedTravelDetail>> {
+  const db = getDb();
+  const rows = await db
+    .select({ code: unloggedTravel.code, firstVisited: unloggedTravel.firstVisited, note: unloggedTravel.note })
+    .from(unloggedTravel)
+    .where(eq(unloggedTravel.kind, kind));
+  return new Map(rows.map((r) => [r.code, { firstVisited: r.firstVisited, note: r.note }]));
+}
+
 /**
  * Inserts a row, or updates the one already at this (kind, code).
  *

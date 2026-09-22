@@ -3,7 +3,8 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { ManageUnloggedTravelLink } from "@/components/charts/manage-unlogged-travel-link";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
-import { getUnloggedTravelCodes } from "@/lib/unlogged-travel";
+import { getUnloggedTravelCodes, getUnloggedTravelDetails } from "@/lib/unlogged-travel";
+import { getProfileSettings } from "@/lib/profile";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
@@ -21,12 +22,19 @@ export default async function WorldVisitsChartPage() {
   // /charts/us-states' drill view does. Codes only — the map's question is
   // pure membership, so the dates and notes stay behind on the manage
   // surface.
-  const [data, usStates, travelledCountries, travelledCounties] = await Promise.all([
-    getCountryVisitData(),
-    getUsStateVisitData(),
-    getUnloggedTravelCodes("country"),
-    getUnloggedTravelCodes("us_county"),
-  ]);
+  // travelledCountryDetails (#370) rides along too — the country tier's
+  // tooltip secondary row needs each travelled entry's own first_visited,
+  // not just membership, so this is a details map rather than reusing
+  // travelledCountries' codes-only Set above.
+  const [data, usStates, travelledCountries, travelledCounties, travelledCountryDetails, { diaryStartDate }] =
+    await Promise.all([
+      getCountryVisitData(),
+      getUsStateVisitData(),
+      getUnloggedTravelCodes("country"),
+      getUnloggedTravelCodes("us_county"),
+      getUnloggedTravelDetails("country"),
+      getProfileSettings(),
+    ]);
 
   return (
     <ChartPage
@@ -50,6 +58,8 @@ export default async function WorldVisitsChartPage() {
           usStates={usStates}
           travelledCountries={[...travelledCountries]}
           travelledCounties={[...travelledCounties]}
+          travelledCountryDetails={[...travelledCountryDetails]}
+          diaryStartDate={diaryStartDate}
         />
       </ChartCard>
     </ChartPage>
