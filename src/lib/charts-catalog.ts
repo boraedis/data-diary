@@ -3,53 +3,45 @@
 // /charts/category/[slug] all read from this one list instead of each
 // hand-rolling their own subset.
 //
-// Categories mirror the day-entry taxonomy from `summarize()` in
-// src/app/(app)/day/[date]/page.tsx, not an invented chart-specific one —
-// keeps the vocabulary consistent across the app. `subs`, `entertainment`
-// and `work` are deliberately omitted: no chart types exist for them yet
-// (see #109, #120), and a category with zero charts has nothing to link to.
+// Categories mirror the day-entry taxonomy, keeping vocabulary consistent
+// across the app. Some categories (subs, entertainment) may not have chart
+// types yet but are included in the official taxonomy.
 //
 // `life` is the one category with no day-entry counterpart, and that's the
 // point of it: every other chart here aggregates `days` rows, while the
 // life timeline (#310) is sourced from the profile tables — declared
-// intervals about the person, not logged days. Filing it under `places`
-// for the residences, or a hypothetical `work` for the jobs, would each
-// name a third of the chart and misfile the rest.
+// intervals about the person, not logged days.
 export type ChartCategory =
-  | "happiness"
   | "sleep"
-  | "health"
-  | "weight"
   | "technology"
-  | "social-media"
+  | "health"
+  | "happiness"
+  | "subs"
   | "places"
   | "people"
+  | "entertainment"
   | "life";
 
 export const CHART_CATEGORIES: Record<ChartCategory, { label: string; description: string }> = {
-  happiness: {
-    label: "Happiness",
-    description: "Mood, journal reasons, and day types.",
-  },
   sleep: {
     label: "Sleep",
     description: "Nightly duration, timing, and where you slept.",
   },
-  health: {
-    label: "Health & Fitness",
-    description: "Coffee, distance walked, and training.",
-  },
-  weight: {
-    label: "Weight",
-    description: "Body weight against training volume.",
-  },
   technology: {
-    label: "Screen Time",
-    description: "Phone and laptop usage.",
+    label: "Technology",
+    description: "Screen time and social media usage.",
   },
-  "social-media": {
-    label: "Social Media",
-    description: "Instagram follower growth.",
+  health: {
+    label: "Health",
+    description: "Body weight, training volume, fitness, and wellness.",
+  },
+  happiness: {
+    label: "Happiness",
+    description: "Mood, journal reasons, and day types.",
+  },
+  subs: {
+    label: "Subs",
+    description: "Personal wellness metrics.",
   },
   places: {
     label: "Places",
@@ -59,6 +51,10 @@ export const CHART_CATEGORIES: Record<ChartCategory, { label: string; descriptio
     label: "People",
     description: "Who you log your days with.",
   },
+  entertainment: {
+    label: "Entertainment",
+    description: "Movies, shows, books, games, and music.",
+  },
   life: {
     label: "Life",
     description: "Jobs, homes and relationships, as spans of time.",
@@ -67,14 +63,14 @@ export const CHART_CATEGORIES: Record<ChartCategory, { label: string; descriptio
 
 // Rendered in this order on the landing page's category grid.
 export const CHART_CATEGORY_ORDER: ChartCategory[] = [
-  "happiness",
   "sleep",
-  "health",
-  "weight",
   "technology",
-  "social-media",
+  "health",
+  "happiness",
+  "subs",
   "places",
   "people",
+  "entertainment",
   "life",
 ];
 
@@ -120,7 +116,7 @@ export const CHARTS: ChartEntry[] = [
     href: "/charts/weight",
     title: "Daily Weight",
     description: "A day-by-day look at weight, body fat %, and muscle mass.",
-    category: "weight",
+    category: "health",
   },
   {
     href: "/charts/coffee-trend",
@@ -180,7 +176,7 @@ export const CHARTS: ChartEntry[] = [
     href: "/charts/gym",
     title: "Weight and Training Volume",
     description: "My weight against total weightlifting hours each month, to see whether time at the gym is helping build muscle.",
-    category: "weight",
+    category: "health",
   },
   {
     href: "/charts/exercise-mix",
@@ -210,7 +206,7 @@ export const CHARTS: ChartEntry[] = [
     href: "/charts/instagram",
     title: "Instagram Followers",
     description: "A day-by-day look at Instagram followers.",
-    category: "social-media",
+    category: "technology",
   },
   {
     href: "/charts/places",

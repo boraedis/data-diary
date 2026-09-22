@@ -113,10 +113,15 @@ export type InteractiveCalendarProps = {
    * `sequentialScale`/`divergingScale`/`colorMode`/`divergingMidpoint`
    * entirely. This app's own charts should reach for those instead (see
    * viz/color.ts's own header comment on why: fixed, colorblind-validated,
-   * "this app's own colors" rather than a borrowed generic ramp) — this
-   * exists specifically for sleep-calendar-chart.tsx's legacy-authentic
-   * mode, where matching the original app's exact `d3.interpolateRdYlBu`
-   * look was the explicit ask, not a new default worth branding. */
+   * "this app's own colors" rather than a borrowed generic ramp) — one real
+   * exception already exists: for a caller switching between several
+   * related metrics (a "Measure" picker), pair this with `@/lib/viz/color`'s
+   * `categorySequentialInterpolator` so each metric gets its own hue rather
+   * than this component's single default ramp (`technology-charts.tsx`'s
+   * screen-time calendar). The other exists for
+   * sleep-calendar-chart.tsx's legacy-authentic mode, where matching the
+   * original app's exact `d3.interpolateRdYlBu` look was the explicit ask,
+   * not a new default worth branding. */
   colorInterpolator?: (t: number) => string;
   /** Shrinks the color domain inward by this amount on each side (in the
    * same units as `value`), clamped so anything at or beyond that inset

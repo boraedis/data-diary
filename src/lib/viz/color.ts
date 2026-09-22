@@ -102,6 +102,84 @@ export function sequentialScale(domain: [number, number], mode: ColorMode = "lig
   return scaleSequential(interpolateHcl(low, high)).domain(domain);
 }
 
+// One ramp per `categoricalColor` slot (same fixed index order, same hue
+// families: 40/80/150/20) — for a chart that switches between several
+// *related* magnitude metrics one at a time (a "Measure" picker swapping
+// the whole calendar, e.g. #408) rather than always painting the same
+// terracotta ramp regardless of which metric is selected. Only one ramp is
+// ever on screen at once (the picker replaces the chart, it doesn't add a
+// series next to it), so the categorical CVD-separation rule doesn't apply
+// between slots the way it would for simultaneous marks — these only need
+// to individually clear the same low-vs-high and low-vs-surface bars
+// `SEQUENTIAL_ENDPOINTS` does, which each does with room to spare (see
+// below). A caller that also shows these same categories as simultaneous
+// marks (a legend, several lines) should still get their color from
+// `categoricalColor` at the same index — that's the one CVD-validated for
+// side-by-side use; this is the sequential-ramp version of the same hue.
+//
+// Deliberately a wider low->high span than `SEQUENTIAL_ENDPOINTS`: a low
+// end at the same lightness as that ramp's (validated against `--muted`
+// for #368) but a substantially brighter, more saturated high end. Real
+// day-to-day totals for a metric like this rarely touch either extreme, so
+// widening the *span* (rather than just picking a new hue) is what
+// actually makes an ordinary day and a heavy day read as different shades
+// instead of two close steps near the low end. Validated with the dataviz
+// skill's `validate_palette.js`, low vs high, `--pairs all` not needed
+// (only ever a 2-color ramp per slot):
+//
+// | pair (dark) | normal ΔE | worst CVD ΔE |
+// |---|---|---|
+// | phone `#733119` vs `#ffaa70`     | 41.1 PASS | 41.0 protan PASS |
+// | Instagram `#634000` vs `#ffcc00` | 47.3 PASS | 46.8 protan PASS |
+// | laptop `#115629` vs `#66ff94`    | 50.2 PASS | 49.6 deutan PASS |
+// | total `#742d31` vs `#ffa0a6`     | 40.4 PASS | 40.2 protan PASS |
+//
+// (Each dark low end also still clears the #368 low-vs-muted floor: worst
+// normal-vision ΔE across the four is 16.8, same order as
+// `SEQUENTIAL_ENDPOINTS`'s own 17.1 — expected, since the low end reuses
+// that ramp's exact lightness/chroma, just rotated to each slot's hue.)
+//
+// Same lightness-band/chroma-floor caveat as `SEQUENTIAL_ENDPOINTS` above:
+// those checks score categorical marks, and a near-white/near-black
+// sequential endpoint fails them by construction — the pairwise numbers
+// above are what matter here.
+const CATEGORY_SEQUENTIAL_ENDPOINTS: Record<ColorMode, [string, string][]> = {
+  light: [
+    ["#fee1d7", "#ca3200"], // slot 0 — chart-1 hue (40, phone)
+    ["#f4e6ce", "#ac5b00"], // slot 1 — chart-2 hue (80, Instagram)
+    ["#d8efdc", "#008f23"], // slot 2 — chart-3 hue (150, laptop)
+    ["#ffdfde", "#cc243d"], // slot 3 — chart-4 hue (20, total)
+  ],
+  dark: [
+    ["#733119", "#ffaa70"],
+    ["#634000", "#ffcc00"],
+    ["#115629", "#66ff94"],
+    ["#742d31", "#ffa0a6"],
+  ],
+};
+
+/**
+ * The one-hue interpolator for `categoricalColor` slot `index`, as a plain
+ * `(t: number) => string` — meant for `InteractiveCalendar`'s
+ * `colorInterpolator` escape hatch (see that prop's own doc comment) so a
+ * calendar can switch its whole ramp to "this metric's own colour" per a
+ * "Measure" picker selection, without switching to a fixed-hue *categorical*
+ * mark. Returns a raw interpolator rather than a bound `ScaleSequential`
+ * (unlike `sequentialScale`/`sequentialLogScale` above) because that's the
+ * shape the primitive's escape hatch takes — it, not this function, owns
+ * the domain, since the domain comes from the primitive's own data.
+ *
+ * There is no unbounded slot count here either: `index` wraps via modulo
+ * rather than throwing, since a caller cycling metrics is a controlled,
+ * fixed-size set (unlike `categoricalColor`'s "never cycle a filtered
+ * series" rule, which guards against a *growing*, data-driven series count).
+ */
+export function categorySequentialInterpolator(index: number, mode: ColorMode = "light"): (t: number) => string {
+  const table = CATEGORY_SEQUENTIAL_ENDPOINTS[mode];
+  const [low, high] = table[((index % table.length) + table.length) % table.length];
+  return interpolateHcl(low, high);
+}
+
 /**
  * Same one-hue ramp as `sequentialScale`, but log-distributed rather than
  * linear — for a heavy-tailed magnitude metric (a choropleth where one or
