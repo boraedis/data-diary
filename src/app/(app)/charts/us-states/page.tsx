@@ -1,6 +1,7 @@
 import { UsStateVisitsChart } from "@/components/charts/us-state-visits-chart";
 import { getUsCountyVisitData, getUsStateVisitData } from "@/lib/charts";
-import { getUnloggedTravelCodes } from "@/lib/unlogged-travel";
+import { getUnloggedTravelCodes, getUnloggedTravelDetails } from "@/lib/unlogged-travel";
+import { getProfileSettings } from "@/lib/profile";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +20,28 @@ export default async function UsStateVisitsChartPage() {
   // small query — codes only, no dates or notes, since the map's question
   // is purely membership — and it's needed by all three view modes and
   // the drill-down alike, so there's nothing to defer.
-  const [data, counties, travelled] = await Promise.all([
+  // travelledDetails (#370) rides along too — the county tier's tooltip
+  // secondary row needs each travelled entry's own first_visited, not
+  // just membership, so this is a details map rather than reusing
+  // `travelled`'s codes-only Set above.
+  const [data, counties, travelled, travelledDetails, { diaryStartDate }] = await Promise.all([
     getUsStateVisitData(),
     getUsCountyVisitData(),
     getUnloggedTravelCodes("us_county"),
+    getUnloggedTravelDetails("us_county"),
+    getProfileSettings(),
   ]);
 
-  // Spread to an array at the boundary: a Set doesn't cross into a client
-  // component as a prop, and the chart re-Sets it where the membership
-  // tests happen.
-  return <UsStateVisitsChart data={data} counties={counties} travelledCounties={[...travelled]} />;
+  // Spread to an array at the boundary: a Set/Map doesn't cross into a
+  // client component as a prop, and the chart re-Sets/re-Maps them where
+  // the membership tests and lookups happen.
+  return (
+    <UsStateVisitsChart
+      data={data}
+      counties={counties}
+      travelledCounties={[...travelled]}
+      travelledCountyDetails={[...travelledDetails]}
+      diaryStartDate={diaryStartDate}
+    />
+  );
 }

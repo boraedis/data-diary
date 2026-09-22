@@ -27,6 +27,18 @@ export type TooltipRow = {
    * a line key reads as "this is a line series" and is the wrong shape
    * entirely when the thing being colored is a 2D area, not a stroke. */
   variant?: SeriesKeyVariant;
+  /** Omits the swatch entirely — for a row that isn't identifying a
+   * colored series or fill at all (e.g. an extra fact about the thing
+   * already hovered, like a region's first-visit date), where a color key
+   * would falsely imply the row names its own color. `color` is unused
+   * when this is set. */
+  noSwatch?: boolean;
+  /** Renders `label` before `value` instead of the default value-first
+   * order. Every existing row reads as a magnitude-then-unit phrase ("42
+   * days"), where value-first is the natural reading order; a row that's
+   * closer to a labelled fact ("first visited: Mar 2020") reads backwards
+   * that way, so a caller in that shape opts into this instead. */
+  labelFirst?: boolean;
 };
 
 /**
@@ -87,9 +99,10 @@ export function ChartTooltip({
       <div className="flex flex-col gap-1">
         {rows.map((row) => (
           <div key={row.label} className="flex items-center gap-1.5">
-            <SeriesKey color={row.color} variant={row.variant ?? "line"} />
+            {row.noSwatch ? null : <SeriesKey color={row.color} variant={row.variant ?? "line"} />}
+            {row.labelFirst ? <span className="text-muted-foreground">{row.label}</span> : null}
             <span className="font-semibold text-popover-foreground tabular-nums">{row.value}</span>
-            <span className="text-muted-foreground">{row.label}</span>
+            {row.labelFirst ? null : <span className="text-muted-foreground">{row.label}</span>}
           </div>
         ))}
       </div>
