@@ -746,9 +746,20 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .attr("class", "geo-region")
         .attr("d", (d) => path(d.feature))
         .attr("fill", (d) => resolveFill(d).color)
-        .attr("stroke", "var(--border)")
-        .attr("stroke-width", 0.5)
-        // Borders stay 0.5 *screen* pixels at every zoom level instead of
+        // `--card`, not `--border`: two adjacent regions landing on the
+        // same ramp value (a common case — the ramp only has so many
+        // steps) need a border that separates them from *each other*, not
+        // one tuned to sit quietly against a card's own background.
+        // `--border` is 13% opacity in dark mode — on top of matching fill
+        // on both sides, that's not enough to read as a seam at all, so
+        // same-valued neighbors merged into one shape. A solid surface
+        // color cuts a visible gap regardless of what's on either side of
+        // it, same reasoning as the marker ring below and `bar.surfaceGap`
+        // in marks.ts ("the mechanism that separates neighbors, instead of
+        // a stroke drawn around them").
+        .attr("stroke", "var(--card)")
+        .attr("stroke-width", 0.75)
+        // Borders stay 0.75 *screen* pixels at every zoom level instead of
         // being scaled up with the geometry. Zooming in therefore makes
         // them sharper and finer rather than fatter — at 8x a scaled
         // stroke would render 4px wide and start swallowing small
