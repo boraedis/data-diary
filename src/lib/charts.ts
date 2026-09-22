@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts } from "@/db/schema";
@@ -80,15 +80,37 @@ export type WeightMetricsPoint = {
 
 /** Every day with at least one of weight/body fat/muscle mass recorded,
  * oldest first — feeds InteractiveScroller's multi-series zoomable chart
- * (issue #117). */
-export async function getWeightScrollerData(): Promise<WeightMetricsPoint[]> {
+ * (issue #117).
+ *
+ * `since` (added #411) restricts to days on/after that date — the Weight
+ * chart's own default is the first logged workout (see
+ * `getFirstExerciseDate` below), so a reader isn't shown years of
+ * pre-exercise weight history with no training context to relate it to.
+ * Filtered in SQL rather than left to the client, same as any other
+ * server-side scope: no reason to ship rows the chart will never draw. */
+export async function getWeightScrollerData(since?: string): Promise<WeightMetricsPoint[]> {
   const db = getDb();
   const rows = await db
     .select({ date: days.date, weightKg: days.weightKg, bodyFatPercent: days.bodyFatPercent, muscleMassKg: days.muscleMassKg })
     .from(days)
-    .where(or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)))
+    .where(
+      and(
+        or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)),
+        since ? gte(days.date, since) : undefined,
+      ),
+    )
     .orderBy(asc(days.date));
   return rows;
+}
+
+/** The date of the earliest logged workout, or `null` if none — "when did
+ * exercise tracking begin," used to default the Weight and Exercise Trend
+ * charts' visible range to days that actually have exercise context (#411)
+ * rather than a full history that predates tracking it at all. */
+export async function getFirstExerciseDate(): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)).limit(1);
+  return row?.date ?? null;
 }
 
 // Legacy's own fixed 7-color wheel for age bands (vis_functions.js:3294,
