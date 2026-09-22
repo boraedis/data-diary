@@ -18,7 +18,8 @@
     "split:duplicate-places": "node scripts/split-duplicate-places.mjs",
     "geo:build": "tsx scripts/geo-build.mjs",
     "geo:add-feature": "tsx scripts/geo-add-feature.mjs",
-    "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs"
+    "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs",
+    "seed:pr-fixture": "node scripts/seed-pr-fixture.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

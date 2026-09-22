@@ -346,11 +346,20 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   /** Label for the tooltip's value row, e.g. "days". Defaults to the
    * generic "value". */
   valueLabel?: string;
-  /** Sequential/travelled color mode — defaults to "dark" since this app
-   * currently renders dark-mode-only (layout.tsx hardcodes the `dark`
-   * class on `<html>`; there's no light/dark toggle yet). Revisit this
-   * default if that ever changes — see viz/color.ts's own `ColorMode`,
-   * and match InteractiveCalendar's same default. */
+  /** Sequential/travelled color mode — defaults to "light" **on purpose**,
+   * even though this app renders dark-mode-only (layout.tsx hardcodes the
+   * `dark` class on `<html>`). #388 flagged that as an unintentional bug
+   * (nothing ever passed "dark", so the dark palette was dead code) and
+   * #389 fixed it by defaulting to "dark" here to match
+   * `InteractiveCalendar` — but on a map specifically, the owner preferred
+   * the light-mode ramp's look against the dark page: its near-white low
+   * end makes even lightly-visited regions read as bright and present,
+   * with the saturated high end reserved for the most-visited ones,
+   * rather than the dark ramp's near-surface low end that recedes into
+   * the background. This is a deliberate reversal for `InteractiveGeo`
+   * only (owner call, 2026-09-22) — `InteractiveCalendar` keeps "dark",
+   * since day cells were never part of that preference. See viz/color.ts's
+   * own `ColorMode`. */
   colorMode?: ColorMode;
   zoomExtent?: [number, number];
   /** `d3.geoProjection` factory — fitSize is applied to it here, so pass
@@ -462,7 +471,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   getSecondaryValue,
   formatValue = formatThousandsNumber,
   valueLabel = "value",
-  colorMode = "dark",
+  colorMode = "light",
   zoomExtent = DEFAULT_ZOOM_EXTENT,
   projection = DEFAULT_PROJECTION,
   markers,

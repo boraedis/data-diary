@@ -1,10 +1,25 @@
 name: PR database branch
 
-# Gives every PR into main its own disposable Neon Postgres branch, seeded
-# from the prod branch's current data, with this PR's schema changes already
-# applied. Point your local .env.local DATABASE_URL at the connection
-# string this posts as a PR comment to test against real, isolated data
-# without touching the shared prod database or prod.
+# Gives every PR into main its own disposable Neon Postgres branch, with
+# this PR's schema changes already applied and a small made-up fixture
+# dataset in it (scripts/seed-pr-fixture.mjs) — not real diary data. Run
+# `npm run dev:pr` locally (see scripts/dev-pr.mjs) to point .env.local at
+# it and test against an isolated database without touching the shared prod
+# database.
+#
+# The branch has to come from *some* parent (Neon has no "create an empty
+# branch" option), so it's still copy-on-write branched from `production`
+# below — but the "Seed fixture data" step immediately TRUNCATEs everything
+# that copied over and replaces it before anything else can query the
+# branch. Until #376, this branch kept its full copy of production data for
+# as long as the PR stayed open; now nothing it serves is real.
+#
+# This repo is public, so the connection string is also deliberately NOT
+# posted in the PR comment below — a public comment with a live credential
+# would be readable by anyone for as long as the PR stayed open (see #376).
+# `npm run dev:pr` instead fetches the string directly from the Neon API
+# using a NEON_API_KEY in the developer's own env, and
+# src/instrumentation.ts does the same server-side for Preview Deployments.
 #
 # One-time setup: add a NEON_API_KEY secret and NEON_PROJECT_ID variable to
 # this repo (Settings -> Secrets and variables -> Actions). Neon's GitHub
@@ -63,7 +78,20 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.neon-branch.outputs.db_url }}
 
-      - name: Comment connection string on PR
+      # Replaces whatever the copy-on-write branch above inherited from
+      # `production` with a small made-up fixture dataset — see #376 and
+      # scripts/seed-pr-fixture.mjs's header for why. Runs even when the
+      # push above reported no changes; skipped if the push step itself
+      # failed, since an unapplied schema means this would be seeding
+      # against the wrong shape.
+      - name: Seed fixture data
+        id: seed
+        if: steps.push.outcome == 'success'
+        run: npm run seed:pr-fixture -- --commit 2>&1 | tee seed-output.log
+        env:
+          DATABASE_URL: ${{ steps.neon-branch.outputs.db_url }}
+
+      - name: Comment on PR that its database branch is ready
         if: success()
         uses: actions/github-script@v7
         with:
@@ -71,13 +99,9 @@ jobs:
             const body = [
               "Isolated test database ready for this PR.",
               "",
-              "Point your local `.env.local` at it:",
+              "Run `npm run dev:pr` locally to point `.env.local` at it and start `next dev` — it fetches the connection string directly from the Neon API (needs `NEON_API_KEY`/`NEON_PROJECT_ID` in your env, see `scripts/dev-pr.mjs`'s header comment) rather than posting it here, since this repo is public.",
               "",
-              "```",
-              `DATABASE_URL=${{ steps.neon-branch.outputs.db_url }}`,
-              "```",
-              "",
-              "Seeded from `production`, with this PR's schema already applied. Deleted automatically when the PR closes.",
+              "This PR's schema is already applied, and it's seeded with small made-up fixture data (`scripts/seed-pr-fixture.mjs`) — not a copy of real production data. Deleted automatically when the PR closes.",
             ].join("\n");
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -126,7 +150,58 @@ jobs:
               log,
               "```",
               "",
-              "Until this is resolved, this PR's Preview Deployment and `npm run dev:pr` will fall back to the shared `production` database, which does **not** have this PR's schema changes — expect \"relation/column does not exist\" errors that look unrelated to this.",
+              "Until this is resolved, this PR's Preview Deployment will fall back to `FALLBACK_DATABASE_URL` (see `src/instrumentation.ts`), which does **not** have this PR's schema changes — expect \"relation/column does not exist\" errors that look unrelated to this. `npm run dev:pr` will just fail with \"no database-ready comment yet\" until a later push here succeeds.",
+              "",
+              `Full run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join("\n");
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (c) => c.user?.type === "Bot" && (c.body.includes("Isolated test database ready") || c.body.includes("this PR's database branch")),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # Without this, a failed seed step leaves the branch holding whatever
+      # it copied from production at creation time with no comment at all —
+      # exactly the exposure #376 exists to close. Flagging it loudly here
+      # instead of leaving that silent.
+      - name: Comment fixture-seed failure on PR
+        if: failure() && steps.seed.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let log = "(no output captured)";
+            try {
+              log = fs.readFileSync('seed-output.log', 'utf8').slice(-3500);
+            } catch {}
+            const body = [
+              "**This PR's database branch was created and its schema applied, but seeding fixture data into it failed.**",
+              "",
+              "`scripts/seed-pr-fixture.mjs --commit` didn't complete — see the log below.",
+              "",
+              "```",
+              log,
+              "```",
+              "",
+              "**Until this is fixed, do not point `npm run dev:pr` or a Preview Deployment at this branch** — it may still hold data copied from `production` at branch-creation time rather than fixture data (see #376).",
               "",
               `Full run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             ].join("\n");
