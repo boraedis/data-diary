@@ -41,6 +41,7 @@ export function CalendarExplorer({
   trackingSpan,
   formatValue,
   valueLabel,
+  colorInterpolator,
   extraFilters,
   ariaLabel,
 }: {
@@ -58,6 +59,12 @@ export function CalendarExplorer({
   trackingSpan?: TrackingSpan;
   formatValue: (value: number) => string;
   valueLabel: string;
+  /** Passed straight through to `InteractiveCalendar`'s own escape hatch —
+   * see that prop's doc comment. For a caller switching between several
+   * related metrics (a "Measure" picker in `extraFilters`), pair this with
+   * `@/lib/viz/color`'s `categorySequentialInterpolator` so each metric
+   * reads as its own colour rather than the default terracotta ramp. */
+  colorInterpolator?: (t: number) => string;
   /** Extra controls rendered before the range picker. The caller owns
    * their state and reshapes `data` accordingly. */
   extraFilters?: React.ReactNode;
@@ -104,6 +111,7 @@ export function CalendarExplorer({
               width={width}
               formatValue={formatValue}
               valueLabel={valueLabel}
+              colorInterpolator={colorInterpolator}
               ariaLabel={ariaLabel}
             />
           )}

@@ -99,6 +99,13 @@ export type InteractiveCalendarProps = {
    * `<html>`; there's no light/dark toggle yet). Revisit this default if
    * that ever changes — see viz/color.ts's own `ColorMode`. */
   colorMode?: ColorMode;
+  /** Escape hatch to a caller-supplied `(t: number) => string` interpolator,
+   * mapped over the data's own `[min, max]` as a plain sequential scale —
+   * bypasses `sequentialScale`/`colorMode` entirely. For a caller switching
+   * between several related metrics (a "Measure" picker), pair this with
+   * `@/lib/viz/color`'s `categorySequentialInterpolator` so each metric gets
+   * its own hue rather than this component's single default ramp. */
+  colorInterpolator?: (t: number) => string;
   ariaLabel?: string;
 };
 
@@ -119,6 +126,7 @@ export function InteractiveCalendar({
   formatValue,
   valueLabel = "value",
   colorMode = "dark",
+  colorInterpolator,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -167,7 +175,13 @@ export function InteractiveCalendar({
     return lo === hi ? [lo - 1, lo + 1] : [lo, hi];
   }, [points]);
 
-  const colorScale = useMemo(() => sequentialScale(domain, colorMode), [domain, colorMode]);
+  const colorScale = useMemo(
+    () =>
+      colorInterpolator !== undefined
+        ? d3.scaleSequential(domain, colorInterpolator)
+        : sequentialScale(domain, colorMode),
+    [domain, colorMode, colorInterpolator],
+  );
 
   // A calendar is in blend mode as soon as any day carries a breakdown.
   // It's all-or-nothing rather than per-cell because the legend below has
