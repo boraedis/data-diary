@@ -96,14 +96,25 @@ export function TrendExplorer<T extends { date: string }>({
       buckets.map(({ start, items }) => {
         const values = items.map(getValue);
         const total = values.reduce((sum, v) => sum + v, 0);
+        const mean = total / values.length;
         return {
           x: parseDate(start),
-          y: aggregate === "sum" ? total : total / values.length,
-          // A range band only means something for a mean — for a sum it
+          y: aggregate === "sum" ? total : mean,
+          // A spread band only means something for a mean — for a sum it
           // would be the spread of the parts, which says nothing about the
           // total the line is drawing.
+          //
+          // Mean ± 1 standard deviation rather than min/max: min/max widens
+          // with sample size alone (a 30-day bucket's extremes are almost
+          // always further apart than a 2-day bucket's, regardless of how
+          // consistent the underlying days actually were), so it read as
+          // "how many days fed this point" more than "how variable were
+          // they." Standard deviation is the bucket's own spread and
+          // doesn't have that bias. A single-item bucket has zero variance
+          // by construction — a real, honest band (one data point, no
+          // spread to show), not a bug.
           ...(aggregate === "mean"
-            ? { bandLow: Math.min(...values), bandHigh: Math.max(...values) }
+            ? { bandLow: mean - (d3.deviation(values) ?? 0), bandHigh: mean + (d3.deviation(values) ?? 0) }
             : {}),
         };
       }),

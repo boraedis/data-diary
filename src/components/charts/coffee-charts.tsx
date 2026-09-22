@@ -23,7 +23,7 @@ export function CoffeeTrendChart({ data }: { data: DailyValue[] }) {
     <TrendExplorer
       data={data}
       title="Coffee Trend"
-      description="Trend in coffee over time, aggregated by period. Marker size shows how many days fed each point; the band shows that bucket's range."
+      description="Trend in coffee over time, aggregated by period. Marker size shows how many days fed each point; the band shows ±1 standard deviation around it."
       methodology={COFFEE_METHODOLOGY}
       trackingSpan={COFFEE_TRACKING_SPAN}
       seriesId="coffee"
