@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { CalendarExplorer } from "@/components/charts/calendar-explorer";
+import { useMemo, useState } from "react";
+import { CalendarExplorer, type CalendarDay } from "@/components/charts/calendar-explorer";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import {
@@ -15,6 +15,7 @@ import {
   type InteractiveScrollerPoint,
   type InteractiveScrollerSeries,
 } from "@/components/charts/interactive/interactive-scroller";
+import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import { parseDate } from "@/lib/date";
@@ -144,47 +145,73 @@ export function DeviceDailyChart({ data }: { data: DeviceDay[] }) {
   );
 }
 
+type DeviceMetric = "total" | "phone" | "laptop" | "instagram";
+
+const DEVICE_METRIC_OPTIONS: GroupByOption<DeviceMetric>[] = [
+  { id: "total", label: "Total" },
+  { id: "phone", label: PHONE },
+  { id: "laptop", label: LAPTOP },
+  { id: "instagram", label: INSTAGRAM },
+];
+
+const DEVICE_METRIC_LABELS: Record<DeviceMetric, string> = {
+  total: "screen time",
+  phone: "phone usage",
+  laptop: "laptop usage",
+  instagram: "Instagram usage",
+};
+
 /**
- * One calendar for both devices, per the note on #209 that they belong
- * together rather than as two near-identical grids.
+ * One calendar, switchable between phone, laptop, Instagram, and their
+ * combined total (#333) — a `GroupByPicker` "Measure" control, the same
+ * pattern `SleepCalendarChart` uses for its own metric switch, rather than
+ * the earlier always-blended phone+laptop view: blending baked in exactly
+ * two categories, with no room for Instagram (a third, narrower-tracked
+ * metric) or a way to isolate a single device's own trend.
  *
- * Uses the blended-cell mode (#210) with **weights**: the hue leans toward
- * whichever device the day actually went on, and the cell's intensity
- * carries the combined total. So a heavy laptop day and a heavy phone day
- * are different colours at similar strength, and a quiet day of either is
- * faint — which is exactly the pair of questions two separate calendars
- * would have made you answer by flicking between them. Instagram isn't a
- * third category here for the same reason it isn't on the mix chart above
- * — see `DeviceUsageChart`'s own comment.
+ * Each metric only plots the days it actually has data for — Instagram
+ * wasn't tracked at all before 2025, and a day can log one device without
+ * the other — rather than filling the gaps with zeros, which would read as
+ * "no usage" instead of "not recorded".
  */
 export function DeviceCalendarChart({ data }: { data: DeviceDay[] }) {
-  const points = useMemo(
-    () =>
-      data.map((day) => {
-        const phone = day.phoneMinutes ?? 0;
-        const laptop = day.laptopMinutes ?? 0;
-        const categories = [
-          { label: PHONE, color: DEVICE_COLORS[PHONE], weight: phone },
-          { label: LAPTOP, color: DEVICE_COLORS[LAPTOP], weight: laptop },
-          // A zero-weight category is dropped by the blend, so a
-          // single-device day reads as that device's own colour rather
-          // than a mix pulled halfway toward one that wasn't used.
-        ].filter((c) => c.weight > 0);
-        return { date: day.date, value: asHours(phone + laptop), categories };
-      }),
-    [data],
-  );
+  const [metric, setMetric] = useState<DeviceMetric>("total");
+
+  const points = useMemo<CalendarDay[]>(() => {
+    const pick = (day: DeviceDay): number | null => {
+      switch (metric) {
+        case "phone":
+          return day.phoneMinutes;
+        case "laptop":
+          return day.laptopMinutes;
+        case "instagram":
+          return day.instagramMinutes;
+        case "total":
+          return day.phoneMinutes === null && day.laptopMinutes === null
+            ? null
+            : (day.phoneMinutes ?? 0) + (day.laptopMinutes ?? 0);
+      }
+    };
+    return data
+      .filter((day) => pick(day) !== null)
+      .map((day) => ({ date: day.date, value: asHours(pick(day) as number) }));
+  }, [data, metric]);
+
+  const valueLabel = DEVICE_METRIC_LABELS[metric];
 
   return (
     <CalendarExplorer
       data={points}
       title="Screen Time Calendar"
-      description="Both devices on one grid: colour leans toward whichever you used more, strength shows the combined total."
+      description="Phone, laptop, Instagram, or their combined total — pick a measure below."
       methodology={SCREEN_TIME_METHODOLOGY}
       trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       formatValue={formatHours}
-      valueLabel="screen time"
-      ariaLabel="Calendar of daily screen time, coloured by which device dominated and shaded by the total."
+      valueLabel={valueLabel}
+      extraFilters={
+        <GroupByPicker value={metric} onChange={setMetric} options={DEVICE_METRIC_OPTIONS} label="Measure" />
+      }
+      ariaLabel={`Calendar of daily ${valueLabel}.`}
     />
   );
 }
