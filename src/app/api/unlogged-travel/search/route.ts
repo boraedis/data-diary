@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { searchCounties } from "@/lib/geo/us-county-lookup";
-import { listCountryFeatures } from "@/lib/geo/country-lookup";
+import { listPickableCountries } from "@/lib/geo/country-lookup";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +49,10 @@ export async function GET(request: Request) {
   }
 
   const needle = q.toLowerCase();
-  const results: TravelSearchResult[] = listCountryFeatures()
+  // The deduped view: one row per code, so the two features sharing
+  // Australia's `036` don't present as two different choices that write
+  // the same value. See listPickableCountries.
+  const results: TravelSearchResult[] = listPickableCountries()
     .filter((c) => c.name.toLowerCase().includes(needle))
     .slice(0, 20)
     .map((c) => ({
