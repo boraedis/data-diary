@@ -326,7 +326,6 @@ export function WorldVisitsChart({
           getLabel={(f) => f.properties.name}
           valueLabel="days"
           getSecondaryValue={countrySecondaryValue}
-          secondaryLabel=""
           resolveExpansion={usStates ? resolveExpansion : undefined}
           ariaLabel={baseAriaLabel + (hasTravelled ? TRAVELLED_ARIA_SUFFIX : "")}
         />

@@ -4,7 +4,7 @@ import * as d3 from "d3";
 import { feature, merge } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
-import { geoExpansion, type GeoExpansion } from "@/components/charts/interactive/interactive-geo";
+import { geoExpansion, type GeoExpansion, type GeoSecondaryRow } from "@/components/charts/interactive/interactive-geo";
 import { CBSA_AREAS, cbsaCodeForCounty, type CbsaKind } from "@/lib/geo/us-cbsa";
 
 // The US half of #107's drill-down, shared by both maps that use it: the
@@ -172,7 +172,7 @@ export function usStatesExpansion(
    * "first visited" a rolled-up state could show — see the world chart's
    * own comment on `travelledCountryDetails` for the same limit stated in
    * full. */
-  getSecondaryValue?: (feature: Feature<Geometry, UsStateProperties>) => string | null,
+  getSecondaryValue?: (feature: Feature<Geometry, UsStateProperties>) => GeoSecondaryRow | null,
 ): GeoExpansion {
   return geoExpansion<UsStateProperties>({
     key: "us-states",
@@ -187,7 +187,6 @@ export function usStatesExpansion(
     getLabel: (f) => f.properties.name,
     valueLabel: "days",
     getSecondaryValue,
-    secondaryLabel: "",
   });
 }
 
@@ -210,7 +209,7 @@ export function usCountiesExpansion(
    * unlike the state tier above, so this one can honestly carry both a
    * logged county's own first-visit date and a travelled county's
    * first_visited/note. */
-  getSecondaryValue?: (feature: Feature<Geometry, UsCountyProperties>) => string | null,
+  getSecondaryValue?: (feature: Feature<Geometry, UsCountyProperties>) => GeoSecondaryRow | null,
 ): GeoExpansion {
   return geoExpansion<UsCountyProperties>({
     key: `us-counties-${stateFips}`,
@@ -222,7 +221,6 @@ export function usCountiesExpansion(
     getLabel: (f) => f.properties.name,
     valueLabel: "days",
     getSecondaryValue,
-    secondaryLabel: "",
   });
 }
 

@@ -279,16 +279,18 @@ describe("WorldVisitsChart", () => {
       { country: "France", days: 40, firstVisited: "2016-01-01" },
     ];
 
-    it("shows a logged country's own first-visit date", () => {
+    it("shows a logged country's own first-visit date, label and value in separate (unswatched) rows", () => {
       const { container } = render(<WorldVisitsChart data={DATED_COUNTRIES} diaryStartDate="2016-01-01" />);
       fireEvent.focus(countryNamed(container, "United States of America"));
-      expect(tooltip().getByText("First visited Mar 2020")).toBeTruthy();
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Mar 2020")).toBeTruthy();
     });
 
     it("reads 'first logged' once the date lands at or before the diary's own start", () => {
       const { container } = render(<WorldVisitsChart data={DATED_COUNTRIES} diaryStartDate="2016-01-01" />);
       fireEvent.focus(countryNamed(container, "France"));
-      expect(tooltip().getByText("First logged Jan 2016")).toBeTruthy();
+      expect(tooltip().getByText("First logged")).toBeTruthy();
+      expect(tooltip().getByText("Jan 2016")).toBeTruthy();
     });
 
     it("falls back to the travelled entry's own date for a country with no logged days", () => {
@@ -300,7 +302,8 @@ describe("WorldVisitsChart", () => {
         />,
       );
       fireEvent.focus(countryNamed(container, "Mexico"));
-      expect(tooltip().getByText("First visited May 2019")).toBeTruthy();
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("May 2019")).toBeTruthy();
     });
 
     it("says the date is unknown rather than omitting the row for a dateless travelled entry", () => {
@@ -312,7 +315,8 @@ describe("WorldVisitsChart", () => {
         />,
       );
       fireEvent.focus(countryNamed(container, "Mexico"));
-      expect(tooltip().getByText("First visited date unknown")).toBeTruthy();
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("date unknown")).toBeTruthy();
     });
 
     it("shows nothing extra for a country with neither logged days nor travel", () => {

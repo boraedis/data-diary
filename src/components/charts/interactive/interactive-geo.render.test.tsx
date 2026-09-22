@@ -175,39 +175,48 @@ describe("InteractiveGeo travelled fill", () => {
 });
 
 // #370's region-level secondary row, the getMarkerSecondaryValue counterpart
-// for a region rather than a marker.
+// for a region rather than a marker. Its label/value split (rather than one
+// composed string) is what lets the row render with the usual
+// bold-value/muted-label weighting instead of the whole row reading bold,
+// and it carries no color swatch — this row isn't naming a fill.
 describe("InteractiveGeo region secondary row", () => {
-  it("shows the accessor's own text below the value row", () => {
+  it("shows the accessor's own label and value below the value row, with no swatch", () => {
     const { container } = renderMap({
-      getSecondaryValue: (f) => (f.properties.name === "AlsoLogged" ? "First visited Mar 2016" : null),
-      secondaryLabel: "detail",
+      getSecondaryValue: (f) =>
+        f.properties.name === "AlsoLogged" ? { label: "First visited", value: "Mar 2016" } : null,
     });
     fireEvent.focus(regionNamed(container, "AlsoLogged"));
-    expect(tooltip().getByText("First visited Mar 2016")).toBeTruthy();
-    expect(tooltip().getByText("detail")).toBeTruthy();
+    expect(tooltip().getByText("Mar 2016")).toBeTruthy();
+    expect(tooltip().getByText("First visited")).toBeTruthy();
+    // No third swatch alongside the value row's own — this row doesn't
+    // identify a color the way the fill row above it does.
+    const swatches = screen.getByRole("status").querySelectorAll("[aria-hidden]");
+    expect(swatches).toHaveLength(1);
   });
 
   it("shows nothing extra for a region the accessor returns null for", () => {
     const { container } = renderMap({
-      getSecondaryValue: (f) => (f.properties.name === "AlsoLogged" ? "First visited Mar 2016" : null),
+      getSecondaryValue: (f) =>
+        f.properties.name === "AlsoLogged" ? { label: "First visited", value: "Mar 2016" } : null,
     });
     fireEvent.focus(regionNamed(container, "Logged"));
-    expect(tooltip().queryByText(/First visited/)).toBeNull();
+    expect(tooltip().queryByText("First visited")).toBeNull();
   });
 
   it("also shows on a travelled region, not just a valued one", () => {
     const { container } = renderMap({
-      getSecondaryValue: (f) => (f.properties.name === "Travelled" ? "First visited date unknown" : null),
+      getSecondaryValue: (f) =>
+        f.properties.name === "Travelled" ? { label: "First visited", value: "date unknown" } : null,
     });
     fireEvent.focus(regionNamed(container, "Travelled"));
     expect(tooltip().getByText("travelled through")).toBeTruthy();
-    expect(tooltip().getByText("First visited date unknown")).toBeTruthy();
+    expect(tooltip().getByText("date unknown")).toBeTruthy();
   });
 
   it("renders unchanged for a caller that passes no getSecondaryValue at all", () => {
     const { container } = renderMap({ getSecondaryValue: undefined });
     fireEvent.focus(regionNamed(container, "AlsoLogged"));
     expect(tooltip().getByText("days")).toBeTruthy();
-    expect(tooltip().queryByText("detail")).toBeNull();
+    expect(tooltip().queryByText("First visited")).toBeNull();
   });
 });

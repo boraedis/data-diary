@@ -417,7 +417,8 @@ describe("UsStateVisitsChart", () => {
         { diaryStartDate: "2016-01-01" },
       );
       fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
-      expect(tooltip().getByText("First visited Aug 2019")).toBeTruthy();
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Aug 2019")).toBeTruthy();
     });
 
     it("shows a logged county's own first-visit date inside the drilled-in expansion", async () => {
@@ -428,7 +429,8 @@ describe("UsStateVisitsChart", () => {
       await waitFor(() => expect(regions(container).map(nameOf)).toContain("Fulton"));
 
       fireEvent.focus(regions(container).find((p) => nameOf(p) === "Fulton")!);
-      expect(tooltip().getByText("First visited Aug 2019")).toBeTruthy();
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Aug 2019")).toBeTruthy();
     });
 
     it("falls back to a travelled county's own date when the county has no logged days", async () => {
@@ -439,13 +441,55 @@ describe("UsStateVisitsChart", () => {
       await waitFor(() => expect(regions(container).map(nameOf)).toContain("Fulton"));
 
       fireEvent.focus(regions(container).find((p) => nameOf(p) === "Fulton")!);
-      expect(tooltip().getByText("First visited Feb 2018")).toBeTruthy();
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Feb 2018")).toBeTruthy();
     });
 
     it("shows nothing extra for a state with no first-visit data at all", () => {
       const { container } = renderChart([{ state: "Georgia", days: 100 }]);
       fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
       expect(tooltip().queryByText(/First (visited|logged)/)).toBeNull();
+    });
+
+    it("rolls up a travelled county's date to its state when the state has no logged days of its own", () => {
+      // Georgia has no entry in `data` at all here — the only evidence
+      // anywhere is Fulton's own travelled record, so the state-level
+      // secondary row has to come from the county roll-up, not the
+      // direct state query (which has nothing to report). Wisconsin
+      // carries the only logged days, just to keep the card past its
+      // empty state — irrelevant to what's being asserted below.
+      const { container } = renderChart([{ state: "Wisconsin", days: 5 }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2018-02-01", note: null }]],
+      });
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Feb 2018")).toBeTruthy();
+    });
+
+    it("takes the earlier of a state's own logged date and a travelled county's date", () => {
+      const { container } = renderChart([{ state: "Georgia", days: 100, firstVisited: "2019-08-01" }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2015-03-01", note: null }]],
+        diaryStartDate: "2016-01-01",
+      });
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Georgia")!);
+      // The travelled county's earlier date wins, and reads as "first
+      // visited" (never "first logged") since it was never a days row.
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Mar 2015")).toBeTruthy();
+      expect(tooltip().queryByText("Aug 2019")).toBeNull();
+    });
+
+    it("rolls up a travelled county's date to its dissolved metro area", async () => {
+      // Fulton (13121) belongs to CBSA 12060, Atlanta-Sandy Springs-Roswell.
+      const { container } = renderChart([{ state: "Wisconsin", days: 5 }], NO_COUNTIES, [FULTON], {
+        travelledCountyDetails: [[FULTON, { firstVisited: "2018-02-01", note: null }]],
+      });
+      fireEvent.click(screen.getByText("Metros"));
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Atlanta-Sandy Springs-Roswell, GA"));
+
+      fireEvent.focus(regions(container).find((p) => nameOf(p) === "Atlanta-Sandy Springs-Roswell, GA")!);
+      expect(tooltip().getByText("First visited")).toBeTruthy();
+      expect(tooltip().getByText("Feb 2018")).toBeTruthy();
     });
   });
 });

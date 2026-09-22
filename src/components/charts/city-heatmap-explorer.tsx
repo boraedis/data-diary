@@ -169,7 +169,6 @@ export function CityHeatmapExplorer({
                 const date = firstVisitedByFeature.get(neighborhoodKey(f.properties.root, f.properties.name));
                 return date ? formatFirstVisited(date, diaryStartDate) : null;
               }}
-              secondaryLabel=""
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"

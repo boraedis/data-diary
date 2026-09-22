@@ -181,6 +181,17 @@ export type GeoFitTarget = Parameters<d3.GeoProjection["fitSize"]>[1];
  * erasure never actually loses anything at the point it matters. */
 export type GeoFeature = Feature<Geometry, GeoJsonProperties>;
 
+/** A region tooltip's optional secondary row (#370) — `label` and `value`
+ * both plain text, rendered with the same weight/muting every other
+ * tooltip row uses (value bold, label muted) and no color swatch, since
+ * this row isn't identifying a colored series or fill the way the
+ * value/travelled row above it is — it's an extra fact about whatever's
+ * already hovered. A struct rather than one composed string specifically
+ * so the label can vary per feature (e.g. "first visited" vs. "first
+ * logged") while still rendering with the label in its usual, unbolded
+ * place instead of getting swept into the bold value text. */
+export type GeoSecondaryRow = { label: string; value: string };
+
 /** The subdivisions of one expanded region: the geometry to draw in its
  * place, plus the accessors that read it. Bundled together deliberately —
  * features and their accessors are only ever meaningful as a pair, and
@@ -217,8 +228,7 @@ export type GeoExpansion = {
    * same reason `isTravelled` has none just above: a county isn't the
    * same feature as the state around it, and a map-level accessor asked
    * about it would answer for the wrong region. */
-  getSecondaryValue?: (feature: GeoFeature) => string | null;
-  secondaryLabel?: string;
+  getSecondaryValue?: (feature: GeoFeature) => GeoSecondaryRow | null;
 };
 
 /**
@@ -244,8 +254,7 @@ export function geoExpansion<P extends GeoJsonProperties>(spec: {
   getLabel: (feature: Feature<Geometry, P>) => string;
   isTravelled?: (feature: Feature<Geometry, P>) => boolean;
   valueLabel?: string;
-  getSecondaryValue?: (feature: Feature<Geometry, P>) => string | null;
-  secondaryLabel?: string;
+  getSecondaryValue?: (feature: Feature<Geometry, P>) => GeoSecondaryRow | null;
 }): GeoExpansion {
   return spec as unknown as GeoExpansion;
 }
@@ -261,8 +270,7 @@ type DrawnFeature = {
   getLabel: (feature: GeoFeature) => string;
   isTravelled?: (feature: GeoFeature) => boolean;
   valueLabel?: string;
-  getSecondaryValue?: (feature: GeoFeature) => string | null;
-  secondaryLabel?: string;
+  getSecondaryValue?: (feature: GeoFeature) => GeoSecondaryRow | null;
   /** Identity of the base feature this can expand into, or null for a
    * feature that's already a subdivision (the bottom of the chain). */
   expandableKey: string | null;
@@ -321,23 +329,19 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   /** Label for a feature's tooltip title — typically its name. */
   getLabel: (feature: Feature<Geometry, P>) => string;
   /** Optional second tooltip row for a region, below the value/travelled
-   * row — a plain string, not a magnitude, the region-level counterpart
-   * to `getMarkerSecondaryValue` below and built for the same reason
-   * (#370): "first visited" is exactly the kind of extra fact a region
-   * has that doesn't belong in the sequential scale's own domain. Called
-   * for whichever region is hovered regardless of its fill state (a real
-   * value, the travelled tint, or no data at all), so the accessor
-   * decides what's relevant to the feature it's given — e.g. composing
-   * "first visited" vs. "first logged" wording itself, since that choice
-   * varies per feature and this primitive has no opinion on it. Return
-   * null for "nothing to add," the same convention
-   * `getMarkerSecondaryValue` uses. */
-  getSecondaryValue?: (feature: Feature<Geometry, P>) => string | null;
-  /** Label for the secondary row. Defaults to "detail", matching
-   * `getMarkerSecondaryValue`'s own default — most callers compose their
-   * own wording into the returned string instead (see that prop's
-   * comment), so this rarely shows as-is. */
-  secondaryLabel?: string;
+   * row — the region-level counterpart to `getMarkerSecondaryValue` below,
+   * built for the same reason (#370): "first visited" is exactly the kind
+   * of extra fact a region has that doesn't belong in the sequential
+   * scale's own domain. Called for whichever region is hovered regardless
+   * of its fill state (a real value, the travelled tint, or no data at
+   * all), so the accessor decides what's relevant to the feature it's
+   * given — e.g. choosing "first visited" vs. "first logged" wording for
+   * its own `label`, since that choice varies per feature and this
+   * primitive has no opinion on it. Rendered with no color swatch (see
+   * `GeoSecondaryRow`'s own comment) — this row isn't naming a fill the
+   * way the value/travelled row above it is. Return null for "nothing to
+   * add," the same convention `getMarkerSecondaryValue` uses. */
+  getSecondaryValue?: (feature: Feature<Geometry, P>) => GeoSecondaryRow | null;
   formatValue?: (value: number) => string;
   /** Label for the tooltip's value row, e.g. "days". Defaults to the
    * generic "value". */
@@ -451,7 +455,6 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   noDataLabel = "no data",
   getLabel,
   getSecondaryValue,
-  secondaryLabel = "detail",
   formatValue = formatThousandsNumber,
   valueLabel = "value",
   colorMode = "light",
@@ -517,7 +520,6 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         isTravelled: isTravelled as DrawnFeature["isTravelled"],
         valueLabel,
         getSecondaryValue: getSecondaryValue as DrawnFeature["getSecondaryValue"],
-        secondaryLabel,
         expandableKey: key,
       });
     }
@@ -536,14 +538,13 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         // Same no-fallback rule as isTravelled just above, for the same
         // reason — see GeoExpansion's own comment on this field.
         getSecondaryValue: expansion!.value.getSecondaryValue,
-        secondaryLabel: expansion!.value.secondaryLabel ?? secondaryLabel,
         // A subdivision is the bottom of the chain — see
         // resolveExpansion's own prop comment.
         expandableKey: null,
       });
     }
     return entries;
-  }, [features, expansion, featureKey, getValue, getLabel, isTravelled, valueLabel, getSecondaryValue, secondaryLabel]);
+  }, [features, expansion, featureKey, getValue, getLabel, isTravelled, valueLabel, getSecondaryValue]);
 
   // Computed here (not inside useD3 below) so the legend can read the same
   // domain/scale without duplicating the computation — same split
@@ -1095,16 +1096,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                     // extra context, appended below whichever primary row
                     // above described the fill. See getSecondaryValue's
                     // own prop comment for why this is read regardless of
-                    // fill state.
+                    // fill state. No swatch: this row isn't naming a fill
+                    // the way the row above it is, so a color key here
+                    // would misleadingly imply it did.
                     ...(hoveredSecondary != null
-                      ? [
-                          {
-                            label: hovered.drawn.secondaryLabel ?? secondaryLabel,
-                            value: hoveredSecondary,
-                            color: hoveredFill?.color ?? "var(--muted-foreground)",
-                            variant: "swatch" as const,
-                          },
-                        ]
+                      ? [{ label: hoveredSecondary.label, value: hoveredSecondary.value, color: "", noSwatch: true }]
                       : []),
                   ]
                 : [
