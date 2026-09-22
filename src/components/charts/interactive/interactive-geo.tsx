@@ -313,6 +313,11 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
   /** Label for the tooltip's value row, e.g. "days". Defaults to the
    * generic "value". */
   valueLabel?: string;
+  /** Sequential/travelled color mode — defaults to "dark" since this app
+   * currently renders dark-mode-only (layout.tsx hardcodes the `dark`
+   * class on `<html>`; there's no light/dark toggle yet). Revisit this
+   * default if that ever changes — see viz/color.ts's own `ColorMode`,
+   * and match InteractiveCalendar's same default. */
   colorMode?: ColorMode;
   zoomExtent?: [number, number];
   /** `d3.geoProjection` factory — fitSize is applied to it here, so pass
@@ -423,7 +428,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   getLabel,
   formatValue = formatThousandsNumber,
   valueLabel = "value",
-  colorMode = "light",
+  colorMode = "dark",
   zoomExtent = DEFAULT_ZOOM_EXTENT,
   projection = DEFAULT_PROJECTION,
   markers,

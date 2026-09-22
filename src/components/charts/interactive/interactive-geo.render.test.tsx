@@ -109,7 +109,7 @@ describe("InteractiveGeo travelled fill", () => {
     const travelled = fillOf(container, "Travelled");
     const empty = fillOf(container, "Empty");
 
-    expect(travelled).toBe(travelledFill("light"));
+    expect(travelled).toBe(travelledFill("dark"));
     expect(empty).toBe("var(--muted)");
     // A real value lands on the ramp, which is neither of the other two.
     expect(logged).not.toBe(travelled);
@@ -122,10 +122,10 @@ describe("InteractiveGeo travelled fill", () => {
     // overlapping travelled record. The case most likely to regress.
     const { container } = renderMap({ isTravelled: () => true });
 
-    expect(fillOf(container, "Logged")).not.toBe(travelledFill("light"));
-    expect(fillOf(container, "AlsoLogged")).not.toBe(travelledFill("light"));
+    expect(fillOf(container, "Logged")).not.toBe(travelledFill("dark"));
+    expect(fillOf(container, "AlsoLogged")).not.toBe(travelledFill("dark"));
     // ...while a region with no value still takes it.
-    expect(fillOf(container, "Empty")).toBe(travelledFill("light"));
+    expect(fillOf(container, "Empty")).toBe(travelledFill("dark"));
   });
 
   it("names both off-ramp fills in the legend", () => {

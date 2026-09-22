@@ -223,7 +223,7 @@ describe("WorldVisitsChart", () => {
     it("tints a country whose only evidence is an unlogged-travel entry", () => {
       const { container } = render(<WorldVisitsChart data={COUNTRIES} travelledCountries={[CODE.mexico]} />);
 
-      expect(fillFor(container, "Mexico")).toBe(travelledFill("light"));
+      expect(fillFor(container, "Mexico")).toBe(travelledFill("dark"));
       // ...and a country with neither days nor travel is still no-data,
       // so the tint is distinguishing something rather than repainting
       // everything empty.
@@ -238,7 +238,7 @@ describe("WorldVisitsChart", () => {
       const withoutTravel = render(<WorldVisitsChart data={COUNTRIES} />);
 
       expect(fillFor(withTravel.container, "France")).toBe(fillFor(withoutTravel.container, "France"));
-      expect(fillFor(withTravel.container, "France")).not.toBe(travelledFill("light"));
+      expect(fillFor(withTravel.container, "France")).not.toBe(travelledFill("dark"));
     });
 
     it("joins on the ISO id, not the country's name", () => {
@@ -258,7 +258,7 @@ describe("WorldVisitsChart", () => {
       // country-lookup.ts stores their name as the code. The chart's
       // fallback has to match, or those three become unrepresentable.
       const { container } = render(<WorldVisitsChart data={COUNTRIES} travelledCountries={["Kosovo"]} />);
-      expect(fillFor(container, "Kosovo")).toBe(travelledFill("light"));
+      expect(fillFor(container, "Kosovo")).toBe(travelledFill("dark"));
     });
 
     it("tints a state in the US expansion whose county is travelled", async () => {
@@ -271,7 +271,7 @@ describe("WorldVisitsChart", () => {
       fireEvent.click(countryNamed(container, "United States of America"));
       await waitFor(() => expect(regions(container).map(nameOf)).toContain(CALIFORNIA));
 
-      expect(fillFor(container, "Alabama")).toBe(travelledFill("light"));
+      expect(fillFor(container, "Alabama")).toBe(travelledFill("dark"));
       // A state with neither is untouched...
       expect(fillFor(container, "Wisconsin")).toBe("var(--muted)");
       // ...and so is a country outside the expansion, which answers this
@@ -309,7 +309,7 @@ describe("WorldVisitsChart", () => {
       // #366's written decision: dateless entries must not be painted into
       // a period-scoped map. This is that decision as a test.
       const { container } = render(<WorldVisitsChart data={COUNTRIES} />);
-      expect(regions(container).every((p) => p.getAttribute("fill") !== travelledFill("light"))).toBe(true);
+      expect(regions(container).every((p) => p.getAttribute("fill") !== travelledFill("dark"))).toBe(true);
     });
   });
 });
