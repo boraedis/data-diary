@@ -145,6 +145,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `DATABASE_URL` | Yes | Postgres/Neon connection string the app reads and writes against. |
 | `QA_DATABASE_URL` | Vercel only | Fallback DB for a Preview Deployment with no open PR yet (see `src/instrumentation.ts`). Unused locally. |
 | `PROD_DB_HOSTS` | Recommended | Comma-separated hostname(s) of your production Neon database. Not a secret — lets `scripts/lib/prod-guard.mjs` recognize when a write script is pointed at prod and demand typed confirmation instead of writing silently. |
+| `NEON_API_KEY` / `NEON_PROJECT_ID` | For `npm run dev:pr` | Same values the "PR database branch" CI workflow uses, made available locally too — `dev:pr` calls the Neon API directly to fetch a PR branch's connection string rather than reading it from a PR comment (this repo is public; see #376). `NEON_PROJECT_ID` isn't a secret. |
 | `APP_PASSWORD` | Yes | The single shared login password; also doubles as the confirmation password `prod-guard.mjs` asks for before a script writes to production, if set. |
 | `SESSION_SECRET` | Yes | Random secret used to sign session cookies. Generate with `openssl rand -hex 32`. |
 | `TMDB_API_KEY` | For movie/TV metadata lookup | [TMDB](https://www.themoviedb.org/documentation/api) API key, used by `/api/tmdb/*`. |
@@ -187,13 +188,14 @@ together by the workflows in `.github/workflows/`:
   (`qa-branch-refresh.yml`), used as the parent for every PR's disposable
   branch and as the fallback database for stray Preview Deployments.
 - **A branch per open PR** — `pr-db-branch-create.yml` creates (and
-  `pr-db-branch-delete.yml` later deletes) a disposable Neon branch for every
-  PR into `main`, branched from `qa`, with that PR's `schema.ts` already
-  pushed to it. The connection string is posted as a PR comment; `npm run
-  dev:pr` reads that comment to point local dev at it, and
-  `src/instrumentation.ts` does the equivalent at cold-start for that PR's
-  actual Vercel Preview Deployment (so a PR that changes the schema doesn't
-  500 against QA's stale one).
+  `pr-db-branch-delete.yml` later deletes) a disposable Neon branch named
+  `pr-<N>` for every PR into `main`, branched from `qa`, with that PR's
+  `schema.ts` already pushed to it. The PR comment only says the branch is
+  ready — it deliberately does **not** include the connection string, since
+  this repo is public (see #376). `npm run dev:pr` and
+  `src/instrumentation.ts` (for that PR's actual Vercel Preview Deployment)
+  both fetch the connection string directly from the Neon API instead, so a
+  PR that changes the schema doesn't 500 against QA's stale one.
 
 `ci.yml` runs on every PR into `main`: lint, `next typegen` + `tsc --noEmit`,
 and a `next build` against the QA database (every page in the app is
