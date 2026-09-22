@@ -1100,7 +1100,15 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                     // the way the row above it is, so a color key here
                     // would misleadingly imply it did.
                     ...(hoveredSecondary != null
-                      ? [{ label: hoveredSecondary.label, value: hoveredSecondary.value, color: "", noSwatch: true }]
+                      ? [
+                          {
+                            label: hoveredSecondary.label,
+                            value: hoveredSecondary.value,
+                            color: "",
+                            noSwatch: true,
+                            labelFirst: true,
+                          },
+                        ]
                       : []),
                   ]
                 : [

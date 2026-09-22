@@ -186,8 +186,14 @@ describe("InteractiveGeo region secondary row", () => {
         f.properties.name === "AlsoLogged" ? { label: "First visited", value: "Mar 2016" } : null,
     });
     fireEvent.focus(regionNamed(container, "AlsoLogged"));
-    expect(tooltip().getByText("Mar 2016")).toBeTruthy();
-    expect(tooltip().getByText("First visited")).toBeTruthy();
+    const label = tooltip().getByText("First visited");
+    const value = tooltip().getByText("Mar 2016");
+    expect(label).toBeTruthy();
+    expect(value).toBeTruthy();
+    // Label before value ("First visited Mar 2016"), not the default
+    // value-first order every other row uses ("42 days") — this row reads
+    // as a labelled fact, not a magnitude-then-unit phrase.
+    expect(label.compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // No third swatch alongside the value row's own — this row doesn't
     // identify a color the way the fill row above it does.
     const swatches = screen.getByRole("status").querySelectorAll("[aria-hidden]");

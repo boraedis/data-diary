@@ -33,6 +33,12 @@ export type TooltipRow = {
    * would falsely imply the row names its own color. `color` is unused
    * when this is set. */
   noSwatch?: boolean;
+  /** Renders `label` before `value` instead of the default value-first
+   * order. Every existing row reads as a magnitude-then-unit phrase ("42
+   * days"), where value-first is the natural reading order; a row that's
+   * closer to a labelled fact ("first visited: Mar 2020") reads backwards
+   * that way, so a caller in that shape opts into this instead. */
+  labelFirst?: boolean;
 };
 
 /**
@@ -94,8 +100,9 @@ export function ChartTooltip({
         {rows.map((row) => (
           <div key={row.label} className="flex items-center gap-1.5">
             {row.noSwatch ? null : <SeriesKey color={row.color} variant={row.variant ?? "line"} />}
+            {row.labelFirst ? <span className="text-muted-foreground">{row.label}</span> : null}
             <span className="font-semibold text-popover-foreground tabular-nums">{row.value}</span>
-            <span className="text-muted-foreground">{row.label}</span>
+            {row.labelFirst ? null : <span className="text-muted-foreground">{row.label}</span>}
           </div>
         ))}
       </div>
