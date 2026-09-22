@@ -227,16 +227,6 @@ export function InteractiveCalendar({
       ? undefined
       : Math.min(Math.max(divergingMidpoint, colorDomain[0]), colorDomain[1]);
 
-  // Domain stays increasing ([lo, mid, hi]), same order as the sequential
-  // case — that's what keeps this chart's low->high legend labels (drawn
-  // by SequentialLegend from the true, un-inset `domain`) lined up with
-  // what the gradient bar actually paints at each end: the bar is a
-  // left-to-right sample of the scale's own interpolator, so an increasing
-  // domain is what makes "low value" land under the left label and "high
-  // value" under the right one. A decreasing domain would flip the colors
-  // without flipping the labels, which reads as simply wrong rather than
-  // as a deliberate choice of which pole means what.
-  //
   // `.clamp(true)` is what actually makes `domainInset` do anything: every
   // real value still gets mapped through this same scale, so without
   // clamping, a value outside `colorDomain` would extrapolate the
@@ -254,38 +244,27 @@ export function InteractiveCalendar({
   );
 
   /**
-   * Maps a value to its 0-1 position along the legend gradient — matching
-   * how `colorScale` itself maps value -> color, since the gradient bar
-   * below is a uniform 0-1 sample of the scale's `interpolator()` and this
-   * has to place the hover tick at the same position that sampling put
-   * that value's actual color. Uses `colorDomain` (not the legend's own
-   * displayed `domain`), same reasoning as `colorScale` itself above — the
-   * `Math.min`/`Math.max` clamps below are this function's own version of
-   * `colorScale`'s `.clamp(true)`.
-   *
-   * For the sequential case that's the plain linear fraction across
-   * `colorDomain`. For diverging, d3.scaleDiverging's domain->t mapping is
-   * two independent linear halves (`[lo, mid]` -> `[0, 0.5]`, `[mid, hi]`
-   * -> `[0.5, 1]`) rather than one line across the full domain — replicated
-   * here rather than reading it back off the scale, since d3 doesn't
-   * expose its internal domain-to-t mapping separately from the full
-   * value-to-color call.
+   * Maps a value to its 0-1 position along the legend gradient. The legend
+   * bar itself (`SequentialLegend`'s `sampleDomain` below) is built by
+   * sampling `colorScale(value)` at evenly-spaced *values* across the
+   * true, un-inset `domain` — not the scale's raw `interpolator(t)` at
+   * evenly-spaced `t`, which is what makes an inset/clamped or
+   * asymmetric-diverging scale render its flat clamped ends and true
+   * midpoint position honestly instead of stretching them edge-to-edge.
+   * Because the bar's x-axis is therefore just "linear position across
+   * `domain`" by construction, this indicator only needs to match that
+   * same plain linear fraction — no separate diverging-halves math, and no
+   * risk of drifting out of sync with what the bar actually paints at that
+   * position, since both this and the bar sample the identical `domain`
+   * and `colorScale`.
    */
   const valueToT = useCallback(
     (value: number): number => {
-      const [lo, hi] = colorDomain;
-      if (clampedMidpoint === undefined) {
-        const span = hi - lo;
-        return span > 0 ? Math.min(1, Math.max(0, (value - lo) / span)) : 1;
-      }
-      if (value <= clampedMidpoint) {
-        const span = clampedMidpoint - lo;
-        return span > 0 ? 0.5 * Math.min(1, Math.max(0, (value - lo) / span)) : 0;
-      }
-      const span = hi - clampedMidpoint;
-      return span > 0 ? 0.5 + 0.5 * Math.min(1, Math.max(0, (value - clampedMidpoint) / span)) : 1;
+      const [lo, hi] = domain;
+      const span = hi - lo;
+      return span > 0 ? Math.min(1, Math.max(0, (value - lo) / span)) : 1;
     },
-    [colorDomain, clampedMidpoint],
+    [domain],
   );
 
   // A calendar is in blend mode as soon as any day carries a breakdown.
@@ -561,6 +540,7 @@ export function InteractiveCalendar({
         <SequentialLegend
           domain={domain}
           colorScale={colorScale}
+          sampleDomain={domain}
           formatValue={formatValue}
           valueT={legendT}
           className="fixed bottom-0 z-10 border-t border-border bg-background/95 px-3 py-2 backdrop-blur"

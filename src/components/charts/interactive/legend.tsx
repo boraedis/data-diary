@@ -153,6 +153,7 @@ export function Legend({
 export function SequentialLegend({
   domain,
   colorScale,
+  sampleDomain,
   formatValue,
   valueT,
   swatches,
@@ -164,13 +165,28 @@ export function SequentialLegend({
   /** Any d3 sequential scale exposing `.interpolator()` (linear or log —
    * this component sampling t in [0,1] for the gradient bar doesn't care
    * which; only the *legend* row's own position-mapping would, and that's
-   * `valueT`'s job, not this component's). */
-  colorScale: { interpolator(): (t: number) => string };
+   * `valueT`'s job, not this component's), and directly callable as
+   * `colorScale(value)` — every real d3 sequential/diverging scale is both
+   * at once. The direct-call form is what `sampleDomain` below uses. */
+  colorScale: ((value: number) => string) & { interpolator(): (t: number) => string };
+  /** When set, the gradient bar is built by sampling `colorScale(value)` at
+   * evenly-spaced *values* across this range instead of the scale's raw
+   * `interpolator(t)` at evenly-spaced `t`. Pass the same value range the
+   * bar's own end labels (`domain`) describe when the color mapping isn't
+   * a plain, unclamped linear scale across that exact range — a clamped
+   * scale (the color domain narrower than the labeled domain, so the
+   * outer stretch paints one flat pole color) or an asymmetric diverging
+   * midpoint both need this to render honestly; a plain unclamped linear
+   * scale over `domain` produces the same bar either way, so existing
+   * callers can leave this unset. */
+  sampleDomain?: [number, number];
   formatValue: (value: number) => string;
   /** Where a hovered/focused value falls along the gradient, as a 0-1
    * fraction — pass `null` to hide the indicator tick. The caller computes
    * this rather than this component deriving it from `domain`, since that
-   * mapping depends on whether the underlying scale is linear or log. */
+   * mapping depends on whether the underlying scale is linear or log (or,
+   * with `sampleDomain` set, a plain linear fraction across it instead —
+   * see the caller's own comment on how it derives this). */
   valueT: number | null;
   /** Discrete states that sit *outside* the gradient — a fill the scale
    * has no value for, like "no data" or #364's "travelled through".
@@ -194,9 +210,13 @@ export function SequentialLegend({
   // would visibly diverge from what the scale actually produces partway
   // through the ramp.
   const gradientStops = useMemo(() => {
+    if (sampleDomain) {
+      const [lo, hi] = sampleDomain;
+      return d3.range(0, 1.0001, 0.1).map((t) => colorScale(lo + t * (hi - lo)));
+    }
     const interpolate = colorScale.interpolator();
     return d3.range(0, 1.0001, 0.1).map((t) => interpolate(t));
-  }, [colorScale]);
+  }, [colorScale, sampleDomain]);
 
   return (
     <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", className)} style={style}>
