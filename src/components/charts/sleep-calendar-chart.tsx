@@ -1,11 +1,17 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChartCard } from "@/components/charts/chart-card";
+import { ChartPage } from "@/components/charts/chart-page";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveCalendar,
   type InteractiveCalendarPoint,
 } from "@/components/charts/interactive/interactive-calendar";
+import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
+import { CALENDAR_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
+import { SLEEP_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 import type { SleepDay } from "@/lib/charts";
 
 /** GitHub-style calendar heatmap of sleep duration, one strip per year —
@@ -14,6 +20,13 @@ import type { SleepDay } from "@/lib/charts";
  * InteractiveCalendar primitive (#21); cell size still scales down as more
  * years' worth of data comes in, so a multi-decade history stays a fixed
  * width instead of scrolling horizontally forever.
+ *
+ * Owns its own page shell (ChartPage + filters + card), the same reason
+ * DailyExplorer/TrendExplorer do: the naps toggle below and the chart share
+ * client state, and only plain data can cross the server/client boundary —
+ * see sleep-daily/page.tsx's comment on the same pattern. Both the private
+ * `/charts/sleep` page and the public `/public-charts/sleep` page render
+ * this component; `backHref`/`backLabel` are how they differ.
  *
  * Uses ResponsiveChart's auto-height mode (no `height` prop) rather than a
  * pre-measurement height guess: a calendar's real rendered height depends
@@ -25,23 +38,84 @@ import type { SleepDay } from "@/lib/charts";
  * first (pre-measurement) layout pass a non-zero starting height for
  * ResizeObserver to report on; InteractiveCalendar's own content is what
  * determines the real height from there. */
-export function SleepCalendarChart({ data }: { data: SleepDay[] }) {
+
+/** Legacy's own literal red-white-blue scale, reworked onto this app's
+ * warm/cool diverging pair (viz/color.ts's `divergingScale`) instead of the
+ * generic red/blue — same "below vs. above a baseline" structure, this
+ * app's own hues (cool below the target, warm above — divergingScale's own
+ * low->cool/high->warm direction, not reversed, so it stays legend-
+ * consistent with every other diverging use of that helper). The baseline
+ * is a fixed 8h target rather than your own mean, so the color reads the
+ * same thing on every visit regardless of how your average has drifted —
+ * a short night always reads cool, a long one always reads warm, not
+ * "cool relative to whatever this month happened to average." */
+const TARGET_SLEEP_MINUTES = 8 * 60;
+
+type SleepMetric = "sleep" | "sleepPlusNaps";
+
+const METRIC_OPTIONS: GroupByOption<SleepMetric>[] = [
+  { id: "sleep", label: "Sleep" },
+  { id: "sleepPlusNaps", label: "Sleep + Naps" },
+];
+
+export type SleepCalendarPoint = SleepDay & { napMinutes?: number | null };
+
+export function SleepCalendarChart({
+  data,
+  backHref,
+  backLabel,
+}: {
+  data: SleepCalendarPoint[];
+  backHref?: string;
+  backLabel?: string;
+}) {
+  // Only offered where there's actually nap data behind it — most callers
+  // (and the entire public site, which never fetches napMinutes at all)
+  // have none, and a toggle with no effect is worse than no toggle.
+  const hasNaps = useMemo(() => data.some((d) => (d.napMinutes ?? 0) > 0), [data]);
+  const [metric, setMetric] = useState<SleepMetric>("sleep");
+  const effectiveMetric = hasNaps ? metric : "sleep";
+
   const points = useMemo<InteractiveCalendarPoint[]>(
-    () => data.map((d) => ({ date: d.date, value: d.durationMinutes })),
-    [data],
+    () =>
+      data.map((d) => ({
+        date: d.date,
+        value: d.durationMinutes + (effectiveMetric === "sleepPlusNaps" ? (d.napMinutes ?? 0) : 0),
+      })),
+    [data, effectiveMetric],
   );
 
   return (
-    <ResponsiveChart minWidth={240} className="min-h-[160px]">
-      {({ width }) => (
-        <InteractiveCalendar
-          points={points}
-          width={width}
-          formatValue={(minutes) => `${(minutes / 60).toFixed(1)}h`}
-          valueLabel="sleep"
-          ariaLabel="Sleep calendar heatmap. Hover a day to see how long you slept."
-        />
-      )}
-    </ResponsiveChart>
+    <ChartPage
+      title="Sleep Calendar"
+      description="Nightly sleep duration relative to an 8-hour target — cool below it, warm above."
+      info={{
+        interactionGuide: CALENDAR_INTERACTION_GUIDE,
+        methodology: SLEEP_METHODOLOGY,
+        trackingSpan: SLEEP_TRACKING_SPAN,
+      }}
+      backHref={backHref}
+      backLabel={backLabel}
+      filters={
+        hasNaps ? (
+          <GroupByPicker value={effectiveMetric} onChange={setMetric} options={METRIC_OPTIONS} label="Measure" />
+        ) : null
+      }
+    >
+      <ChartCard empty={data.length === 0}>
+        <ResponsiveChart minWidth={240} className="min-h-[160px]">
+          {({ width }) => (
+            <InteractiveCalendar
+              points={points}
+              width={width}
+              formatValue={(minutes) => `${(minutes / 60).toFixed(1)}h`}
+              valueLabel={effectiveMetric === "sleepPlusNaps" ? "sleep + naps" : "sleep"}
+              divergingMidpoint={TARGET_SLEEP_MINUTES}
+              ariaLabel="Sleep calendar heatmap. Hover a day to see how long you slept."
+            />
+          )}
+        </ResponsiveChart>
+      </ChartCard>
+    </ChartPage>
   );
 }

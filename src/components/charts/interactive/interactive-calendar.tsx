@@ -6,7 +6,7 @@ import { useD3 } from "@/hooks/use-d3";
 import { MARK_SPECS, attachMarkHover } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { sequentialScale, type ColorMode } from "@/lib/viz/color";
+import { divergingScale, sequentialScale, type ColorMode } from "@/lib/viz/color";
 import { formatDate } from "@/lib/viz/format";
 import { parseDate } from "@/lib/date";
 
@@ -99,6 +99,14 @@ export type InteractiveCalendarProps = {
    * `<html>`; there's no light/dark toggle yet). Revisit this default if
    * that ever changes — see viz/color.ts's own `ColorMode`. */
   colorMode?: ColorMode;
+  /** When set, cells use a diverging (cool/warm) scale centered on this
+   * value instead of the default single-hue sequential ramp — e.g. a
+   * fixed target duration, where below and above the target are two
+   * different meanings rather than just "more". Clamped into the data's
+   * own `[min, max]` if the target falls outside it. Ignored in blend
+   * mode (`categories`), which always paints from the sequential ramp's
+   * low end. */
+  divergingMidpoint?: number;
   ariaLabel?: string;
 };
 
@@ -119,6 +127,7 @@ export function InteractiveCalendar({
   formatValue,
   valueLabel = "value",
   colorMode = "dark",
+  divergingMidpoint,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -167,7 +176,64 @@ export function InteractiveCalendar({
     return lo === hi ? [lo - 1, lo + 1] : [lo, hi];
   }, [points]);
 
-  const colorScale = useMemo(() => sequentialScale(domain, colorMode), [domain, colorMode]);
+  // The clamped midpoint actually used for the diverging domain — a fixed
+  // target (e.g. an 8h sleep goal) can easily fall outside the data's own
+  // [min, max] (someone who never sleeps under 8h clamps the cool half
+  // away entirely), and d3.scaleDiverging expects its domain triple
+  // monotonic, not an arbitrary midpoint.
+  const clampedMidpoint =
+    divergingMidpoint === undefined
+      ? undefined
+      : Math.min(Math.max(divergingMidpoint, domain[0]), domain[1]);
+
+  // Domain stays increasing ([lo, mid, hi]), same order as the sequential
+  // case — that's what keeps this chart's low->high legend labels (drawn
+  // by SequentialLegend from this same `domain`) lined up with what the
+  // gradient bar actually paints at each end: the bar is a left-to-right
+  // sample of the scale's own interpolator, so an increasing domain is
+  // what makes "low value" land under the left label and "high value"
+  // under the right one. A decreasing domain would flip the colors
+  // without flipping the labels, which reads as simply wrong rather than
+  // as a deliberate choice of which pole means what.
+  const colorScale = useMemo(
+    () =>
+      clampedMidpoint === undefined
+        ? sequentialScale(domain, colorMode)
+        : divergingScale([domain[0], clampedMidpoint, domain[1]], colorMode),
+    [domain, colorMode, clampedMidpoint],
+  );
+
+  /**
+   * Maps a value to its 0-1 position along the legend gradient — matching
+   * how `colorScale` itself maps value -> color, since the gradient bar
+   * below is a uniform 0-1 sample of the scale's `interpolator()` and this
+   * has to place the hover tick at the same position that sampling put
+   * that value's actual color.
+   *
+   * For the sequential case that's the plain linear fraction across
+   * `domain`. For diverging, d3.scaleDiverging's domain->t mapping is two
+   * independent linear halves (`[lo, mid]` -> `[0, 0.5]`, `[mid, hi]` ->
+   * `[0.5, 1]`) rather than one line across the full domain — replicated
+   * here rather than reading it back off the scale, since d3 doesn't
+   * expose its internal domain-to-t mapping separately from the full
+   * value-to-color call.
+   */
+  const valueToT = useCallback(
+    (value: number): number => {
+      const [lo, hi] = domain;
+      if (clampedMidpoint === undefined) {
+        const span = hi - lo;
+        return span > 0 ? Math.min(1, Math.max(0, (value - lo) / span)) : 1;
+      }
+      if (value <= clampedMidpoint) {
+        const span = clampedMidpoint - lo;
+        return span > 0 ? 0.5 * Math.min(1, Math.max(0, (value - lo) / span)) : 0;
+      }
+      const span = hi - clampedMidpoint;
+      return span > 0 ? 0.5 + 0.5 * Math.min(1, Math.max(0, (value - clampedMidpoint) / span)) : 1;
+    },
+    [domain, clampedMidpoint],
+  );
 
   // A calendar is in blend mode as soon as any day carries a breakdown.
   // It's all-or-nothing rather than per-cell because the legend below has
@@ -364,12 +430,8 @@ export function InteractiveCalendar({
   const hoveredColor = hovered ? cellFill(hovered.value, hovered.categories) : undefined;
 
   // Where the hovered cell's value falls on the low->high legend, as a
-  // 0-1 fraction — drives the hover indicator line below. Clamped in case
-  // of floating-point edges right at the domain endpoints.
-  const legendT =
-    hovered !== null
-      ? Math.min(1, Math.max(0, (hovered.value - domain[0]) / ((domain[1] - domain[0]) || 1)))
-      : null;
+  // 0-1 fraction — drives the hover indicator line below.
+  const legendT = hovered !== null ? valueToT(hovered.value) : null;
 
   return (
     // overflow-x-auto is a safety net, not the primary width fix: at the

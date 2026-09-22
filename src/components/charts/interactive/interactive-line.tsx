@@ -59,7 +59,7 @@ export type InteractiveLineSeries = {
    * floor on every mode. */
   markers?: boolean | ((point: InteractiveLinePoint, index: number) => number);
   /** Render `bandLow`/`bandHigh` as a translucent area behind this series'
-   * line (legacy Averager's min/max band). */
+   * line (legacy Averager's band; TrendExplorer feeds it ±1 std dev). */
   band?: boolean;
   /** Per-point tooltip row label, overriding this series' own `label` for
    * that one row — e.g. HappinessAveragerChart's "12 days" sample-size
