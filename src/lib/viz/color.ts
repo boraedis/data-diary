@@ -52,15 +52,42 @@ export function categoricalColor(index: number): string {
 // as "this app's own colors," matching the categorical palette's earthy
 // identity rather than a borrowed generic blue ramp.
 
+// The dark low end used to sit at oklch L 0.26 — barely a step off dark
+// `--muted` (L 0.25), so a region with exactly one logged day was
+// colorimetrically indistinguishable from one with none (#368). Re-stepped
+// it with more chroma and a bigger lightness gap from `--muted`, validated
+// with the dataviz skill's `validate_palette.js` pairwise against `--muted`
+// and against `travelledFill` (dark card surface, `--pairs all`):
+//
+// | pair | normal ΔE | worst CVD ΔE |
+// |---|---|---|
+// | dark ramp-low `#733119` vs `--muted` `#291f1a`  | 17.1 PASS | 12.0 protan PASS |
+// | dark ramp-low `#733119` vs travelled `#16556a`  | 17.1 PASS | 12.4 deutan PASS |
+//
+// The light low end is untouched: #368's problem only ever bit dark mode
+// in practice (`InteractiveCalendar` is the only remaining "dark"
+// consumer since `InteractiveGeo` deliberately reverted to "light" — see
+// its own colorMode comment) and there was never a same-mode light
+// pairing live to fix — the light ramp only ever renders against this
+// app's one (dark) `--muted`, and that cross-mode pair has a large
+// lightness gap by construction (light low L 0.93 vs dark `--muted` L
+// 0.25), independent of this fix.
+//
+// The validator's lightness-band/chroma-floor checks still fail the dark
+// low end, same as `TRAVELLED_FILL` below and for the same reason: those
+// checks score categorical marks, and a sequential ramp's near-surface
+// end fails them by construction. The pairwise separation numbers above
+// are the ones that matter here.
 const SEQUENTIAL_ENDPOINTS: Record<ColorMode, [string, string]> = {
   // oklch(0.93 0.035 40) -> oklch(0.68 0.18 40): pale terracotta tint (near
   // zero recedes toward the light surface) to the same saturated
   // terracotta as light-mode chart-1.
   light: ["#fee1d7", "#f16935"],
-  // oklch(0.26 0.035 40) -> oklch(0.78 0.16 40): near-surface dark tint to
-  // a brighter terracotta than dark-mode chart-1, so the "hot" end still
-  // stands out against the dark card surface.
-  dark: ["#331e17", "#ff9064"],
+  // oklch(0.40 0.10 40) -> oklch(0.78 0.16 40): near-surface but no longer
+  // near-`--muted` dark tint, to a brighter terracotta than dark-mode
+  // chart-1, so the "hot" end still stands out against the dark card
+  // surface.
+  dark: ["#733119", "#ff9064"],
 };
 
 /**
@@ -105,6 +132,12 @@ export function sequentialLogScale(domain: [number, number], mode: ColorMode = "
  * a blue reads as categorically not-on-the-ramp, which is exactly the
  * claim being made: this is not a magnitude.
  *
+ * (This same 0.02-window tightness is what #368 flagged on the *dark*
+ * ramp — dark low end vs dark `--muted` were themselves indistinguishable.
+ * #368's fix re-stepped the dark low end only; the light low end above is
+ * untouched, since it never has a same-mode `--muted` to collide with in
+ * this dark-only app — see `SEQUENTIAL_ENDPOINTS`'s own comment.)
+ *
  * Lightness is then the lightest step that still separates: light mode
  * is the palest blue clearing the validator's normal-vision floor
  * against both neighbours, so it stays recessive and never competes with
@@ -119,7 +152,7 @@ export function sequentialLogScale(domain: [number, number], mode: ColorMode = "
  * |---|---|---|
  * | light vs ramp low `#fee1d7` | 15.9 PASS | 9.5 protan PASS |
  * | light vs no-data `#f5ede7`  | 15.9 PASS | 11.3 protan PASS |
- * | dark vs ramp low `#331e17`  | 19.2 PASS | 17.1 deutan PASS |
+ * | dark vs ramp low `#733119` (post-#368) | 17.1 PASS | 12.4 deutan PASS |
  * | dark vs no-data `#291f1a`   | 19.3 PASS | 17.8 deutan PASS |
  *
  * The validator also reports lightness-band and chroma-floor failures for
