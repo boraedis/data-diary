@@ -180,13 +180,44 @@ export function travelledFill(mode: ColorMode = "light"): string {
   return TRAVELLED_FILL[mode];
 }
 
+// The dark neutral used to sit at oklch L 0.3 — the same #368 mistake the
+// sequential ramp's dark low end had (barely a step off dark `--muted` at
+// L 0.25), just not caught here at the time: a cell near the diverging
+// midpoint read as nearly the same color as the card it sat on, "too dark
+// and transparent" per user feedback on #403. Re-stepped it the opposite
+// direction from #368's fix (up in lightness rather than down, since a
+// *midpoint* has no low/high end to anchor to — it just needs to clear the
+// surface) to land close to the poles' own lightness (L 0.74-0.75) rather
+// than near-white, so the three-color ramp doesn't read as "two real colors
+// and one washed-out one." Validated with the dataviz skill's
+// `validate_palette.js` pairwise against both poles and the dark card/muted
+// surfaces (`--pairs all`):
+//
+// | pair | normal ΔE | worst CVD ΔE |
+// |---|---|---|
+// | dark neutral `#d4ccc3` vs cool `#4fb8e6`  | 17.0 PASS | 11.3 protan PASS |
+// | dark neutral `#d4ccc3` vs warm `#ff8a4d`   | 17.6 PASS | 14.0 deutan PASS |
+// | dark neutral `#d4ccc3` vs `--card` `#1f1611`  | 63.9 PASS | 63.9 deutan PASS |
+// | dark neutral `#d4ccc3` vs `--muted` `#291f1a` | 60.0 PASS | 59.9 deutan PASS |
+//
+// (For comparison, the old `#312d2a` scored ΔE 5.2 normal-vision against
+// `--card` — the "hard to tell apart even with full color vision" failure
+// this replaces.) Same lightness-band/chroma-floor caveat as
+// `SEQUENTIAL_ENDPOINTS`/`TRAVELLED_FILL` above: those checks score
+// categorical marks, and a near-white, low-chroma midpoint fails them by
+// construction — the pairwise separation numbers are what matter here.
+// Light mode's neutral is untouched: it already sits well clear of the
+// (very light) light-mode surfaces, and this app renders dark-mode-only in
+// practice (no consumer has ever passed `colorMode="light"` to a diverging
+// scale), so there was no live light-mode instance of this bug to fix.
 const DIVERGING_ENDPOINTS: Record<ColorMode, { cool: string; warm: string; neutral: string }> = {
   // Cool pole = dusty-teal family (chart-5's hue, 225°); warm pole =
   // terracotta family (chart-1's hue, 40°) — this app's own warm/cool
   // poles in place of the generic blue<->red pair, same "opposite hues,
   // neutral midpoint" structure.
   light: { cool: "#00719e", warm: "#ae3200", neutral: "#e0ddda" },
-  dark: { cool: "#4fb8e6", warm: "#ff8a4d", neutral: "#312d2a" },
+  // oklch(0.85 0.015 70): see this block's own comment above (post-#403).
+  dark: { cool: "#4fb8e6", warm: "#ff8a4d", neutral: "#d4ccc3" },
 };
 
 /**
