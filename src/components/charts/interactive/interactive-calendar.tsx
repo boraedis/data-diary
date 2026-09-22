@@ -118,6 +118,19 @@ export type InteractiveCalendarProps = {
    * mode, where matching the original app's exact `d3.interpolateRdYlBu`
    * look was the explicit ask, not a new default worth branding. */
   colorInterpolator?: (t: number) => string;
+  /** Shrinks the color domain inward by this amount on each side (in the
+   * same units as `value`), clamped so anything at or beyond that inset
+   * boundary paints the same fully-saturated pole color instead of a
+   * fainter, less-differentiated one. A calendar spanning a few genuine
+   * outliers (one very short night, one very long one) otherwise spends
+   * most of its color range on those rare extremes and leaves the
+   * densely-populated middle looking flat — this trades that off
+   * deliberately: differences among the *common* values get more of the
+   * gradient's visual range, at the cost of the true extremes no longer
+   * being distinguishable from "merely quite extreme." The legend's
+   * low/high text labels still show the data's real, un-inset min/max —
+   * only the color mapping (and its hover indicator) is inset. */
+  domainInset?: number;
   ariaLabel?: string;
 };
 
@@ -140,6 +153,7 @@ export function InteractiveCalendar({
   colorMode = "dark",
   divergingMidpoint,
   colorInterpolator,
+  domainInset,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -188,35 +202,55 @@ export function InteractiveCalendar({
     return lo === hi ? [lo - 1, lo + 1] : [lo, hi];
   }, [points]);
 
+  // The color domain, shrunk inward by `domainInset` if set — see that
+  // prop's own doc comment. Falls back to the true `domain` if the inset
+  // would invert it (a tighter inset than the data actually spans), rather
+  // than collapsing to a degenerate single-point domain.
+  const colorDomain = useMemo<[number, number]>(() => {
+    if (!domainInset) return domain;
+    const [lo, hi] = domain;
+    const inset = Math.min(domainInset, (hi - lo) / 2);
+    const insetLo = lo + inset;
+    const insetHi = hi - inset;
+    return insetLo < insetHi ? [insetLo, insetHi] : domain;
+  }, [domain, domainInset]);
+
   // The clamped midpoint actually used for the diverging domain — a fixed
-  // target (e.g. an 8h sleep goal) can easily fall outside the data's own
-  // [min, max] (someone who never sleeps under 8h clamps the cool half
-  // away entirely), and d3.scaleDiverging expects its domain triple
-  // monotonic, not an arbitrary midpoint. Meaningless (and unused) when
-  // `colorInterpolator` is set, which is always a plain sequential mapping
-  // over the full domain regardless of any target.
+  // target (e.g. an 8h sleep goal) can easily fall outside the color
+  // domain's own [min, max] (someone who never sleeps under 8h clamps the
+  // cool half away entirely), and d3.scaleDiverging expects its domain
+  // triple monotonic, not an arbitrary midpoint. Meaningless (and unused)
+  // when `colorInterpolator` is set, which is always a plain sequential
+  // mapping over the color domain regardless of any target.
   const clampedMidpoint =
     divergingMidpoint === undefined
       ? undefined
-      : Math.min(Math.max(divergingMidpoint, domain[0]), domain[1]);
+      : Math.min(Math.max(divergingMidpoint, colorDomain[0]), colorDomain[1]);
 
   // Domain stays increasing ([lo, mid, hi]), same order as the sequential
   // case — that's what keeps this chart's low->high legend labels (drawn
-  // by SequentialLegend from this same `domain`) lined up with what the
-  // gradient bar actually paints at each end: the bar is a left-to-right
-  // sample of the scale's own interpolator, so an increasing domain is
-  // what makes "low value" land under the left label and "high value"
-  // under the right one. A decreasing domain would flip the colors
+  // by SequentialLegend from the true, un-inset `domain`) lined up with
+  // what the gradient bar actually paints at each end: the bar is a
+  // left-to-right sample of the scale's own interpolator, so an increasing
+  // domain is what makes "low value" land under the left label and "high
+  // value" under the right one. A decreasing domain would flip the colors
   // without flipping the labels, which reads as simply wrong rather than
   // as a deliberate choice of which pole means what.
+  //
+  // `.clamp(true)` is what actually makes `domainInset` do anything: every
+  // real value still gets mapped through this same scale, so without
+  // clamping, a value outside `colorDomain` would extrapolate the
+  // interpolator past t=0/t=1 instead of pinning to the pole color the
+  // inset is supposed to reserve for it.
   const colorScale = useMemo(
     () =>
-      colorInterpolator !== undefined
-        ? d3.scaleSequential(domain, colorInterpolator)
+      (colorInterpolator !== undefined
+        ? d3.scaleSequential(colorDomain, colorInterpolator)
         : clampedMidpoint === undefined
-          ? sequentialScale(domain, colorMode)
-          : divergingScale([domain[0], clampedMidpoint, domain[1]], colorMode),
-    [domain, colorMode, clampedMidpoint, colorInterpolator],
+          ? sequentialScale(colorDomain, colorMode)
+          : divergingScale([colorDomain[0], clampedMidpoint, colorDomain[1]], colorMode)
+      ).clamp(true),
+    [colorDomain, colorMode, clampedMidpoint, colorInterpolator],
   );
 
   /**
@@ -224,19 +258,22 @@ export function InteractiveCalendar({
    * how `colorScale` itself maps value -> color, since the gradient bar
    * below is a uniform 0-1 sample of the scale's `interpolator()` and this
    * has to place the hover tick at the same position that sampling put
-   * that value's actual color.
+   * that value's actual color. Uses `colorDomain` (not the legend's own
+   * displayed `domain`), same reasoning as `colorScale` itself above — the
+   * `Math.min`/`Math.max` clamps below are this function's own version of
+   * `colorScale`'s `.clamp(true)`.
    *
    * For the sequential case that's the plain linear fraction across
-   * `domain`. For diverging, d3.scaleDiverging's domain->t mapping is two
-   * independent linear halves (`[lo, mid]` -> `[0, 0.5]`, `[mid, hi]` ->
-   * `[0.5, 1]`) rather than one line across the full domain — replicated
+   * `colorDomain`. For diverging, d3.scaleDiverging's domain->t mapping is
+   * two independent linear halves (`[lo, mid]` -> `[0, 0.5]`, `[mid, hi]`
+   * -> `[0.5, 1]`) rather than one line across the full domain — replicated
    * here rather than reading it back off the scale, since d3 doesn't
    * expose its internal domain-to-t mapping separately from the full
    * value-to-color call.
    */
   const valueToT = useCallback(
     (value: number): number => {
-      const [lo, hi] = domain;
+      const [lo, hi] = colorDomain;
       if (clampedMidpoint === undefined) {
         const span = hi - lo;
         return span > 0 ? Math.min(1, Math.max(0, (value - lo) / span)) : 1;
@@ -248,7 +285,7 @@ export function InteractiveCalendar({
       const span = hi - clampedMidpoint;
       return span > 0 ? 0.5 + 0.5 * Math.min(1, Math.max(0, (value - clampedMidpoint) / span)) : 1;
     },
-    [domain, clampedMidpoint],
+    [colorDomain, clampedMidpoint],
   );
 
   // A calendar is in blend mode as soon as any day carries a breakdown.

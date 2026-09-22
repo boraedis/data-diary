@@ -59,6 +59,20 @@ import type { SleepDay } from "@/lib/charts";
  * matching a specific remembered look, not a new default worth branding.
  */
 
+/**
+ * Reserves the outer 2h of the color range for genuine outliers, rather
+ * than letting a rare very-short or very-long night stretch the gradient
+ * so far that the common, everyday range of durations barely moves in
+ * color — see `InteractiveCalendar`'s own `domainInset` doc comment. Any
+ * night at or beyond 2h short of the data's shortest recorded night (or 2h
+ * past its longest) would paint identically to that actual extreme; in
+ * practice no such night exists by construction (nothing is *more*
+ * extreme than the real min/max), so this only ever pulls the *bulk* of
+ * real nights further from the poles, giving them more of the gradient to
+ * spread across.
+ */
+const DOMAIN_INSET_MINUTES = 2 * 60;
+
 type SleepMetric = "sleep" | "sleepPlusNaps";
 
 const METRIC_OPTIONS: GroupByOption<SleepMetric>[] = [
@@ -119,6 +133,7 @@ export function SleepCalendarChart({
               formatValue={(minutes) => `${(minutes / 60).toFixed(1)}h`}
               valueLabel={effectiveMetric === "sleepPlusNaps" ? "sleep + naps" : "sleep"}
               colorInterpolator={interpolateRdYlBu}
+              domainInset={DOMAIN_INSET_MINUTES}
               ariaLabel="Sleep calendar heatmap. Hover a day to see how long you slept."
             />
           )}
