@@ -166,6 +166,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `npm run backfill:place-paths` | Recomputes materialized place-hierarchy paths. Dry-run by default; `--commit` to write. |
 | `npm run diagnose:place-cycles` | Read-only check for cyclical parent/child relationships in the places hierarchy. |
 | `npm run split:duplicate-places` | Splits merged/duplicate place records apart. Dry-run by default; `--commit` to write. |
+| `npm run seed:pr-fixture` | TRUNCATEs every table and replaces it with a small made-up fixture dataset — see `scripts/seed-pr-fixture.mjs`'s header. Only ever meant to run against a disposable PR database branch (`pr-db-branch-create.yml` runs it automatically after creating one); refuses to run against a `PROD_DB_HOSTS` match. Dry-run by default; `--commit` to write. |
 
 Every write-capable script here runs through `scripts/lib/prod-guard.mjs`,
 which checks the active `DATABASE_URL`'s hostname against `PROD_DB_HOSTS`
@@ -189,13 +190,17 @@ together by the workflows in `.github/workflows/`:
   branch and as the fallback database for stray Preview Deployments.
 - **A branch per open PR** — `pr-db-branch-create.yml` creates (and
   `pr-db-branch-delete.yml` later deletes) a disposable Neon branch named
-  `pr-<N>` for every PR into `main`, branched from `qa`, with that PR's
-  `schema.ts` already pushed to it. The PR comment only says the branch is
-  ready — it deliberately does **not** include the connection string, since
-  this repo is public (see #376). `npm run dev:pr` and
-  `src/instrumentation.ts` (for that PR's actual Vercel Preview Deployment)
-  both fetch the connection string directly from the Neon API instead, so a
-  PR that changes the schema doesn't 500 against QA's stale one.
+  `pr-<N>` for every PR into `main`, copy-on-write branched from
+  `production` (Neon has no "create an empty branch" option), with that
+  PR's `schema.ts` already pushed to it. Immediately after, the workflow
+  runs `scripts/seed-pr-fixture.mjs`, which TRUNCATEs everything the branch
+  copied from production and replaces it with a small, made-up fixture
+  dataset — so no PR branch actually holds real diary data (see #376). The
+  PR comment only says the branch is ready — it deliberately does **not**
+  include the connection string, since this repo is public (see #376
+  again). `npm run dev:pr` and `src/instrumentation.ts` (for that PR's
+  actual Vercel Preview Deployment) both fetch the connection string
+  directly from the Neon API instead.
 
 `ci.yml` runs on every PR into `main`: lint, `next typegen` + `tsc --noEmit`,
 and a `next build` against the QA database (every page in the app is
