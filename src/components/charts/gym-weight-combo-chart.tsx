@@ -197,17 +197,33 @@ function Combo({
  * Owns its own page shell (ChartPage + filters + card), same reason every
  * other filtered chart in this app does: the range picker below and the
  * chart share client state, and pages are server components. `data` is
- * already scoped server-side to dates on/after the first tracked exercise
- * (#411 — see `getGymWeightComboData`'s own `since` doc comment); the
- * `TimeRangePicker` here only narrows *within* that fixed window, it
- * doesn't reach back before it. */
-export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
+ * the *full* weight/training history — the `TimeRangePicker`'s own domain
+ * spans all of it, so older dates stay reachable — but the picker's
+ * initial value (#411) defaults to `defaultRangeStart` through the latest
+ * date, focusing the first paint on the region where both fields actually
+ * have data, rather than opening on years of weight-only history with no
+ * training to compare it against. */
+export function GymWeightComboChart({
+  data,
+  defaultRangeStart,
+}: {
+  data: GymWeightComboData;
+  /** Where the range picker's *initial* selection should start — typically
+   * `getFirstExerciseDate()`. Omit to default to the full domain, same as
+   * every other range picker in this app. Doesn't restrict what's
+   * reachable; the user can still drag back past it. */
+  defaultRangeStart?: string | null;
+}) {
   const fullDomain = useMemo<[Date, Date] | null>(() => {
     const dates = [...data.weight.map((w) => parseDate(w.date)), ...data.workoutsByMonth.map((m) => parseMonth(m.month))];
     const extent = d3.extent(dates);
     return extent[0] && extent[1] ? (extent as [Date, Date]) : null;
   }, [data.weight, data.workoutsByMonth]);
-  const [range, setRange] = useState<[Date, Date] | null>(null);
+  const [range, setRange] = useState<[Date, Date] | null>(() => {
+    if (!defaultRangeStart || !fullDomain) return null;
+    const start = parseDate(defaultRangeStart);
+    return start < fullDomain[1] ? [start, fullDomain[1]] : null;
+  });
 
   const weight = useMemo<WeightPt[]>(() => {
     const [from, to] = range ?? [];

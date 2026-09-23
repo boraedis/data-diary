@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts } from "@/db/schema";
@@ -510,25 +510,26 @@ export type GymWeightComboData = {
  * rep/weight-only manual entry with neither contributes zero rather than
  * a guessed estimate.
  *
- * `since` (#411) restricts both series to dates on/after that day — this
- * chart's own point is relating weight to training, so the page defaults
- * it to `getFirstExerciseDate()` rather than showing years of weight
- * history with no training to compare it against. Filtered in SQL rather
- * than left to the client: no reason to ship rows the chart will never
- * draw. */
-export async function getGymWeightComboData(since?: string): Promise<GymWeightComboData> {
+ * Returns the *full* weight and training history — #411 originally
+ * restricted this in SQL to dates on/after the first tracked exercise, but
+ * that threw away real, viewable weight history a reader might still want
+ * to scroll back into. The chart itself instead defaults its own
+ * `TimeRangePicker` to that same "since exercise tracking began" window
+ * (see `GymWeightComboChart`), which narrows the *initial view* without
+ * narrowing what's actually reachable. */
+export async function getGymWeightComboData(): Promise<GymWeightComboData> {
   const db = getDb();
   const [weightRows, strengthWorkouts, strengthSetDurations] = await Promise.all([
     db
       .select({ date: days.date, weightKg: days.weightKg })
       .from(days)
-      .where(and(isNotNull(days.weightKg), since ? gte(days.date, since) : undefined))
+      .where(isNotNull(days.weightKg))
       .orderBy(asc(days.date)),
     db
       .select({ id: workouts.id, date: workouts.date, durationMinutes: workouts.durationMinutes })
       .from(workouts)
       .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
-      .where(and(eq(exercises.category, "strength"), since ? gte(workouts.date, since) : undefined))
+      .where(eq(exercises.category, "strength"))
       .orderBy(asc(workouts.date)),
     db
       .select({ workoutId: workoutSets.workoutId, durationSeconds: workoutSets.durationSeconds })
