@@ -91,6 +91,21 @@ export async function getWeightScrollerData(): Promise<WeightMetricsPoint[]> {
   return rows;
 }
 
+/** The date of the earliest logged workout, or `null` if none — "when did
+ * exercise tracking begin," used to default the "Weight and Training
+ * Volume" combo chart's visible range to days that actually have exercise
+ * context (#411) rather than a full history that predates tracking it at
+ * all. Deliberately NOT applied to the standalone Weight/Exercise Trend
+ * charts — Weight's own full history (much of it pre-dating exercise
+ * tracking) is exactly what that chart is for, and Exercise Trend's data
+ * already starts at this same date by construction (see
+ * `getTrainingDailyData`'s own doc comment). */
+export async function getFirstExerciseDate(): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)).limit(1);
+  return row?.date ?? null;
+}
+
 // Legacy's own fixed 7-color wheel for age bands (vis_functions.js:3294,
 // `ageRegions()`'s COLOR_WHEEL), cycled by `age % length` — explicitly
 // requested to carry this forward as-is rather than leaving age bands
@@ -493,7 +508,15 @@ export type GymWeightComboData = {
  * with no `durationMinutes` at all (manually entered, no Hevy import)
  * falls back to summing its own sets' `durationSeconds`, so a purely
  * rep/weight-only manual entry with neither contributes zero rather than
- * a guessed estimate. */
+ * a guessed estimate.
+ *
+ * Returns the *full* weight and training history — #411 originally
+ * restricted this in SQL to dates on/after the first tracked exercise, but
+ * that threw away real, viewable weight history a reader might still want
+ * to scroll back into. The chart itself instead defaults its own
+ * `TimeRangePicker` to that same "since exercise tracking began" window
+ * (see `GymWeightComboChart`), which narrows the *initial view* without
+ * narrowing what's actually reachable. */
 export async function getGymWeightComboData(): Promise<GymWeightComboData> {
   const db = getDb();
   const [weightRows, strengthWorkouts, strengthSetDurations] = await Promise.all([

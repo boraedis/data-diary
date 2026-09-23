@@ -1,32 +1,19 @@
-import { ChartCard } from "@/components/charts/chart-card";
-import { ChartPage } from "@/components/charts/chart-page";
 import { GymWeightComboChart } from "@/components/charts/gym-weight-combo-chart";
-import { getGymWeightComboData } from "@/lib/charts";
-import { COMBO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
-import { TRAINING_METHODOLOGY, WEIGHT_METHODOLOGY } from "@/lib/viz/methodology";
-import { TRAINING_TRACKING_SPAN } from "@/lib/viz/tracking-span";
+import { getFirstExerciseDate, getGymWeightComboData } from "@/lib/charts";
 
 export const dynamic = "force-dynamic";
 
+// The chart component owns the page shell (ChartPage + filters + card), the
+// same way /charts/weight does: the range picker and the chart share state,
+// and only plain data can cross the server/client boundary.
 export default async function GymWeightChartPage() {
-  const data = await getGymWeightComboData();
-  const empty = data.weight.length === 0 && data.workoutsByMonth.length === 0;
+  // The chart gets the *full* weight/training history (#411 originally
+  // restricted this in SQL, which made older weight data unreachable —
+  // see getGymWeightComboData's own doc comment) and defaults its own
+  // range picker to the region where both fields actually have data,
+  // rather than defaulting to the full domain the way most range pickers
+  // in this app do.
+  const [data, firstExerciseDate] = await Promise.all([getGymWeightComboData(), getFirstExerciseDate()]);
 
-  return (
-    <ChartPage
-      title="Weight and Training Volume"
-      description="My weight against total weightlifting hours each month — a way to see whether time at the gym is helping build muscle."
-      info={{
-        interactionGuide: COMBO_INTERACTION_GUIDE,
-        methodology: `${WEIGHT_METHODOLOGY} ${TRAINING_METHODOLOGY}`,
-        // The later of the two fields' own start dates — training data is
-        // what actually limits how far back this combo chart's bars go.
-        trackingSpan: TRAINING_TRACKING_SPAN,
-      }}
-    >
-      <ChartCard empty={empty}>
-        <GymWeightComboChart data={data} />
-      </ChartCard>
-    </ChartPage>
-  );
+  return <GymWeightComboChart data={data} defaultRangeStart={firstExerciseDate} />;
 }
