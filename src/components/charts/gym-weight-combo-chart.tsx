@@ -3,14 +3,21 @@
 import { useMemo, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
+import { ChartCard } from "@/components/charts/chart-card";
+import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { styleAxis } from "@/components/charts/interactive/axis";
 import { MARK_SPECS, attachMarkHover, roundedBarPath } from "@/components/charts/interactive/marks";
 import { ChartTooltip } from "@/components/charts/interactive/tooltip";
 import { Legend } from "@/components/charts/interactive/legend";
+import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
+import { parseDate } from "@/lib/date";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDate, formatDuration } from "@/lib/viz/format";
 import type { GymWeightComboData } from "@/lib/charts";
+import { COMBO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { TRAINING_METHODOLOGY, WEIGHT_METHODOLOGY } from "@/lib/viz/methodology";
+import { TRAINING_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 const MARGIN = { top: 12, right: 48, bottom: 28, left: 48 };
 
@@ -185,56 +192,91 @@ function Combo({
  * right axis, hours of strength-category workouts per calendar month) —
  * the legacy app's bespoke dual-axis `LineBarChart` from
  * gym-weight_chart.js, generalized into this shared component's config
- * surface instead of copied as one-off code. */
+ * surface instead of copied as one-off code.
+ *
+ * Owns its own page shell (ChartPage + filters + card), same reason every
+ * other filtered chart in this app does: the range picker below and the
+ * chart share client state, and pages are server components. `data` is
+ * already scoped server-side to dates on/after the first tracked exercise
+ * (#411 — see `getGymWeightComboData`'s own `since` doc comment); the
+ * `TimeRangePicker` here only narrows *within* that fixed window, it
+ * doesn't reach back before it. */
 export function GymWeightComboChart({ data }: { data: GymWeightComboData }) {
-  const weight = useMemo<WeightPt[]>(
-    () => data.weight.map((w) => ({ date: new Date(w.date), dateStr: w.date, weightKg: w.weightKg })),
-    [data.weight],
-  );
-  const months = useMemo<MonthBar[]>(
-    () =>
-      data.workoutsByMonth.map((m) => {
+  const fullDomain = useMemo<[Date, Date] | null>(() => {
+    const dates = [...data.weight.map((w) => parseDate(w.date)), ...data.workoutsByMonth.map((m) => parseMonth(m.month))];
+    const extent = d3.extent(dates);
+    return extent[0] && extent[1] ? (extent as [Date, Date]) : null;
+  }, [data.weight, data.workoutsByMonth]);
+  const [range, setRange] = useState<[Date, Date] | null>(null);
+
+  const weight = useMemo<WeightPt[]>(() => {
+    const [from, to] = range ?? [];
+    return data.weight
+      .filter((w) => !from || !to || (parseDate(w.date) >= from && parseDate(w.date) <= to))
+      .map((w) => ({ date: new Date(w.date), dateStr: w.date, weightKg: w.weightKg }));
+  }, [data.weight, range]);
+  const months = useMemo<MonthBar[]>(() => {
+    const [from, to] = range ?? [];
+    return data.workoutsByMonth
+      .filter((m) => !from || !to || (parseMonth(m.month) >= from && parseMonth(m.month) <= to))
+      .map((m) => {
         const start = parseMonth(m.month);
         const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
         return { start, end, hours: m.hours };
-      }),
-    [data.workoutsByMonth],
-  );
+      });
+  }, [data.workoutsByMonth, range]);
 
   const [hovered, setHovered] = useState<Hovered | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const containerRect = containerEl?.getBoundingClientRect();
 
+  const empty = data.weight.length === 0 && data.workoutsByMonth.length === 0;
+
   return (
-    <div className="flex flex-col gap-2">
-      <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport wrapperRef={setContainerEl}>
-        {({ width, height }) => (
-          <>
-            <Combo
-              weight={weight}
-              months={months}
-              width={width}
-              height={height}
-              onHover={setHovered}
-              onLeave={() => setHovered(null)}
-            />
-            {hovered && containerRect ? (
-              <ChartTooltip
-                x={hovered.clientPos.x - containerRect.left}
-                y={hovered.clientPos.y - containerRect.top}
-                rows={[{ label: hovered.label, value: hovered.value, color: hovered.color }]}
-                containerWidth={width}
-              />
-            ) : null}
-          </>
-        )}
-      </ResponsiveChart>
-      <Legend
-        series={[
-          { label: "weight", color: categoricalColor(0) },
-          { label: "weightlifting hours", color: categoricalColor(1) },
-        ]}
-      />
-    </div>
+    <ChartPage
+      title="Weight and Training Volume"
+      description="My weight against total weightlifting hours each month — a way to see whether time at the gym is helping build muscle."
+      info={{
+        interactionGuide: COMBO_INTERACTION_GUIDE,
+        methodology: `${WEIGHT_METHODOLOGY} ${TRAINING_METHODOLOGY}`,
+        // The later of the two fields' own start dates — training data is
+        // what actually limits how far back this combo chart's bars go.
+        trackingSpan: TRAINING_TRACKING_SPAN,
+      }}
+      filters={fullDomain ? <TimeRangePicker domain={fullDomain} value={range} onChange={setRange} /> : null}
+    >
+      <ChartCard empty={empty}>
+        <div className="flex flex-col gap-2">
+          <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport wrapperRef={setContainerEl}>
+            {({ width, height }) => (
+              <>
+                <Combo
+                  weight={weight}
+                  months={months}
+                  width={width}
+                  height={height}
+                  onHover={setHovered}
+                  onLeave={() => setHovered(null)}
+                />
+                {hovered && containerRect ? (
+                  <ChartTooltip
+                    x={hovered.clientPos.x - containerRect.left}
+                    y={hovered.clientPos.y - containerRect.top}
+                    rows={[{ label: hovered.label, value: hovered.value, color: hovered.color }]}
+                    containerWidth={width}
+                  />
+                ) : null}
+              </>
+            )}
+          </ResponsiveChart>
+          <Legend
+            series={[
+              { label: "weight", color: categoricalColor(0) },
+              { label: "weightlifting hours", color: categoricalColor(1) },
+            ]}
+          />
+        </div>
+      </ChartCard>
+    </ChartPage>
   );
 }

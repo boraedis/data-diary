@@ -80,33 +80,26 @@ export type WeightMetricsPoint = {
 
 /** Every day with at least one of weight/body fat/muscle mass recorded,
  * oldest first — feeds InteractiveScroller's multi-series zoomable chart
- * (issue #117).
- *
- * `since` (added #411) restricts to days on/after that date — the Weight
- * chart's own default is the first logged workout (see
- * `getFirstExerciseDate` below), so a reader isn't shown years of
- * pre-exercise weight history with no training context to relate it to.
- * Filtered in SQL rather than left to the client, same as any other
- * server-side scope: no reason to ship rows the chart will never draw. */
-export async function getWeightScrollerData(since?: string): Promise<WeightMetricsPoint[]> {
+ * (issue #117). */
+export async function getWeightScrollerData(): Promise<WeightMetricsPoint[]> {
   const db = getDb();
   const rows = await db
     .select({ date: days.date, weightKg: days.weightKg, bodyFatPercent: days.bodyFatPercent, muscleMassKg: days.muscleMassKg })
     .from(days)
-    .where(
-      and(
-        or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)),
-        since ? gte(days.date, since) : undefined,
-      ),
-    )
+    .where(or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)))
     .orderBy(asc(days.date));
   return rows;
 }
 
 /** The date of the earliest logged workout, or `null` if none — "when did
- * exercise tracking begin," used to default the Weight and Exercise Trend
- * charts' visible range to days that actually have exercise context (#411)
- * rather than a full history that predates tracking it at all. */
+ * exercise tracking begin," used to default the "Weight and Training
+ * Volume" combo chart's visible range to days that actually have exercise
+ * context (#411) rather than a full history that predates tracking it at
+ * all. Deliberately NOT applied to the standalone Weight/Exercise Trend
+ * charts — Weight's own full history (much of it pre-dating exercise
+ * tracking) is exactly what that chart is for, and Exercise Trend's data
+ * already starts at this same date by construction (see
+ * `getTrainingDailyData`'s own doc comment). */
 export async function getFirstExerciseDate(): Promise<string | null> {
   const db = getDb();
   const [row] = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)).limit(1);
@@ -508,20 +501,27 @@ export type GymWeightComboData = {
  * with no `durationMinutes` at all (manually entered, no Hevy import)
  * falls back to summing its own sets' `durationSeconds`, so a purely
  * rep/weight-only manual entry with neither contributes zero rather than
- * a guessed estimate. */
-export async function getGymWeightComboData(): Promise<GymWeightComboData> {
+ * a guessed estimate.
+ *
+ * `since` (#411) restricts both series to dates on/after that day — this
+ * chart's own point is relating weight to training, so the page defaults
+ * it to `getFirstExerciseDate()` rather than showing years of weight
+ * history with no training to compare it against. Filtered in SQL rather
+ * than left to the client: no reason to ship rows the chart will never
+ * draw. */
+export async function getGymWeightComboData(since?: string): Promise<GymWeightComboData> {
   const db = getDb();
   const [weightRows, strengthWorkouts, strengthSetDurations] = await Promise.all([
     db
       .select({ date: days.date, weightKg: days.weightKg })
       .from(days)
-      .where(isNotNull(days.weightKg))
+      .where(and(isNotNull(days.weightKg), since ? gte(days.date, since) : undefined))
       .orderBy(asc(days.date)),
     db
       .select({ id: workouts.id, date: workouts.date, durationMinutes: workouts.durationMinutes })
       .from(workouts)
       .innerJoin(exercises, eq(workouts.exerciseId, exercises.id))
-      .where(eq(exercises.category, "strength"))
+      .where(and(eq(exercises.category, "strength"), since ? gte(workouts.date, since) : undefined))
       .orderBy(asc(workouts.date)),
     db
       .select({ workoutId: workoutSets.workoutId, durationSeconds: workoutSets.durationSeconds })

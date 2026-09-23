@@ -7,7 +7,6 @@ import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/respons
 import { InteractiveScroller, type InteractiveScrollerPoint, type InteractiveScrollerSeries } from "@/components/charts/interactive/interactive-scroller";
 import { MultiSelectPicker, type MultiSelectOption } from "@/components/charts/interactive/multi-select-picker";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
-import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { categoricalColor } from "@/lib/viz/color";
 import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups, WeightMetricsPoint } from "@/lib/charts";
@@ -28,15 +27,6 @@ import { WEIGHT_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // toggle, and (private page only) Age/Occupation/Residence/Relationship
 // region overlays backed by the real profile timelines in
 // src/lib/profile.ts.
-//
-// #411 added a `TimeRangePicker` on top of that, despite this component's
-// original stance ("a second range control would fight the scroller's own
-// zoom") — explicit follow-up ask. The two don't actually fight in
-// practice: the picker narrows which rows ever reach the scroller (the
-// same pre-filter TrendExplorer/ExerciseMixExplorer already do for their
-// own range pickers), while the scroller's own zoom/pan still works freely
-// *within* whatever range that leaves — one sets the outer bound, the
-// other explores inside it.
 
 type WeightField = "weight" | "bodyFat" | "muscleMass";
 type WeightUnit = "kg" | "lbs" | "pctWeight";
@@ -151,21 +141,7 @@ export function WeightScrollerChart({
   // default, for a first-time visitor.
   const [regionType, setRegionType] = useState<RegionType>("none");
 
-  const fullDomain = useMemo<[Date, Date] | null>(() => {
-    if (data.length === 0) return null;
-    return [parseDate(data[0].date), parseDate(data[data.length - 1].date)];
-  }, [data]);
-  const [range, setRange] = useState<[Date, Date] | null>(null);
-  const rangedData = useMemo(() => {
-    if (!range) return data;
-    const [from, to] = range;
-    return data.filter((d) => {
-      const date = parseDate(d.date);
-      return date >= from && date <= to;
-    });
-  }, [data, range]);
-
-  const series = useMemo(() => buildSeries(rangedData, fields, unit), [rangedData, fields, unit]);
+  const series = useMemo(() => buildSeries(data, fields, unit), [data, fields, unit]);
   const regions = useMemo(
     () => (regionType === "none" ? [] : (regionGroups?.[regionType] ?? [])),
     [regionType, regionGroups],
@@ -191,7 +167,6 @@ export function WeightScrollerChart({
           {regionGroups ? (
             <GroupByPicker value={regionType} onChange={setRegionType} options={REGION_TYPE_OPTIONS} label="Regions" />
           ) : null}
-          {fullDomain ? <TimeRangePicker domain={fullDomain} value={range} onChange={setRange} /> : null}
         </>
       }
     >
