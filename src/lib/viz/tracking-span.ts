@@ -68,6 +68,10 @@ export const INSTAGRAM_USAGE_TRACKING_SPAN: TrackingSpan = { start: "2025-01-01"
  * Instagram *usage* minutes above. */
 export const INSTAGRAM_TRACKING_SPAN: TrackingSpan = { start: "2018-07-28" };
 
+/** All nine subs share one start: they were added to the entry form
+ * together. */
+export const SUBS_TRACKING_SPAN: TrackingSpan = { start: "2019-04-01" };
+
 export const PLACES_TRACKING_SPAN: TrackingSpan = { start: "2016-02-18" };
 
 export const PEOPLE_TRACKING_SPAN: TrackingSpan = { start: "2016-06-02" };

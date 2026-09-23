@@ -4,8 +4,8 @@
 // hand-rolling their own subset.
 //
 // Categories mirror the day-entry taxonomy, keeping vocabulary consistent
-// across the app. Some categories (subs, entertainment) may not have chart
-// types yet but are included in the official taxonomy.
+// across the app. Some categories (entertainment) may not have chart types
+// yet but are included in the official taxonomy.
 //
 // `life` is the one category with no day-entry counterpart, and that's the
 // point of it: every other chart here aggregates `days` rows, while the
@@ -207,6 +207,24 @@ export const CHARTS: ChartEntry[] = [
     title: "Instagram Followers",
     description: "A day-by-day look at Instagram followers.",
     category: "technology",
+  },
+  {
+    href: "/charts/subs-trend",
+    title: "Subs Trend",
+    description: "Trend in each sub over time, aggregated by period.",
+    category: "subs",
+  },
+  {
+    href: "/charts/subs-daily",
+    title: "Daily Subs",
+    description: "A day-by-day look at each sub's score.",
+    category: "subs",
+  },
+  {
+    href: "/charts/subs-calendar",
+    title: "Subs Calendar",
+    description: "A year-by-year heatmap, each day coloured by its mix of subs.",
+    category: "subs",
   },
   {
     href: "/charts/places",

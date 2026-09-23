@@ -54,6 +54,7 @@ export function DailyExplorer({
   regions,
   extraFilters,
   initialWindow = 30,
+  initialHiddenIds,
   ariaLabel,
 }: {
   series: DailyExplorerSeries[];
@@ -81,6 +82,10 @@ export function DailyExplorer({
    * series (a follower count, say) wants none — smoothing a line that only
    * ever rises says nothing the line doesn't. */
   initialWindow?: number;
+  /** Series ids (or `"average"`) the legend opens with toggled off —
+   * passed straight through to `InteractiveScroller`. For a chart with more
+   * series than read well at once (the nine subs, #120). */
+  initialHiddenIds?: readonly string[];
   ariaLabel: string;
 }) {
   const [windowId, setWindowId] = useState<WindowId>(
@@ -127,6 +132,7 @@ export function DailyExplorer({
               height={height}
               regions={regions}
               valueFormat={valueFormat}
+              initialHiddenIds={initialHiddenIds}
               ariaLabel={ariaLabel}
             />
           )}
