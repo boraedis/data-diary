@@ -62,6 +62,37 @@ const WEEKS_PER_YEAR = 53;
 const MIN_CELL_SIZE = 8;
 const MAX_CELL_SIZE = 18;
 
+/**
+ * Resolves a `var(--custom-property)` reference to its actual computed
+ * color, for the one place in this component that needs a color d3-color
+ * can actually parse rather than just paint: `blendColors` below does real
+ * Lab-space math on category colors, and `d3.color()` (which `d3.lab()`
+ * calls internally) returns `null` — silently, no error — for a CSS
+ * variable reference string, since resolving one needs the CSSOM, not a
+ * color-string parser. A category built from `categoricalColor()`
+ * (`@/lib/viz/color` — `var(--chart-1)` etc., specifically so a *plain*
+ * `fill` attribute tracks light/dark mode via the browser's own CSS engine)
+ * fed straight into that math produced `{l: NaN, a: NaN, b: NaN}` for
+ * every entry, every blend silently fell through to the `labs.length ===
+ * 0` fallback, and every blended cell painted the same fixed color
+ * (`colorScale(domain[0])`, since `d3.interpolateLab` also can't parse the
+ * unparseable "blend" and just returns its start color at any `t`) —
+ * regardless of the day's actual category. Not caught by
+ * `PeopleCalendarChart` (this primitive's other blend-mode consumer)
+ * because tag colors there are literal hex strings straight from the
+ * database (`tags.color`), never a `var()` reference — `DayTypeCalendarChart`
+ * (#410) is the first caller to hand this a `categoricalColor()` string.
+ * Non-`var()` input passes through untouched. Safe to call unconditionally
+ * (no SSR guard needed): every call site is inside a D3 render callback or
+ * a hover handler, both of which only ever run after mount, in the browser.
+ */
+export function resolveCssColor(color: string): string {
+  const match = /^var\((--[\w-]+)\)$/.exec(color.trim());
+  if (!match) return color;
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim();
+  return resolved || color;
+}
+
 export type InteractiveCalendarPoint = {
   date: string; // "YYYY-MM-DD"
   value: number;
@@ -318,7 +349,7 @@ export function InteractiveCalendar({
    */
   const blendColors = (entries: { color: string; weight?: number }[]): string => {
     const labs = entries
-      .map((e) => ({ lab: d3.lab(e.color), weight: e.weight ?? 1 }))
+      .map((e) => ({ lab: d3.lab(resolveCssColor(e.color)), weight: e.weight ?? 1 }))
       .filter((e) => !Number.isNaN(e.lab.l) && e.weight > 0);
     if (labs.length === 0) return "var(--muted)";
     const total = labs.reduce((sum, e) => sum + e.weight, 0);
