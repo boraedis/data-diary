@@ -406,7 +406,8 @@ export async function getLifeTimelineData(): Promise<LifeTimelineEntry[]> {
 export type SleepDay = { date: string; durationMinutes: number };
 
 /**
- * A night plus where it was spent — the private-only superset of `SleepDay`.
+ * A night plus where it was spent and any naps that day — the private-only
+ * superset of `SleepDay`.
  *
  * Kept as its own type rather than widening `SleepDay`, because `SleepDay`
  * is what the **public** sleep chart renders
@@ -422,6 +423,11 @@ export type SleepNight = SleepDay & {
    * most nights, so anything grouping on this must treat null as its own
    * group rather than dropping it. */
   locationType: string | null;
+  /** `days.napMinutes`, or null when no nap was recorded that day. Matched
+   * by calendar date to the night's own row, same as location — a nap
+   * doesn't get its own independent timeline here, just an optional
+   * addend to that night's sleep value. */
+  napMinutes: number | null;
 };
 
 function hhmmToMinutes(hhmm: string): number | null {
@@ -454,6 +460,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
       wakeTime: days.wakeTime,
       wakeCrossedMidnight: days.wakeCrossedMidnight,
       locationType: days.sleepLocationType,
+      napMinutes: days.napMinutes,
     })
     .from(days)
     .where(sql`${days.sleepTime} is not null and ${days.wakeTime} is not null`)
@@ -466,7 +473,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
     if (sleepMin === null || wakeMin === null) continue;
     const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
     if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
-    out.push({ date: r.date, durationMinutes, locationType: r.locationType });
+    out.push({ date: r.date, durationMinutes, locationType: r.locationType, napMinutes: r.napMinutes });
   }
   return out;
 }

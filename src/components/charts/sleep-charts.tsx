@@ -21,43 +21,97 @@ import { SLEEP_LOCATION_TRACKING_SPAN, SLEEP_TRACKING_SPAN } from "@/lib/viz/tra
 // pass across the boundary.
 
 const SLEEP_COLOR = categoricalColor(4);
+// Only used as the second line in "Both" mode (see SLEEP_METRIC_OPTIONS
+// below) — a distinct slot from SLEEP_COLOR so the two lines read as
+// separate series, not a color reused across itself.
+const NAP_COLOR = categoricalColor(1);
 const asHours = (minutes: number) => minutes / 60;
 const formatHours = (hours: number) => formatDuration(hours);
 
+/** Whether to plot sleep alone, sleep with naps folded in, or both lines at
+ * once. Shared between Sleep Trend and Sleep Daily so the picker (and its
+ * behavior) reads the same on both pages. */
+type SleepMetric = "sleep" | "sleepPlusNaps" | "both";
+
+const SLEEP_METRIC_OPTIONS: GroupByOption<SleepMetric>[] = [
+  { id: "sleep", label: "Sleep" },
+  { id: "sleepPlusNaps", label: "Sleep + Naps" },
+  { id: "both", label: "Both" },
+];
+
+/** Picks the metric state down to what the data can actually support — the
+ * "Sleep + Naps"/"Both" options are pointless (and misleading, implying a
+ * distinction that doesn't exist) on a history with no naps recorded. */
+function useSleepMetric(data: SleepNight[]) {
+  const hasNaps = useMemo(() => data.some((n) => (n.napMinutes ?? 0) > 0), [data]);
+  const [metric, setMetric] = useState<SleepMetric>("sleep");
+  return { hasNaps, metric: hasNaps ? metric : "sleep", setMetric } as const;
+}
+
+const sleepHours = (night: SleepNight) => asHours(night.durationMinutes);
+const sleepPlusNapsHours = (night: SleepNight) => asHours(night.durationMinutes + (night.napMinutes ?? 0));
+
 export function SleepTrendChart({ data }: { data: SleepNight[] }) {
+  const { hasNaps, metric, setMetric } = useSleepMetric(data);
+
   return (
     <TrendExplorer
       data={data}
       title="Sleep Trend"
-      description="Trend in sleep duration over time, aggregated by period. Marker size shows how many nights fed each point; the band shows that bucket's range."
+      description="Trend in sleep duration over time, aggregated by period. Marker size shows how many nights fed each point; the band shows ±1 standard deviation around it."
       methodology={SLEEP_METHODOLOGY}
       trackingSpan={SLEEP_TRACKING_SPAN}
       seriesId="sleep"
-      label="Sleep"
+      label={metric === "sleepPlusNaps" ? "Sleep + Naps" : "Sleep"}
       color={SLEEP_COLOR}
-      getValue={(night) => asHours(night.durationMinutes)}
+      getValue={metric === "sleepPlusNaps" ? sleepPlusNapsHours : sleepHours}
+      extraSeries={
+        metric === "both"
+          ? [{ id: "sleepPlusNaps", label: "Sleep + Naps", color: NAP_COLOR, getValue: sleepPlusNapsHours }]
+          : undefined
+      }
       aggregate="mean"
       valueFormat={formatHours}
       tooltipLabel={(nights) => `${nights.length} night${nights.length === 1 ? "" : "s"}`}
+      extraFilters={
+        hasNaps ? (
+          <GroupByPicker value={metric} onChange={setMetric} options={SLEEP_METRIC_OPTIONS} label="Measure" />
+        ) : undefined
+      }
       ariaLabel="Average time asleep per night over time. Use arrow keys to inspect individual buckets, or hover a point."
     />
   );
 }
 
 export function SleepDailyChart({ data }: { data: SleepNight[] }) {
-  const points = useMemo(
-    () => data.map((night) => ({ date: night.date, value: asHours(night.durationMinutes) })),
-    [data],
-  );
+  const { hasNaps, metric, setMetric } = useSleepMetric(data);
+
+  const series = useMemo(() => {
+    const sleepSeries = { id: "sleep", label: "Sleep", color: SLEEP_COLOR, data: data.map((n) => ({ date: n.date, value: sleepHours(n) })) };
+    const sleepPlusNapsSeries = {
+      id: "sleepPlusNaps",
+      label: "Sleep + Naps",
+      color: metric === "both" ? NAP_COLOR : SLEEP_COLOR,
+      data: data.map((n) => ({ date: n.date, value: sleepPlusNapsHours(n) })),
+    };
+    if (metric === "sleep") return [sleepSeries];
+    if (metric === "sleepPlusNaps") return [sleepPlusNapsSeries];
+    return [sleepSeries, sleepPlusNapsSeries];
+  }, [data, metric]);
 
   return (
     <DailyExplorer
-      series={[{ id: "sleep", label: "Sleep", color: SLEEP_COLOR, data: points }]}
+      series={series}
       title="Nightly Sleep"
       description="A night-by-night look at sleep duration. Scroll or drag to zoom, and use the strip below to move through the range."
       methodology={SLEEP_METHODOLOGY}
       trackingSpan={SLEEP_TRACKING_SPAN}
       valueFormat={formatHours}
+      extraFilters={
+        hasNaps ? (
+          <GroupByPicker value={metric} onChange={setMetric} options={SLEEP_METRIC_OPTIONS} label="Measure" />
+        ) : undefined
+      }
       ariaLabel="Time asleep each night. Scroll or pinch to zoom, drag to pan, hover a night for its exact duration."
     />
   );
