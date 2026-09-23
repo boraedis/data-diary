@@ -1,29 +1,12 @@
-import { ChartCard } from "@/components/charts/chart-card";
-import { ChartPage } from "@/components/charts/chart-page";
-import { HappinessAveragerChart } from "@/components/charts/happiness-averager-chart";
-import { getHappinessAveragerData } from "@/lib/charts";
-import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
-import { HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
-import { HAPPINESS_TRACKING_SPAN } from "@/lib/viz/tracking-span";
+import { HappinessTrendChart } from "@/components/charts/happiness-trend-chart";
+import { getHappinessTrendData } from "@/lib/charts";
 
 export const dynamic = "force-dynamic";
 
+// The chart component owns the page shell (ChartPage + filters + card), the
+// same way /charts/weight does: the split toggle and the chart share state,
+// and only plain data can cross the server/client boundary.
 export default async function HappinessTrendChartPage() {
-  const data = await getHappinessAveragerData();
-
-  return (
-    <ChartPage
-      title="Happiness Trend"
-      description="Trend in happiness over time, aggregated by period."
-      info={{
-        interactionGuide: LINE_INTERACTION_GUIDE,
-        methodology: HAPPINESS_METHODOLOGY,
-        trackingSpan: HAPPINESS_TRACKING_SPAN,
-      }}
-    >
-      <ChartCard empty={data.length === 0}>
-        <HappinessAveragerChart data={data} />
-      </ChartCard>
-    </ChartPage>
-  );
+  const data = await getHappinessTrendData();
+  return <HappinessTrendChart data={data} />;
 }

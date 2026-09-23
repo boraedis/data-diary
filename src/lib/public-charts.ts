@@ -16,7 +16,6 @@
 import { asc, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
-import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
 
 // Widened alongside charts.ts's own WeightMetricsPoint (issue #117
 // follow-up) — body fat % and muscle mass are body-composition data, not
@@ -41,34 +40,22 @@ export async function getPublicWeightData(): Promise<PublicWeightPoint[]> {
   return rows;
 }
 
-export type PublicMonthlyHappiness = {
-  month: string; // "YYYY-MM"
-  avg: number;
-  count: number;
-  min: number;
-  max: number;
-};
+export type PublicHappinessDay = { date: string; happiness: number };
 
-export async function getPublicHappinessTrendData(): Promise<PublicMonthlyHappiness[]> {
+/** Raw-daily happiness — bucketing moved client-side into `TrendExplorer`
+ * (period picker + work-day split both need to re-bucket on demand), same
+ * move `src/lib/charts.ts`'s own private `getHappinessTrendData` made. No
+ * day-type here: the work-day split stays private-only, same reasoning
+ * `SleepCalendarChart`'s naps toggle is private-only — see that chart's own
+ * comment on `SleepCalendarPoint`. */
+export async function getPublicHappinessTrendData(): Promise<PublicHappinessDay[]> {
   const db = getDb();
   const rows = await db
     .select({ date: days.date, happiness: days.happiness })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-
-  const buckets = groupByPeriod(rows, "month", (r) => r.date);
-  const summaries = summarizePeriods(buckets, (r) => r.happiness as number);
-  return buckets.map((bucket, i) => {
-    const values = bucket.items.map((r) => r.happiness as number);
-    return {
-      month: bucket.key,
-      avg: summaries[i].avg,
-      count: summaries[i].count,
-      min: Math.min(...values),
-      max: Math.max(...values),
-    };
-  });
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number }));
 }
 
 // `reason` included — explicit call by the app owner (see this file's own

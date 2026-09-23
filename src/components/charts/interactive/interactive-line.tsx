@@ -14,7 +14,7 @@ import { Legend } from "./legend";
 // InteractiveLine (#18) — the shared time-series primitive that replaces
 // three overlapping legacy constructors (Scroller, Averager, TimeLine) and
 // generalizes this repo's two one-off implementations
-// (WeightScrollerChart, HappinessAveragerChart — now thin wrappers around
+// (WeightScrollerChart, HappinessTrendChart — now thin wrappers around
 // this) into one composable component. See issue #18 for the full spec;
 // this file's own doc comments cover the *why* behind each design choice
 // below.
@@ -52,7 +52,7 @@ export type InteractiveLineSeries = {
   points: InteractiveLinePoint[];
   /** Point markers. `true` draws every point at the toolkit's default mark
    * spec (>=8px diameter, surface ring). A function sizes each marker
-   * individually instead — e.g. HappinessAveragerChart's "bigger dot = more
+   * individually instead — e.g. HappinessTrendChart's "bigger dot = more
    * days fed this average" — and is NOT clamped to the spec's minimum,
    * since the whole point of a variable radius is to also go smaller for
    * lower-confidence points; the spec minimum is only the *default*, not a
@@ -62,7 +62,7 @@ export type InteractiveLineSeries = {
    * line (legacy Averager's band; TrendExplorer feeds it ±1 std dev). */
   band?: boolean;
   /** Per-point tooltip row label, overriding this series' own `label` for
-   * that one row — e.g. HappinessAveragerChart's "12 days" sample-size
+   * that one row — e.g. HappinessTrendChart's "12 days" sample-size
    * caption in place of repeating "Happiness" on every row. Defaults to
    * the fixed series `label` (also what the legend shows). */
   tooltipLabel?: (point: InteractiveLinePoint, index: number) => string;
@@ -118,7 +118,7 @@ export type InteractiveLineProps = {
   valueFormat?: (value: number) => string;
   /** Date preset for the tooltip's title (viz/format.ts's formatDate
    * presets) — defaults to "weekday" (a day-level chart's natural title).
-   * A month-bucketed series like HappinessAveragerChart should pass
+   * A month-bucketed series like HappinessTrendChart should pass
    * "monthYear" instead, since every point already sits on the 1st and a
    * weekday there is meaningless. */
   dateFormat?: DateFormatPreset;

@@ -1,8 +1,8 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
-import { days, exercises, metros, people, places, tags, workoutSets, workouts } from "@/db/schema";
-import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
+import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
+import { groupByPeriod } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
 import { resolveCountyForPoint, type UsCounty } from "@/lib/geo/us-counties";
@@ -668,57 +668,35 @@ export async function getPlaceLeaderboardData(limit = 30): Promise<PlaceLeaderbo
   return rows.map((r) => ({ name: r.name, value: Number(r.value), color: r.color }));
 }
 
-// --- Happiness averager ---------------------------------------------------
+// --- Happiness trend --------------------------------------------------
 
-export type MonthlyAverage = {
-  month: string; // "YYYY-MM"
-  avg: number;
-  count: number;
-  /** Lowest/highest single day within the month — the legacy "Averager"
-   * pattern's min/max band (functions/views/vis/vis_functions.js's
-   * Averager), showing how much a month's days actually varied around its
-   * average rather than just the average alone. Wired into a shaded band
-   * behind the line by HappinessAveragerChart (#18); see
-   * interactive-line.tsx's `band` series option. */
-  min: number;
-  max: number;
+export type HappinessTrendDay = {
+  date: string;
+  happiness: number;
+  /** `days.dayType`, or null when it wasn't recorded. Powers
+   * HappinessTrendChart's work-day/other-days split (#410) — the legacy
+   * "Averager" pattern (functions/views/vis/charts/happiness_averager.js)
+   * binned by day-type too; an earlier pass at this chart (#18) left it out
+   * "since it'd need a second grouping dimension this first pass doesn't
+   * have a UI for yet" (TrendExplorer's `extraSeries`, added for #403's
+   * sleep-naps split, is that UI). */
+  dayType: DayType | null;
 };
 
-/** Monthly average happiness (plus the sample size behind each point, so the
- * chart can size markers by how many days actually fed each average — a
- * month with 2 entries and a month with 30 shouldn't look equally
- * confident — and the month's min/max, for the band described above). The
- * legacy "Averager" pattern (functions/views/vis/charts/
- * happiness_averager.js) bins by day-type too; that's left out here since
- * it'd need a second grouping dimension this first pass doesn't have a UI
- * for yet. */
-export async function getHappinessAveragerData(): Promise<MonthlyAverage[]> {
+/** Daily happiness (with day-type), oldest first — the raw-daily
+ * counterpart to what used to be server-side monthly bucketing
+ * (`getHappinessAveragerData`/`MonthlyAverage`, since replaced): binning
+ * moved client-side into `TrendExplorer` (`src/lib/viz/bin.ts`) once the
+ * period picker and work-day split both needed to re-bucket on demand
+ * rather than at a single fixed month grain. */
+export async function getHappinessTrendData(): Promise<HappinessTrendDay[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, happiness: days.happiness })
+    .select({ date: days.date, happiness: days.happiness, dayType: days.dayType })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-
-  // Monthly bucketing via the shared groupByPeriod/summarizePeriods helper
-  // (#16) — this used to be its own hand-rolled `Map<string, {sum,count}>`
-  // here, duplicating the same "bucket by month" logic
-  // getGymWeightComboData had above. min/max are computed straight off
-  // each bucket's own items rather than through summarizePeriods (which
-  // only ever returns avg/count) — no need to generalize that shared
-  // helper for a min/max case only this one call site uses so far.
-  const buckets = groupByPeriod(rows, "month", (r) => r.date);
-  const summaries = summarizePeriods(buckets, (r) => r.happiness as number);
-  return buckets.map((bucket, i) => {
-    const values = bucket.items.map((r) => r.happiness as number);
-    return {
-      month: bucket.key,
-      avg: summaries[i].avg,
-      count: summaries[i].count,
-      min: Math.min(...values),
-      max: Math.max(...values),
-    };
-  });
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, dayType: r.dayType }));
 }
 
 // --- People network ---------------------------------------------------

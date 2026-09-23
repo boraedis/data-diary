@@ -6,7 +6,7 @@ import { SeriesKey, type SeriesKeyVariant } from "./legend";
 
 // Shared tooltip + crosshair (#17's "shared tooltip component" and
 // "crosshair hook" scope items) — the interactive half of the toolkit.
-// Replaces both today's nothing (HappinessAveragerChart's native
+// Replaces both today's nothing (HappinessTrendChart's native
 // `<title>` per-point, which shows one series at a time and never on
 // keyboard focus) and legacy `InteractiveScroller`'s fully hand-built
 // in-SVG tooltip (functions/views/vis/vis_functions.js).
