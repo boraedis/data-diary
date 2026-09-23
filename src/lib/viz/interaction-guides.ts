@@ -13,7 +13,7 @@
  */
 
 export const LINE_INTERACTION_GUIDE =
-  "Hover a point for its exact value and date. The shaded band (where shown) is that period's day-to-day range around the plotted average; marker size shows how many days fed the point.";
+  "Hover a point for its exact value and date. The shaded band (where shown) is ±1 standard deviation around that period's plotted average; marker size shows how many days fed the point.";
 
 export const SCROLLER_INTERACTION_GUIDE =
   "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry.";

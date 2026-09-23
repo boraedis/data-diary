@@ -258,28 +258,62 @@ export function travelledFill(mode: ColorMode = "light"): string {
   return TRAVELLED_FILL[mode];
 }
 
-const DIVERGING_ENDPOINTS: Record<ColorMode, { cool: string; warm: string; neutral: string }> = {
+// #403's first pass at this (a desaturated near-gray midpoint, `#312d2a`
+// then `#d4ccc3`) fixed the dark-mode contrast bug but still read as flat
+// and washed out next to the two real poles — because a *neutral* midpoint
+// is the wrong shape for this scale in the first place. The legacy app's
+// own sleep calendar (functions/views/vis/charts/sleep_calendar.js) used
+// `d3.interpolateRdYlBu` — Red-Yellow-Blue, not Red-White-Blue as
+// remembered: a genuine third hue at the midpoint, not a desaturated
+// in-between. That's what gives a diverging ramp its life — every cell
+// reads as a real color, not just the two extremes with a gray dead zone
+// between them. Reworked onto this app's own poles with a warm gold
+// accent (hue ~90) in place of RdYlBu's yellow, picked specifically for
+// separation from the warm pole (hue 40, orange/terracotta) — a hue much
+// closer to 40 kept failing colorblind-safety pairwise against the warm
+// pole (an early gold candidate around hue 85 scored ΔE 4.4 deutan against
+// dark warm `#ff8a4d`, well under the safety floor) since deuteranopia
+// compresses the red/orange/yellow range together; hue 90 clears it.
+// Validated with the dataviz skill's `validate_palette.js` pairwise
+// against both poles (`--pairs all`):
+//
+// | pair | normal ΔE | worst CVD ΔE |
+// |---|---|---|
+// | dark gold `#facf4e` vs cool `#4fb8e6` | 16.5+ PASS | 11.7+ PASS |
+// | dark gold `#facf4e` vs warm `#ff8a4d` | 16.5 PASS | 11.7 deutan PASS |
+// | light gold `#e6bc36` vs cool `#00719e` | 27.5+ PASS | 20.3+ PASS |
+// | light gold `#e6bc36` vs warm `#ae3200` | 27.5+ PASS | 20.3+ PASS |
+//
+// Same lightness-band/chroma-floor caveat as `SEQUENTIAL_ENDPOINTS`/
+// `TRAVELLED_FILL` above: those checks score categorical marks, and a
+// bright, near-white-lightness gold fails the lightness-band check by
+// construction (it's nowhere near this palette's other mid-lightness
+// colors) — the pairwise separation numbers are what matter here.
+const DIVERGING_ENDPOINTS: Record<ColorMode, { cool: string; warm: string; mid: string }> = {
   // Cool pole = dusty-teal family (chart-5's hue, 225°); warm pole =
   // terracotta family (chart-1's hue, 40°) — this app's own warm/cool
   // poles in place of the generic blue<->red pair, same "opposite hues,
-  // neutral midpoint" structure.
-  light: { cool: "#00719e", warm: "#ae3200", neutral: "#e0ddda" },
-  dark: { cool: "#4fb8e6", warm: "#ff8a4d", neutral: "#312d2a" },
+  // vivid midpoint" structure RdYlBu itself has (red<->yellow<->blue).
+  // `mid` is the gold accent — see this block's own comment above.
+  light: { cool: "#00719e", warm: "#ae3200", mid: "#e6bc36" },
+  dark: { cool: "#4fb8e6", warm: "#ff8a4d", mid: "#facf4e" },
 };
 
 /**
- * Two-hue-plus-neutral-midpoint scale for polarity (a value that's above
- * or below a meaningful baseline — net happiness swing, budget over/under,
- * etc.). `domain` is `[min, mid, max]`, matching `d3.scaleDiverging`'s own
- * three-point domain convention; pass the baseline as `mid` (usually 0,
- * but not assumed to be — a diverging domain's midpoint is whatever value
- * means "neither side").
+ * Two-hue-plus-vivid-midpoint scale for polarity (a value that's above or
+ * below a meaningful baseline — net happiness swing, budget over/under,
+ * etc.), styled after ColorBrewer's RdYlBu: opposite poles either side of
+ * a genuine third hue at the midpoint, not a desaturated gray. `domain` is
+ * `[min, mid, max]`, matching `d3.scaleDiverging`'s own three-point domain
+ * convention; pass the baseline as `mid` (usually 0, but not assumed to
+ * be — a diverging domain's midpoint is whatever value means "neither
+ * side").
  */
 export function divergingScale(
   domain: [number, number, number],
   mode: ColorMode = "light",
 ): ScaleDiverging<string> {
-  const { cool, warm, neutral } = DIVERGING_ENDPOINTS[mode];
+  const { cool, warm, mid: neutral } = DIVERGING_ENDPOINTS[mode];
   // d3's diverging interpolator is called with t in [0, 1] where 0.5 is
   // the midpoint — build it as two half-ramps (cool->neutral,
   // neutral->warm) rather than a single three-stop interpolator, since
