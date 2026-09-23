@@ -6,7 +6,7 @@ import { useD3 } from "@/hooks/use-d3";
 import { MARK_SPECS, attachMarkHover } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { sequentialScale, type ColorMode } from "@/lib/viz/color";
+import { divergingScale, sequentialScale, type ColorMode } from "@/lib/viz/color";
 import { formatDate } from "@/lib/viz/format";
 import { parseDate } from "@/lib/date";
 
@@ -99,13 +99,43 @@ export type InteractiveCalendarProps = {
    * `<html>`; there's no light/dark toggle yet). Revisit this default if
    * that ever changes — see viz/color.ts's own `ColorMode`. */
   colorMode?: ColorMode;
-  /** Escape hatch to a caller-supplied `(t: number) => string` interpolator,
-   * mapped over the data's own `[min, max]` as a plain sequential scale —
-   * bypasses `sequentialScale`/`colorMode` entirely. For a caller switching
-   * between several related metrics (a "Measure" picker), pair this with
-   * `@/lib/viz/color`'s `categorySequentialInterpolator` so each metric gets
-   * its own hue rather than this component's single default ramp. */
+  /** When set, cells use a diverging (cool/warm) scale centered on this
+   * value instead of the default single-hue sequential ramp — e.g. a
+   * fixed target duration, where below and above the target are two
+   * different meanings rather than just "more". Clamped into the data's
+   * own `[min, max]` if the target falls outside it. Ignored in blend
+   * mode (`categories`), which always paints from the sequential ramp's
+   * low end. Ignored when `colorInterpolator` is set (see below). */
+  divergingMidpoint?: number;
+  /** Escape hatch to a caller-supplied `(t: number) => string` interpolator
+   * (any d3-scale-chromatic function, e.g. `d3.interpolateRdYlBu`), mapped
+   * over the data's own `[min, max]` as a plain sequential scale — bypasses
+   * `sequentialScale`/`divergingScale`/`colorMode`/`divergingMidpoint`
+   * entirely. This app's own charts should reach for those instead (see
+   * viz/color.ts's own header comment on why: fixed, colorblind-validated,
+   * "this app's own colors" rather than a borrowed generic ramp) — one real
+   * exception already exists: for a caller switching between several
+   * related metrics (a "Measure" picker), pair this with `@/lib/viz/color`'s
+   * `categorySequentialInterpolator` so each metric gets its own hue rather
+   * than this component's single default ramp (`technology-charts.tsx`'s
+   * screen-time calendar). The other exists for
+   * sleep-calendar-chart.tsx's legacy-authentic mode, where matching the
+   * original app's exact `d3.interpolateRdYlBu` look was the explicit ask,
+   * not a new default worth branding. */
   colorInterpolator?: (t: number) => string;
+  /** Shrinks the color domain inward by this amount on each side (in the
+   * same units as `value`), clamped so anything at or beyond that inset
+   * boundary paints the same fully-saturated pole color instead of a
+   * fainter, less-differentiated one. A calendar spanning a few genuine
+   * outliers (one very short night, one very long one) otherwise spends
+   * most of its color range on those rare extremes and leaves the
+   * densely-populated middle looking flat — this trades that off
+   * deliberately: differences among the *common* values get more of the
+   * gradient's visual range, at the cost of the true extremes no longer
+   * being distinguishable from "merely quite extreme." The legend's
+   * low/high text labels still show the data's real, un-inset min/max —
+   * only the color mapping (and its hover indicator) is inset. */
+  domainInset?: number;
   ariaLabel?: string;
 };
 
@@ -126,7 +156,9 @@ export function InteractiveCalendar({
   formatValue,
   valueLabel = "value",
   colorMode = "dark",
+  divergingMidpoint,
   colorInterpolator,
+  domainInset,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -175,12 +207,69 @@ export function InteractiveCalendar({
     return lo === hi ? [lo - 1, lo + 1] : [lo, hi];
   }, [points]);
 
+  // The color domain, shrunk inward by `domainInset` if set — see that
+  // prop's own doc comment. Falls back to the true `domain` if the inset
+  // would invert it (a tighter inset than the data actually spans), rather
+  // than collapsing to a degenerate single-point domain.
+  const colorDomain = useMemo<[number, number]>(() => {
+    if (!domainInset) return domain;
+    const [lo, hi] = domain;
+    const inset = Math.min(domainInset, (hi - lo) / 2);
+    const insetLo = lo + inset;
+    const insetHi = hi - inset;
+    return insetLo < insetHi ? [insetLo, insetHi] : domain;
+  }, [domain, domainInset]);
+
+  // The clamped midpoint actually used for the diverging domain — a fixed
+  // target (e.g. an 8h sleep goal) can easily fall outside the color
+  // domain's own [min, max] (someone who never sleeps under 8h clamps the
+  // cool half away entirely), and d3.scaleDiverging expects its domain
+  // triple monotonic, not an arbitrary midpoint. Meaningless (and unused)
+  // when `colorInterpolator` is set, which is always a plain sequential
+  // mapping over the color domain regardless of any target.
+  const clampedMidpoint =
+    divergingMidpoint === undefined
+      ? undefined
+      : Math.min(Math.max(divergingMidpoint, colorDomain[0]), colorDomain[1]);
+
+  // `.clamp(true)` is what actually makes `domainInset` do anything: every
+  // real value still gets mapped through this same scale, so without
+  // clamping, a value outside `colorDomain` would extrapolate the
+  // interpolator past t=0/t=1 instead of pinning to the pole color the
+  // inset is supposed to reserve for it.
   const colorScale = useMemo(
     () =>
-      colorInterpolator !== undefined
-        ? d3.scaleSequential(domain, colorInterpolator)
-        : sequentialScale(domain, colorMode),
-    [domain, colorMode, colorInterpolator],
+      (colorInterpolator !== undefined
+        ? d3.scaleSequential(colorDomain, colorInterpolator)
+        : clampedMidpoint === undefined
+          ? sequentialScale(colorDomain, colorMode)
+          : divergingScale([colorDomain[0], clampedMidpoint, colorDomain[1]], colorMode)
+      ).clamp(true),
+    [colorDomain, colorMode, clampedMidpoint, colorInterpolator],
+  );
+
+  /**
+   * Maps a value to its 0-1 position along the legend gradient. The legend
+   * bar itself (`SequentialLegend`'s `sampleDomain` below) is built by
+   * sampling `colorScale(value)` at evenly-spaced *values* across the
+   * true, un-inset `domain` — not the scale's raw `interpolator(t)` at
+   * evenly-spaced `t`, which is what makes an inset/clamped or
+   * asymmetric-diverging scale render its flat clamped ends and true
+   * midpoint position honestly instead of stretching them edge-to-edge.
+   * Because the bar's x-axis is therefore just "linear position across
+   * `domain`" by construction, this indicator only needs to match that
+   * same plain linear fraction — no separate diverging-halves math, and no
+   * risk of drifting out of sync with what the bar actually paints at that
+   * position, since both this and the bar sample the identical `domain`
+   * and `colorScale`.
+   */
+  const valueToT = useCallback(
+    (value: number): number => {
+      const [lo, hi] = domain;
+      const span = hi - lo;
+      return span > 0 ? Math.min(1, Math.max(0, (value - lo) / span)) : 1;
+    },
+    [domain],
   );
 
   // A calendar is in blend mode as soon as any day carries a breakdown.
@@ -378,12 +467,8 @@ export function InteractiveCalendar({
   const hoveredColor = hovered ? cellFill(hovered.value, hovered.categories) : undefined;
 
   // Where the hovered cell's value falls on the low->high legend, as a
-  // 0-1 fraction — drives the hover indicator line below. Clamped in case
-  // of floating-point edges right at the domain endpoints.
-  const legendT =
-    hovered !== null
-      ? Math.min(1, Math.max(0, (hovered.value - domain[0]) / ((domain[1] - domain[0]) || 1)))
-      : null;
+  // 0-1 fraction — drives the hover indicator line below.
+  const legendT = hovered !== null ? valueToT(hovered.value) : null;
 
   return (
     // overflow-x-auto is a safety net, not the primary width fix: at the
@@ -460,6 +545,7 @@ export function InteractiveCalendar({
         <SequentialLegend
           domain={domain}
           colorScale={colorScale}
+          sampleDomain={domain}
           formatValue={formatValue}
           valueT={legendT}
           className="fixed bottom-0 z-10 border-t border-border bg-background/95 px-3 py-2 backdrop-blur"

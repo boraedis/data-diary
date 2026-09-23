@@ -17,7 +17,7 @@ export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
     <TrendExplorer
       data={data}
       title="Distance Walked Trend"
-      description="Trend in distance walked over time, aggregated by period. Marker size shows how many days fed each point; the band shows that bucket's range."
+      description="Trend in distance walked over time, aggregated by period. Marker size shows how many days fed each point; the band shows ±1 standard deviation around it."
       methodology={DISTANCE_METHODOLOGY}
       trackingSpan={DISTANCE_TRACKING_SPAN}
       seriesId="distance"
