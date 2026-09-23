@@ -63,34 +63,89 @@ const MIN_CELL_SIZE = 8;
 const MAX_CELL_SIZE = 18;
 
 /**
- * Resolves a `var(--custom-property)` reference to its actual computed
- * color, for the one place in this component that needs a color d3-color
- * can actually parse rather than just paint: `blendColors` below does real
- * Lab-space math on category colors, and `d3.color()` (which `d3.lab()`
- * calls internally) returns `null` — silently, no error — for a CSS
- * variable reference string, since resolving one needs the CSSOM, not a
- * color-string parser. A category built from `categoricalColor()`
- * (`@/lib/viz/color` — `var(--chart-1)` etc., specifically so a *plain*
- * `fill` attribute tracks light/dark mode via the browser's own CSS engine)
- * fed straight into that math produced `{l: NaN, a: NaN, b: NaN}` for
- * every entry, every blend silently fell through to the `labs.length ===
- * 0` fallback, and every blended cell painted the same fixed color
- * (`colorScale(domain[0])`, since `d3.interpolateLab` also can't parse the
- * unparseable "blend" and just returns its start color at any `t`) —
+ * Converts an `oklch(L C H)` string to a `#rrggbb` hex string d3-color can
+ * actually parse. Standard OKLab -> linear-sRGB -> gamma-encoded-sRGB
+ * matrices (Björn Ottosson's published constants — the same conversion
+ * every oklch-to-sRGB implementation uses); `L`/`C`/`H` are the raw numbers
+ * as this app's own `globals.css` writes them (`L` a 0-1 fraction, not a
+ * percentage — this codebase never uses the percentage form). An optional
+ * `/ alpha` component is accepted and ignored: every color this function
+ * actually sees (this app's own `--chart-1..5` tokens) is fully opaque, and
+ * `blendColors` below has no channel to carry per-entry opacity through
+ * anyway. Returns `null` for anything that isn't `oklch(...)` syntax, so
+ * the caller can fall back to the original string unchanged.
+ */
+function oklchToHex(value: string): string | null {
+  const match = /^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*[\d.]+%?)?\s*\)$/i.exec(value.trim());
+  if (!match) return null;
+  const [, lStr, cStr, hStr] = match;
+  const L = Number(lStr);
+  const C = Number(cStr);
+  const Hdeg = Number(hStr);
+  if (!Number.isFinite(L) || !Number.isFinite(C) || !Number.isFinite(Hdeg)) return null;
+  const H = (Hdeg * Math.PI) / 180;
+  const a = C * Math.cos(H);
+  const b = C * Math.sin(H);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l = l_ ** 3;
+  const m = m_ ** 3;
+  const s = s_ ** 3;
+  const rLinear = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const gLinear = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const bLinear = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+  const gamma = (x: number) => {
+    const clamped = Math.min(1, Math.max(0, x));
+    return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+  };
+  const toHex = (x: number) => Math.round(gamma(x) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(rLinear)}${toHex(gLinear)}${toHex(bLinear)}`;
+}
+
+/**
+ * Resolves a category color into something d3-color can actually parse,
+ * for the one place in this component that needs to do real math on a
+ * color rather than just paint it: `blendColors` below does Lab-space
+ * averaging, and `d3.color()` (which `d3.lab()` calls internally) can't
+ * parse either of the two things a `categoricalColor()` string
+ * (`@/lib/viz/color` — `var(--chart-1)` etc., specifically meant to be set
+ * directly as a `fill` attribute and resolved by the browser's own CSS
+ * engine, not read back into JS) turns out to actually be:
+ *
+ * 1. A `var(--custom-property)` reference — resolving one needs the CSSOM,
+ *    not a color-string parser, so `d3.color("var(--chart-1)")` returns
+ *    `null` outright.
+ * 2. This app's own token values, once resolved, which are themselves
+ *    `oklch(...)` — a color function `d3.color()` (as of this project's
+ *    d3 version) doesn't recognize either, so even after correctly
+ *    reading the custom property's real value, feeding *that* straight to
+ *    `d3.lab()` still returned `null`. A first attempt at this fix handled
+ *    only step 1 and missed step 2 entirely, so it changed nothing
+ *    user-visible — the resolved `var()` value was just as unparseable as
+ *    the reference itself.
+ *
+ * Either failure mode alone was silent (`d3.color()` never throws, just
+ * returns `null`), so every category's Lab came back `{l: NaN, a: NaN, b:
+ * NaN}`, got filtered out by `blendColors`' own `labs.length === 0` guard,
+ * and every blend fell through to the same fixed fallback color —
  * regardless of the day's actual category. Not caught by
  * `PeopleCalendarChart` (this primitive's other blend-mode consumer)
  * because tag colors there are literal hex strings straight from the
- * database (`tags.color`), never a `var()` reference — `DayTypeCalendarChart`
- * (#410) is the first caller to hand this a `categoricalColor()` string.
- * Non-`var()` input passes through untouched. Safe to call unconditionally
- * (no SSR guard needed): every call site is inside a D3 render callback or
- * a hover handler, both of which only ever run after mount, in the browser.
+ * database (`tags.color`), never a `var()`/oklch() token —
+ * `DayTypeCalendarChart` (#410) is the first caller to hand this a
+ * `categoricalColor()` string. Input that's neither a `var()` reference
+ * nor `oklch(...)` (a plain hex/rgb string, say) passes through untouched.
+ * Safe to call unconditionally (no SSR guard needed): every call site is
+ * inside a D3 render callback or a hover handler, both of which only ever
+ * run after mount, in the browser.
  */
 export function resolveCssColor(color: string): string {
-  const match = /^var\((--[\w-]+)\)$/.exec(color.trim());
-  if (!match) return color;
-  const resolved = getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim();
-  return resolved || color;
+  const varMatch = /^var\((--[\w-]+)\)$/.exec(color.trim());
+  const raw = varMatch
+    ? getComputedStyle(document.documentElement).getPropertyValue(varMatch[1]).trim() || color
+    : color;
+  return oklchToHex(raw) ?? raw;
 }
 
 export type InteractiveCalendarPoint = {
