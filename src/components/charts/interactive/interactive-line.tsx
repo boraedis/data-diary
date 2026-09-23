@@ -11,6 +11,14 @@ import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
 import { Legend } from "./legend";
 
+// Click-to-toggle legend (`hiddenIds`/`onToggle`) added for the Exercise
+// Trend chart's category/exercise breakdown (#411) — the same pattern
+// InteractiveScroller/InteractiveArea already have, generalized to this
+// primitive rather than left as the one Interactive* without it. A hidden
+// series is dropped everywhere below (domain, crosshair, overview, the
+// plot itself) as if it weren't passed at all; only the legend still lists
+// it, dimmed, so it can be toggled back on.
+
 // InteractiveLine (#18) — the shared time-series primitive that replaces
 // three overlapping legacy constructors (Scroller, Averager, TimeLine) and
 // generalizes this repo's two one-off implementations
@@ -59,7 +67,13 @@ export type InteractiveLineSeries = {
    * floor on every mode. */
   markers?: boolean | ((point: InteractiveLinePoint, index: number) => number);
   /** Render `bandLow`/`bandHigh` as a translucent area behind this series'
-   * line (legacy Averager's band; TrendExplorer feeds it ±1 std dev). */
+   * line (legacy Averager's band; TrendExplorer feeds it ±1 std dev). Only
+   * actually drawn while exactly one series is visible at once (toggling
+   * others off via the legend, or there simply being only one to begin
+   * with) — overlapping translucent bands from several simultaneously
+   * visible series read as mud, not signal, so this flag means "eligible
+   * for a band," and the component itself decides when showing one is
+   * legible. */
   band?: boolean;
   /** Per-point tooltip row label, overriding this series' own `label` for
    * that one row — e.g. HappinessTrendChart's "12 days" sample-size
@@ -320,12 +334,18 @@ export function InteractiveLine({
 
   const resolvedSeries = useMemo(() => resolveSeriesColors(series), [series]);
 
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
+  const visibleSeries = useMemo(
+    () => resolvedSeries.filter((s) => !hiddenIds.has(s.id)),
+    [resolvedSeries, hiddenIds],
+  );
+
   const fullXDomain = useMemo<[Date, Date]>(() => {
     if (xDomain) return xDomain;
-    const allX = resolvedSeries.flatMap((s) => s.points.map((p) => p.x));
+    const allX = visibleSeries.flatMap((s) => s.points.map((p) => p.x));
     const extent = d3.extent(allX);
     return extent[0] && extent[1] ? (extent as [Date, Date]) : [new Date(), new Date()];
-  }, [xDomain, resolvedSeries]);
+  }, [xDomain, visibleSeries]);
 
   // Visible domain is uncontrolled internal state — null means "the full
   // domain," rather than duplicating fullXDomain into state up front, so a
@@ -352,7 +372,7 @@ export function InteractiveLine({
 
   const resolvedYDomain = useMemo<[number, number]>(() => {
     if (yDomain) return yDomain;
-    const visible = resolvedSeries.flatMap((s) =>
+    const visible = visibleSeries.flatMap((s) =>
       s.points.filter((p) => p.x >= effectiveDomain[0] && p.x <= effectiveDomain[1]),
     );
     const values = visible.flatMap((p) => {
@@ -364,14 +384,14 @@ export function InteractiveLine({
     const [lo, hi] = (d3.extent(values.length ? values : [0, 1]) as [number, number]);
     const pad = (hi - lo) * 0.1 || 1;
     return [lo - pad, hi + pad];
-  }, [yDomain, resolvedSeries, effectiveDomain]);
+  }, [yDomain, visibleSeries, effectiveDomain]);
 
   const y = useMemo(
     () => d3.scaleLinear().domain(resolvedYDomain).range([innerHeight, 0]),
     [resolvedYDomain, innerHeight],
   );
 
-  const crosshair = useLineCrosshair(resolvedSeries, x);
+  const crosshair = useLineCrosshair(visibleSeries, x);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<{
@@ -507,20 +527,24 @@ export function InteractiveLine({
         .curve(d3.curveMonotoneX);
 
       // Bands behind every series' line (not interleaved per-series) so a
-      // later series' band never paints over an earlier series' line.
-      for (const s of resolvedSeries) {
-        if (!s.band) continue;
-        const banded = s.points.filter((p) => p.bandLow !== undefined && p.bandHigh !== undefined);
-        if (banded.length === 0) continue;
-        g.append("path")
-          .datum(banded)
-          .attr("fill", s.color)
-          .attr("fill-opacity", MARK_SPECS.area.fillOpacity)
-          .attr("stroke", "none")
-          .attr("d", areaGen);
+      // later series' band never paints over an earlier series' line. Only
+      // drawn while exactly one series is visible — see `band`'s own doc
+      // comment on `InteractiveLineSeries` for why.
+      if (visibleSeries.length === 1) {
+        for (const s of visibleSeries) {
+          if (!s.band) continue;
+          const banded = s.points.filter((p) => p.bandLow !== undefined && p.bandHigh !== undefined);
+          if (banded.length === 0) continue;
+          g.append("path")
+            .datum(banded)
+            .attr("fill", s.color)
+            .attr("fill-opacity", MARK_SPECS.area.fillOpacity)
+            .attr("stroke", "none")
+            .attr("d", areaGen);
+        }
       }
 
-      for (const s of resolvedSeries) {
+      for (const s of visibleSeries) {
         g.append("path")
           .datum(s.points)
           .attr("fill", "none")
@@ -529,7 +553,7 @@ export function InteractiveLine({
           .attr("d", lineGen);
       }
 
-      for (const s of resolvedSeries) {
+      for (const s of visibleSeries) {
         if (!s.markers) continue;
         g.selectAll(null)
           .data(s.points)
@@ -542,14 +566,14 @@ export function InteractiveLine({
           .attr("stroke-width", MARK_SPECS.marker.ringWidth);
       }
     },
-    [resolvedSeries, regions, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight],
+    [visibleSeries, regions, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight],
   );
 
   // One combined pass over every series' hovered point (skipping series
   // with no point near the current crosshair position) — the tooltip's
   // rows, its vertical anchor, and its title date all derive from this
   // same set rather than re-deriving "what's hovered" three separate ways.
-  const hoveredEntries = resolvedSeries
+  const hoveredEntries = visibleSeries
     .map((s, i) => {
       const h = crosshair.hoveredBySeries[i];
       return h ? { series: s, point: h.point, index: h.index } : null;
@@ -581,8 +605,17 @@ export function InteractiveLine({
     <div style={{ position: "relative", width, height }}>
       {hasLegend ? (
         <Legend
-          series={resolvedSeries.map((s) => ({ label: s.label, color: s.color }))}
+          series={resolvedSeries.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
           className="mb-1.5"
+          onToggle={(id) => {
+            setHiddenIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+          }}
+          hiddenIds={hiddenIds}
         />
       ) : null}
       <div style={{ position: "relative", width, height: mainHeight }}>
@@ -621,7 +654,7 @@ export function InteractiveLine({
       </div>
       {hasOverview ? (
         <Overview
-          series={resolvedSeries}
+          series={visibleSeries}
           width={width}
           fullDomain={fullXDomain}
           selection={visibleDomain}

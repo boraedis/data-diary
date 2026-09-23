@@ -6,6 +6,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveScroller,
+  type InteractiveScrollerRegion,
   type InteractiveScrollerSeries,
 } from "@/components/charts/interactive/interactive-scroller";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
@@ -50,6 +51,7 @@ export function DailyExplorer({
   methodology,
   trackingSpan,
   valueFormat,
+  regions,
   extraFilters,
   initialWindow = 30,
   ariaLabel,
@@ -66,6 +68,12 @@ export function DailyExplorer({
   /** Shared across every series — this chart is one column read at
    * different times/counts, not unrelated units needing their own format. */
   valueFormat: (value: number) => string;
+  /** Shaded background bands for historical context (an occupation,
+   * residence, or age bracket) — passed straight through to
+   * `InteractiveScroller`. See `WeightScrollerChart` for the caller-side
+   * pattern (a `GroupByPicker` selecting which `ProfileRegionGroups` key to
+   * show, defaulting to none shown). */
+  regions?: InteractiveScrollerRegion[];
   /** Extra controls rendered before the window picker. The caller owns
    * their state and reshapes `data` accordingly. */
   extraFilters?: React.ReactNode;
@@ -117,6 +125,7 @@ export function DailyExplorer({
               movingAverageWindow={window > 0 ? window : undefined}
               width={width}
               height={height}
+              regions={regions}
               valueFormat={valueFormat}
               ariaLabel={ariaLabel}
             />
