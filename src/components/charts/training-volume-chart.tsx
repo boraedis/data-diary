@@ -215,13 +215,27 @@ export function TrainingVolumeChart({ data, rows }: { data: TrainingDay[]; rows:
   );
 
   // Fixed, zero-floored y-domain (#411): duration is never negative, and
-  // recomputed only from the grouping/period/range that's actually chosen
-  // — not from which lines a legend toggle currently hides — so hiding a
-  // line to see its band doesn't also rescale the axis out from under it.
+  // recomputed from the grouping/period/range that's actually chosen — so
+  // switching "Break down by" rescales the axis to that view's own data,
+  // rather than staying pinned whatever "None" happened to need.
+  //
+  // Sized off the *line* values only, deliberately excluding every lane's
+  // band bounds — a single outlier training day (one long one-off hike)
+  // lands entirely inside whichever single lane it belongs to, and that
+  // lane's std-dev band balloons around it regardless of how many lanes
+  // exist, even though only one lane's band is ever actually drawn at a
+  // time (InteractiveLine only shows a band while exactly one line is
+  // visible). Sizing the fixed axis to accommodate every lane's band *in
+  // case* it gets isolated defeated the rescale entirely — every breakdown
+  // inherited whichever lane had the single worst outlier. The generous
+  // 30% headroom below is what keeps a genuinely isolated lane's own band
+  // usually still fitting without a fixed axis reintroducing that problem;
+  // an unusually wide band can still peek past the top, same tradeoff a
+  // fixed axis on any chart implies.
   const yDomain = useMemo<[number, number]>(() => {
-    const values = series.flatMap((s) => s.points.flatMap((p) => [p.y, p.bandHigh ?? p.y]));
-    const max = d3.max(values) ?? 1;
-    return [0, max * 1.05 || 1];
+    const lineValues = series.flatMap((s) => s.points.map((p) => p.y));
+    const max = d3.max(lineValues) ?? 1;
+    return [0, max * 1.3 || 1];
   }, [series]);
 
   return (
