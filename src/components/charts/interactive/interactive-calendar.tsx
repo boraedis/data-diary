@@ -278,6 +278,24 @@ export function InteractiveCalendar({
   // "how much" and others mean "which kinds" can't be read.
   const blended = useMemo(() => points.some((p) => (p.categories?.length ?? 0) > 0), [points]);
 
+  // Whether `points` actually has a real value spread, as opposed to every
+  // point sharing one constant value (DayTypeCalendarChart's `value: 1` on
+  // every cell, deliberately — see its own comment: there's no magnitude to
+  // show when a day has exactly one type). `domain` above pads a
+  // zero-width span out to `[lo-1, lo+1]` so the *sequential* ramp still
+  // has two distinct endpoints to draw a legend between — but blend mode's
+  // intensity calc below was reusing that same padded domain to place a
+  // constant value at its midpoint (t=0.5, "60% MIN_INTENSITY-ward")
+  // instead of at the top, quietly contradicting the "equal values render
+  // every day at full intensity" behavior every blend-mode consumer's own
+  // comment already documents and assumes. Tracked separately from
+  // `domain` itself so the padding stays available for the modes that
+  // actually need it.
+  const hasValueSpan = useMemo(() => {
+    const [lo, hi] = d3.extent(points, (p) => p.value);
+    return lo !== undefined && hi !== undefined && lo !== hi;
+  }, [points]);
+
   /**
    * Averages colors in CIELAB rather than sRGB.
    *
@@ -336,11 +354,11 @@ export function InteractiveCalendar({
       if (!categories || categories.length === 0) return colorScale(value);
       const blend = blendColors(categories);
       const span = domain[1] - domain[0];
-      const t = span > 0 ? (value - domain[0]) / span : 1;
+      const t = !hasValueSpan ? 1 : span > 0 ? (value - domain[0]) / span : 1;
       const intensity = MIN_INTENSITY + (1 - MIN_INTENSITY) * Math.min(1, Math.max(0, t));
       return d3.interpolateLab(colorScale(domain[0]), blend)(intensity);
     },
-    [colorScale, domain],
+    [colorScale, domain, hasValueSpan],
   );
 
   const [hovered, setHovered] = useState<Hovered | null>(null);
