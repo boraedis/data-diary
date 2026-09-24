@@ -7,7 +7,7 @@ import { useD3 } from "@/hooks/use-d3";
 import { attachMarkHover, MARK_SPECS } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { categoricalColor, sequentialLogScale, travelledFill, type ColorMode } from "@/lib/viz/color";
+import { categoricalColor, sequentialLogScale, travelledFill, noDataFill, type ColorMode } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 
 // InteractiveGeo (#24) — the shared choropleth primitive. Generic over any
@@ -131,19 +131,19 @@ const DEFAULT_PROJECTION = () => d3.geoMercator();
 // every render, including one triggered by this primitive's own `hovered`
 // state, tearing the whole map down and rebuilding it on nearly every
 // pointermove). Learned the hard way there; applied here from the start.
-// 64x, not the 8x this shipped with. 8 was set when the only things on a
+// 128x, not the 8x this shipped with. 8 was set when the only things on a
 // map were countries and states, where it's plenty; it stopped being
 // enough once a map could draw all 3,142 US counties (#313) or a city's
 // neighborhoods (#177), where the whole point is getting close to one
 // small polygon. The US is ~4,500km across and a county is tens of km, so
 // 8x doesn't even bring one county to a readable size.
 //
-// Nothing degrades at the higher ceiling: region borders carry
-// `vector-effect: non-scaling-stroke` so they hold a constant on-screen
-// width however far in you go, and markers are counter-scaled by the
-// transform's own k on every zoom tick. 64 also matches the scaleExtent
-// InteractiveScroller and InteractiveTimeline already use.
-const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 64];
+// Increased from 64x to 128x for finer detail when inspecting small regions
+// or densely packed features. Nothing degrades at the higher ceiling: region
+// borders carry `vector-effect: non-scaling-stroke` so they hold a constant
+// on-screen width however far in you go, and markers are counter-scaled by
+// the transform's own k on every zoom tick.
+const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 128];
 
 // Smaller than interactive-network.tsx's own [3, 16] node range — a geo
 // marker sits on top of an already-busy choropleth fill + legend, where
@@ -588,14 +588,15 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
    *
    * Precedence is value -> travelled -> no data. See `isTravelled`'s prop
    * comment for why a real value wins. */
+  const noDataColor = noDataFill();
   const resolveFill = useCallback(
     (d: DrawnFeature): { color: string; state: "value" | "travelled" | "none"; value: number | null } => {
       const v = d.getValue(d.feature);
       if (v != null && v > 0) return { color: colorScale(v), state: "value", value: v };
       if (d.isTravelled?.(d.feature)) return { color: travelledColor, state: "travelled", value: null };
-      return { color: "var(--muted)", state: "none", value: null };
+      return { color: noDataColor, state: "none", value: null };
     },
-    [colorScale, travelledColor],
+    [colorScale, travelledColor, noDataColor],
   );
 
   /** The off-ramp fills to name in the legend — only the ones actually
@@ -625,9 +626,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     }
     const out: { label: string; color: string }[] = [];
     if (travelled) out.push({ label: travelledLabel, color: travelledColor });
-    if (none) out.push({ label: noDataLabel, color: "var(--muted)" });
+    if (none) out.push({ label: noDataLabel, color: noDataColor });
     return out;
-  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel]);
+  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel, noDataColor]);
 
   const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - (legendSwatches.length ? LEGEND_SWATCH_ROW_HEIGHT : 0));
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
@@ -1115,7 +1116,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                         [
                           hoveredFill?.state === "travelled"
                             ? { label: travelledLabel, value: "", color: hoveredFill.color, variant: "swatch" as const }
-                            : { label: noDataLabel, value: "", color: "var(--muted-foreground)", variant: "swatch" as const },
+                            : { label: noDataLabel, value: "", color: noDataColor, variant: "swatch" as const },
                         ]),
                     // The optional secondary row — "first visited"-style
                     // extra context, appended below whichever primary row
