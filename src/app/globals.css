@@ -19,6 +19,8 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
   --color-chart-5: var(--chart-5);
+  --color-rank-up: var(--rank-up);
+  --color-rank-down: var(--rank-down);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
@@ -101,6 +103,30 @@
      "hard to tell apart even with full color vision"); hue 105 clears it
      (ΔE 18.1 normal / 12.6 protan against dark-mode chart-3's #0d7435).*/
   --metric-happiness-workday: oklch(0.49 0.14 100);
+  /* Rank movement on leaderboards (#115) — the only up/down status pair in
+     the app, reserved for "moved up / moved down the ranking" and never
+     used as a series colour. Red/green is the classic red-green CVD trap,
+     so the pair is pushed apart on two axes the confusion line doesn't
+     collapse: lightness (the green sits well above the red) and hue (a mint
+     green, 165, leaning toward blue rather than the yellow-green that
+     deutan folds onto red). Validated with the dataviz skill's
+     `validate_palette.js`, the pair against each other plus WCAG text
+     contrast against the card, since these colour a glyph and a number:
+
+     | mode | pair | normal ΔE | worst CVD ΔE | text contrast |
+     |---|---|---|---|---|
+     | dark  | #41dca5 / #f4514f | 35.8 | 14.3 deutan | 10.2 / 5.2 |
+     | light | #007e57 / #cc272e | 29.4 | 8.5 deutan  | 5.1 / 5.4 |
+
+     (A straight chart-3-style green against a --destructive-style red
+     measured ΔE 3.4 deutan — indistinguishable.) The validator's
+     lightness-band check fails the dark pair by design: it scores
+     categorical marks, and these are text-weight glyphs that need to be
+     *brighter* than that band to clear 4.5:1. The ▲/▼ glyph and accessible
+     label ship with the colour regardless, so direction is never colour
+     alone. */
+  --rank-up: oklch(0.52 0.12 165);
+  --rank-down: oklch(0.55 0.2 25);
   /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
   --radius: 0.75rem;
   --sidebar: oklch(0.97 0.01 65);
@@ -149,6 +175,8 @@
   --chart-5: oklch(0.52 0.14 225);
   --metric-weight: oklch(0.68 0.16 300);
   --metric-happiness-workday: oklch(0.64 0.14 105);
+  --rank-up: oklch(0.8 0.15 165);
+  --rank-down: oklch(0.66 0.2 25);
   --sidebar: oklch(0.19 0.016 48);
   --sidebar-foreground: oklch(0.96 0.012 70);
   --sidebar-primary: oklch(0.72 0.16 40);

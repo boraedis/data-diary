@@ -82,7 +82,7 @@ Current shape:
   | `InteractiveCalendar` | shipped | #21 | sleep calendar |
   | `InteractiveArea` | shipped | #19 | exercise mix |
   | `InteractiveNetwork` | shipped | #23 | people network |
-  | `InteractiveBar`/`Ranked` | shipped | #22 | places leaderboard |
+  | `InteractiveBar`/`Ranked` | shipped (reworked into a leaderboard table, #115) | #22 | places leaderboard, people table |
   | Geo/Choropleth | shipped | #24 | world map |
   | Migrate remaining chart pages onto the primitives above, delete old bespoke components | shipped | #25 | — |
   | `InteractiveScroller` | shipped | #117 | weight |

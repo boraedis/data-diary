@@ -30,7 +30,7 @@ export const NETWORK_INTERACTION_GUIDE =
   "Scroll or pinch to zoom, drag the background to pan. Drag a node to reposition it, or click one to highlight its connections.";
 
 export const RANKED_INTERACTION_GUIDE =
-  "Hover a row for its detail. Use the controls above to change how many entries are shown.";
+  "Click a column header to sort by it, again to reverse, and a third time (or click #) to return to rank order — the # column always shows the real rank. Hover a movement arrow for where that entry stood then and now, a shaded number for its exact value, or a header for what the column measures. On a narrow screen, scroll the table sideways; the rank and name stay pinned. Use the controls above to change how many entries are shown.";
 
 export const DONUT_INTERACTION_GUIDE =
   "Click a slice to zoom into it; click the center (or press Escape) to zoom back out. Hover a slice for its exact value.";
