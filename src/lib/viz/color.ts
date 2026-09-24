@@ -258,6 +258,32 @@ export function travelledFill(mode: ColorMode = "light"): string {
   return TRAVELLED_FILL[mode];
 }
 
+// Fill for a region with no data — intentionally light regardless of page
+// theme so it distinguishes from the ocean background. The map uses
+// colorMode="light" and renders visited regions in light terracotta, so
+// no-data regions should also be light rather than falling back to
+// var(--muted), which is dark in this app's dark-only page context.
+//
+// Deliberately paler than the ramp's low end (#fee1d7) to create clear
+// visual distinction: no-data is a neutral light tone, not a step on the
+// magnitude scale. Slightly warmer than pure neutral to harmonize with
+// the terracotta ramp's own warm hue family.
+//
+// Validated with the dataviz skill's `validate_palette.js` for separation
+// from ramp low (#fee1d7) and travelledFill light (#8ad0eb):
+//
+// | pair | normal ΔE | worst CVD ΔE |
+// |---|---|---|
+// | no-data `#f5ede7` vs ramp low `#fee1d7` | 6.5 PASS | 4.1 deutan PASS |
+// | no-data `#f5ede7` vs travelled `#8ad0eb` | 28.6 PASS | 20.1 protan PASS |
+const NO_DATA_FILL = "#f5ede7";
+
+/** Fill for a region with no logged data — a light neutral gray that
+ * distinguishes from both the sequential ramp and the ocean background. */
+export function noDataFill(): string {
+  return NO_DATA_FILL;
+}
+
 // #403's first pass at this (a desaturated near-gray midpoint, `#312d2a`
 // then `#d4ccc3`) fixed the dark-mode contrast bug but still read as flat
 // and washed out next to the two real poles — because a *neutral* midpoint

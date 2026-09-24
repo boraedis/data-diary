@@ -7,7 +7,7 @@ import { useD3 } from "@/hooks/use-d3";
 import { attachMarkHover, MARK_SPECS } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { categoricalColor, sequentialLogScale, travelledFill, type ColorMode } from "@/lib/viz/color";
+import { categoricalColor, sequentialLogScale, travelledFill, noDataFill, type ColorMode } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 
 // InteractiveGeo (#24) — the shared choropleth primitive. Generic over any
@@ -588,14 +588,15 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
    *
    * Precedence is value -> travelled -> no data. See `isTravelled`'s prop
    * comment for why a real value wins. */
+  const noDataColor = noDataFill();
   const resolveFill = useCallback(
     (d: DrawnFeature): { color: string; state: "value" | "travelled" | "none"; value: number | null } => {
       const v = d.getValue(d.feature);
       if (v != null && v > 0) return { color: colorScale(v), state: "value", value: v };
       if (d.isTravelled?.(d.feature)) return { color: travelledColor, state: "travelled", value: null };
-      return { color: "var(--muted)", state: "none", value: null };
+      return { color: noDataColor, state: "none", value: null };
     },
-    [colorScale, travelledColor],
+    [colorScale, travelledColor, noDataColor],
   );
 
   /** The off-ramp fills to name in the legend — only the ones actually
@@ -625,9 +626,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     }
     const out: { label: string; color: string }[] = [];
     if (travelled) out.push({ label: travelledLabel, color: travelledColor });
-    if (none) out.push({ label: noDataLabel, color: "var(--muted)" });
+    if (none) out.push({ label: noDataLabel, color: noDataColor });
     return out;
-  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel]);
+  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel, noDataColor]);
 
   const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - (legendSwatches.length ? LEGEND_SWATCH_ROW_HEIGHT : 0));
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
@@ -1115,7 +1116,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                         [
                           hoveredFill?.state === "travelled"
                             ? { label: travelledLabel, value: "", color: hoveredFill.color, variant: "swatch" as const }
-                            : { label: noDataLabel, value: "", color: "var(--muted-foreground)", variant: "swatch" as const },
+                            : { label: noDataLabel, value: "", color: noDataColor, variant: "swatch" as const },
                         ]),
                     // The optional secondary row — "first visited"-style
                     // extra context, appended below whichever primary row
