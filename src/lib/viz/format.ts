@@ -30,6 +30,18 @@ export function formatDuration(hours: number): string {
   return `${h}h ${m}m`;
 }
 
+/**
+ * A running total of hours — listening time, time watched, time trained —
+ * where `formatDuration`'s "h m" stops scaling: "1,234h 12m" is noise past
+ * the first few hours. Under 10 hours keeps minutes ("3h 20m", "45m"),
+ * since that's where they still change the reading; from 10 up it's whole
+ * hours with thousands separators ("128h", "1,234h").
+ */
+export function formatHoursTotal(hours: number): string {
+  if (hours < 10) return formatDuration(hours);
+  return `${formatThousandsNumber(Math.round(hours))}h`;
+}
+
 // --- Date ---------------------------------------------------------------
 
 export type DateFormatPreset = "short" | "month" | "monthYear" | "dayYear" | "weekday" | "weekdayYear";

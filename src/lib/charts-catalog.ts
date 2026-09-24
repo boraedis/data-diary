@@ -229,7 +229,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/places",
     title: "Place Leaderboard",
-    description: "A leaderboard of my most mentioned locations.",
+    description: "A leaderboard of my most mentioned places, regions, metros and categories.",
     category: "places",
   },
   {
@@ -259,7 +259,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/people-table",
     title: "People Leaderboard",
-    description: "A leaderboard of the people you've logged the most.",
+    description: "A leaderboard of the people and tags I've logged the most, by mentions or impact.",
     category: "people",
   },
   {
@@ -297,6 +297,36 @@ export const CHARTS: ChartEntry[] = [
     title: "City Heatmap",
     description: "A heatmap of the neighborhoods of Atlanta, DC, Dubai, NYC, and Istanbul describing where I have visited and spent time in.",
     category: "places",
+  },
+  {
+    href: "/charts/exercise-leaderboard",
+    title: "Exercise Leaderboard",
+    description: "A leaderboard of the exercises, focuses and categories I've spent the most time training.",
+    category: "health",
+  },
+  {
+    href: "/charts/music-leaderboard",
+    title: "Music Leaderboard",
+    description: "A leaderboard of the artists, albums, songs and genres I've listened to most.",
+    category: "entertainment",
+  },
+  {
+    href: "/charts/podcast-leaderboard",
+    title: "Podcast Leaderboard",
+    description: "A leaderboard of the podcasts, episodes and categories I've listened to most.",
+    category: "entertainment",
+  },
+  {
+    href: "/charts/entertainment-leaderboard",
+    title: "Entertainment Leaderboard",
+    description: "A leaderboard of time spent by entertainment type, title and location.",
+    category: "entertainment",
+  },
+  {
+    href: "/charts/sports-leaderboard",
+    title: "Sports Leaderboard",
+    description: "A leaderboard of the sports, leagues, conferences and teams I've watched most.",
+    category: "entertainment",
   },
   {
     href: "/charts/life-timeline",
