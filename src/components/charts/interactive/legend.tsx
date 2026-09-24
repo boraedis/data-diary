@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import * as d3 from "d3";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +39,32 @@ export function SeriesKey({
       style={{ backgroundColor: color }}
     />
   );
+}
+
+/**
+ * The measured height of a legend's wrapper, for a chart that reserves room
+ * for its legend out of a fixed height budget.
+ *
+ * The line and scroller primitives used to reserve one fixed row. That
+ * holds until the legend wraps — nine subs plus a "30-day averages" entry
+ * on a phone (#120) — and then the plot below overflows its box by a row.
+ * Measuring the real wrapper keeps the budget honest at any width. Pass the
+ * returned ref to the element wrapping `<Legend>`, with any gap below it as
+ * *padding* on that wrapper so the measurement includes it.
+ *
+ * `fallback` is used until the first measurement lands, and permanently
+ * where `ResizeObserver` doesn't exist (jsdom in tests), so a render there
+ * lays out exactly as before this hook existed.
+ */
+export function useLegendHeight(fallback: number) {
+  const [height, setHeight] = useState(fallback);
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, height] as const;
 }
 
 export type LegendSeries = {

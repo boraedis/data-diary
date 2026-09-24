@@ -1646,6 +1646,58 @@ export function getInstagramFollowingData(): Promise<DailyValue[]> {
   return dailyValuesOf(days.instagramFollowing);
 }
 
+// --- Subs (#120) -----------------------------------------------------------
+
+/**
+ * A day's nine sub scores (0–10), index-aligned with `SUB_NAMES` from
+ * `@/lib/days`. `null` means that sub was left blank that day — not
+ * logged, which is different from a logged zero (the entry form's "fill
+ * blanks with 0" button exists precisely because those are different
+ * acts), so charts must skip a blank rather than average it in as 0.
+ *
+ * One row per day with every sub on it, rather than nine separate
+ * `DailyValue[]` series: the subs calendar needs all nine side by side to
+ * blend a day's colour, and the line charts split the row per sub
+ * client-side, which is cheap at one row per day.
+ */
+export type SubsDay = { date: string; values: (number | null)[] };
+
+/** Days with at least one sub logged, oldest first. */
+export async function getSubsDailyData(): Promise<SubsDay[]> {
+  const db = getDb();
+  // Same column order as SUB_NAMES — ["A", "W", "C", "L", "Ni", "NO", "Ad",
+  // "D", "K"]. Spelled out rather than derived, because `days.ts` keeps its
+  // own name->column list private; recap-subs.ts makes the same call.
+  const columns = [
+    days.subA,
+    days.subW,
+    days.subC,
+    days.subL,
+    days.subNi,
+    days.subNO,
+    days.subAd,
+    days.subD,
+    days.subK,
+  ] as const;
+  const rows = await db
+    .select({
+      date: days.date,
+      a: columns[0],
+      w: columns[1],
+      c: columns[2],
+      l: columns[3],
+      ni: columns[4],
+      no: columns[5],
+      ad: columns[6],
+      d: columns[7],
+      k: columns[8],
+    })
+    .from(days)
+    .where(or(...columns.map((column) => isNotNull(column))))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, values: [r.a, r.w, r.c, r.l, r.ni, r.no, r.ad, r.d, r.k] }));
+}
+
 // --- Where you were, over time (#221) --------------------------------------
 
 /** One day and the countries it touched. Deduplicated: a day whose two

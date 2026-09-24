@@ -17,7 +17,7 @@ import type { TrackingSpan } from "@/lib/viz/tracking-span";
 /** A `DailyValue` optionally carrying the categories that made up the day,
  * which the primitive blends into one cell colour. */
 export type CalendarDay = DailyValue & {
-  categories?: { label: string; color: string; weight?: number }[];
+  categories?: { label: string; color: string; weight?: number; value?: string }[];
 };
 
 /**
@@ -43,6 +43,8 @@ export function CalendarExplorer({
   valueLabel,
   colorInterpolator,
   extraFilters,
+  legend,
+  blendIntensityCap,
   ariaLabel,
 }: {
   /** Days to draw. A day may carry a `categories` breakdown, in which case
@@ -68,6 +70,14 @@ export function CalendarExplorer({
   /** Extra controls rendered before the range picker. The caller owns
    * their state and reshapes `data` accordingly. */
   extraFilters?: React.ReactNode;
+  /** A category key rendered above the grid, inside the card. A blended
+   * calendar needs one — `InteractiveCalendar` suppresses its own low->high
+   * legend in blend mode and leaves naming the categories to the caller —
+   * and a plain one doesn't, so it's opt-in. */
+  legend?: React.ReactNode;
+  /** Passed straight through to `InteractiveCalendar` — see its doc
+   * comment. Only meaningful for a blended calendar. */
+  blendIntensityCap?: number;
   ariaLabel: string;
 }) {
   const [range, setRange] = useState<[Date, Date] | null>(null);
@@ -104,6 +114,7 @@ export function CalendarExplorer({
       }
     >
       <ChartCard empty={points.length === 0}>
+        {legend}
         <ResponsiveChart minWidth={240} className="min-h-[160px]">
           {({ width }) => (
             <InteractiveCalendar
@@ -112,6 +123,7 @@ export function CalendarExplorer({
               formatValue={formatValue}
               valueLabel={valueLabel}
               colorInterpolator={colorInterpolator}
+              blendIntensityCap={blendIntensityCap}
               ariaLabel={ariaLabel}
             />
           )}

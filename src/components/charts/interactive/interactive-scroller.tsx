@@ -9,7 +9,7 @@ import { categoricalColor } from "@/lib/viz/color";
 import { drawStandardAxes, styleAxis } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
-import { Legend, type LegendSeries } from "./legend";
+import { Legend, useLegendHeight, type LegendSeries } from "./legend";
 import type { InteractiveLineRegion } from "./interactive-line";
 
 // InteractiveScroller (#117) — a standalone primitive for raw, day-cadence
@@ -35,7 +35,7 @@ import type { InteractiveLineRegion } from "./interactive-line";
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
 const MINIMAP_HEIGHT = 56; // strip itself
 const MINIMAP_AXIS_HEIGHT = 20; // its own bottom x-axis, per #117 follow-up
-const LEGEND_HEIGHT = 28;
+const LEGEND_HEIGHT = 28; // one-row starting guess; measured once rendered (useLegendHeight)
 const MIN_MAIN_HEIGHT = 160;
 const DEFAULT_MOVING_AVERAGE_WINDOW = 30; // legacy's movingAverageSize default
 // A wash, never a saturated block — matches MARK_SPECS.area.fillOpacity
@@ -102,6 +102,11 @@ export type InteractiveScrollerProps = {
   dateFormat?: DateFormatPreset;
   margin?: Partial<typeof DEFAULT_MARGIN>;
   ariaLabel?: string;
+  /** Legend ids that start hidden on first render — series ids, or
+   * `"average"` for the shared rolling-average overlay. Same contract as
+   * `InteractiveLine`'s prop of the same name: read once as the toggle
+   * state's initial value, after which the reader owns it. */
+  initialHiddenIds?: readonly string[];
 };
 
 type ResolvedSeries = InteractiveScrollerSeries & { color: string };
@@ -291,10 +296,13 @@ function useScrollerCrosshair(series: ResolvedSeries[], x: d3.ScaleTime<number, 
 
 type ResolvedRegion = InteractiveScrollerRegion & { depth: number };
 
-/** Bottom minimap strip — always plots every series' SMOOTHED line across
- * the FULL range, per legacy's own spec, regardless of whether that
- * series' average overlay is currently toggled off in the main plot (or
- * whether that series opted into an average at all): the minimap's job is
+/** Bottom minimap strip — always plots every *visible* series' SMOOTHED
+ * line across the FULL range, per legacy's own spec, regardless of whether
+ * that series' average overlay is currently toggled off in the main plot
+ * (or whether that series opted into an average at all). A series hidden
+ * via the legend is dropped here too, like everywhere else — with nine
+ * subs opening six-hidden (#120), drawing hidden ones here left a strip of
+ * lines the main plot didn't have. The minimap's job is
  * an at-a-glance shape of the whole history, and a smoothed line reads
  * better at that scale than a noisy raw one would — legacy computes this
  * unconditionally too (`means`, independent of `movingAverageShow`). Also
@@ -429,6 +437,7 @@ export function InteractiveScroller({
   dateFormat = "weekday",
   margin,
   ariaLabel,
+  initialHiddenIds,
 }: InteractiveScrollerProps) {
   const MARGIN = { ...DEFAULT_MARGIN, ...margin };
   const clipId = useId().replace(/[:]/g, "");
@@ -458,7 +467,7 @@ export function InteractiveScroller({
       ? `${movingAverageWindow}-day average${seriesWithAverage.length > 1 ? "s" : ""}`
       : null;
 
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set(initialHiddenIds));
   const showAverageOverlay = !hiddenIds.has("average");
   const visibleSeries = resolvedSeries.filter((s) => !hiddenIds.has(s.id));
 
@@ -471,7 +480,7 @@ export function InteractiveScroller({
   const [visibleDomain, setVisibleDomain] = useState<[Date, Date] | null>(null);
   const effectiveDomain = visibleDomain ?? fullXDomain;
 
-  const legendReserve = LEGEND_HEIGHT;
+  const [legendRef, legendReserve] = useLegendHeight(LEGEND_HEIGHT);
   const minimapReserve = MINIMAP_HEIGHT + MINIMAP_AXIS_HEIGHT;
   const mainHeight = Math.max(MIN_MAIN_HEIGHT, height - legendReserve - minimapReserve);
 
@@ -790,19 +799,20 @@ export function InteractiveScroller({
 
   return (
     <div style={{ position: "relative", width, height }}>
-      <Legend
-        series={legendSeries}
-        className="mb-1.5"
-        onToggle={(id) => {
-          setHiddenIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-          });
-        }}
-        hiddenIds={hiddenIds}
-      />
+      <div ref={legendRef} className="pb-1.5">
+        <Legend
+          series={legendSeries}
+          onToggle={(id) => {
+            setHiddenIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+          }}
+          hiddenIds={hiddenIds}
+        />
+      </div>
       <div style={{ position: "relative", width, height: mainHeight }}>
         <svg ref={ref} />
         <div
@@ -829,7 +839,7 @@ export function InteractiveScroller({
         ) : null}
       </div>
       <Minimap
-        smoothedSeries={resolvedSeries.map((s) => ({ color: s.color, points: averagesById.get(s.id) ?? [] }))}
+        smoothedSeries={visibleSeries.map((s) => ({ color: s.color, points: averagesById.get(s.id) ?? [] }))}
         regions={resolvedRegions}
         width={width}
         fullDomain={fullXDomain}

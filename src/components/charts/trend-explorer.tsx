@@ -39,12 +39,14 @@ export function TrendExplorer<T extends { date: string }>({
   color,
   getValue,
   aggregate,
+  band,
   valueFormat,
   tooltipLabel,
   extraSeries,
   extraFilters,
   backHref,
   backLabel,
+  initialHiddenIds,
   ariaLabel,
 }: {
   data: T[];
@@ -76,6 +78,12 @@ export function TrendExplorer<T extends { date: string }>({
    * `extraSeries` below is for a second *related* value on the same
    * footing (sleep vs. sleep+naps), not an independently-aggregated one. */
   aggregate: "mean" | "sum";
+  /** Whether lines get their ±1 std-dev band. Defaults to on for a mean
+   * and off for a sum (see the comment in `computePoints`). Pass `false`
+   * for a mean whose spread says nothing the mean doesn't already — a
+   * percentage of yes/no days, where the spread is fixed by the percentage
+   * itself (Subs Trend's "% of days"). */
+  band?: boolean;
   valueFormat: (value: number) => string;
   /** Secondary tooltip line for a bucket, given the rows *this series*
    * actually included (after its own `getValue` filtering, if any) — not
@@ -100,8 +108,13 @@ export function TrendExplorer<T extends { date: string }>({
    * "/public-charts"/"Charts"), same pattern `SleepCalendarChart` uses. */
   backHref?: string;
   backLabel?: string;
+  /** Series ids the legend opens with toggled off — passed straight
+   * through to `InteractiveLine`. For a chart with more lines than read
+   * well at once (the nine subs, #120); the reader toggles the rest in. */
+  initialHiddenIds?: readonly string[];
   ariaLabel: string;
 }) {
+  const showBand = aggregate === "mean" && band !== false;
   const [period, setPeriod] = useState<Period>("month");
   const [range, setRange] = useState<[Date, Date] | null>(null);
 
@@ -168,23 +181,41 @@ export function TrendExplorer<T extends { date: string }>({
     return { points, itemsByPoint };
   };
 
+  // getValue/extraSeries are usually inline arrows, so depending on their
+  // identity would rebuild every render. What actually changes which values
+  // a line reads is *which* line it is, so each series' id + label stand in
+  // for its closure — a caller that swaps a series' meaning changes one of
+  // them (Happiness Trend's work-day split renames the primary line from
+  // "happiness" to "workday"; Sleep Trend's naps measure relabels "Sleep"
+  // to "Sleep + Naps"), and that's what triggers the recompute. Keying on
+  // `buckets`/`aggregate` alone (as before) left the primary line showing
+  // the previous mode's values under the new mode's name.
+  const primaryKey = `${seriesId}:${label}`;
+  const extraSeriesKey = (extraSeries ?? []).map((s) => `${s.id}:${s.label}`).join("|");
+
   const primary = useMemo(
     () => computePoints(getValue),
-    // getValue is stable per call site in practice; including it would
-    // rebuild on every render for callers passing an inline arrow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate],
+    [buckets, aggregate, primaryKey],
   );
   const points = primary.points;
 
   const extraComputed = useMemo(
     () => (extraSeries ?? []).map((s) => computePoints(s.getValue)),
-    // extraSeries entries' getValues are stable per call site, same as
-    // getValue above; extraSeries.length is the real dependency (whether
-    // the set of lines itself changed), not the array identity.
+    // See `extraSeriesKey` above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate, extraSeries?.length],
+    [buckets, aggregate, extraSeriesKey],
   );
+
+  // With more than one line, every tooltip row needs its line's name: the
+  // default "N days" caption alone would leave the swatch colour as the
+  // only thing saying which row is which. A lone line's name is already
+  // the chart's title, so it keeps the bare caption.
+  const multiSeries = (extraSeries?.length ?? 0) > 0;
+  const rowLabel = (seriesLabel: string, items: T[]) => {
+    const caption = tooltipLabel ? tooltipLabel(items) : `${items.length} day${items.length === 1 ? "" : "s"}`;
+    return multiSeries ? `${seriesLabel} · ${caption}` : caption;
+  };
 
   // Marker radius by sample size — a bucket built from 30 days reads as
   // more confident than one built from 2.
@@ -224,33 +255,27 @@ export function TrendExplorer<T extends { date: string }>({
                   label,
                   color,
                   points,
-                  band: aggregate === "mean",
+                  band: showBand,
                   markers: (_point, i) => radiusScale(primary.itemsByPoint[i]?.length ?? 0),
-                  tooltipLabel: (_point, i) => {
-                    const items = primary.itemsByPoint[i] ?? [];
-                    if (tooltipLabel) return tooltipLabel(items);
-                    return `${items.length} day${items.length === 1 ? "" : "s"}`;
-                  },
+                  tooltipLabel: (_point, i) => rowLabel(label, primary.itemsByPoint[i] ?? []),
                 },
                 ...(extraSeries ?? []).map((s, si) => ({
                   id: s.id,
                   label: s.label,
                   color: s.color,
                   points: extraComputed[si]?.points ?? [],
-                  band: aggregate === "mean",
+                  band: showBand,
                   markers: (_point: InteractiveLinePoint, pointIndex: number) =>
                     radiusScale(extraComputed[si]?.itemsByPoint[pointIndex]?.length ?? 0),
-                  tooltipLabel: (_point: InteractiveLinePoint, pointIndex: number) => {
-                    const items = extraComputed[si]?.itemsByPoint[pointIndex] ?? [];
-                    if (tooltipLabel) return tooltipLabel(items);
-                    return `${items.length} day${items.length === 1 ? "" : "s"}`;
-                  },
+                  tooltipLabel: (_point: InteractiveLinePoint, pointIndex: number) =>
+                    rowLabel(s.label, extraComputed[si]?.itemsByPoint[pointIndex] ?? []),
                 })),
               ]}
               width={width}
               height={height}
               valueFormat={valueFormat}
               dateFormat="monthYear"
+              initialHiddenIds={initialHiddenIds}
               ariaLabel={ariaLabel}
             />
           )}

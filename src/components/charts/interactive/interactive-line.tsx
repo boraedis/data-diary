@@ -9,7 +9,7 @@ import { categoricalColor } from "@/lib/viz/color";
 import { drawStandardAxes } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
-import { Legend } from "./legend";
+import { Legend, useLegendHeight } from "./legend";
 
 // Click-to-toggle legend (`hiddenIds`/`onToggle`) added for the Exercise
 // Trend chart's category/exercise breakdown (#411) — the same pattern
@@ -32,6 +32,8 @@ const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
 // height budget (passed in from ResponsiveChart) before the main plot gets
 // whatever's left — the same "subtract fixed chrome, floor the remainder"
 // approach WeightScrollerChart used pre-#18 for its overview strip alone.
+// The legend's slice is measured once it renders (`useLegendHeight`), since
+// a long one wraps; LEGEND_HEIGHT is only its one-row starting guess.
 const OVERVIEW_HEIGHT = 64;
 const LEGEND_HEIGHT = 28;
 const MIN_MAIN_HEIGHT = 160;
@@ -142,6 +144,14 @@ export type InteractiveLineProps = {
    * component's own generic default), since it's the only thing a
    * screen-reader/keyboard user gets before they start exploring points. */
   ariaLabel?: string;
+  /** Series ids that start hidden (legend-toggled off) on first render —
+   * for a chart carrying more series than read well at once, where the
+   * caller wants to open on a sensible subset and let the reader toggle
+   * the rest in (the subs trend, #120: nine subs, opening on three). Read
+   * once, as the legend toggle state's initial value: the reader owns the
+   * toggles from then on, so a later change to this prop doesn't clobber
+   * what they've switched on or off. */
+  initialHiddenIds?: readonly string[];
 };
 
 type ResolvedSeries = InteractiveLineSeries & { color: string };
@@ -329,12 +339,13 @@ export function InteractiveLine({
   dateFormat = "weekday",
   margin,
   ariaLabel,
+  initialHiddenIds,
 }: InteractiveLineProps) {
   const MARGIN = { ...DEFAULT_MARGIN, ...margin };
 
   const resolvedSeries = useMemo(() => resolveSeriesColors(series), [series]);
 
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set(initialHiddenIds));
   const visibleSeries = useMemo(
     () => resolvedSeries.filter((s) => !hiddenIds.has(s.id)),
     [resolvedSeries, hiddenIds],
@@ -358,7 +369,8 @@ export function InteractiveLine({
   const hasOverview = zoom === "brush" || zoom === "both";
   const hasDirectZoom = zoom === "direct" || zoom === "both";
 
-  const legendReserve = hasLegend ? LEGEND_HEIGHT : 0;
+  const [legendRef, legendHeight] = useLegendHeight(LEGEND_HEIGHT);
+  const legendReserve = hasLegend ? legendHeight : 0;
   const overviewReserve = hasOverview ? OVERVIEW_HEIGHT : 0;
   const mainHeight = Math.max(MIN_MAIN_HEIGHT, height - legendReserve - overviewReserve);
 
@@ -372,15 +384,23 @@ export function InteractiveLine({
 
   const resolvedYDomain = useMemo<[number, number]>(() => {
     if (yDomain) return yDomain;
-    const visible = visibleSeries.flatMap((s) =>
-      s.points.filter((p) => p.x >= effectiveDomain[0] && p.x <= effectiveDomain[1]),
+    // Band bounds only count toward the domain while a band is actually
+    // drawn (exactly one visible series — see `band`'s own doc comment).
+    // Counting them regardless left several-lines-at-once views padded out
+    // to fit spreads nobody could see, squashing the lines themselves.
+    const bandsDrawn = visibleSeries.length === 1;
+    const values = visibleSeries.flatMap((s) =>
+      s.points
+        .filter((p) => p.x >= effectiveDomain[0] && p.x <= effectiveDomain[1])
+        .flatMap((p) => {
+          const vs = [p.y];
+          if (bandsDrawn && s.band) {
+            if (p.bandLow !== undefined) vs.push(p.bandLow);
+            if (p.bandHigh !== undefined) vs.push(p.bandHigh);
+          }
+          return vs;
+        }),
     );
-    const values = visible.flatMap((p) => {
-      const vs = [p.y];
-      if (p.bandLow !== undefined) vs.push(p.bandLow);
-      if (p.bandHigh !== undefined) vs.push(p.bandHigh);
-      return vs;
-    });
     const [lo, hi] = (d3.extent(values.length ? values : [0, 1]) as [number, number]);
     const pad = (hi - lo) * 0.1 || 1;
     return [lo - pad, hi + pad];
@@ -604,19 +624,20 @@ export function InteractiveLine({
   return (
     <div style={{ position: "relative", width, height }}>
       {hasLegend ? (
-        <Legend
-          series={resolvedSeries.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
-          className="mb-1.5"
-          onToggle={(id) => {
-            setHiddenIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            });
-          }}
-          hiddenIds={hiddenIds}
-        />
+        <div ref={legendRef} className="pb-1.5">
+          <Legend
+            series={resolvedSeries.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
+            onToggle={(id) => {
+              setHiddenIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              });
+            }}
+            hiddenIds={hiddenIds}
+          />
+        </div>
       ) : null}
       <div style={{ position: "relative", width, height: mainHeight }}>
         <svg ref={ref} />

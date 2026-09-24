@@ -359,8 +359,14 @@ The one chart category with no day-entry counterpart is `life`
 while this one reads the profile tables. Anything else sourced from
 declared profile intervals belongs there too.
 
-Still open: the subs-chart rebuild onto Scroller/Line (#120),
-InteractiveLine's own label/hover/zoom pass (#110), and a per-primitive
+The subs charts (#120) are rebuilt as three pages — Subs Trend
+(InteractiveLine), Daily Subs (InteractiveScroller) and a blended Subs
+Calendar — sharing one named per-sub palette in `src/lib/viz/subs.ts`
+rather than the categorical slots (nine subs overflow five). The line
+charts open on A/W/Ni via the primitives' `initialHiddenIds`, with the
+rest toggled in from the legend.
+
+Still open: InteractiveLine's own label/hover/zoom pass (#110), and a per-primitive
 "notes & polish backlog" sub-issue for each primitive from the original
 epic (#111-#116). Each is workable independently — check the issue itself
 for its own scope/API-shape notes before starting.
