@@ -89,6 +89,18 @@
      range for visual consistency; not run through validate_palette.js
      since it's a single fixed accent, not a new palette.*/
   --metric-weight: oklch(0.55 0.16 300);
+  /* Happiness's own green (chart-3, hue 150) split into a work-day/non-
+     work-day pair (#410's day-type split on Happiness Trend) — work days
+     get a mustardy, olive-shifted variant of that same green (hue 105)
+     rather than an unrelated hue, so the two lines read as "one metric,
+     two conditions" instead of two different metrics. Unlike --metric-weight
+     above, this *is* run through validate_palette.js — a green/olive pair
+     is a genuinely hard case for red-green color vision deficiency (both
+     sit on the same confusion axis), and an earlier, less-shifted candidate
+     (hue 90) failed that check outright (ΔE 3.8 CVD against the green,
+     "hard to tell apart even with full color vision"); hue 105 clears it
+     (ΔE 18.1 normal / 12.6 protan against dark-mode chart-3's #0d7435).*/
+  --metric-happiness-workday: oklch(0.49 0.14 100);
   /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
   --radius: 0.75rem;
   --sidebar: oklch(0.97 0.01 65);
@@ -136,6 +148,7 @@
   --chart-4: oklch(0.65 0.11 20);
   --chart-5: oklch(0.52 0.14 225);
   --metric-weight: oklch(0.68 0.16 300);
+  --metric-happiness-workday: oklch(0.64 0.14 105);
   --sidebar: oklch(0.19 0.016 48);
   --sidebar-foreground: oklch(0.96 0.012 70);
   --sidebar-primary: oklch(0.72 0.16 40);

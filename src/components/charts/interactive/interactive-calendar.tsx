@@ -194,8 +194,13 @@ export type InteractiveCalendarPoint = {
    * pass it where the split itself is the point (minutes on phone against
    * minutes on laptop — a day spent mostly on one should look mostly like
    * that one, not like an even mix).
+   *
+   * `value` is optional tooltip text shown beside the category's name — for
+   * a weighted mix where the weight itself is worth reading (each sub's
+   * score behind a subs-calendar day, #120). Omit it where the category's
+   * presence is the whole story (a tagged group was there or it wasn't).
    */
-  categories?: { label: string; color: string; weight?: number }[];
+  categories?: { label: string; color: string; weight?: number; value?: string }[];
 };
 
 export type InteractiveCalendarProps = {
@@ -249,11 +254,20 @@ export type InteractiveCalendarProps = {
    * low/high text labels still show the data's real, un-inset min/max —
    * only the color mapping (and its hover indicator) is inset. */
   domainInset?: number;
+  /** Blend mode only: the value at which a blended cell reaches full
+   * colour, instead of the data's own max. A history whose maximum is a
+   * rare outlier (a subs day totalling 30 when the median is 5, #120)
+   * otherwise spends the whole intensity range on that one day and paints
+   * every ordinary day faint. Values at or above the cap all show full
+   * colour; the tooltip still reports the real value. Ignored outside
+   * blend mode, where `domainInset` does the equivalent job for the
+   * sequential ramp. */
+  blendIntensityCap?: number;
   ariaLabel?: string;
 };
 
 type YearGroup = { year: number; days: Map<string, { value: number; categories: DayCategories }> };
-type DayCategories = { label: string; color: string }[] | undefined;
+type DayCategories = { label: string; color: string; value?: string }[] | undefined;
 type CellDatum = { dateStr: string; value: number; categories: DayCategories; week: number; dow: number };
 type Hovered = {
   dateStr: string;
@@ -272,6 +286,7 @@ export function InteractiveCalendar({
   divergingMidpoint,
   colorInterpolator,
   domainInset,
+  blendIntensityCap,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -466,12 +481,18 @@ export function InteractiveCalendar({
     (value: number, categories: DayCategories): string => {
       if (!categories || categories.length === 0) return colorScale(value);
       const blend = blendColors(categories);
-      const span = domain[1] - domain[0];
+      // `hasValueSpan` short-circuits straight to full intensity (`t = 1`)
+      // regardless of `blendIntensityCap`: a cap only means something when
+      // there's a real spread to cap the top of — DayTypeCalendarChart's
+      // constant `value: 1` on every cell (see `hasValueSpan`'s own
+      // comment) has no such spread, so there's nothing for a cap to do.
+      const top = blendIntensityCap !== undefined ? Math.min(domain[1], blendIntensityCap) : domain[1];
+      const span = top - domain[0];
       const t = !hasValueSpan ? 1 : span > 0 ? (value - domain[0]) / span : 1;
       const intensity = MIN_INTENSITY + (1 - MIN_INTENSITY) * Math.min(1, Math.max(0, t));
       return d3.interpolateLab(colorScale(domain[0]), blend)(intensity);
     },
-    [colorScale, domain, hasValueSpan],
+    [colorScale, domain, hasValueSpan, blendIntensityCap],
   );
 
   const [hovered, setHovered] = useState<Hovered | null>(null);
@@ -624,7 +645,7 @@ export function InteractiveCalendar({
               // categories behind it have to be nameable on hover.
               ...(hovered.categories ?? []).map((c) => ({
                 label: c.label,
-                value: "",
+                value: c.value ?? "",
                 color: c.color,
               })),
             ]}

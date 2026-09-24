@@ -13,15 +13,15 @@
  */
 
 export const LINE_INTERACTION_GUIDE =
-  "Hover a point for its exact value and date. The shaded band (where shown) is ±1 standard deviation around that period's plotted average; marker size shows how many days fed the point.";
+  "Hover a point for its exact value and date. With more than one line, click a legend entry to hide or show that line. The shaded band is ±1 standard deviation around that period's plotted average, drawn only while a single line is visible; marker size shows how many days fed the point.";
 
 export const SCROLLER_INTERACTION_GUIDE =
-  "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry.";
+  "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry. Click a legend entry to hide or show that line or the rolling average.";
 
 export const HIST_INTERACTION_GUIDE = "Hover a bar for its exact count.";
 
 export const CALENDAR_INTERACTION_GUIDE =
-  "Each cell is one day, shaded by its value — hover a cell for the exact figure. Use the range picker above to focus on a shorter stretch.";
+  "Each cell is one day, shaded by its value — hover a cell for the exact figure. Where a day is made of several categories, its colour is their mix, and the tooltip lists what went into it. Use the range picker above to focus on a shorter stretch.";
 
 export const AREA_INTERACTION_GUIDE =
   "Hover or focus a band and use the arrow keys to inspect it. Click a legend entry to hide that category; click it again to bring it back.";

@@ -39,10 +39,14 @@ export function TrendExplorer<T extends { date: string }>({
   color,
   getValue,
   aggregate,
+  band,
   valueFormat,
   tooltipLabel,
   extraSeries,
   extraFilters,
+  backHref,
+  backLabel,
+  initialHiddenIds,
   ariaLabel,
 }: {
   data: T[];
@@ -57,31 +61,60 @@ export function TrendExplorer<T extends { date: string }>({
   seriesId: string;
   label: string;
   color: string;
-  getValue: (item: T) => number;
+  /** Return `undefined` to exclude an item from *this series'* bucket
+   * math entirely — not counted toward its mean/sum, not diluting its
+   * std-dev band — rather than, say, mapping it to 0. This is what makes
+   * a same-buckets split series possible (a "work days" line whose
+   * `getValue` returns `undefined` for every non-work day): each series
+   * can effectively pre-filter its own share of a bucket's rows while
+   * still sharing the one bucketing pass with every other series on the
+   * chart. A bucket where every item is excluded produces no point at all
+   * for that series (a real gap — e.g. a week with zero work days on the
+   * "work days" line — not a 0 or a NaN). */
+  getValue: (item: T) => number | undefined;
   /** `mean` for a rate ("cups per day"), `sum` for a volume ("hours
    * trained"). The distinction changes what an empty bucket means, so it's
    * required rather than defaulted. Shared by every series on this chart —
    * `extraSeries` below is for a second *related* value on the same
    * footing (sleep vs. sleep+naps), not an independently-aggregated one. */
   aggregate: "mean" | "sum";
+  /** Whether lines get their ±1 std-dev band. Defaults to on for a mean
+   * and off for a sum (see the comment in `computePoints`). Pass `false`
+   * for a mean whose spread says nothing the mean doesn't already — a
+   * percentage of yes/no days, where the spread is fixed by the percentage
+   * itself (Subs Trend's "% of days"). */
+  band?: boolean;
   valueFormat: (value: number) => string;
-  /** Secondary tooltip line for a bucket, given the rows behind it. Shared
-   * across the primary series and `extraSeries` — they're buckets of the
-   * same underlying rows, just summarized two different ways. */
+  /** Secondary tooltip line for a bucket, given the rows *this series*
+   * actually included (after its own `getValue` filtering, if any) — not
+   * necessarily every row in the bucket. */
   tooltipLabel?: (items: T[]) => string;
   /** Additional line(s) sharing this chart's own buckets, aggregate, and
    * tooltip — e.g. "sleep" and "sleep+naps" plotted together so both are
-   * visible at once instead of only ever one or the other. Each gets its
-   * own `getValue`/band computed from the exact same buckets as the
-   * primary series, not a second independent dataset. */
-  extraSeries?: { id: string; label: string; color: string; getValue: (item: T) => number }[];
+   * visible at once instead of only ever one or the other, or a boolean
+   * split (a "work days" line and an "other days" line, each excluding
+   * the other's rows via `getValue`). Each gets its own `getValue`/band
+   * computed from the exact same buckets as the primary series, not a
+   * second independent dataset. */
+  extraSeries?: { id: string; label: string; color: string; getValue: (item: T) => number | undefined }[];
   /** Extra controls for the filters row, rendered before the period and
    * range pickers. The caller owns their state and pre-filters `data`
    * accordingly — this component only lays them out, so a chart can add a
    * dimension without this one growing a mode for it. */
   extraFilters?: React.ReactNode;
+  /** Passed straight through to the internal `ChartPage` — see its own
+   * defaults ("/charts"/"Charts"). Only needed by a chart whose public and
+   * private pages both render this same component (the public page passes
+   * "/public-charts"/"Charts"), same pattern `SleepCalendarChart` uses. */
+  backHref?: string;
+  backLabel?: string;
+  /** Series ids the legend opens with toggled off — passed straight
+   * through to `InteractiveLine`. For a chart with more lines than read
+   * well at once (the nine subs, #120); the reader toggles the rest in. */
+  initialHiddenIds?: readonly string[];
   ariaLabel: string;
 }) {
+  const showBand = aggregate === "mean" && band !== false;
   const [period, setPeriod] = useState<Period>("month");
   const [range, setRange] = useState<[Date, Date] | null>(null);
 
@@ -104,10 +137,23 @@ export function TrendExplorer<T extends { date: string }>({
 
   // Shared by the primary series and every `extraSeries` entry — they all
   // bucket the exact same rows, just summarized by different `getValue`s,
-  // so the bucketing/std-dev math only needs writing once.
-  const computePoints = (valueOf: (item: T) => number): InteractiveLinePoint[] =>
-    buckets.map(({ start, items }) => {
-      const values = items.map(valueOf);
+  // so the bucketing/std-dev math only needs writing once. Returns
+  // `itemsByPoint` alongside `points`, in step with each other (both
+  // filtered to buckets where this series actually has at least one
+  // included item), rather than a plain `InteractiveLinePoint[]` callers
+  // could index into `buckets` by position — a series that excludes some
+  // rows (`getValue` returning `undefined` for them) can end up with
+  // *fewer* points than there are buckets, so "point i" and "bucket i" are
+  // no longer the same bucket once any series does that.
+  const computePoints = (
+    valueOf: (item: T) => number | undefined,
+  ): { points: InteractiveLinePoint[]; itemsByPoint: T[][] } => {
+    const points: InteractiveLinePoint[] = [];
+    const itemsByPoint: T[][] = [];
+    for (const { start, items } of buckets) {
+      const included = items.filter((item) => valueOf(item) !== undefined);
+      if (included.length === 0) continue;
+      const values = included.map((item) => valueOf(item) as number);
       const total = values.reduce((sum, v) => sum + v, 0);
       const mean = total / values.length;
       // A spread band only means something for a mean — for a sum it
@@ -123,32 +169,53 @@ export function TrendExplorer<T extends { date: string }>({
       // bias. A single-item bucket has zero variance by construction —
       // that's a real, honest band (one data point, no spread to show),
       // not a bug.
-      const variance =
-        values.length > 0 ? values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length : 0;
+      const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
       const stdDev = Math.sqrt(variance);
-      return {
+      points.push({
         x: parseDate(start),
         y: aggregate === "sum" ? total : mean,
         ...(aggregate === "mean" ? { bandLow: mean - stdDev, bandHigh: mean + stdDev } : {}),
-      };
-    });
+      });
+      itemsByPoint.push(included);
+    }
+    return { points, itemsByPoint };
+  };
 
-  const points = useMemo<InteractiveLinePoint[]>(
+  // getValue/extraSeries are usually inline arrows, so depending on their
+  // identity would rebuild every render. What actually changes which values
+  // a line reads is *which* line it is, so each series' id + label stand in
+  // for its closure — a caller that swaps a series' meaning changes one of
+  // them (Happiness Trend's work-day split renames the primary line from
+  // "happiness" to "workday"; Sleep Trend's naps measure relabels "Sleep"
+  // to "Sleep + Naps"), and that's what triggers the recompute. Keying on
+  // `buckets`/`aggregate` alone (as before) left the primary line showing
+  // the previous mode's values under the new mode's name.
+  const primaryKey = `${seriesId}:${label}`;
+  const extraSeriesKey = (extraSeries ?? []).map((s) => `${s.id}:${s.label}`).join("|");
+
+  const primary = useMemo(
     () => computePoints(getValue),
-    // getValue is stable per call site in practice; including it would
-    // rebuild on every render for callers passing an inline arrow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate],
+    [buckets, aggregate, primaryKey],
+  );
+  const points = primary.points;
+
+  const extraComputed = useMemo(
+    () => (extraSeries ?? []).map((s) => computePoints(s.getValue)),
+    // See `extraSeriesKey` above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [buckets, aggregate, extraSeriesKey],
   );
 
-  const extraPoints = useMemo<InteractiveLinePoint[][]>(
-    () => (extraSeries ?? []).map((s) => computePoints(s.getValue)),
-    // extraSeries entries' getValues are stable per call site, same as
-    // getValue above; extraSeries.length is the real dependency (whether
-    // the set of lines itself changed), not the array identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate, extraSeries?.length],
-  );
+  // With more than one line, every tooltip row needs its line's name: the
+  // default "N days" caption alone would leave the swatch colour as the
+  // only thing saying which row is which. A lone line's name is already
+  // the chart's title, so it keeps the bare caption.
+  const multiSeries = (extraSeries?.length ?? 0) > 0;
+  const rowLabel = (seriesLabel: string, items: T[]) => {
+    const caption = tooltipLabel ? tooltipLabel(items) : `${items.length} day${items.length === 1 ? "" : "s"}`;
+    return multiSeries ? `${seriesLabel} · ${caption}` : caption;
+  };
 
   // Marker radius by sample size — a bucket built from 30 days reads as
   // more confident than one built from 2.
@@ -166,6 +233,8 @@ export function TrendExplorer<T extends { date: string }>({
       title={title}
       description={description}
       info={{ interactionGuide: LINE_INTERACTION_GUIDE, methodology, trackingSpan }}
+      backHref={backHref}
+      backLabel={backLabel}
       filters={
         domain ? (
           <>
@@ -186,33 +255,27 @@ export function TrendExplorer<T extends { date: string }>({
                   label,
                   color,
                   points,
-                  band: aggregate === "mean",
-                  markers: (_point, i) => radiusScale(buckets[i]?.items.length ?? 0),
-                  tooltipLabel: (_point, i) => {
-                    const items = buckets[i]?.items ?? [];
-                    if (tooltipLabel) return tooltipLabel(items as T[]);
-                    return `${items.length} day${items.length === 1 ? "" : "s"}`;
-                  },
+                  band: showBand,
+                  markers: (_point, i) => radiusScale(primary.itemsByPoint[i]?.length ?? 0),
+                  tooltipLabel: (_point, i) => rowLabel(label, primary.itemsByPoint[i] ?? []),
                 },
-                ...(extraSeries ?? []).map((s, i) => ({
+                ...(extraSeries ?? []).map((s, si) => ({
                   id: s.id,
                   label: s.label,
                   color: s.color,
-                  points: extraPoints[i] ?? [],
-                  band: aggregate === "mean",
+                  points: extraComputed[si]?.points ?? [],
+                  band: showBand,
                   markers: (_point: InteractiveLinePoint, pointIndex: number) =>
-                    radiusScale(buckets[pointIndex]?.items.length ?? 0),
-                  tooltipLabel: (_point: InteractiveLinePoint, pointIndex: number) => {
-                    const items = buckets[pointIndex]?.items ?? [];
-                    if (tooltipLabel) return tooltipLabel(items as T[]);
-                    return `${items.length} day${items.length === 1 ? "" : "s"}`;
-                  },
+                    radiusScale(extraComputed[si]?.itemsByPoint[pointIndex]?.length ?? 0),
+                  tooltipLabel: (_point: InteractiveLinePoint, pointIndex: number) =>
+                    rowLabel(s.label, extraComputed[si]?.itemsByPoint[pointIndex] ?? []),
                 })),
               ]}
               width={width}
               height={height}
               valueFormat={valueFormat}
               dateFormat="monthYear"
+              initialHiddenIds={initialHiddenIds}
               ariaLabel={ariaLabel}
             />
           )}

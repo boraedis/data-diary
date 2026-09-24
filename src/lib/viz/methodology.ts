@@ -35,6 +35,9 @@ export const TRAINING_METHODOLOGY =
 export const SCREEN_TIME_METHODOLOGY =
   "Phone and laptop usage come from each device's own built-in screen-time tracking, logged as minutes per day. Instagram usage is tracked the same way, added more recently once I wanted to actively watch and limit it specifically — it's a slice of phone time, not a separate total on top of it.";
 
+export const SUBS_METHODOLOGY =
+  "Each sub is logged once a day as a 0–10 intensity score, 0 meaning none that day. A sub left blank on a day counts as not logged rather than as zero, so it's skipped in averages instead of pulling them down. Nine subs are tracked; most days only a few of them are ever above zero.";
+
 export const INSTAGRAM_METHODOLOGY =
   "Follower and following counts are logged straight from the Instagram app, tracking how both have grown or shrunk over time.";
 

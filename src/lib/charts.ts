@@ -1,8 +1,8 @@
 import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
-import { days, exercises, metros, people, places, tags, workoutSets, workouts } from "@/db/schema";
-import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
+import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
+import { groupByPeriod } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
 import { resolveCountyForPoint, type UsCounty } from "@/lib/geo/us-counties";
@@ -89,6 +89,21 @@ export async function getWeightScrollerData(): Promise<WeightMetricsPoint[]> {
     .where(or(isNotNull(days.weightKg), isNotNull(days.bodyFatPercent), isNotNull(days.muscleMassKg)))
     .orderBy(asc(days.date));
   return rows;
+}
+
+/** The date of the earliest logged workout, or `null` if none — "when did
+ * exercise tracking begin," used to default the "Weight and Training
+ * Volume" combo chart's visible range to days that actually have exercise
+ * context (#411) rather than a full history that predates tracking it at
+ * all. Deliberately NOT applied to the standalone Weight/Exercise Trend
+ * charts — Weight's own full history (much of it pre-dating exercise
+ * tracking) is exactly what that chart is for, and Exercise Trend's data
+ * already starts at this same date by construction (see
+ * `getTrainingDailyData`'s own doc comment). */
+export async function getFirstExerciseDate(): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db.select({ date: workouts.date }).from(workouts).orderBy(asc(workouts.date)).limit(1);
+  return row?.date ?? null;
 }
 
 // Legacy's own fixed 7-color wheel for age bands (vis_functions.js:3294,
@@ -493,7 +508,15 @@ export type GymWeightComboData = {
  * with no `durationMinutes` at all (manually entered, no Hevy import)
  * falls back to summing its own sets' `durationSeconds`, so a purely
  * rep/weight-only manual entry with neither contributes zero rather than
- * a guessed estimate. */
+ * a guessed estimate.
+ *
+ * Returns the *full* weight and training history — #411 originally
+ * restricted this in SQL to dates on/after the first tracked exercise, but
+ * that threw away real, viewable weight history a reader might still want
+ * to scroll back into. The chart itself instead defaults its own
+ * `TimeRangePicker` to that same "since exercise tracking began" window
+ * (see `GymWeightComboChart`), which narrows the *initial view* without
+ * narrowing what's actually reachable. */
 export async function getGymWeightComboData(): Promise<GymWeightComboData> {
   const db = getDb();
   const [weightRows, strengthWorkouts, strengthSetDurations] = await Promise.all([
@@ -668,57 +691,35 @@ export async function getPlaceLeaderboardData(limit = 30): Promise<PlaceLeaderbo
   return rows.map((r) => ({ name: r.name, value: Number(r.value), color: r.color }));
 }
 
-// --- Happiness averager ---------------------------------------------------
+// --- Happiness trend --------------------------------------------------
 
-export type MonthlyAverage = {
-  month: string; // "YYYY-MM"
-  avg: number;
-  count: number;
-  /** Lowest/highest single day within the month — the legacy "Averager"
-   * pattern's min/max band (functions/views/vis/vis_functions.js's
-   * Averager), showing how much a month's days actually varied around its
-   * average rather than just the average alone. Wired into a shaded band
-   * behind the line by HappinessAveragerChart (#18); see
-   * interactive-line.tsx's `band` series option. */
-  min: number;
-  max: number;
+export type HappinessTrendDay = {
+  date: string;
+  happiness: number;
+  /** `days.dayType`, or null when it wasn't recorded. Powers
+   * HappinessTrendChart's work-day/other-days split (#410) — the legacy
+   * "Averager" pattern (functions/views/vis/charts/happiness_averager.js)
+   * binned by day-type too; an earlier pass at this chart (#18) left it out
+   * "since it'd need a second grouping dimension this first pass doesn't
+   * have a UI for yet" (TrendExplorer's `extraSeries`, added for #403's
+   * sleep-naps split, is that UI). */
+  dayType: DayType | null;
 };
 
-/** Monthly average happiness (plus the sample size behind each point, so the
- * chart can size markers by how many days actually fed each average — a
- * month with 2 entries and a month with 30 shouldn't look equally
- * confident — and the month's min/max, for the band described above). The
- * legacy "Averager" pattern (functions/views/vis/charts/
- * happiness_averager.js) bins by day-type too; that's left out here since
- * it'd need a second grouping dimension this first pass doesn't have a UI
- * for yet. */
-export async function getHappinessAveragerData(): Promise<MonthlyAverage[]> {
+/** Daily happiness (with day-type), oldest first — the raw-daily
+ * counterpart to what used to be server-side monthly bucketing
+ * (`getHappinessAveragerData`/`MonthlyAverage`, since replaced): binning
+ * moved client-side into `TrendExplorer` (`src/lib/viz/bin.ts`) once the
+ * period picker and work-day split both needed to re-bucket on demand
+ * rather than at a single fixed month grain. */
+export async function getHappinessTrendData(): Promise<HappinessTrendDay[]> {
   const db = getDb();
   const rows = await db
-    .select({ date: days.date, happiness: days.happiness })
+    .select({ date: days.date, happiness: days.happiness, dayType: days.dayType })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-
-  // Monthly bucketing via the shared groupByPeriod/summarizePeriods helper
-  // (#16) — this used to be its own hand-rolled `Map<string, {sum,count}>`
-  // here, duplicating the same "bucket by month" logic
-  // getGymWeightComboData had above. min/max are computed straight off
-  // each bucket's own items rather than through summarizePeriods (which
-  // only ever returns avg/count) — no need to generalize that shared
-  // helper for a min/max case only this one call site uses so far.
-  const buckets = groupByPeriod(rows, "month", (r) => r.date);
-  const summaries = summarizePeriods(buckets, (r) => r.happiness as number);
-  return buckets.map((bucket, i) => {
-    const values = bucket.items.map((r) => r.happiness as number);
-    return {
-      month: bucket.key,
-      avg: summaries[i].avg,
-      count: summaries[i].count,
-      min: Math.min(...values),
-      max: Math.max(...values),
-    };
-  });
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, dayType: r.dayType }));
 }
 
 // --- People network ---------------------------------------------------
@@ -1643,6 +1644,58 @@ export function getInstagramFollowersData(): Promise<DailyValue[]> {
  */
 export function getInstagramFollowingData(): Promise<DailyValue[]> {
   return dailyValuesOf(days.instagramFollowing);
+}
+
+// --- Subs (#120) -----------------------------------------------------------
+
+/**
+ * A day's nine sub scores (0–10), index-aligned with `SUB_NAMES` from
+ * `@/lib/days`. `null` means that sub was left blank that day — not
+ * logged, which is different from a logged zero (the entry form's "fill
+ * blanks with 0" button exists precisely because those are different
+ * acts), so charts must skip a blank rather than average it in as 0.
+ *
+ * One row per day with every sub on it, rather than nine separate
+ * `DailyValue[]` series: the subs calendar needs all nine side by side to
+ * blend a day's colour, and the line charts split the row per sub
+ * client-side, which is cheap at one row per day.
+ */
+export type SubsDay = { date: string; values: (number | null)[] };
+
+/** Days with at least one sub logged, oldest first. */
+export async function getSubsDailyData(): Promise<SubsDay[]> {
+  const db = getDb();
+  // Same column order as SUB_NAMES — ["A", "W", "C", "L", "Ni", "NO", "Ad",
+  // "D", "K"]. Spelled out rather than derived, because `days.ts` keeps its
+  // own name->column list private; recap-subs.ts makes the same call.
+  const columns = [
+    days.subA,
+    days.subW,
+    days.subC,
+    days.subL,
+    days.subNi,
+    days.subNO,
+    days.subAd,
+    days.subD,
+    days.subK,
+  ] as const;
+  const rows = await db
+    .select({
+      date: days.date,
+      a: columns[0],
+      w: columns[1],
+      c: columns[2],
+      l: columns[3],
+      ni: columns[4],
+      no: columns[5],
+      ad: columns[6],
+      d: columns[7],
+      k: columns[8],
+    })
+    .from(days)
+    .where(or(...columns.map((column) => isNotNull(column))))
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ date: r.date, values: [r.a, r.w, r.c, r.l, r.ni, r.no, r.ad, r.d, r.k] }));
 }
 
 // --- Where you were, over time (#221) --------------------------------------

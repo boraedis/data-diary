@@ -6,6 +6,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveScroller,
+  type InteractiveScrollerRegion,
   type InteractiveScrollerSeries,
 } from "@/components/charts/interactive/interactive-scroller";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
@@ -50,8 +51,10 @@ export function DailyExplorer({
   methodology,
   trackingSpan,
   valueFormat,
+  regions,
   extraFilters,
   initialWindow = 30,
+  initialHiddenIds,
   ariaLabel,
 }: {
   series: DailyExplorerSeries[];
@@ -66,6 +69,12 @@ export function DailyExplorer({
   /** Shared across every series — this chart is one column read at
    * different times/counts, not unrelated units needing their own format. */
   valueFormat: (value: number) => string;
+  /** Shaded background bands for historical context (an occupation,
+   * residence, or age bracket) — passed straight through to
+   * `InteractiveScroller`. See `WeightScrollerChart` for the caller-side
+   * pattern (a `GroupByPicker` selecting which `ProfileRegionGroups` key to
+   * show, defaulting to none shown). */
+  regions?: InteractiveScrollerRegion[];
   /** Extra controls rendered before the window picker. The caller owns
    * their state and reshapes `data` accordingly. */
   extraFilters?: React.ReactNode;
@@ -73,6 +82,10 @@ export function DailyExplorer({
    * series (a follower count, say) wants none — smoothing a line that only
    * ever rises says nothing the line doesn't. */
   initialWindow?: number;
+  /** Series ids (or `"average"`) the legend opens with toggled off —
+   * passed straight through to `InteractiveScroller`. For a chart with more
+   * series than read well at once (the nine subs, #120). */
+  initialHiddenIds?: readonly string[];
   ariaLabel: string;
 }) {
   const [windowId, setWindowId] = useState<WindowId>(
@@ -117,7 +130,9 @@ export function DailyExplorer({
               movingAverageWindow={window > 0 ? window : undefined}
               width={width}
               height={height}
+              regions={regions}
               valueFormat={valueFormat}
+              initialHiddenIds={initialHiddenIds}
               ariaLabel={ariaLabel}
             />
           )}
