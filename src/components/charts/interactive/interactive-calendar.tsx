@@ -104,48 +104,75 @@ function oklchToHex(value: string): string | null {
 }
 
 /**
+ * Converts a CSS `lab(L% a b)` string to a `#rrggbb` hex string. `L` is a
+ * percentage (0%-100%, matching CIE Lab's own 0-100 scale exactly — CSS
+ * just spells it with a `%`); `a`/`b` are plain numbers, same convention
+ * `d3.lab(l, a, b)` already uses, so this is a much shorter conversion than
+ * `oklchToHex` above — no matrix math, just strip the `%` and hand the
+ * three numbers to d3's own Lab constructor. Returns `null` for anything
+ * that isn't `lab(...)` syntax. See `resolveCssColor`'s own comment for why
+ * this format is the one that actually matters at runtime.
+ */
+function cssLabToHex(value: string): string | null {
+  const match = /^lab\(\s*([\d.]+)%\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s*\/\s*[\d.]+%?)?\s*\)$/i.exec(value.trim());
+  if (!match) return null;
+  const [, lStr, aStr, bStr] = match;
+  const L = Number(lStr);
+  const a = Number(aStr);
+  const b = Number(bStr);
+  if (!Number.isFinite(L) || !Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return d3.lab(L, a, b).formatHex();
+}
+
+/**
  * Resolves a category color into something d3-color can actually parse,
  * for the one place in this component that needs to do real math on a
  * color rather than just paint it: `blendColors` below does Lab-space
  * averaging, and `d3.color()` (which `d3.lab()` calls internally) can't
- * parse either of the two things a `categoricalColor()` string
+ * parse any of the three things a `categoricalColor()` string
  * (`@/lib/viz/color` — `var(--chart-1)` etc., specifically meant to be set
  * directly as a `fill` attribute and resolved by the browser's own CSS
- * engine, not read back into JS) turns out to actually be:
+ * engine, not read back into JS) turns out to actually be, at each step of
+ * resolving it:
  *
  * 1. A `var(--custom-property)` reference — resolving one needs the CSSOM,
  *    not a color-string parser, so `d3.color("var(--chart-1)")` returns
  *    `null` outright.
- * 2. This app's own token values, once resolved, which are themselves
- *    `oklch(...)` — a color function `d3.color()` (as of this project's
- *    d3 version) doesn't recognize either, so even after correctly
- *    reading the custom property's real value, feeding *that* straight to
- *    `d3.lab()` still returned `null`. A first attempt at this fix handled
- *    only step 1 and missed step 2 entirely, so it changed nothing
- *    user-visible — the resolved `var()` value was just as unparseable as
- *    the reference itself.
+ * 2. This app's own token values are *authored* as `oklch(...)` in
+ *    `globals.css` — also unparseable by this project's d3 version. A
+ *    first attempt at this fix handled step 1 but assumed the resolved
+ *    value would still be that literal oklch() text.
+ * 3. It isn't: `getComputedStyle(...).getPropertyValue('--chart-N')`
+ *    doesn't hand back the author's source text unchanged — verified live
+ *    in a real browser against this app's actual deployment, since this is
+ *    exactly the step both earlier attempts got wrong by assuming instead
+ *    of checking. The browser normalizes the recognized `oklch()` function
+ *    into an equivalent CSS `lab(L% a b)` serialization, a *third* syntax
+ *    `d3.color()` doesn't recognize either — so the second attempt's fix
+ *    (oklch parsing) never even ran, because its own regex never matched
+ *    what the property actually contained by the time JS saw it.
  *
- * Either failure mode alone was silent (`d3.color()` never throws, just
+ * Every failure mode above is silent (`d3.color()` never throws, just
  * returns `null`), so every category's Lab came back `{l: NaN, a: NaN, b:
- * NaN}`, got filtered out by `blendColors`' own `labs.length === 0` guard,
- * and every blend fell through to the same fixed fallback color —
- * regardless of the day's actual category. Not caught by
- * `PeopleCalendarChart` (this primitive's other blend-mode consumer)
- * because tag colors there are literal hex strings straight from the
- * database (`tags.color`), never a `var()`/oklch() token —
- * `DayTypeCalendarChart` (#410) is the first caller to hand this a
- * `categoricalColor()` string. Input that's neither a `var()` reference
- * nor `oklch(...)` (a plain hex/rgb string, say) passes through untouched.
- * Safe to call unconditionally (no SSR guard needed): every call site is
- * inside a D3 render callback or a hover handler, both of which only ever
- * run after mount, in the browser.
+ * NaN}` at every one of these three attempts, got filtered out by
+ * `blendColors`' own `labs.length === 0` guard, and every blend fell
+ * through to the same fixed fallback color — regardless of the day's
+ * actual category. Not caught by `PeopleCalendarChart` (this primitive's
+ * other blend-mode consumer) because tag colors there are literal hex
+ * strings straight from the database (`tags.color`), never a `var()`
+ * token — `DayTypeCalendarChart` (#410) is the first caller to hand this a
+ * `categoricalColor()` string. Input that's already parseable (a plain
+ * hex/rgb string, or literally either color function without the `var()`
+ * wrapper) passes through / converts directly. Safe to call unconditionally
+ * (no SSR guard needed): every call site is inside a D3 render callback or
+ * a hover handler, both of which only ever run after mount, in the browser.
  */
 export function resolveCssColor(color: string): string {
   const varMatch = /^var\((--[\w-]+)\)$/.exec(color.trim());
   const raw = varMatch
     ? getComputedStyle(document.documentElement).getPropertyValue(varMatch[1]).trim() || color
     : color;
-  return oklchToHex(raw) ?? raw;
+  return cssLabToHex(raw) ?? oklchToHex(raw) ?? raw;
 }
 
 export type InteractiveCalendarPoint = {
