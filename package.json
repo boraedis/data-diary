@@ -18,6 +18,7 @@
     "split:duplicate-places": "node scripts/split-duplicate-places.mjs",
     "geo:build": "tsx scripts/geo-build.mjs",
     "geo:add-feature": "tsx scripts/geo-add-feature.mjs",
+    "geo:build-admin": "tsx scripts/geo-build-admin.mjs",
     "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs",
     "seed:pr-fixture": "node scripts/seed-pr-fixture.mjs"
   },
