@@ -62,6 +62,119 @@ const WEEKS_PER_YEAR = 53;
 const MIN_CELL_SIZE = 8;
 const MAX_CELL_SIZE = 18;
 
+/**
+ * Converts an `oklch(L C H)` string to a `#rrggbb` hex string d3-color can
+ * actually parse. Standard OKLab -> linear-sRGB -> gamma-encoded-sRGB
+ * matrices (Björn Ottosson's published constants — the same conversion
+ * every oklch-to-sRGB implementation uses); `L`/`C`/`H` are the raw numbers
+ * as this app's own `globals.css` writes them (`L` a 0-1 fraction, not a
+ * percentage — this codebase never uses the percentage form). An optional
+ * `/ alpha` component is accepted and ignored: every color this function
+ * actually sees (this app's own `--chart-1..5` tokens) is fully opaque, and
+ * `blendColors` below has no channel to carry per-entry opacity through
+ * anyway. Returns `null` for anything that isn't `oklch(...)` syntax, so
+ * the caller can fall back to the original string unchanged.
+ */
+function oklchToHex(value: string): string | null {
+  const match = /^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*[\d.]+%?)?\s*\)$/i.exec(value.trim());
+  if (!match) return null;
+  const [, lStr, cStr, hStr] = match;
+  const L = Number(lStr);
+  const C = Number(cStr);
+  const Hdeg = Number(hStr);
+  if (!Number.isFinite(L) || !Number.isFinite(C) || !Number.isFinite(Hdeg)) return null;
+  const H = (Hdeg * Math.PI) / 180;
+  const a = C * Math.cos(H);
+  const b = C * Math.sin(H);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l = l_ ** 3;
+  const m = m_ ** 3;
+  const s = s_ ** 3;
+  const rLinear = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const gLinear = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const bLinear = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+  const gamma = (x: number) => {
+    const clamped = Math.min(1, Math.max(0, x));
+    return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+  };
+  const toHex = (x: number) => Math.round(gamma(x) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(rLinear)}${toHex(gLinear)}${toHex(bLinear)}`;
+}
+
+/**
+ * Converts a CSS `lab(L% a b)` string to a `#rrggbb` hex string. `L` is a
+ * percentage (0%-100%, matching CIE Lab's own 0-100 scale exactly — CSS
+ * just spells it with a `%`); `a`/`b` are plain numbers, same convention
+ * `d3.lab(l, a, b)` already uses, so this is a much shorter conversion than
+ * `oklchToHex` above — no matrix math, just strip the `%` and hand the
+ * three numbers to d3's own Lab constructor. Returns `null` for anything
+ * that isn't `lab(...)` syntax. See `resolveCssColor`'s own comment for why
+ * this format is the one that actually matters at runtime.
+ */
+function cssLabToHex(value: string): string | null {
+  const match = /^lab\(\s*([\d.]+)%\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s*\/\s*[\d.]+%?)?\s*\)$/i.exec(value.trim());
+  if (!match) return null;
+  const [, lStr, aStr, bStr] = match;
+  const L = Number(lStr);
+  const a = Number(aStr);
+  const b = Number(bStr);
+  if (!Number.isFinite(L) || !Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return d3.lab(L, a, b).formatHex();
+}
+
+/**
+ * Resolves a category color into something d3-color can actually parse,
+ * for the one place in this component that needs to do real math on a
+ * color rather than just paint it: `blendColors` below does Lab-space
+ * averaging, and `d3.color()` (which `d3.lab()` calls internally) can't
+ * parse any of the three things a `categoricalColor()` string
+ * (`@/lib/viz/color` — `var(--chart-1)` etc., specifically meant to be set
+ * directly as a `fill` attribute and resolved by the browser's own CSS
+ * engine, not read back into JS) turns out to actually be, at each step of
+ * resolving it:
+ *
+ * 1. A `var(--custom-property)` reference — resolving one needs the CSSOM,
+ *    not a color-string parser, so `d3.color("var(--chart-1)")` returns
+ *    `null` outright.
+ * 2. This app's own token values are *authored* as `oklch(...)` in
+ *    `globals.css` — also unparseable by this project's d3 version. A
+ *    first attempt at this fix handled step 1 but assumed the resolved
+ *    value would still be that literal oklch() text.
+ * 3. It isn't: `getComputedStyle(...).getPropertyValue('--chart-N')`
+ *    doesn't hand back the author's source text unchanged — verified live
+ *    in a real browser against this app's actual deployment, since this is
+ *    exactly the step both earlier attempts got wrong by assuming instead
+ *    of checking. The browser normalizes the recognized `oklch()` function
+ *    into an equivalent CSS `lab(L% a b)` serialization, a *third* syntax
+ *    `d3.color()` doesn't recognize either — so the second attempt's fix
+ *    (oklch parsing) never even ran, because its own regex never matched
+ *    what the property actually contained by the time JS saw it.
+ *
+ * Every failure mode above is silent (`d3.color()` never throws, just
+ * returns `null`), so every category's Lab came back `{l: NaN, a: NaN, b:
+ * NaN}` at every one of these three attempts, got filtered out by
+ * `blendColors`' own `labs.length === 0` guard, and every blend fell
+ * through to the same fixed fallback color — regardless of the day's
+ * actual category. Not caught by `PeopleCalendarChart` (this primitive's
+ * other blend-mode consumer) because tag colors there are literal hex
+ * strings straight from the database (`tags.color`), never a `var()`
+ * token — `DayTypeCalendarChart` (#410) is the first caller to hand this a
+ * `categoricalColor()` string. Input that's already parseable (a plain
+ * hex/rgb string, or literally either color function without the `var()`
+ * wrapper) passes through / converts directly. Safe to call unconditionally
+ * (no SSR guard needed): every call site is inside a D3 render callback or
+ * a hover handler, both of which only ever run after mount, in the browser.
+ */
+export function resolveCssColor(color: string): string {
+  const varMatch = /^var\((--[\w-]+)\)$/.exec(color.trim());
+  const raw = varMatch
+    ? getComputedStyle(document.documentElement).getPropertyValue(varMatch[1]).trim() || color
+    : color;
+  return cssLabToHex(raw) ?? oklchToHex(raw) ?? raw;
+}
+
 export type InteractiveCalendarPoint = {
   date: string; // "YYYY-MM-DD"
   value: number;
@@ -293,6 +406,24 @@ export function InteractiveCalendar({
   // "how much" and others mean "which kinds" can't be read.
   const blended = useMemo(() => points.some((p) => (p.categories?.length ?? 0) > 0), [points]);
 
+  // Whether `points` actually has a real value spread, as opposed to every
+  // point sharing one constant value (DayTypeCalendarChart's `value: 1` on
+  // every cell, deliberately — see its own comment: there's no magnitude to
+  // show when a day has exactly one type). `domain` above pads a
+  // zero-width span out to `[lo-1, lo+1]` so the *sequential* ramp still
+  // has two distinct endpoints to draw a legend between — but blend mode's
+  // intensity calc below was reusing that same padded domain to place a
+  // constant value at its midpoint (t=0.5, "60% MIN_INTENSITY-ward")
+  // instead of at the top, quietly contradicting the "equal values render
+  // every day at full intensity" behavior every blend-mode consumer's own
+  // comment already documents and assumes. Tracked separately from
+  // `domain` itself so the padding stays available for the modes that
+  // actually need it.
+  const hasValueSpan = useMemo(() => {
+    const [lo, hi] = d3.extent(points, (p) => p.value);
+    return lo !== undefined && hi !== undefined && lo !== hi;
+  }, [points]);
+
   /**
    * Averages colors in CIELAB rather than sRGB.
    *
@@ -315,7 +446,7 @@ export function InteractiveCalendar({
    */
   const blendColors = (entries: { color: string; weight?: number }[]): string => {
     const labs = entries
-      .map((e) => ({ lab: d3.lab(e.color), weight: e.weight ?? 1 }))
+      .map((e) => ({ lab: d3.lab(resolveCssColor(e.color)), weight: e.weight ?? 1 }))
       .filter((e) => !Number.isNaN(e.lab.l) && e.weight > 0);
     if (labs.length === 0) return "var(--muted)";
     const total = labs.reduce((sum, e) => sum + e.weight, 0);
@@ -350,13 +481,18 @@ export function InteractiveCalendar({
     (value: number, categories: DayCategories): string => {
       if (!categories || categories.length === 0) return colorScale(value);
       const blend = blendColors(categories);
+      // `hasValueSpan` short-circuits straight to full intensity (`t = 1`)
+      // regardless of `blendIntensityCap`: a cap only means something when
+      // there's a real spread to cap the top of — DayTypeCalendarChart's
+      // constant `value: 1` on every cell (see `hasValueSpan`'s own
+      // comment) has no such spread, so there's nothing for a cap to do.
       const top = blendIntensityCap !== undefined ? Math.min(domain[1], blendIntensityCap) : domain[1];
       const span = top - domain[0];
-      const t = span > 0 ? (value - domain[0]) / span : 1;
+      const t = !hasValueSpan ? 1 : span > 0 ? (value - domain[0]) / span : 1;
       const intensity = MIN_INTENSITY + (1 - MIN_INTENSITY) * Math.min(1, Math.max(0, t));
       return d3.interpolateLab(colorScale(domain[0]), blend)(intensity);
     },
-    [colorScale, domain, blendIntensityCap],
+    [colorScale, domain, hasValueSpan, blendIntensityCap],
   );
 
   const [hovered, setHovered] = useState<Hovered | null>(null);
