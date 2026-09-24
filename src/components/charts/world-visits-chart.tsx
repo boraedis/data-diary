@@ -5,12 +5,19 @@ import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import worldTopologyRaw from "world-atlas/countries-50m.json";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
-import { InteractiveGeo, type GeoExpansion, type GeoFeature } from "@/components/charts/interactive/interactive-geo";
+import {
+  InteractiveGeo,
+  geoExpansion,
+  type GeoExpansion,
+  type GeoFeature,
+} from "@/components/charts/interactive/interactive-geo";
 import { loadUsStateFeatures, travelledStateFips, usStatesExpansion } from "@/components/charts/us-geo-levels";
 import { normalizeCountryName } from "@/lib/geo/country-names";
+import { loadAdminRegionFeatures } from "@/lib/geo/admin-geometry";
+import type { AdminRegionProperties } from "@/lib/geo/admin-regions";
 import { formatFirstVisited, formatTravelledFirstVisited } from "@/lib/viz/first-visited";
 import type { Feature, Geometry, Polygon } from "geojson";
-import type { CountryVisitEntry, UsStateVisitEntry } from "@/lib/charts";
+import type { AdminRegionVisitData, CountryVisitEntry, UsStateVisitEntry } from "@/lib/charts";
 import type { UnloggedTravelDetail } from "@/lib/unlogged-travel";
 
 type CountryProperties = { name: string };
@@ -108,6 +115,8 @@ const NO_TRAVEL: string[] = [];
  * per-country first_visited/note detail array. */
 const NO_TRAVEL_DETAILS: [string, UnloggedTravelDetail][] = [];
 
+type RegionDetail = { days: number; firstVisited: string | null };
+
 /** Choropleth of days logged per country — #24's first real InteractiveGeo
  * consumer. `data` is the server-fetched day count per (already
  * catalog-named) country; joined against world-atlas's own GeoJSON
@@ -115,13 +124,15 @@ const NO_TRAVEL_DETAILS: [string, UnloggedTravelDetail][] = [];
  * since this app's place catalog is free-text, not a controlled ISO
  * list.
  *
- * Clicking the US breaks it into its states in place (#107), with every
- * other country still drawn around it; every other country keeps the
- * original zoom-to-bounds. That asymmetry is the honest state of the
- * world rather than an oversight — see `resolveExpansion` below. */
+ * Clicking the US breaks it into its states in place (#107), and clicking
+ * any other country with logged days breaks it into its own provinces,
+ * regions or departments (#304), with every other country still drawn
+ * around it. A country with no subdivision geometry keeps the original
+ * zoom-to-bounds — see `resolveExpansion` below. */
 export function WorldVisitsChart({
   data,
   usStates,
+  adminRegions,
   travelledCountries = NO_TRAVEL,
   travelledCounties = NO_TRAVEL,
   travelledCountryDetails = NO_TRAVEL_DETAILS,
@@ -138,6 +149,11 @@ export function WorldVisitsChart({
    * period-scoped countries and quietly contradict them. Better no
    * expansion than one that disagrees with the map around it. */
   usStates?: UsStateVisitEntry[];
+  /** Per-subdivision day counts for every other country with geometry
+   * (#304), enabling their expansions. Omitted by the recap for exactly
+   * the reason `usStates` is: whole-history subdivisions under
+   * period-scoped countries would contradict the map around them. */
+  adminRegions?: AdminRegionVisitData;
   /**
    * Unlogged-travel country codes (#366/#323) — countries travelled to or
    * through that never made a day's top-two place slots.
@@ -270,6 +286,19 @@ export function WorldVisitsChart({
     [firstVisitedByState, diaryStartDate],
   );
 
+  /** world-atlas country id -> subdivision name -> its days and first
+   * visit. Only countries with at least one resolved subdivision appear,
+   * which is what `resolveExpansion` keys off. */
+  const regionsByCountry = useMemo(() => {
+    const map = new Map<string, Map<string, RegionDetail>>();
+    for (const entry of adminRegions?.regions ?? []) {
+      let regions = map.get(entry.countryId);
+      if (!regions) map.set(entry.countryId, (regions = new Map()));
+      regions.set(entry.region, { days: entry.days, firstVisited: entry.firstVisited });
+    }
+    return map;
+  }, [adminRegions]);
+
   const travelledCountryCodes = useMemo(() => new Set(travelledCountries), [travelledCountries]);
 
   /** Which states the US expansion should tint. Unlogged travel is only
@@ -298,26 +327,63 @@ export function WorldVisitsChart({
   );
 
   /**
-   * The US is the only country that expands, and that's a real limit
-   * rather than a stub: subdivision geometry for everyone else means
-   * Natural Earth's admin-1 layer, which has no topojson-org-quality npm
-   * package and would need a one-time conversion plus per-country name
-   * reconciliation against this free-text catalog — #107's own scoping
-   * discussion parked that behind #163's geometry-storage decision.
+   * Two kinds of country expand. The US goes through us-atlas and its
+   * name-joined states (#107). Every other country listed in
+   * ADMIN_REGIONS goes through its committed geoBoundaries file, with days
+   * already assigned to subdivisions server-side by coordinates (#304).
    *
-   * Returning null for every other country is what keeps that honest:
-   * the primitive falls back to zoom-to-bounds, exactly what this map did
-   * before, instead of blanking a country that has no geometry to show.
+   * A country only expands when it has at least one resolved subdivision.
+   * Geometry with nothing to colour would be a map of empty polygons,
+   * which says less than the zoom-to-bounds it would replace — so a
+   * travelled-through country, or one whose only days couldn't be placed,
+   * returns null and the primitive falls back to zooming, as it does for
+   * every country with no geometry at all.
+   *
+   * Unlogged travel doesn't reach subdivisions: it's stored per country
+   * outside the US, so there's no finer tint an expansion could honestly
+   * show.
    */
   const resolveExpansion = useCallback(
     (f: GeoFeature): Promise<GeoExpansion | null> | null => {
-      if (String(f.properties?.name ?? "") !== UNITED_STATES) return null;
-      return loadUsStateFeatures().then((stateFeatures) =>
-        usStatesExpansion(stateFeatures, daysByState, travelledStates, stateSecondaryValue),
+      if (String(f.properties?.name ?? "") === UNITED_STATES) {
+        if (!usStates) return null;
+        return loadUsStateFeatures().then((stateFeatures) =>
+          usStatesExpansion(stateFeatures, daysByState, travelledStates, stateSecondaryValue),
+        );
+      }
+      const countryId = String(f.id ?? "");
+      const regions = regionsByCountry.get(countryId);
+      if (!regions) return null;
+      const pending = loadAdminRegionFeatures(countryId);
+      if (!pending) return null;
+      const countryName = String(f.properties?.name ?? countryId);
+      return pending.then((features) =>
+        geoExpansion<AdminRegionProperties>({
+          key: `admin-${countryId}`,
+          label: countryName,
+          features,
+          getValue: (r) => regions.get(r.properties.name)?.days ?? null,
+          getLabel: (r) => r.properties.name,
+          valueLabel: "days",
+          getSecondaryValue: (r) => {
+            const first = regions.get(r.properties.name)?.firstVisited;
+            return first ? formatFirstVisited(first, diaryStartDate) : null;
+          },
+        }),
       );
     },
-    [daysByState, travelledStates, stateSecondaryValue],
+    [usStates, daysByState, travelledStates, stateSecondaryValue, regionsByCountry, diaryStartDate],
   );
+
+  /** Countries whose subdivisions can't account for all their days — see
+   * AdminRegionVisitData.unresolved. Named from the map's own features
+   * rather than the catalog, since the data is keyed by world-atlas id. */
+  const unplacedEntries = useMemo(() => {
+    const nameById = new Map(features.features.map((f) => [String(f.id ?? ""), f.properties.name]));
+    return (adminRegions?.unresolved ?? [])
+      .map(({ countryId, days }) => [nameById.get(countryId) ?? countryId, days] as const)
+      .sort((a, b) => b[1] - a[1]);
+  }, [adminRegions, features]);
 
   /**
    * Countries with logged days that this map has no polygon for.
@@ -344,8 +410,9 @@ export function WorldVisitsChart({
     return [...byName].sort((a, b) => b[1] - a[1]);
   }, [data, features]);
 
-  const baseAriaLabel = usStates
-    ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click the United States to break it into its states in place; clicking any other country zooms to it. Hover a country or state to see how many days you've logged there."
+  const expandable = Boolean(usStates) || regionsByCountry.size > 0;
+  const baseAriaLabel = expandable
+    ? "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Click a country to break it into its states, provinces or regions in place where that's available; clicking any other country zooms to it. Hover a country or region to see how many days you've logged there."
     : "World map of days logged per country. Scroll or pinch to zoom, drag to pan. Hover a country to see how many days you've logged there.";
 
   // The state half only counts when there's an expansion to reveal it in:
@@ -366,7 +433,7 @@ export function WorldVisitsChart({
           getLabel={(f) => f.properties.name}
           valueLabel="days"
           getSecondaryValue={countrySecondaryValue}
-          resolveExpansion={usStates ? resolveExpansion : undefined}
+          resolveExpansion={expandable ? resolveExpansion : undefined}
           ariaLabel={baseAriaLabel + (hasTravelled ? TRAVELLED_ARIA_SUFFIX : "")}
         />
       )}
@@ -376,6 +443,13 @@ export function WorldVisitsChart({
         Not drawn on this map:{" "}
         {offMapEntries.map(([name, days]) => `${name} (${days} ${days === 1 ? "day" : "days"})`).join(", ")} — no
         country by that name in the map&rsquo;s geography.
+      </p>
+    ) : null}
+    {unplacedEntries.length > 0 ? (
+      <p className="pt-3 text-xs text-muted-foreground">
+        Not placed in a region:{" "}
+        {unplacedEntries.map(([name, days]) => `${name} (${days} ${days === 1 ? "day" : "days"})`).join(", ")} —
+        none of the places logged on those days has a location inside one of its regions.
       </p>
     ) : null}
     </>

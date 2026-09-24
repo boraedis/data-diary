@@ -174,6 +174,17 @@ helps:
   `.git` than the raw file on disk. Standard/published geo (world borders,
   future US states/counties) stays on the existing npm-package path
   (`world-atlas`, `us-atlas`) — that part was never the open question.
+- **Published geo with no npm package** — the non-US province/region
+  layers the world map expands into (#304) — lands on the same committed-
+  TopoJSON side, in `src/data/geo/admin/<iso3>.topo.json`, but as a
+  *build artifact* of `npm run geo:build-admin` rather than a hand-edited
+  file: the script downloads each country from geoBoundaries, simplifies
+  it to ≤150KB, and records source/licence per file in `SOURCES.json`. No
+  raw source copy is committed (upstream is the source). Which countries
+  and which admin level each uses live in `src/lib/geo/admin-regions.ts`;
+  adding a country is one entry there, one loader line in
+  `admin-geometry.ts`, and a rebuild. Legacy's GADM files were
+  deliberately not reused — GADM forbids redistribution.
 - **Binary media** (images, the facelapse video from #15) goes to **Vercel
   Blob** (`@vercel/blob`, `BLOB_READ_WRITE_TOKEN`) instead. A re-encoded
   video or replaced photo produces a wholly new blob every time — no delta
