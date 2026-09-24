@@ -272,11 +272,15 @@ export function travelledFill(mode: ColorMode = "light"): string {
 // Validated with the dataviz skill's `validate_palette.js` for separation
 // from ramp low (#fee1d7) and travelledFill light (#8ad0eb):
 //
+// Medium-dark warm gray that's noticeably lighter than the dark ocean but
+// still clearly distinct from visited regions. Provides subtle visual
+// distinction without dominating the map.
+//
 // | pair | normal ΔE | worst CVD ΔE |
 // |---|---|---|
-// | no-data `#f5ede7` vs ramp low `#fee1d7` | 6.5 PASS | 4.1 deutan PASS |
-// | no-data `#f5ede7` vs travelled `#8ad0eb` | 28.6 PASS | 20.1 protan PASS |
-const NO_DATA_FILL = "#f5ede7";
+// | no-data `#7a6f66` vs ramp low `#fee1d7` | 43.2 PASS | 42.1 protan PASS |
+// | no-data `#7a6f66` vs travelled `#8ad0eb` | 27.8 PASS | 19.7 protan PASS |
+const NO_DATA_FILL = "#7a6f66";
 
 /** Fill for a region with no logged data — a light neutral gray that
  * distinguishes from both the sequential ramp and the ocean background. */
