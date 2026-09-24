@@ -6,7 +6,7 @@ import { useD3 } from "@/hooks/use-d3";
 import { styleAxis } from "./axis";
 import { attachMarkHover, MARK_SPECS, roundedBarPath } from "./marks";
 import { ChartTooltip } from "./tooltip";
-import { categoricalColor } from "@/lib/viz/color";
+import { categoricalColor, contrastingTextColor } from "@/lib/viz/color";
 import { formatDate } from "@/lib/viz/format";
 import { daysBetween, todayDateString } from "@/lib/date";
 import { layoutTimeline, type LaidOutInterval, type TimelineInterval } from "@/lib/viz/timeline";
@@ -123,38 +123,6 @@ export type InteractiveTimelineProps = {
 };
 
 type Hovered = { item: LaidOutInterval; color: string; clientPos: { x: number; y: number } };
-
-/**
- * Black or white for a label sitting *on* `fill`, whichever the reader can
- * actually see.
- *
- * A fixed label colour doesn't work here. The first version used
- * `var(--card)`, which is white in light mode (fine on a saturated bar) but
- * near-black in dark mode — so every label went dark-on-dark the moment the
- * chart was viewed in the theme most of this app is used in. And even a
- * fixed white would fail on the pale colours a user can pick for an entry
- * in the profile admin UI.
- *
- * `fill` is read back off the painted element with `getComputedStyle`
- * rather than taken from the colour we set, because that colour is often a
- * `var(--chart-N)` reference that only the browser can resolve. Where
- * there's no resolved colour to measure (jsdom computes no styles), white
- * is the safer guess: the default palette is mid-to-dark.
- *
- * The 0.179 threshold is the real WCAG crossover — the luminance at which
- * contrast against black overtakes contrast against white — not a
- * hand-tuned number.
- */
-function contrastingTextColor(fill: string): string {
-  const rgb = d3.color(fill)?.rgb();
-  if (!rgb || Number.isNaN(rgb.r)) return "#ffffff";
-  const channel = (v: number) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
-  return luminance > 0.179 ? "#111111" : "#ffffff";
-}
 
 /** "3 yrs 2 mos", "8 mos", "24 days" — a span, not a date. Deliberately
  * local rather than added to viz/format.ts: `formatDuration` there means

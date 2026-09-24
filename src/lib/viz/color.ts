@@ -1,4 +1,4 @@
-import { scaleDiverging, scaleSequential, scaleSequentialLog, interpolateHcl } from "d3";
+import { color, scaleDiverging, scaleSequential, scaleSequentialLog, interpolateHcl } from "d3";
 import type { ScaleDiverging, ScaleSequential } from "d3";
 
 // Shared color-system helpers (#16's "color system" scope item). Every
@@ -321,4 +321,40 @@ export function divergingScale(
   const interpolator = (t: number): string =>
     t <= 0.5 ? interpolateHcl(cool, neutral)(t * 2) : interpolateHcl(neutral, warm)((t - 0.5) * 2);
   return scaleDiverging<string>(interpolator).domain(domain);
+}
+
+/**
+ * Black or white for a label sitting *on* `fill`, whichever the reader can
+ * actually see.
+ *
+ * A fixed label colour doesn't work here. The first version used
+ * `var(--card)`, which is white in light mode (fine on a saturated bar) but
+ * near-black in dark mode — so every label went dark-on-dark the moment the
+ * chart was viewed in the theme most of this app is used in. And even a
+ * fixed white would fail on the pale colours a user can pick for an entry
+ * in the profile admin UI.
+ *
+ * `fill` must be a colour d3 can parse — a `var(--chart-N)` reference is
+ * not, which is why InteractiveTimeline reads the fill back off the painted
+ * element with `getComputedStyle` before asking. Where there's no resolved
+ * colour to measure (a `var()`, or jsdom, which computes no styles), white
+ * is the safer guess: the default palette is mid-to-dark.
+ *
+ * The 0.179 threshold is the real WCAG crossover — the luminance at which
+ * contrast against black overtakes contrast against white — not a
+ * hand-tuned number.
+ *
+ * Moved here from InteractiveTimeline (#119) when InteractiveRanked's
+ * cell fills (#115) needed the same answer for user-chosen place and tag
+ * colours.
+ */
+export function contrastingTextColor(fill: string): string {
+  const rgb = color(fill)?.rgb();
+  if (!rgb || Number.isNaN(rgb.r)) return "#ffffff";
+  const channel = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+  return luminance > 0.179 ? "#111111" : "#ffffff";
 }

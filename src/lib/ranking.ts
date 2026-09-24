@@ -26,7 +26,34 @@ import { addDays } from "@/lib/date";
  * shift a total built over years. That's the honest reading rather than a
  * flaw — a big week jump means something genuinely unusual happened.
  */
-export type RankWindow = { id: string; label: string; days: number };
+export type RankWindow = {
+  id: string;
+  label: string;
+  days: number;
+  /** How the window reads in a sentence, for hover labels: "Up 3 places
+   * since a week ago". */
+  since?: string;
+};
+
+/**
+ * The week / month / year windows every leaderboard uses, so the people and
+ * places tables (and whatever joins them) agree on what "a month ago" means.
+ * 31 rather than 30 so a month window always reaches the same date last
+ * month, never the day after it.
+ */
+export const STANDARD_RANK_WINDOWS: RankWindow[] = [
+  { id: "week", label: "Week", days: 7, since: "a week ago" },
+  { id: "month", label: "Month", days: 31, since: "a month ago" },
+  { id: "year", label: "Year", days: 365, since: "a year ago" },
+];
+
+/**
+ * One appearance of `key` on `date`. `weight` defaults to 1 — people count
+ * one per day, but places use legacy's slot weighting (the day's first place
+ * counts double the second), and movement has to be computed on the same
+ * weighted totals the table is sorted by or the two would disagree.
+ */
+export type RankAppearance = { key: string; date: string; weight?: number };
 
 export type RankMovement = {
   /** Positions gained since that point in time — positive is upward (a
@@ -36,13 +63,19 @@ export type RankMovement = {
   /** First appeared inside this window: they weren't in the ranking at
    * that point, which is a different statement from "unchanged". */
   isNew: boolean;
+  /** The rank held at that point in time, for a hover label ("was 7th") —
+   * null exactly when `isNew`. */
+  previousRank: number | null;
 };
 
 export type RankedItem = {
   key: string;
-  /** Appearances across the whole history — what the table is sorted by. */
+  /** Current rank, ties sharing the better one (see `rankByCount`). */
+  rank: number;
+  /** Appearances (weighted, where weights were given) across the whole
+   * history — what the table is sorted by. */
   total: number;
-  /** Appearances gained inside each window. */
+  /** Appearances (weighted) gained inside each window. */
   counts: Record<string, number>;
   movements: Record<string, RankMovement>;
 };
@@ -66,13 +99,10 @@ function rankByCount(counts: Map<string, number>): Map<string, number> {
 }
 
 /** Cumulative appearances per key up to and including `through`. */
-function cumulativeThrough(
-  appearances: { key: string; date: string }[],
-  through: string,
-): Map<string, number> {
+function cumulativeThrough(appearances: RankAppearance[], through: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const a of appearances) {
-    if (a.date <= through) counts.set(a.key, (counts.get(a.key) ?? 0) + 1);
+    if (a.date <= through) counts.set(a.key, (counts.get(a.key) ?? 0) + (a.weight ?? 1));
   }
   return counts;
 }
@@ -85,7 +115,7 @@ function cumulativeThrough(
  * the data and report movement that is really just absence.
  */
 export function computeRankings(
-  appearances: { key: string; date: string }[],
+  appearances: RankAppearance[],
   asOf: string,
   windows: RankWindow[],
 ): RankedItem[] {
@@ -111,11 +141,11 @@ export function computeRankings(
           // They weren't in the ranking at that point at all, so there is
           // no position to have moved from. Treating "absent" as "last"
           // would report an enormous rise for anyone recently met.
-          movements[window.id] = { delta: null, isNew: true };
+          movements[window.id] = { delta: null, isNew: true, previousRank: null };
         } else {
-          movements[window.id] = { delta: before - now, isNew: false };
+          movements[window.id] = { delta: before - now, isNew: false, previousRank: before };
         }
       }
-      return { key, total, counts, movements };
+      return { key, rank: nowRanks.get(key) as number, total, counts, movements };
     });
 }
