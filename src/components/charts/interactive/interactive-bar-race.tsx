@@ -32,8 +32,9 @@ import { ChartTooltip } from "./tooltip";
 // all of which is SVG work, and all of which the rest of this folder
 // already does in D3. Forcing them into one component would mean two
 // disjoint render trees behind one prop, so this ships as a sibling
-// primitive instead. The shared vocabulary between them is the
-// `RankedEntry` shape, which a `RaceFrame` is a list of.
+// primitive instead. (They once shared a `RankedEntry` row shape; since
+// #115 turned InteractiveRanked into a column-configured table generic
+// over its own rows, that type lives in viz/race.ts alone.)
 //
 // **What's different from legacy, on purpose:**
 //  - Legacy built a fixed keyframe list (3 interpolated snapshots per

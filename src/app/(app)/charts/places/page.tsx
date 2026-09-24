@@ -1,29 +1,12 @@
-import { ChartCard } from "@/components/charts/chart-card";
-import { ChartPage } from "@/components/charts/chart-page";
-import { PlaceLeaderboard } from "@/components/charts/place-leaderboard";
+import { PlaceLeaderboardChart } from "@/components/charts/place-leaderboard";
 import { getPlaceLeaderboardData } from "@/lib/charts";
-import { RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
-import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
-import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const dynamic = "force-dynamic";
 
+// The chart component owns the page shell (ChartPage + filters + card), the
+// same way /charts/people-table does: the "Show" filter and the table share
+// state, and only plain data can cross the server/client boundary.
 export default async function PlacesChartPage() {
   const entries = await getPlaceLeaderboardData();
-
-  return (
-    <ChartPage
-      title="Place Leaderboard"
-      description="A leaderboard of my most mentioned locations."
-      info={{
-        interactionGuide: RANKED_INTERACTION_GUIDE,
-        methodology: PLACES_METHODOLOGY,
-        trackingSpan: PLACES_TRACKING_SPAN,
-      }}
-    >
-      <ChartCard empty={entries.length === 0}>
-        <PlaceLeaderboard entries={entries} />
-      </ChartCard>
-    </ChartPage>
-  );
+  return <PlaceLeaderboardChart entries={entries} />;
 }

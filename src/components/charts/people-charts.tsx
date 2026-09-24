@@ -4,12 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { CalendarExplorer } from "@/components/charts/calendar-explorer";
-import {
-  InteractiveRanked,
-  RankMovementCell,
-  type RankedColumn,
-  type RankedEntry,
-} from "@/components/charts/interactive/interactive-ranked";
+import { InteractiveRanked, type RankedColumn } from "@/components/charts/interactive/interactive-ranked";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import {
   CompositionExplorer,
@@ -18,7 +13,7 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { personImpact, recencyWeight } from "@/lib/impact";
-import { computeRankings, type RankWindow } from "@/lib/ranking";
+import { computeRankings, STANDARD_RANK_WINDOWS, type RankedItem } from "@/lib/ranking";
 import { categoricalColor } from "@/lib/viz/color";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveBarRace } from "@/components/charts/interactive/interactive-bar-race";
@@ -219,6 +214,13 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
   );
 }
 
+type PeopleTableRow = {
+  name: string;
+  tagName: string | null;
+  tagColor: string | null;
+  item: RankedItem;
+};
+
 /**
  * The people table: everyone ranked by days logged, with how their standing
  * has moved lately.
@@ -235,21 +237,15 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
  * would otherwise empty the recent windows and report everyone as having
  * vanished at once.
  */
-const RANK_WINDOWS: RankWindow[] = [
-  { id: "week", label: "Week", days: 7 },
-  { id: "month", label: "Month", days: 31 },
-  { id: "year", label: "Year", days: 365 },
-];
-
 export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
   const [limit, setLimit] = useState<TableLimit>("50");
 
-  const { entries, byName } = useMemo(() => {
+  const rows = useMemo<PeopleTableRow[]>(() => {
     const appearances = data.flatMap((day) =>
       day.people.map((person) => ({ key: person.name, date: day.date })),
     );
     const asOf = data.length > 0 ? data[data.length - 1].date : "";
-    const ranked = asOf ? computeRankings(appearances, asOf, RANK_WINDOWS) : [];
+    const ranked = asOf ? computeRankings(appearances, asOf, STANDARD_RANK_WINDOWS) : [];
 
     // Latest tag wins where someone has been retagged — the table is a
     // "who are they now" view, not a history of their tagging. The colour
@@ -262,44 +258,50 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
       }
     }
 
-    return {
-      entries: ranked.map((item) => ({ label: item.key, value: item.total })),
-      byName: new Map(
-        ranked.map((item) => [
-          item.key,
-          { item, tag: tags.get(item.key) ?? { name: null, color: null } },
-        ]),
-      ),
-    };
+    return ranked.map((item) => {
+      const tag = tags.get(item.key);
+      return { name: item.key, tagName: tag?.name ?? null, tagColor: tag?.color ?? null, item };
+    });
   }, [data]);
 
-  const shown = useMemo(
-    () => (limit === "all" ? entries : entries.slice(0, Number(limit))),
-    [entries, limit],
-  );
+  const shown = useMemo(() => (limit === "all" ? rows : rows.slice(0, Number(limit))), [rows, limit]);
 
-  const columns = useMemo<RankedColumn[]>(
-    () =>
-      RANK_WINDOWS.map((window) => ({
-        id: window.id,
-        label: window.label,
-        // Week stays on a phone; month and year are the first to go.
-        secondary: window.id !== "week",
-        render: (entry: RankedEntry) => {
-          const found = byName.get(entry.label);
-          if (!found) return null;
-          const movement = found.item.movements[window.id];
-          return (
-            <span className="flex items-baseline justify-end gap-2">
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {found.item.counts[window.id]}
-              </span>
-              <RankMovementCell delta={movement.delta} isNew={movement.isNew} />
-            </span>
-          );
-        },
-      })),
-    [byName],
+  const columns = useMemo<RankedColumn<PeopleTableRow>[]>(
+    () => [
+      { kind: "text", id: "name", header: "Name", value: (r) => r.name },
+      {
+        kind: "text",
+        id: "tag",
+        header: "Tag",
+        description: "How I know them, in the tag's own colour.",
+        value: (r) => r.tagName,
+        cellColor: { color: (r) => (r.tagName ? r.tagColor : null) },
+        hideBelow: "md",
+      },
+      {
+        kind: "number",
+        id: "days",
+        header: "Days",
+        value: (r) => r.item.total,
+        // Log for the same reason as place mentions: the top handful are
+        // hundreds of days ahead of a long tail of ones and twos.
+        conditional: { type: "scale", log: true },
+      },
+      ...STANDARD_RANK_WINDOWS.map(
+        (window): RankedColumn<PeopleTableRow> => ({
+          kind: "movement",
+          id: window.id,
+          header: window.label,
+          description: `Days gained, and places moved in the ranking, since ${window.since ?? window.label}.`,
+          movement: (r) => r.item.movements[window.id] ?? null,
+          gained: (r) => r.item.counts[window.id] ?? null,
+          since: window.since ?? window.label,
+          // Week stays on a phone; month and year are the first to go.
+          hideBelow: window.id === "week" ? undefined : window.id === "month" ? "sm" : "md",
+        }),
+      ),
+    ],
+    [],
   );
 
   return (
@@ -317,11 +319,10 @@ export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
     >
       <ChartCard empty={shown.length === 0}>
         <InteractiveRanked
-          entries={shown}
-          valueLabel="Days"
-          detail={(entry) => byName.get(entry.label)?.tag.name ?? null}
+          rows={shown}
+          getKey={(r) => r.name}
+          rank={(r) => r.item.rank}
           columns={columns}
-          color={(entry) => byName.get(entry.label)?.tag.color ?? categoricalColor(0)}
           ariaLabel="People ranked by days logged, with how their ranking has moved since a week, a month and a year ago."
         />
       </ChartCard>

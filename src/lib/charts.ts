@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
@@ -17,6 +17,7 @@ import dubaiTopo from "@/data/geo/dubai.topo.json";
 import nycTopo from "@/data/geo/nyc.topo.json";
 import istanbulTopo from "@/data/geo/istanbul.topo.json";
 import { addDays, parseDate } from "@/lib/date";
+import { buildPlaceLeaderboard, type PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
@@ -648,7 +649,7 @@ export async function getExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {
 
 // --- Place leaderboard ---------------------------------------------------
 
-export type PlaceLeaderboardEntry = { name: string; value: number; color: string | null };
+export type { PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
 
 // places.color is only ever set on a top-level ("country") place — see
 // that column's own comment in schema.ts — so a leaf place's own "country
@@ -660,38 +661,29 @@ export type PlaceLeaderboardEntry = { name: string; value: number; color: string
 // backfilled (see schema.ts), and a root place may simply have no color
 // set — both cases fall back to the toolkit default at the call site
 // rather than here, matching getPeopleNetworkData's own tag-color
-// convention just above.
+// convention just below.
 const rootPlaces = alias(places, "root_places");
 
-/** Ranks places by how often they were logged in a day's two place slots,
- * weighting slot 1 double slot 2 — the exact scheme the legacy
- * `location_leaderboard` chart used (`places[mens.place1].value += 2`,
- * `+= 1` for place2). The legacy chart then grouped results into a
- * metro/category hierarchy for a nested table; that enrichment isn't in
- * this schema yet (see REBUILD_PLAN.md), so this is the flat top-N
- * ranking underneath it — still the real, meaningful part. */
-export async function getPlaceLeaderboardData(limit = 30): Promise<PlaceLeaderboardEntry[]> {
+/** Every logged place, ranked by slot-weighted mentions (legacy
+ * `location_leaderboard`'s 2x-slot-1 / 1x-slot-2 scheme), with its
+ * ancestor path and week/month/year rank movement (#115). No top-N limit
+ * any more: the page's own "Show" control picks how many rows to draw,
+ * and a few hundred places is a small payload. The ranking itself is
+ * `buildPlaceLeaderboard`'s job — see src/lib/place-leaderboard.ts for why
+ * it's no longer a GROUP BY. */
+export async function getPlaceLeaderboardData(): Promise<PlaceLeaderboardEntry[]> {
   const db = getDb();
-  const rows = await db
-    .select({
-      name: places.name,
-      value: sql<number>`
-        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
-        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
-      `.as("value"),
-      color: rootPlaces.color,
-    })
-    .from(places)
-    .innerJoin(
-      days,
-      sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`,
-    )
-    .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`)
-    .groupBy(places.id, places.name, rootPlaces.color)
-    .orderBy(desc(sql`value`))
-    .limit(limit);
-
-  return rows.map((r) => ({ name: r.name, value: Number(r.value), color: r.color }));
+  const [dayRows, catalog] = await Promise.all([
+    db
+      .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+      .from(days)
+      .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id))),
+    db
+      .select({ id: places.id, name: places.name, idPath: places.idPath, rootColor: rootPlaces.color })
+      .from(places)
+      .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`),
+  ]);
+  return buildPlaceLeaderboard(dayRows, catalog);
 }
 
 // --- Happiness trend --------------------------------------------------
