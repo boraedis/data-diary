@@ -75,9 +75,33 @@ export type RankedItem = {
   /** Appearances (weighted, where weights were given) across the whole
    * history — what the table is sorted by. */
   total: number;
+  /** Unweighted appearances across the whole history — sessions, plays,
+   * days — for a secondary column beside a weighted total (hours, score). */
+  occurrences: number;
   /** Appearances (weighted) gained inside each window. */
   counts: Record<string, number>;
   movements: Record<string, RankMovement>;
+};
+
+/**
+ * One key's cumulative standing now and at the start of each window —
+ * everything movement needs, without the individual appearances.
+ *
+ * `computeRankings` builds these from appearances, which suits the small
+ * domains (a few thousand days or sessions). The large ones — music is
+ * ~100k listens — aggregate straight to snapshots in SQL instead
+ * (`sum(...) filter (where played_at <= cutoff)`), so the rows never leave
+ * the database; both then share `rankSnapshots` and can't disagree about
+ * what movement means.
+ */
+export type RankSnapshot = {
+  key: string;
+  total: number;
+  occurrences: number;
+  /** Cumulative (weighted) total as it stood at each window's start, keyed
+   * by window id. Null when the key had no appearances yet by then — "not
+   * ranked", which is different from ranked on zero. */
+  before: Record<string, number | null>;
 };
 
 /** Ranks keys by count, descending. Ties share the better rank, so two keys
@@ -98,13 +122,40 @@ function rankByCount(counts: Map<string, number>): Map<string, number> {
   return ranks;
 }
 
-/** Cumulative appearances per key up to and including `through`. */
-function cumulativeThrough(appearances: RankAppearance[], through: string): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const a of appearances) {
-    if (a.date <= through) counts.set(a.key, (counts.get(a.key) ?? 0) + (a.weight ?? 1));
-  }
-  return counts;
+/**
+ * Current rank, gains and point-in-time movement from snapshots, sorted by
+ * total, highest first.
+ */
+export function rankSnapshots(snapshots: RankSnapshot[], windows: RankWindow[]): RankedItem[] {
+  const nowRanks = rankByCount(new Map(snapshots.map((s) => [s.key, s.total])));
+  const thenRanks = windows.map((window) => {
+    const then = new Map<string, number>();
+    for (const s of snapshots) {
+      const before = s.before[window.id];
+      if (before !== null && before !== undefined) then.set(s.key, before);
+    }
+    return rankByCount(then);
+  });
+
+  return [...snapshots]
+    .sort((a, b) => b.total - a.total)
+    .map((s) => {
+      const rank = nowRanks.get(s.key) as number;
+      const counts: Record<string, number> = {};
+      const movements: Record<string, RankMovement> = {};
+      windows.forEach((window, i) => {
+        counts[window.id] = s.total - (s.before[window.id] ?? 0);
+        const before = thenRanks[i].get(s.key);
+        // Not in the ranking at that point at all, so there is no position
+        // to have moved from. Treating "absent" as "last" would report an
+        // enormous rise for anything recently discovered.
+        movements[window.id] =
+          before === undefined
+            ? { delta: null, isNew: true, previousRank: null }
+            : { delta: before - rank, isNew: false, previousRank: before };
+      });
+      return { key: s.key, rank, total: s.total, occurrences: s.occurrences, counts, movements };
+    });
 }
 
 /**
@@ -112,40 +163,30 @@ function cumulativeThrough(appearances: RankAppearance[], through: string): Map<
  *
  * `asOf` anchors every window — pass the latest logged date rather than
  * today, so a gap in logging doesn't shift every window past the end of
- * the data and report movement that is really just absence.
+ * the data and report movement that is really just absence. Appearances
+ * after `asOf` are ignored.
  */
 export function computeRankings(
   appearances: RankAppearance[],
   asOf: string,
   windows: RankWindow[],
 ): RankedItem[] {
-  const nowCounts = cumulativeThrough(appearances, asOf);
-  const nowRanks = rankByCount(nowCounts);
-
-  const perWindow = windows.map((window) => {
-    const thenDate = addDays(asOf, -window.days);
-    const thenCounts = cumulativeThrough(appearances, thenDate);
-    return { window, thenCounts, thenRanks: rankByCount(thenCounts) };
-  });
-
-  return [...nowCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([key, total]) => {
-      const counts: Record<string, number> = {};
-      const movements: Record<string, RankMovement> = {};
-      for (const { window, thenCounts, thenRanks } of perWindow) {
-        counts[window.id] = total - (thenCounts.get(key) ?? 0);
-        const now = nowRanks.get(key) as number;
-        const before = thenRanks.get(key);
-        if (before === undefined) {
-          // They weren't in the ranking at that point at all, so there is
-          // no position to have moved from. Treating "absent" as "last"
-          // would report an enormous rise for anyone recently met.
-          movements[window.id] = { delta: null, isNew: true, previousRank: null };
-        } else {
-          movements[window.id] = { delta: before - now, isNew: false, previousRank: before };
-        }
-      }
-      return { key, rank: nowRanks.get(key) as number, total, counts, movements };
+  const cutoffs = windows.map((window) => addDays(asOf, -window.days));
+  const byKey = new Map<string, RankSnapshot>();
+  for (const a of appearances) {
+    if (a.date > asOf) continue;
+    let snapshot = byKey.get(a.key);
+    if (!snapshot) {
+      snapshot = { key: a.key, total: 0, occurrences: 0, before: {} };
+      for (const window of windows) snapshot.before[window.id] = null;
+      byKey.set(a.key, snapshot);
+    }
+    const weight = a.weight ?? 1;
+    snapshot.total += weight;
+    snapshot.occurrences += 1;
+    windows.forEach((window, i) => {
+      if (a.date <= cutoffs[i]) snapshot.before[window.id] = (snapshot.before[window.id] ?? 0) + weight;
     });
+  }
+  return rankSnapshots([...byKey.values()], windows);
 }
