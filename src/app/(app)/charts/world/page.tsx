@@ -2,7 +2,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ManageUnloggedTravelLink } from "@/components/charts/manage-unlogged-travel-link";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
-import { getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
+import { getAdminRegionVisitData, getCountryVisitData, getUsStateVisitData } from "@/lib/charts";
 import { getUnloggedTravelCodes, getUnloggedTravelDetails } from "@/lib/unlogged-travel";
 import { getProfileSettings } from "@/lib/profile";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -26,10 +26,14 @@ export default async function WorldVisitsChartPage() {
   // tooltip secondary row needs each travelled entry's own first_visited,
   // not just membership, so this is a details map rather than reusing
   // travelledCountries' codes-only Set above.
-  const [data, usStates, travelledCountries, travelledCounties, travelledCountryDetails, { diaryStartDate }] =
+  //
+  // Subdivisions for every other country (#304) ride along the same way
+  // states do, so a click only waits on that country's geometry file.
+  const [data, usStates, adminRegions, travelledCountries, travelledCounties, travelledCountryDetails, { diaryStartDate }] =
     await Promise.all([
       getCountryVisitData(),
       getUsStateVisitData(),
+      getAdminRegionVisitData(),
       getUnloggedTravelCodes("country"),
       getUnloggedTravelCodes("us_county"),
       getUnloggedTravelDetails("country"),
@@ -39,7 +43,7 @@ export default async function WorldVisitsChartPage() {
   return (
     <ChartPage
       title="World Heatmap"
-      description="A heatmap of the world describing which countries I have visited and spent time in. Click the US to drill into its states."
+      description="A heatmap of the world describing which countries I have visited and spent time in. Click a country to break it into its states, provinces or regions."
       info={{
         interactionGuide: GEO_INTERACTION_GUIDE,
         methodology: PLACES_METHODOLOGY,
@@ -56,6 +60,7 @@ export default async function WorldVisitsChartPage() {
         <WorldVisitsChart
           data={data}
           usStates={usStates}
+          adminRegions={adminRegions}
           travelledCountries={[...travelledCountries]}
           travelledCounties={[...travelledCounties]}
           travelledCountryDetails={[...travelledCountryDetails]}

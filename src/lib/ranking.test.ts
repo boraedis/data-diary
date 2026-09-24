@@ -60,13 +60,13 @@ describe("computeRankings", () => {
 
   it("marks someone who did not yet exist in the ranking as new", () => {
     const result = computeRankings(on("A", "2026-01-10"), "2026-01-14", WEEK);
-    expect(result[0].movements.week).toEqual({ delta: null, isNew: true });
+    expect(result[0].movements.week).toEqual({ delta: null, isNew: true, previousRank: null });
   });
 
   it("reports no movement for someone inactive this week but long established", () => {
     // Absent lately, but their standing is unchanged — nobody passed them.
     const result = computeRankings(on("A", "2026-01-01", "2026-01-02"), "2026-01-14", WEEK);
-    expect(result[0].movements.week).toEqual({ delta: 0, isNew: false });
+    expect(result[0].movements.week).toEqual({ delta: 0, isNew: false, previousRank: 1 });
     expect(result[0].counts.week).toBe(0);
   });
 
@@ -109,5 +109,34 @@ describe("computeRankings", () => {
     const result = computeRankings(on("A", "2026-01-20", "2026-01-01"), "2026-01-21", windows);
     expect(result[0].counts.week).toBe(1);
     expect(result[0].counts.month).toBe(2);
+  });
+
+  it("ranks on weighted totals when appearances carry a weight", () => {
+    // Places count a day's first slot double. B has more appearances but A
+    // has more weight, and both the order and the movement must follow the
+    // weight, or the movement column would disagree with the total beside it.
+    const result = computeRankings(
+      [
+        { key: "B", date: "2026-01-01" },
+        { key: "B", date: "2026-01-02" },
+        { key: "A", date: "2026-01-03", weight: 2 },
+        { key: "A", date: "2026-01-12", weight: 2 },
+      ],
+      "2026-01-14",
+      WEEK,
+    );
+    expect(result.map((r) => [r.key, r.total, r.rank])).toEqual([
+      ["A", 4, 1],
+      ["B", 2, 2],
+    ]);
+    // A week ago they were level on 2 (both 1st); A is now clear.
+    expect(result[0].movements.week).toEqual({ delta: 0, isNew: false, previousRank: 1 });
+    expect(result[1].movements.week).toEqual({ delta: -1, isNew: false, previousRank: 1 });
+    expect(result[0].counts.week).toBe(2);
+  });
+
+  it("reports tied current ranks", () => {
+    const result = computeRankings([...on("A", "2026-01-01"), ...on("B", "2026-01-02")], "2026-01-14", []);
+    expect(result.map((r) => r.rank)).toEqual([1, 1]);
   });
 });

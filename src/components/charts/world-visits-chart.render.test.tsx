@@ -6,11 +6,11 @@ import type { Feature, Geometry } from "geojson";
 import { WorldVisitsChart } from "./world-visits-chart";
 import { travelledFill } from "@/lib/viz/color";
 
-// Covers the half of #107 that only this chart has: expansion is offered
-// for exactly one country and must stay inert for every other, falling
-// back to the pre-#107 zoom-to-bounds rather than blanking a country with
-// no geometry — plus the overlap trap that world-atlas already shipping
-// its own Puerto Rico creates.
+// Covers the half of #107 that only this chart has — the US expansion, and
+// the overlap trap that world-atlas already shipping its own Puerto Rico
+// creates — plus #304's expansions for every other country with
+// subdivision data, which must stay inert for a country without any,
+// falling back to zoom-to-bounds rather than blanking it.
 //
 // jsdom does no layout, so this proves wiring and structure, not
 // appearance. See the PR for what was verified visually.
@@ -117,7 +117,7 @@ describe("WorldVisitsChart", () => {
     expect(names.filter((n) => n === "Puerto Rico")).toHaveLength(1);
   });
 
-  it("leaves a country with no subdivision geometry on zoom-to-bounds", async () => {
+  it("leaves a country with no subdivision data on zoom-to-bounds", async () => {
     const { container } = render(<WorldVisitsChart data={COUNTRIES} usStates={STATES} />);
     const worldCount = regions(container).length;
 
@@ -149,8 +149,8 @@ describe("WorldVisitsChart", () => {
     fireEvent.click(countryNamed(container, "United States of America"));
     await waitFor(() => expect(regions(container).map(nameOf)).toContain(CALIFORNIA));
 
-    // France can't expand — there's no admin-1 geometry for it — but
-    // clicking it is still clicking away from the US, so the US goes
+    // France can't expand here — no subdivision data is passed for it —
+    // but clicking it is still clicking away from the US, so the US goes
     // back to being one polygon.
     fireEvent.click(countryNamed(container, "France"));
 
@@ -173,6 +173,71 @@ describe("WorldVisitsChart", () => {
     fireEvent.click(countryNamed(container, "United States of America"));
     await Promise.resolve();
     expect(regions(container)).toHaveLength(worldCount);
+  });
+
+  describe("subdivisions outside the US (#304)", () => {
+    const ADMIN = {
+      regions: [
+        { countryId: CODE.france, region: "Paris", days: 4, firstVisited: "2019-05-01" },
+        { countryId: CODE.france, region: "Seine-Saint-Denis", days: 1, firstVisited: "2019-05-02" },
+      ],
+      unresolved: [{ countryId: "203", days: 3 }],
+    };
+
+    it("breaks France into its departments, in place, when clicked", async () => {
+      const { container } = render(<WorldVisitsChart data={COUNTRIES} adminRegions={ADMIN} />);
+      const worldCount = regions(container).length;
+
+      fireEvent.click(countryNamed(container, "France"));
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Paris"));
+
+      const names = regions(container).map(nameOf);
+      expect(names).not.toContain("France");
+      // Every department is drawn, visited or not — the unvisited ones are
+      // what make Paris read as a place *in* France.
+      expect(names).toContain("Gironde");
+      expect(names).toHaveLength(worldCount - 1 + 96);
+      expect(names).toContain("Spain");
+    });
+
+    it("colours a department by its own days, not France's", async () => {
+      const { container } = render(<WorldVisitsChart data={COUNTRIES} adminRegions={ADMIN} />);
+      fireEvent.click(countryNamed(container, "France"));
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain("Paris"));
+
+      const paris = fillFor(container, "Paris");
+      expect(paris).toBeTruthy();
+      expect(paris).not.toBe(fillFor(container, "Seine-Saint-Denis"));
+      expect(paris).not.toBe(fillFor(container, "Gironde"));
+    });
+
+    it("does not expand a country with geometry but no subdivision days", async () => {
+      // Canada has a committed file, but nothing resolved into it here —
+      // expanding would be a map of empty provinces.
+      const { container } = render(
+        <WorldVisitsChart data={[...COUNTRIES, { country: "Canada", days: 16 }]} adminRegions={ADMIN} />,
+      );
+      const worldCount = regions(container).length;
+      fireEvent.click(countryNamed(container, "Canada"));
+      await Promise.resolve();
+      expect(regions(container)).toHaveLength(worldCount);
+    });
+
+    it("keeps the US on its own path alongside everyone else's", async () => {
+      const { container } = render(<WorldVisitsChart data={COUNTRIES} usStates={STATES} adminRegions={ADMIN} />);
+      fireEvent.click(countryNamed(container, "United States of America"));
+      await waitFor(() => expect(regions(container).map(nameOf)).toContain(CALIFORNIA));
+    });
+
+    it("lists days that landed in no subdivision, by the map's own country name", () => {
+      render(<WorldVisitsChart data={COUNTRIES} adminRegions={ADMIN} />);
+      expect(screen.getByText(/Not placed in a region:\s*Czechia \(3 days\)/)).toBeTruthy();
+    });
+
+    it("says nothing about unplaced days when there are none", () => {
+      render(<WorldVisitsChart data={COUNTRIES} adminRegions={{ ...ADMIN, unresolved: [] }} />);
+      expect(screen.queryByText(/Not placed in a region/)).toBeNull();
+    });
   });
 
   describe("countries the map can't draw (#383)", () => {

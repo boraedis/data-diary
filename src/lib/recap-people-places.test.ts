@@ -95,8 +95,8 @@ describe("buildRecapPeoplePlaces — places", () => {
     );
     // Home: 2 (one first slot). Office: 1 (second slot) + 2 (first slot) = 3.
     expect(result.leaderboard).toEqual([
-      { name: "Office", value: 3, color: null },
-      { name: "Home", value: 2, color: "#abcdef" },
+      { id: 11, name: "Office", path: null, value: 3, color: null, rank: 1, movements: null, gained: null },
+      { id: 10, name: "Home", path: null, value: 2, color: "#abcdef", rank: 2, movements: null, gained: null },
     ]);
   });
 

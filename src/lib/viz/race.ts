@@ -1,5 +1,3 @@
-import type { RankedEntry } from "@/components/charts/interactive/interactive-ranked";
-
 // Pure frame/ranking math for the bar race (#103) — the half of
 // InteractiveBarRace that has nothing to do with D3, React or the DOM, so
 // it can be unit-tested without a jsdom pass (same split as viz/bin.ts and
@@ -26,6 +24,11 @@ import type { RankedEntry } from "@/components/charts/interactive/interactive-ra
 // legacy's d3 transitions were tweening between keyframes.
 
 /** One period's standings, pre-aggregated by the caller. */
+/** One named value in a race frame. This used to be InteractiveRanked's
+ * row type, shared with it; it lives here since #115 made that primitive
+ * generic over its own rows and the race was the only other user. */
+export type RankedEntry = { label: string; value: number };
+
 export type RaceFrame = {
   /** The moment this frame represents — used for the ticker and, when the
    * caller supplies one, the scrub readout. */

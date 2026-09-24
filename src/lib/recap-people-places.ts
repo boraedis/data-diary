@@ -3,7 +3,8 @@ import { days, people, places } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
-import type { CountryVisitEntry, PlaceLeaderboardEntry } from "@/lib/charts";
+import type { CountryVisitEntry } from "@/lib/charts";
+import { PLACE_SLOT_WEIGHTS, type PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
 
 // The recap's people & places section (issue #172, epic #130).
 //
@@ -74,8 +75,6 @@ export type RecapDiscovery = RecapCount & { examples: string[] };
  * reads as a highlight; the first year of any catalog would otherwise list
  * hundreds, since everything in it is technically new. */
 const MAX_EXAMPLES = 3;
-
-const PLACE_SLOT_WEIGHTS = [2, 1];
 
 /** Ten, where the standalone places chart shows thirty.
  *
@@ -179,14 +178,22 @@ export function buildRecapPeoplePlaces(
       placeScores.set(id, (placeScores.get(id) ?? 0) + weight);
     });
   }
-  const leaderboard = [...placeScores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, LEADERBOARD_SIZE)
-    .map(([id, value]) => ({
-      name: input.placeNames.get(id) ?? "Unknown",
-      value,
-      color: input.colorByPlaceId.get(id) ?? null,
-    }));
+  // No path or movement here: the recap has no place hierarchy to hand,
+  // and movement over week/month/year windows means nothing inside a
+  // period that's already a fixed window. `PlaceLeaderboard` drops those
+  // columns when they're null.
+  const sortedScores = [...placeScores.entries()].sort((a, b) => b[1] - a[1]);
+  const leaderboard: PlaceLeaderboardEntry[] = sortedScores.slice(0, LEADERBOARD_SIZE).map(([id, value]) => ({
+    id,
+    name: input.placeNames.get(id) ?? "Unknown",
+    path: null,
+    value,
+    color: input.colorByPlaceId.get(id) ?? null,
+    // Ties share the better rank, same rule as src/lib/ranking.ts.
+    rank: sortedScores.findIndex(([, v]) => v === value) + 1,
+    movements: null,
+    gained: null,
+  }));
 
   // --- Country choropleth ---
   // Distinct *days present*, matching getCountryVisitData: a day whose two

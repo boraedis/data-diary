@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
@@ -6,6 +6,9 @@ import { groupByPeriod } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
 import { resolveCountyForPoint, type UsCounty } from "@/lib/geo/us-counties";
+import { hasAdminRegions, loadAdminRegionFeatures } from "@/lib/geo/admin-geometry";
+import { resolveAdminRegion } from "@/lib/geo/admin-lookup";
+import { resolveCountryCode } from "@/lib/geo/country-lookup";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
@@ -14,6 +17,7 @@ import dubaiTopo from "@/data/geo/dubai.topo.json";
 import nycTopo from "@/data/geo/nyc.topo.json";
 import istanbulTopo from "@/data/geo/istanbul.topo.json";
 import { addDays, parseDate } from "@/lib/date";
+import { buildPlaceLeaderboard, type PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
@@ -645,7 +649,7 @@ export async function getExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {
 
 // --- Place leaderboard ---------------------------------------------------
 
-export type PlaceLeaderboardEntry = { name: string; value: number; color: string | null };
+export type { PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
 
 // places.color is only ever set on a top-level ("country") place — see
 // that column's own comment in schema.ts — so a leaf place's own "country
@@ -657,38 +661,29 @@ export type PlaceLeaderboardEntry = { name: string; value: number; color: string
 // backfilled (see schema.ts), and a root place may simply have no color
 // set — both cases fall back to the toolkit default at the call site
 // rather than here, matching getPeopleNetworkData's own tag-color
-// convention just above.
+// convention just below.
 const rootPlaces = alias(places, "root_places");
 
-/** Ranks places by how often they were logged in a day's two place slots,
- * weighting slot 1 double slot 2 — the exact scheme the legacy
- * `location_leaderboard` chart used (`places[mens.place1].value += 2`,
- * `+= 1` for place2). The legacy chart then grouped results into a
- * metro/category hierarchy for a nested table; that enrichment isn't in
- * this schema yet (see REBUILD_PLAN.md), so this is the flat top-N
- * ranking underneath it — still the real, meaningful part. */
-export async function getPlaceLeaderboardData(limit = 30): Promise<PlaceLeaderboardEntry[]> {
+/** Every logged place, ranked by slot-weighted mentions (legacy
+ * `location_leaderboard`'s 2x-slot-1 / 1x-slot-2 scheme), with its
+ * ancestor path and week/month/year rank movement (#115). No top-N limit
+ * any more: the page's own "Show" control picks how many rows to draw,
+ * and a few hundred places is a small payload. The ranking itself is
+ * `buildPlaceLeaderboard`'s job — see src/lib/place-leaderboard.ts for why
+ * it's no longer a GROUP BY. */
+export async function getPlaceLeaderboardData(): Promise<PlaceLeaderboardEntry[]> {
   const db = getDb();
-  const rows = await db
-    .select({
-      name: places.name,
-      value: sql<number>`
-        coalesce(sum(case when ${days.place1Id} = ${places.id} then 2 else 0 end), 0)
-        + coalesce(sum(case when ${days.place2Id} = ${places.id} then 1 else 0 end), 0)
-      `.as("value"),
-      color: rootPlaces.color,
-    })
-    .from(places)
-    .innerJoin(
-      days,
-      sql`${days.place1Id} = ${places.id} or ${days.place2Id} = ${places.id}`,
-    )
-    .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`)
-    .groupBy(places.id, places.name, rootPlaces.color)
-    .orderBy(desc(sql`value`))
-    .limit(limit);
-
-  return rows.map((r) => ({ name: r.name, value: Number(r.value), color: r.color }));
+  const [dayRows, catalog] = await Promise.all([
+    db
+      .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+      .from(days)
+      .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id))),
+    db
+      .select({ id: places.id, name: places.name, idPath: places.idPath, rootColor: rootPlaces.color })
+      .from(places)
+      .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`),
+  ]);
+  return buildPlaceLeaderboard(dayRows, catalog);
 }
 
 // --- Happiness trend --------------------------------------------------
@@ -1109,6 +1104,159 @@ export async function getUsCountyVisitData(): Promise<UsCountyVisitData> {
       }))
       .sort((a, b) => b.days - a.days),
     unresolvedDays: unresolvedDayPlacePairs.size,
+  };
+}
+
+// --- Non-US subdivision visits (world map expansion, #304) ----------------
+
+export type AdminRegionVisitEntry = {
+  /** world-atlas country id — the key the world map expands by, and
+   * ADMIN_REGIONS' own key. */
+  countryId: string;
+  /** The subdivision's feature name in the committed geometry — also its
+   * join key, see AdminRegionProperties. */
+  region: string;
+  days: number;
+  firstVisited: string | null;
+};
+
+export type AdminRegionVisitData = {
+  regions: AdminRegionVisitEntry[];
+  /** Per country, days logged there that landed in none of its
+   * subdivisions — a place (and every ancestor of it) with no
+   * coordinates, or coordinates outside every polygon. Surfaced for the
+   * same reason UsCountyVisitData.unresolvedDays is: so a country's
+   * subdivisions summing to less than the country itself is explained on
+   * the page rather than discovered. Keyed by world-atlas country id. */
+  unresolved: { countryId: string; days: number }[];
+};
+
+/**
+ * Distinct days logged in each subdivision of every country with geometry
+ * in ADMIN_REGIONS (#304) — the data behind clicking Turkey, France, Japan
+ * and the rest on /charts/world. Same "was I there that day" dedup as every
+ * other choropleth in this file.
+ *
+ * Resolution is spatial, like getUsCountyVisitData's, not a namePath walk
+ * like getUsStateVisitData's — see admin-regions.ts for the measurement
+ * that decided it, and resolveAdminRegion for the ancestor fallback that
+ * catches places logged without an address. The *country* still comes from
+ * the catalog (the idPath root, as in getCountryVisitData), so a place
+ * geocoded across a border counts in the country it was filed under and
+ * simply resolves to no subdivision there, rather than quietly moving a
+ * day between countries the base map has already counted.
+ *
+ * Cost: point-in-polygon for each referenced non-US place against its own
+ * country's subdivisions only (never the whole world's), a few hundred
+ * places against at most a couple of hundred polygons. The geometry is
+ * decoded once per process — see loadAdminRegionFeatures.
+ */
+export async function getAdminRegionVisitData(): Promise<AdminRegionVisitData> {
+  const db = getDb();
+  const dayRows = await db
+    .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+    .from(days)
+    .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)));
+
+  const referencedIds = new Set<number>();
+  for (const row of dayRows) {
+    if (row.place1Id !== null) referencedIds.add(row.place1Id);
+    if (row.place2Id !== null) referencedIds.add(row.place2Id);
+  }
+  if (referencedIds.size === 0) return { regions: [], unresolved: [] };
+
+  const referenced = await db
+    .select({ id: places.id, idPath: places.idPath })
+    .from(places)
+    .where(inArray(places.id, [...referencedIds]));
+
+  // Every place on any referenced place's path — the roots, to name the
+  // country, and the ancestors in between, whose coordinates are the
+  // fallback when a place's own don't land.
+  const pathIdsByPlace = new Map<number, number[]>();
+  const pathIds = new Set<number>();
+  for (const p of referenced) {
+    const ids = (p.idPath ?? "").split("/").filter(Boolean).map(Number);
+    if (ids.length === 0) continue;
+    pathIdsByPlace.set(p.id, ids);
+    for (const id of ids) pathIds.add(id);
+  }
+  const pathRows = pathIds.size
+    ? await db
+        .select({ id: places.id, name: places.name, lat: places.lat, lng: places.lng })
+        .from(places)
+        .where(inArray(places.id, [...pathIds]))
+    : [];
+  const pathById = new Map(pathRows.map((r) => [r.id, r]));
+
+  // Resolved once per place, not once per (day, place) pair, for the same
+  // reason getUsCountyVisitData does it that way.
+  const countryByPlaceId = new Map<number, string>();
+  const regionByPlaceId = new Map<number, string>();
+  for (const [placeId, ids] of pathIdsByPlace) {
+    const root = pathById.get(ids[0]);
+    const countryId = root ? resolveCountryCode(root.name)?.code : undefined;
+    if (!countryId || !hasAdminRegions(countryId)) continue;
+    countryByPlaceId.set(placeId, countryId);
+
+    // Own point first, then each ancestor's nearest-first, never the
+    // country's own (a country-level point says nothing about which
+    // subdivision a day was in).
+    const points: [number, number][] = [];
+    for (const id of ids.slice(1).reverse()) {
+      const node = pathById.get(id);
+      if (node?.lat != null && node.lng != null) points.push([node.lng, node.lat]);
+    }
+    if (points.length === 0) continue;
+    const features = await loadAdminRegionFeatures(countryId);
+    const region = features ? resolveAdminRegion(features.features, points) : null;
+    if (region) regionByPlaceId.set(placeId, region);
+  }
+
+  const dayRegionPairs = new Set<string>();
+  const dayCountryPairs = new Set<string>();
+  const resolvedDayCountryPairs = new Set<string>();
+  for (const row of dayRows) {
+    for (const placeId of [row.place1Id, row.place2Id]) {
+      if (placeId === null) continue;
+      const countryId = countryByPlaceId.get(placeId);
+      if (!countryId) continue;
+      dayCountryPairs.add(`${row.date}\0${countryId}`);
+      const region = regionByPlaceId.get(placeId);
+      if (!region) continue;
+      dayRegionPairs.add(`${row.date}\0${countryId}\0${region}`);
+      resolvedDayCountryPairs.add(`${row.date}\0${countryId}`);
+    }
+  }
+
+  const counts = new Map<string, number>();
+  const firstVisited = new Map<string, string>();
+  for (const pair of dayRegionPairs) {
+    const date = pair.slice(0, pair.indexOf("\0"));
+    const key = pair.slice(date.length + 1);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const prev = firstVisited.get(key);
+    if (!prev || date < prev) firstVisited.set(key, date);
+  }
+
+  // A day counts as unresolved only when *nothing* that day placed it in a
+  // subdivision of that country — a day with one resolved place and one
+  // unresolved one is already on the map.
+  const unresolved = new Map<string, number>();
+  for (const pair of dayCountryPairs) {
+    if (resolvedDayCountryPairs.has(pair)) continue;
+    const countryId = pair.slice(pair.indexOf("\0") + 1);
+    unresolved.set(countryId, (unresolved.get(countryId) ?? 0) + 1);
+  }
+
+  return {
+    regions: [...counts.entries()]
+      .map(([key, dayCount]) => {
+        const [countryId, region] = key.split("\0");
+        return { countryId, region, days: dayCount, firstVisited: firstVisited.get(key) ?? null };
+      })
+      .sort((a, b) => b.days - a.days),
+    unresolved: [...unresolved.entries()].map(([countryId, dayCount]) => ({ countryId, days: dayCount })),
   };
 }
 
