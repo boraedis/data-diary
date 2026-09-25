@@ -1,0 +1,168 @@
+name: Scheduled database backup
+
+# Nightly pg_dump of the production database into the private
+# boraedis/data-diary-backups repo (#47) — an off-Neon copy, so the data
+# doesn't depend on Neon's own short-retention point-in-time restore alone.
+# See README's "Backups" section for one-time setup and how to restore.
+#
+# Credentials:
+# - BACKUP_DATABASE_URL — a *read-only* Neon role's connection string, as a
+#   repo-level secret. Deliberately not PROD_DATABASE_URL: that one lives in
+#   the "production" environment, whose required-reviewer gate would pause
+#   this job for approval every night — and a backup has no reason to hold
+#   write access anyway. Use the direct (non "-pooler") host; pg_dump over
+#   PgBouncer's transaction pooling is unreliable.
+# - BACKUP_REPO_TOKEN — a fine-grained PAT scoped to data-diary-backups only,
+#   Contents: read and write. When it expires the push step fails, which
+#   opens the failure issue below — that's the renewal reminder.
+#
+# This repo is public, so these logs are too: nothing below may echo the
+# dump, the connection string, or the token. (GitHub masks secret values,
+# but the dump's contents aren't a secret it knows about.)
+#
+# Retention: the last 30 nightly dumps, plus every 1st-of-the-month dump
+# indefinitely (~12 extra files a year) for damage that isn't noticed within
+# a month. Deleting a file doesn't shrink git history, though — gzipped
+# dumps are binary and don't delta-compress, so committing one a night on
+# top of the last would grow the backup repo by every dump ever taken
+# (~2GB/year at the current ~43MB database). So each run replaces the backup
+# repo's history with a single fresh commit holding just the retained files,
+# and the old commits become unreferenced. The files themselves are the
+# retention; the git history isn't.
+#
+# GitHub disables scheduled workflows in a public repo after 60 days with no
+# commits — if this repo ever goes quiet that long, re-enable it from the
+# Actions tab.
+
+on:
+  schedule:
+    # Nightly, 07:30 UTC (~03:30 US Eastern). GitHub Actions cron is UTC.
+    - cron: "30 7 * * *"
+  workflow_dispatch: {}
+
+# Two overlapping runs would each force-push their own snapshot; the second
+# could drop the first's dump. Queue instead.
+concurrency:
+  group: scheduled-backup
+  cancel-in-progress: false
+
+defaults:
+  run:
+    # Explicit `shell: bash` makes Actions run with `-eo pipefail`, so a
+    # failing pg_dump fails the step instead of being hidden behind gzip's
+    # exit status.
+    shell: bash
+
+env:
+  BACKUP_REPO: boraedis/data-diary-backups
+  KEEP_DAILY: 30
+  # A dump smaller than this is treated as a failed/wrong-database dump
+  # rather than a real backup (the database is ~43MB, and the gzipped dump
+  # several MB). Catches e.g. a URL pointing at an empty branch before it
+  # gets rotated in over good backups.
+  MIN_DUMP_BYTES: 1000000
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # pg_dump refuses to dump a server newer than itself, and Neon runs
+      # Postgres 18 while the runner image ships an older client. Pull the
+      # matching client from the official PostgreSQL apt repo; bump the
+      # version here if the Neon project's Postgres major version changes.
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          /usr/lib/postgresql/18/bin/pg_dump --version
+
+      - name: Dump the database
+        id: dump
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          file="data-diary-$(date -u +%F).sql.gz"
+          # Plain SQL (restores with just psql). --no-owner/--no-privileges
+          # so it restores into any role/database, not only one with Neon's
+          # exact role names.
+          /usr/lib/postgresql/18/bin/pg_dump --no-owner --no-privileges "$DATABASE_URL" \
+            | gzip -9 > "$file"
+
+          size=$(stat -c %s "$file")
+          if [ "$size" -lt "$MIN_DUMP_BYTES" ]; then
+            echo "::error::Dump is only $size bytes (minimum $MIN_DUMP_BYTES) — refusing to rotate it in."
+            exit 1
+          fi
+          # pg_dump writes this trailer only when it finishes cleanly.
+          if ! gunzip -c "$file" | tail -n 5 | grep -q "PostgreSQL database dump complete"; then
+            echo "::error::Dump is missing pg_dump's completion trailer — likely truncated."
+            exit 1
+          fi
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "Dumped $file ($size bytes)"
+
+      - name: Rotate into the backup repo
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+          FILE: ${{ steps.dump.outputs.file }}
+        run: |
+          git clone --quiet --depth 1 \
+            "https://x-access-token:${BACKUP_REPO_TOKEN}@github.com/${BACKUP_REPO}.git" backups
+          mkdir -p backups/dumps
+          mv "$FILE" backups/dumps/
+          cd backups
+
+          # Newest first (ISO dates sort lexically). Keep the newest
+          # $KEEP_DAILY, and any 1st-of-month dump regardless of age.
+          ls dumps/data-diary-*.sql.gz | sort -r | tail -n +$((KEEP_DAILY + 1)) \
+            | { grep -v -- '-01\.sql\.gz$' || true; } \
+            | xargs -r rm --
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898+github-actions[bot]@users.noreply.github.com"
+          # Fresh single-commit history each run — see the retention note
+          # at the top of this file for why.
+          git checkout --quiet --orphan snapshot
+          git add -A
+          git commit --quiet -m "Backup ${FILE#data-diary-}" \
+            -m "$(ls dumps | wc -l) dumps retained. Written by data-diary's scheduled-backup.yml."
+          git push --quiet --force origin snapshot:main
+          echo "Retained dumps:"
+          ls -lh dumps | tail -n +2
+
+  # A backup that silently stops running is the classic failure mode, and a
+  # scheduled run's failure only shows up in the Actions tab (plus an email
+  # that's easy to filter). Same fix as migrate-prod.yml: open an issue, which
+  # lands with every other notification. Only a run link — never log output,
+  # since this repo is public.
+  report-failure:
+    needs: backup
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Scheduled database backup failed (run #${context.runNumber})`,
+              assignees: [context.repo.owner],
+              body: [
+                "Tonight's database backup didn't complete, so no new dump was rotated into `data-diary-backups` (existing backups are untouched).",
+                "",
+                `Run: ${runUrl}`,
+                "",
+                "Common causes: `BACKUP_REPO_TOKEN` expired (renew it and update the secret), the Neon Postgres major version moved past the client this workflow installs, or `BACKUP_DATABASE_URL` points at the wrong branch (the size check fails). Close this once a run succeeds.",
+              ].join("\n"),
+            });
