@@ -1421,6 +1421,13 @@ export type PlaceHierarchyRow = {
    * it lays out, so pre-rolling them up here would double-count every
    * ancestor. */
   value: number;
+  /** The metro of this place's nearest Municipality ancestor (or itself,
+   * when it *is* one) — `resolvePlaceLevels`' own field, reused rather
+   * than re-walked here. Null for anything outside a metro's catchment
+   * (most of the tree: metroId is only ever set on a Municipality). Used
+   * together with `subcategory === "Municipality"` to regroup the real
+   * geography subtree by metro (#227) rather than flattening it. */
+  metro: string | null;
 };
 
 /** Every place that was logged at least once, plus enough of the catalog
@@ -1465,6 +1472,8 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     )
     .groupBy(places.id, hierarchyRootPlaces.color);
 
+  const levelsByPlaceId = await resolvePlaceLevels(rows.map((r) => r.id));
+
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -1474,6 +1483,7 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     subcategory: r.subcategory,
     rootColor: r.rootColor,
     value: Number(r.value),
+    metro: levelsByPlaceId.get(r.id)?.metro ?? null,
   }));
 }
 
