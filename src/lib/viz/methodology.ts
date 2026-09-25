@@ -58,3 +58,18 @@ export const LIFE_METHODOLOGY =
 
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";
+
+// The leaderboards added in #115. Same voice as the rest: what's recorded
+// and how, not how the chart is drawn.
+
+export const MUSIC_METHODOLOGY =
+  "Every stream comes from Spotify's extended streaming history export, imported in bulk rather than logged by hand. Each artist is matched to one catalog entry however Spotify spells it, and carries the genres Spotify assigns it, which are hand-sorted into a small set of genre groups. Time is what Spotify recorded as played, so a skipped track counts only for the seconds it ran.";
+
+export const PODCAST_METHODOLOGY =
+  "Podcast episodes come from the same Spotify streaming history export as music. Each show is matched to one catalog entry and filed under a hand-picked category, since Spotify doesn't publish a podcast taxonomy. Time is what Spotify recorded as played.";
+
+export const ENTERTAINMENT_METHODOLOGY =
+  "Entertainment is logged per session: each movie watched, TV episode, reading session, sports game and gaming session, plus anything else (concerts, theatre) under its own kind. Each session records how long it took and where it happened. Movies and TV are matched to TMDB, books to Google Books; sports are logged by league and teams.";
+
+export const SPORTS_METHODOLOGY =
+  "Every game watched is logged with its sport, league, the two teams playing and how long I watched. Conferences are the ones each team belongs to in the catalog — ACC, NFC North, Eastern and so on.";

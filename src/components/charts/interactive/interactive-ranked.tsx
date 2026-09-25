@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { formatThousandsNumber } from "@/lib/viz/format";
 import { contrastingTextColor, divergingScale, sequentialLogScale, sequentialScale } from "@/lib/viz/color";
 import type { RankMovement } from "@/lib/ranking";
@@ -156,9 +156,20 @@ export type InteractiveRankedProps<T> = {
   /** The first column is the row's name: pinned, left-aligned, never hidden. */
   columns: RankedColumn<T>[];
   ariaLabel: string;
+  /** Rows drawn per batch — see "Every row, drawn in batches" below. */
+  pageSize?: number;
 };
 
 type SortState = { columnId: string; direction: "asc" | "desc" } | null;
+
+/** Podium badge classes by rank — `--medal-*` in globals.css, validated
+ * for separation and for the dark ink they carry. Written out in full so
+ * Tailwind's scanner sees each class. */
+const MEDAL_CLASS: Record<number, string> = {
+  1: "bg-medal-gold font-bold text-badge-ink",
+  2: "bg-medal-silver font-bold text-badge-ink",
+  3: "bg-medal-bronze font-bold text-badge-ink",
+};
 
 /** "1st", "2nd", "11th", "23rd". */
 function ordinal(n: number): string {
@@ -287,8 +298,11 @@ export function RankMovementCell({
   if (!movement) return <Blank />;
   if (movement.isNew) {
     return (
+      // A bright, solid blue (`--rank-new`, globals.css) so a newcomer
+      // jumps out of a long column of dashes — deliberately unlike the
+      // green/red arrows and the warm podium medals.
       <span
-        className="rounded-sm bg-accent px-1.5 py-px text-[10px] font-semibold tracking-wide text-accent-foreground uppercase"
+        className="rounded-sm bg-rank-new px-1.5 py-px text-[10px] font-bold tracking-wide text-badge-ink uppercase"
         title={`New since ${since} — not ranked then, ${ordinal(currentRank)} now`}
       >
         New
@@ -424,7 +438,11 @@ function MovementCell<T>({
           screen with no sideways scroll. */}
       {column.gained ? (
         <span className="hidden min-w-8 text-right text-xs text-muted-foreground tabular-nums sm:inline">
-          {gained !== null && gained !== 0 ? `+${(column.formatGained ?? formatThousandsNumber)(gained)}` : ""}
+          {gained !== null && gained !== 0
+            ? // Usually a gain, but a recency-faded score (people impact)
+              // can shrink over a window, so the sign is the value's own.
+              `${gained > 0 ? "+" : "−"}${(column.formatGained ?? formatThousandsNumber)(Math.abs(gained))}`
+            : ""}
         </span>
       ) : null}
       <span className="inline-flex min-w-8 justify-end">
@@ -434,7 +452,14 @@ function MovementCell<T>({
   );
 }
 
-export function InteractiveRanked<T>({ rows, getKey, rank, columns, ariaLabel }: InteractiveRankedProps<T>) {
+export function InteractiveRanked<T>({
+  rows,
+  getKey,
+  rank,
+  columns,
+  ariaLabel,
+  pageSize = 100,
+}: InteractiveRankedProps<T>) {
   const [sort, setSort] = useState<SortState>(null);
 
   // Rank is fixed to each row before sorting: the rank column always shows
@@ -462,6 +487,41 @@ export function InteractiveRanked<T>({ rows, getKey, rank, columns, ariaLabel }:
       return cmp !== 0 ? cmp * sign : a.index - b.index;
     });
   }, [ranked, columns, sort]);
+
+  // **Every row, drawn in batches.** A leaderboard shows everything it
+  // ranks (#115 dropped the "Top N" pickers), and music's song mode is
+  // ~17k rows, which as table rows is enough DOM to make the page crawl.
+  // So rows are all *here* — sorting and the conditional-format domains
+  // cover every one — but only drawn a batch at a time, with the next
+  // batch added as the end of the table scrolls into view (and a button
+  // for when the observer can't fire). Any change to the rows or the sort
+  // starts again from the first batch, via the `source` check below
+  // rather than an effect, so there's never a render showing stale counts.
+  const [paging, setPaging] = useState({ source: sorted, count: pageSize });
+  const drawn = paging.source === sorted ? paging.count : pageSize;
+  const visible = useMemo(() => sorted.slice(0, drawn), [sorted, drawn]);
+  const remaining = sorted.length - visible.length;
+  const showMore = () => setPaging({ source: sorted, count: drawn + pageSize });
+
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || remaining <= 0 || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setPaging((current) => ({
+            source: sorted,
+            count: (current.source === sorted ? current.count : pageSize) + pageSize,
+          }));
+        }
+      },
+      // Start the next batch well before the reader reaches the end.
+      { rootMargin: "800px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [sorted, remaining, pageSize]);
 
   const formatters = useMemo(
     () =>
@@ -500,7 +560,9 @@ export function InteractiveRanked<T>({ rows, getKey, rank, columns, ariaLabel }:
   return (
     // overflow-x-auto rather than shrinking columns past legibility — the
     // pinned rank/name columns keep each row identifiable while it scrolls.
-    <div className="-mx-1 overflow-x-auto px-1">
+    // `isolate` keeps the pinned cells' z-index inside the table: without
+    // it they stacked above the page's sticky top nav on vertical scroll.
+    <div className="isolate -mx-1 overflow-x-auto px-1">
       <table className="w-full border-separate border-spacing-0 text-left text-sm" aria-label={ariaLabel}>
         <thead>
           <tr className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -565,15 +627,15 @@ export function InteractiveRanked<T>({ rows, getKey, rank, columns, ariaLabel }:
           </tr>
         </thead>
         <tbody>
-          {sorted.map(({ row, rank: rowRank, index }) => (
+          {visible.map(({ row, rank: rowRank, index }) => (
             <tr key={getKey(row)} className="group transition-colors hover:bg-accent">
               <td className={`${pinnedCell} left-0 border-b border-border/40 py-1.5 pr-2 text-center`}>
-                {/* Podium ranks get a filled badge — the standings-table
-                    cue that makes the top of a long table findable at a
-                    glance, without spending a colour on it. */}
+                {/* Podium ranks get gold / silver / bronze badges — the
+                    standings-table cue that makes the top of a long table
+                    findable at a glance. Tied ranks share a medal. */}
                 <span
                   className={`inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1 text-xs tabular-nums ${
-                    rowRank <= 3 ? "bg-muted font-semibold text-foreground" : "text-muted-foreground"
+                    MEDAL_CLASS[rowRank] ?? "text-muted-foreground"
                   }`}
                 >
                   {rowRank}
@@ -615,6 +677,20 @@ export function InteractiveRanked<T>({ rows, getKey, rank, columns, ariaLabel }:
           ))}
         </tbody>
       </table>
+      {remaining > 0 ? (
+        <div ref={sentinel} className="flex items-center justify-center gap-3 py-3 text-xs text-muted-foreground">
+          <span className="tabular-nums">
+            Showing {formatThousandsNumber(visible.length)} of {formatThousandsNumber(sorted.length)}
+          </span>
+          <button
+            type="button"
+            onClick={showMore}
+            className="rounded-md px-2 py-1 font-medium text-foreground hover:bg-accent focus-visible:outline-2"
+          >
+            Show {formatThousandsNumber(Math.min(pageSize, remaining))} more
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

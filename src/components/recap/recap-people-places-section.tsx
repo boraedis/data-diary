@@ -1,14 +1,16 @@
 import { ChartCard } from "@/components/charts/chart-card";
-import { PlaceLeaderboard } from "@/components/charts/place-leaderboard";
+import { LeaderboardTable } from "@/components/charts/leaderboard";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { MIN_DAYS_FOR_TOTAL, toRecapStat } from "@/lib/recap";
+import { PLACE_DAYS_DESCRIPTION } from "@/lib/leaderboards/places";
+import type { LeaderboardColumns } from "@/lib/leaderboards/rows";
 import type { RecapCount, RecapDiscovery, RecapPeoplePlaces } from "@/lib/recap-people-places";
 
 // The people & places section of the recap report (issue #172, epic #130).
 //
 // Both charts here are the existing chart pages' own components, handed
-// period-scoped data instead of all-time data — `PlaceLeaderboard`
+// period-scoped data instead of all-time data — `LeaderboardTable`
 // (InteractiveRanked, #22/#115) and `WorldVisitsChart` (InteractiveGeo, #24).
 // That's deliberate per #172: no bespoke recap chart components. The map's
 // height is passed explicitly, though, rather than left at its default: as
@@ -26,6 +28,17 @@ import type { RecapCount, RecapDiscovery, RecapPeoplePlaces } from "@/lib/recap-
 // a window the data can't support. Same reasoning as the missing
 // `usStates` above. Whole-history unlogged travel lives on
 // /charts/world.
+
+/** The places table's columns, minus path and movement: the recap's rows
+ * have no hierarchy, and it's already a fixed window. The country colour
+ * tints the name instead. */
+const RECAP_PLACE_COLUMNS: LeaderboardColumns = {
+  nameHeader: "Place",
+  valueHeader: "Days",
+  valueDescription: PLACE_DAYS_DESCRIPTION,
+  valueFormat: "days",
+  gainedNoun: "days gained",
+};
 
 export function RecapPeoplePlacesSection({
   data,
@@ -75,8 +88,9 @@ export function RecapPeoplePlacesSection({
             <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
               Place Leaderboard
             </h3>
-            <PlaceLeaderboard
-              entries={data.leaderboard}
+            <LeaderboardTable
+              rows={data.leaderboard}
+              columns={RECAP_PLACE_COLUMNS}
               ariaLabel={`Most-mentioned places in ${periodLabel}, ranked.`}
             />
           </section>
