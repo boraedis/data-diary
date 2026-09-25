@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import * as d3 from "d3";
 import type { Feature, Geometry } from "geojson";
 import { WorldVisitsChart } from "./world-visits-chart";
-import { travelledFill } from "@/lib/viz/color";
+import { noDataFill, travelledFill } from "@/lib/viz/color";
 
 // Covers the half of #107 that only this chart has — the US expansion, and
 // the overlap trap that world-atlas already shipping its own Puerto Rico
@@ -297,7 +297,7 @@ describe("WorldVisitsChart", () => {
       // ...and a country with neither days nor travel is still no-data,
       // so the tint is distinguishing something rather than repainting
       // everything empty.
-      expect(fillFor(container, "Canada")).toBe("var(--muted)");
+      expect(fillFor(container, "Canada")).toBe(noDataFill());
     });
 
     it("never downgrades a country that has real logged days", () => {
@@ -319,7 +319,7 @@ describe("WorldVisitsChart", () => {
       // nothing.
       const { container } = render(<WorldVisitsChart data={COUNTRIES} travelledCountries={["Mexico"]} />);
 
-      expect(fillFor(container, "Mexico")).toBe("var(--muted)");
+      expect(fillFor(container, "Mexico")).toBe(noDataFill());
       expect(screen.queryByText("travelled through")).toBeNull();
     });
 
@@ -343,10 +343,10 @@ describe("WorldVisitsChart", () => {
 
       expect(fillFor(container, "Alabama")).toBe(travelledFill("light"));
       // A state with neither is untouched...
-      expect(fillFor(container, "Wisconsin")).toBe("var(--muted)");
+      expect(fillFor(container, "Wisconsin")).toBe(noDataFill());
       // ...and so is a country outside the expansion, which answers this
       // question from an entirely different set.
-      expect(fillFor(container, "Mexico")).toBe("var(--muted)");
+      expect(fillFor(container, "Mexico")).toBe(noDataFill());
     });
 
     it("does not let travelled counties leak onto the countries around them", async () => {
@@ -355,7 +355,7 @@ describe("WorldVisitsChart", () => {
       const { container } = render(
         <WorldVisitsChart data={COUNTRIES} usStates={STATES} travelledCounties={["01097"]} />,
       );
-      expect(fillFor(container, "Canada")).toBe("var(--muted)");
+      expect(fillFor(container, "Canada")).toBe(noDataFill());
       expect(screen.queryByText("travelled through")).toBeNull();
     });
 

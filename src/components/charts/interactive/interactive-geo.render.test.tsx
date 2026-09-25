@@ -4,11 +4,18 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import * as d3 from "d3";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import { InteractiveGeo } from "./interactive-geo";
-import { travelledFill } from "@/lib/viz/color";
+import { noDataFill, travelledFill } from "@/lib/viz/color";
 
 // #364's three-state fill: a value on the sequential ramp, the flat
 // "travelled through" tint, and the muted no-data fill — plus the
 // precedence between them.
+//
+// The no-data expectation goes through `noDataFill()` rather than a
+// literal, same as the travelled one goes through `travelledFill()`: #426
+// moved that fill off `var(--muted)` onto its own constant, and hardcoding
+// either value here only re-breaks this file (and the us-state/world
+// render tests, which do the same) the next time the colour is tuned.
+// What's under test is which state a region resolves to, not the hex.
 //
 // Tests the primitive directly rather than through a chart, because #364
 // deliberately ships without a consumer (#365/#366 wire the maps up). The
@@ -110,7 +117,7 @@ describe("InteractiveGeo travelled fill", () => {
     const empty = fillOf(container, "Empty");
 
     expect(travelled).toBe(travelledFill("light"));
-    expect(empty).toBe("var(--muted)");
+    expect(empty).toBe(noDataFill());
     // A real value lands on the ramp, which is neither of the other two.
     expect(logged).not.toBe(travelled);
     expect(logged).not.toBe(empty);
@@ -144,7 +151,7 @@ describe("InteractiveGeo travelled fill", () => {
 
   it("renders unchanged for a caller that passes no isTravelled at all", () => {
     const { container } = renderMap({ isTravelled: undefined });
-    expect(fillOf(container, "Travelled")).toBe("var(--muted)");
+    expect(fillOf(container, "Travelled")).toBe(noDataFill());
     expect(screen.queryByText("travelled through")).toBeNull();
   });
 
