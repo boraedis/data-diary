@@ -1,6 +1,5 @@
-import { addDays, daysBetween } from "@/lib/date";
+import { daysBetween } from "@/lib/date";
 import { personImpact, recencyWeight } from "@/lib/impact";
-import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import type { PeopleDay } from "@/lib/charts";
 
 // Pure scoring + selection for the People Impact Trend chart — legacy's
@@ -9,26 +8,26 @@ import type { PeopleDay } from "@/lib/charts";
 // life-timeline.ts is: the decisions worth testing (what a point means,
 // who a preset or a tag pulls in) shouldn't need a rendered chart.
 //
-// **What a point is.** Legacy's, exactly: every calendar day has a
-// *standing* per person — the recency-weighted sum of every impact they
-// ever scored up to that day (`recencyWeight(age) × personImpact(day's
-// happiness, slot)`, the same curve the bar race uses) — and a plotted
-// point is the **mean standing over the days in its period**. So the line
-// is "who mattered around then", not "how often did I see them that week":
-// it rises while someone's in your days, and eases back toward the fader's
-// floor over the year or two after they leave rather than dropping to zero
-// the first week they're missing.
+// **What a point is.** Every calendar day has a *standing* per person —
+// the recency-weighted sum of every impact they ever scored up to that day
+// (`recencyWeight(age) × personImpact(day's happiness, slot)`, the same
+// curve the bar race uses) — and the chart plots it **for every day, with
+// no averaging**. Legacy averaged it per week/month/quarter/year; the user
+// asked for the raw daily line instead (#441), and since the fader is
+// already a year-scale smoother, the daily line is readable on its own. So
+// the line is "who mattered around then", not "how often did I see them
+// that week": it jumps a little on each day they're logged, holds while
+// they're in your days, and eases back toward the fader's floor over the
+// year or two after they leave rather than dropping to zero.
 //
-// **How it's computed.** Legacy looped every day over every earlier day
-// (quadratic in the history, per person — it sat behind a loading modal).
-// Here a period's mean has a closed form over a prefix sum of the fader:
-// the days of a period `[s, e]` see an appearance on day `j` at ages
-// `max(s,j)-j … e-j`, so its whole contribution to the period is
-// `score × (C[e-j] - C[max(s,j)-j-1])` with `C` the cumulative weights.
-// That makes a period one pass over the person's appearances instead of one
-// per day, which is what lets the chart re-bucket and re-rank on every
-// control change instead of once behind a spinner — and it's exact, the
-// same number legacy's day-by-day average produces, not an approximation.
+// **How it's computed.** `dailyStandings` spreads each appearance forward
+// over the days after it — one pass per appearance, the same work legacy's
+// loop of every day over every earlier day did, minus the days nobody was
+// logged. It's cached per timeline and person, so re-picking the roster
+// only computes the people it adds. The top-impact preset ranks by
+// `meanStanding` over the whole history instead, which has a closed form
+// over a prefix sum of the fader (see its own comment) and so ranks
+// hundreds of people without building a daily series for any of them.
 
 /** Legacy's `START + 150`: the opening months are a handful of days against
  * an empty history, so every standing is still climbing from zero — a ramp
@@ -73,6 +72,8 @@ export type ImpactTimeline = {
   end: string;
   /** `end`'s day index. */
   lastDay: number;
+  /** `weight[age]` = `recencyWeight(age)`, as a lookup table. */
+  weight: Float64Array;
   /** `cumulativeWeight[k]` = Σ `recencyWeight(0..k)`. */
   cumulativeWeight: Float64Array;
   appearances: Map<string, Appearances>;
@@ -97,10 +98,12 @@ export function buildImpactTimeline(data: PeopleDay[]): ImpactTimeline | null {
   const end = data[data.length - 1].date;
   const lastDay = daysBetween(start, end);
 
+  const weight = new Float64Array(lastDay + 1);
   const cumulativeWeight = new Float64Array(lastDay + 1);
   let running = 0;
   for (let age = 0; age <= lastDay; age++) {
-    running += recencyWeight(age);
+    weight[age] = recencyWeight(age);
+    running += weight[age];
     cumulativeWeight[age] = running;
   }
 
@@ -144,6 +147,7 @@ export function buildImpactTimeline(data: PeopleDay[]): ImpactTimeline | null {
     start,
     end,
     lastDay,
+    weight,
     cumulativeWeight,
     appearances,
     people,
@@ -153,13 +157,17 @@ export function buildImpactTimeline(data: PeopleDay[]): ImpactTimeline | null {
 
 /**
  * A person's mean standing over days `s..e` (inclusive day indices), or
- * `null` when there's nothing to average.
+ * `null` when there's nothing to average — what the top-impact preset
+ * ranks by.
  *
  * Starts from their first appearance rather than from `s`: before it their
- * standing is exactly zero, and averaging those zeros in would draw someone
- * met mid-period as a fraction of what they were by its end. Legacy dropped
- * all-zero periods for the same reason (`mean === 0 → undefined`) but kept
- * the partial ones diluted; clipping handles both.
+ * standing is exactly zero, and averaging those zeros in would rank someone
+ * met late in the history below where their line actually sits.
+ *
+ * Closed form: the days `[s, e]` see an appearance on day `j` at ages
+ * `max(s,j)-j … e-j`, so its whole contribution is
+ * `score × (C[e-j] - C[max(s,j)-j-1])` with `C` the cumulative weights —
+ * one pass over the person's appearances, not one per day.
  */
 export function meanStanding(timeline: ImpactTimeline, name: string, s: number, e: number): number | null {
   const a = timeline.appearances.get(name);
@@ -189,59 +197,48 @@ function daysLoggedIn(timeline: ImpactTimeline, name: string, s: number, e: numb
   return count;
 }
 
-export type ImpactTrendBucket = {
-  /** The period's first calendar day — the point's x. */
-  date: string;
-  /** Inclusive day-index range this bucket averages over, already clipped
-   * to the visible range (a range starting mid-month averages only the
-   * days it shows). */
-  s: number;
-  e: number;
-};
+const standingsCache = new WeakMap<ImpactTimeline, Map<string, Float64Array>>();
 
-/** The periods covering day indices `s..e`. */
-export function impactTrendBuckets(
-  timeline: ImpactTimeline,
-  period: Period,
-  s: number,
-  e: number,
-): ImpactTrendBucket[] {
-  const dates: { date: string; index: number }[] = [];
-  for (let i = s; i <= e; i++) dates.push({ date: addDays(timeline.start, i), index: i });
-  return groupByPeriod(dates, period, (d) => d.date).map((bucket) => ({
-    date: bucket.start,
-    s: bucket.items[0].index,
-    e: bucket.items[bucket.items.length - 1].index,
-  }));
-}
+/**
+ * A person's standing on every day of the timeline, indexed by day. Zero
+ * before their first appearance.
+ *
+ * Cached per timeline (a `WeakMap`, so a page's cache goes when its data
+ * does): a series is the one expensive thing here — appearances × the days
+ * after each — and it never changes for a given load, so adding a tag
+ * computes only the people it brings in.
+ */
+export function dailyStandings(timeline: ImpactTimeline, name: string): Float64Array {
+  let cache = standingsCache.get(timeline);
+  if (!cache) standingsCache.set(timeline, (cache = new Map()));
+  const cached = cache.get(name);
+  if (cached) return cached;
 
-/** One person's line: a point per bucket, skipping periods before they
- * were ever logged. */
-export function impactTrendPoints(
-  timeline: ImpactTimeline,
-  name: string,
-  buckets: ImpactTrendBucket[],
-): { date: string; value: number }[] {
-  const out: { date: string; value: number }[] = [];
-  for (const bucket of buckets) {
-    const value = meanStanding(timeline, name, bucket.s, bucket.e);
-    if (value !== null) out.push({ date: bucket.date, value });
+  const out = new Float64Array(timeline.lastDay + 1);
+  const a = timeline.appearances.get(name);
+  if (a) {
+    const W = timeline.weight;
+    for (let k = 0; k < a.day.length; k++) {
+      const j = a.day[k];
+      const score = a.score[k];
+      for (let i = j; i <= timeline.lastDay; i++) out[i] += score * W[i - j];
+    }
   }
+  cache.set(name, out);
   return out;
 }
 
 /**
  * The two "top" presets.
  *
- * - `impact`: highest mean standing over the visible range — the area under
- *   their line, i.e. who the chart itself says mattered most in the window.
- * - `logged`: most days logged within the visible range.
+ * - `impact`: highest mean standing over the whole history — the area
+ *   under their line, i.e. who the chart itself says mattered most.
+ * - `logged`: most days logged.
  *
- * Both are ranked **over the visible range**, not all time. Legacy ranked
- * once, globally, so narrowing the range to 2018 still showed today's top
- * thirty; ranking the window instead is what makes "who mattered in 2018"
- * a question the range picker can answer. Ties break by name so the preset
- * doesn't reshuffle between renders.
+ * Both are ranked over the **whole history**, never the visible range: the
+ * time range picker is a pure x-axis view (#441), so dragging it must not
+ * change who's on the chart. Ties break by name so the preset doesn't
+ * reshuffle between renders.
  */
 export type TopPreset = "impact" | "logged";
 
@@ -284,12 +281,7 @@ export type ShownPerson = {
   via: { kind: "person" } | { kind: "tag"; tag: string } | { kind: "preset" };
 };
 
-export function resolveSelection(
-  timeline: ImpactTimeline,
-  selection: ImpactTrendSelection,
-  s: number,
-  e: number,
-): ShownPerson[] {
+export function resolveSelection(timeline: ImpactTimeline, selection: ImpactTrendSelection): ShownPerson[] {
   const excluded = new Set(selection.excluded);
   const shown = new Map<string, ShownPerson>();
   const add = (name: string, via: ShownPerson["via"]) => {
@@ -303,7 +295,7 @@ export function resolveSelection(
     }
   }
   if (selection.preset !== "none") {
-    for (const name of rankPeople(timeline, selection.preset, s, e, IMPACT_TREND_TOP_N)) {
+    for (const name of rankPeople(timeline, selection.preset, 0, timeline.lastDay, IMPACT_TREND_TOP_N)) {
       add(name, { kind: "preset" });
     }
   }

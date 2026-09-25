@@ -4,8 +4,7 @@ import { personImpact, recencyWeight } from "@/lib/impact";
 import type { PeopleDay, PersonOnDay } from "@/lib/charts";
 import {
   buildImpactTimeline,
-  impactTrendBuckets,
-  impactTrendPoints,
+  dailyStandings,
   impactTrendTags,
   meanStanding,
   rankPeople,
@@ -111,25 +110,28 @@ describe("buildImpactTimeline", () => {
   });
 });
 
-describe("impactTrendPoints", () => {
-  it("averages each period and starts a line at the person's first period", () => {
-    const timeline = buildImpactTimeline(sampleData())!;
-    const buckets = impactTrendBuckets(timeline, "month", 0, timeline.lastDay);
-    expect(buckets[0]).toMatchObject({ date: "2020-01-01", s: 0, e: 30 });
-    const cy = impactTrendPoints(timeline, "Cy", buckets);
-    expect(cy[0].date).toBe("2020-04-01"); // day 91 is in April
-    const ben = impactTrendPoints(timeline, "Ben", buckets);
-    expect(ben).toHaveLength(buckets.length);
-    expect(ben[1].value).toBeCloseTo(meanStanding(timeline, "Ben", buckets[1].s, buckets[1].e)!, 12);
+describe("dailyStandings", () => {
+  const data = sampleData();
+  const timeline = buildImpactTimeline(data)!;
+
+  it("matches legacy's per-day standing on every day", () => {
+    for (const name of ["Ana", "Ben", "Cy"]) {
+      const series = dailyStandings(timeline, name);
+      for (const i of [0, 1, 17, 90, 91, 150, timeline.lastDay]) {
+        const date = addDays(timeline.start, i);
+        expect(series[i]).toBeCloseTo(bruteMean(data, name, date, date) ?? 0, 9);
+      }
+    }
   });
 
-  it("clips the first and last bucket to the range", () => {
-    const timeline = buildImpactTimeline(sampleData())!;
-    const buckets = impactTrendBuckets(timeline, "month", 40, 70);
-    expect(buckets.map((b) => [b.s, b.e])).toEqual([
-      [40, 59],
-      [60, 70],
-    ]);
+  it("is zero before someone's first appearance", () => {
+    const cy = dailyStandings(timeline, "Cy");
+    expect(cy[90]).toBe(0);
+    expect(cy[91]).toBeGreaterThan(0);
+  });
+
+  it("returns the cached series for a repeat call", () => {
+    expect(dailyStandings(timeline, "Ben")).toBe(dailyStandings(timeline, "Ben"));
   });
 });
 
@@ -150,10 +152,9 @@ describe("rankPeople", () => {
 
 describe("resolveSelection", () => {
   const timeline = buildImpactTimeline(sampleData())!;
-  const all = [0, timeline.lastDay] as const;
 
   it("composes hand-picked people, tags and a preset, first source winning", () => {
-    const shown = resolveSelection(timeline, { preset: "impact", tags: ["Work"], people: ["Cy"], excluded: [] }, ...all);
+    const shown = resolveSelection(timeline, { preset: "impact", tags: ["Work"], people: ["Cy"], excluded: [] });
     expect(shown.map((p) => [p.name, p.via.kind])).toEqual([
       ["Cy", "person"],
       ["Ben", "tag"],
@@ -162,7 +163,7 @@ describe("resolveSelection", () => {
   });
 
   it("drops excluded people whichever control brought them in", () => {
-    const shown = resolveSelection(timeline, { preset: "impact", tags: ["Work"], people: [], excluded: ["Ben"] }, ...all);
+    const shown = resolveSelection(timeline, { preset: "impact", tags: ["Work"], people: [], excluded: ["Ben"] });
     expect(shown.map((p) => p.name)).not.toContain("Ben");
   });
 
@@ -174,11 +175,11 @@ describe("resolveSelection", () => {
       data.push({ date: addDays("2021-01-01", i), happiness: 60, people });
     }
     const t = buildImpactTimeline(data)!;
-    const shown = resolveSelection(t, { preset: "none", tags: ["Club"], people: [], excluded: [] }, 0, t.lastDay);
+    const shown = resolveSelection(t, { preset: "none", tags: ["Club"], people: [], excluded: [] });
     expect(shown.map((p) => p.name)).toEqual(["Regular"]);
     expect(impactTrendTags(t)).toEqual([{ name: "Club", color: "#123456", members: 1 }]);
     // ...but can still be added by name.
-    const withOnce = resolveSelection(t, { preset: "none", tags: ["Club"], people: ["Once"], excluded: [] }, 0, t.lastDay);
+    const withOnce = resolveSelection(t, { preset: "none", tags: ["Club"], people: ["Once"], excluded: [] });
     expect(withOnce.map((p) => p.name)).toEqual(["Once", "Regular"]);
   });
 });

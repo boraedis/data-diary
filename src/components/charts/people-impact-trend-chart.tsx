@@ -9,15 +9,13 @@ import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/respons
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { InteractiveLine, type InteractiveLineSeries } from "@/components/charts/interactive/interactive-line";
 import { Legend, SeriesKey } from "@/components/charts/interactive/legend";
-import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { addDays, daysBetween, parseDate, toDateString } from "@/lib/date";
 import {
   buildImpactTimeline,
   IMPACT_TREND_TOP_N,
   IMPACT_TREND_WARM_UP_DAYS,
-  impactTrendBuckets,
-  impactTrendPoints,
+  dailyStandings,
   impactTrendTags,
   resolveSelection,
   type ImpactTimeline,
@@ -25,7 +23,6 @@ import {
   type ShownPerson,
 } from "@/lib/people-impact-trend";
 import type { PeopleDay } from "@/lib/charts";
-import type { Period } from "@/lib/viz/bin";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 import { LINE_SERIES_HOVER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -34,11 +31,16 @@ import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 import { cn } from "@/lib/utils";
 
 // People Impact Trend — legacy's `people_impact_averager.js`: one line per
-// person, their recency-weighted impact standing averaged per period, over a
+// person, their recency-weighted impact standing on every day, over a
 // roster the reader builds. It replaced a five-names-plus-Other stacked
 // area of day counts, which could only ever show the same five people and
 // said nothing about impact. The scoring and the roster rules live in
 // src/lib/people-impact-trend.ts; this file is the controls and the chart.
+//
+// The time range picker is a **view**, not a filter (#441): it sets which
+// dates the axes show — the y-axis fits the visible stretch, so narrowing
+// the range zooms both axes — but who's on the chart, and every colour,
+// is decided over the whole history and never changes as it's dragged.
 //
 // Two things here are deliberate departures from how other line charts in
 // this app are put together, both forced by the line count (thirty by
@@ -62,21 +64,46 @@ const PRESET_OPTIONS: GroupByOption<ImpactTrendSelection["preset"]>[] = [
  * - "tag": each person in their tag's own colour — the colours are the
  *   user's, chosen per group, so a group view reads as its colour without a
  *   key. Legacy's "Tag Colors" switch.
- * - "picked": the people added by name get the categorical slots, in the
- *   order they were added (so the fifth person added doesn't repaint the
- *   first four), and everyone else is grey context. Legacy gave every line
- *   a cycled colour instead; with thirty lines and five real slots that
- *   would repeat each colour six times, which the fixed-slot rule in
- *   src/lib/viz/color.ts exists to prevent. Past five picks, the rest go
- *   grey too, for the same reason.
+ * - "picked": the first five people added by name get the categorical
+ *   slots, in the order they were added (so a later pick doesn't repaint
+ *   an earlier one). Everyone else — later picks, and whoever a preset or
+ *   tag brought in — gets a colour of their own derived from their name
+ *   (`nameColor`), rather than the grey `categoricalColor` falls back to.
+ *   That breaks this app's five-slots-then-grey rule on purpose, at the
+ *   user's request on #441: a grey mass of thirty lines hid who was who,
+ *   and hover alone was too slow a way to tell them apart. Colours can
+ *   repeat or sit close together at this line count; hover is still the
+ *   way to be sure.
  */
 const COLOR_OPTIONS: GroupByOption<ColorBy>[] = [
   { id: "tag", label: "Group" },
   { id: "picked", label: "Picked" },
 ];
 
-/** The context grey — the same neutral `categoricalColor` falls back to. */
+/** The neutral for untagged people in "tag" colouring — the same one
+ * `categoricalColor` falls back to. */
 const CONTEXT_COLOR = "var(--muted-foreground)";
+
+/** Real categorical slots — mirrors `CATEGORICAL_SLOT_COUNT` in
+ * src/lib/viz/color.ts, past which `categoricalColor` returns grey. */
+const PICK_SLOTS = 5;
+
+/**
+ * A colour for a person, derived from their name: random-looking, but the
+ * same on every load and unaffected by who else is on the chart, so adding
+ * someone never repaints anyone already there. The hue comes from an
+ * FNV-1a hash of the name; lightness and chroma are fixed in oklch so every
+ * line carries the same visual weight, and sit mid-range so they read on
+ * both the light and dark card.
+ */
+function nameColor(name: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) {
+    hash ^= name.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `oklch(0.7 0.14 ${(hash >>> 0) % 360})`;
+}
 
 const DEFAULT_SELECTION: ImpactTrendSelection = { preset: "impact", tags: [], people: [], excluded: [] };
 
@@ -122,7 +149,6 @@ function ImpactTrendExplorer({
   timeline: ImpactTimeline;
   nicknames: Record<string, string[]>;
 }) {
-  const [period, setPeriod] = useState<Period>("month");
   const [range, setRange] = useState<[Date, Date] | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("tag");
   const [selection, setSelection] = useState<ImpactTrendSelection>(DEFAULT_SELECTION);
@@ -138,39 +164,61 @@ function ImpactTrendExplorer({
   const s = range ? Math.max(warmUp, daysBetween(timeline.start, toDateString(range[0]))) : warmUp;
   const e = range ? Math.min(timeline.lastDay, daysBetween(timeline.start, toDateString(range[1]))) : timeline.lastDay;
 
-  const shown = useMemo(() => resolveSelection(timeline, selection, s, e), [timeline, selection, s, e]);
-  const buckets = useMemo(() => impactTrendBuckets(timeline, period, s, e), [timeline, period, s, e]);
+  // Independent of the range on purpose — see the header.
+  const shown = useMemo(() => resolveSelection(timeline, selection), [timeline, selection]);
+
+  // One Date per day index, built once: a daily line per person means tens
+  // of thousands of points, and each would otherwise construct its own.
+  const dayDates = useMemo(
+    () => Array.from({ length: timeline.lastDay + 1 }, (_, i) => parseDate(addDays(timeline.start, i))),
+    [timeline],
+  );
 
   const colorOf = useMemo(() => {
     const slots = new Map(selection.people.map((name, i) => [name, i]));
     return (name: string) => {
       if (colorBy === "tag") return timeline.byName.get(name)?.tagColor ?? CONTEXT_COLOR;
       const slot = slots.get(name);
-      return slot === undefined ? CONTEXT_COLOR : categoricalColor(slot);
+      return slot !== undefined && slot < PICK_SLOTS ? categoricalColor(slot) : nameColor(name);
     };
   }, [colorBy, selection.people, timeline]);
 
-  const series = useMemo<InteractiveLineSeries[]>(
-    () =>
-      shown
-        .map(({ name }) => ({
-          id: name,
-          label: name,
-          color: colorOf(name),
-          points: impactTrendPoints(timeline, name, buckets).map((p) => ({ x: parseDate(p.date), y: p.value })),
-        }))
-        // Grey context lines first, so the coloured picks draw over them.
-        .sort((a, b) => Number(a.color !== CONTEXT_COLOR) - Number(b.color !== CONTEXT_COLOR)),
-    [shown, timeline, buckets, colorOf],
-  );
+  // Each line is cut to the visible range here rather than left to the
+  // x-axis: InteractiveLine doesn't clip its paths to the plot, so points
+  // outside the domain would draw across the margins. Days before someone's
+  // first appearance (standing exactly 0) are left off, so a line starts
+  // where they entered the log instead of running along zero until then.
+  const series = useMemo<InteractiveLineSeries[]>(() => {
+    const picked = new Set(selection.people);
+    return shown
+      .map(({ name }) => {
+        const standings = dailyStandings(timeline, name);
+        const points = [];
+        for (let i = s; i <= e; i++) {
+          if (standings[i] > 0) points.push({ x: dayDates[i], y: standings[i] });
+        }
+        return { id: name, label: name, color: colorOf(name), points };
+      })
+      // Hand-picked people last, so they draw over everyone else.
+      .sort((a, b) => Number(picked.has(a.id)) - Number(picked.has(b.id)));
+  }, [shown, timeline, s, e, dayDates, colorOf, selection.people]);
 
-  // A zero floor rather than InteractiveLine's auto-domain, which pads
-  // below the lowest line — a standing can't go negative (positive slots
+  // Fitted to what's visible, so narrowing the range zooms the y-axis too.
+  // Clamped at zero rather than left to InteractiveLine's auto-domain, whose
+  // padding can dip below it — a standing is never negative (positive slots
   // only), so space under zero would be plot spent on nothing.
   const yDomain = useMemo<[number, number]>(() => {
+    let min = Infinity;
     let max = 0;
-    for (const s of series) for (const p of s.points) max = Math.max(max, p.y);
-    return [0, max > 0 ? max * 1.05 : 1];
+    for (const line of series) {
+      for (const p of line.points) {
+        if (p.y < min) min = p.y;
+        if (p.y > max) max = p.y;
+      }
+    }
+    if (max === 0) return [0, 1];
+    const pad = (max - min) * 0.05 || max * 0.05;
+    return [Math.max(0, min - pad), max + pad];
   }, [series]);
 
   const legend = useMemo(() => {
@@ -186,10 +234,11 @@ function ImpactTrendExplorer({
       if (untagged) rows.push({ label: "No group", color: CONTEXT_COLOR });
       return rows;
     }
-    const picked = selection.people.filter((name) => shown.some((p) => p.name === name));
-    const rows = picked.map((name) => ({ label: name, color: colorOf(name) }));
-    if (shown.length > picked.length) rows.push({ label: "Everyone else", color: CONTEXT_COLOR });
-    return rows;
+    // Only the picks: everyone else has a colour of their own now, and a
+    // thirty-row key would outgrow the chart. Hover names the rest.
+    return selection.people
+      .filter((name) => shown.some((p) => p.name === name))
+      .map((name) => ({ label: name, color: colorOf(name) }));
   }, [colorBy, shown, timeline, selection.people, colorOf]);
 
   // --- Roster edits --------------------------------------------------------
@@ -249,7 +298,6 @@ function ImpactTrendExplorer({
             label="Start with"
           />
           <GroupByPicker value={colorBy} onChange={setColorBy} options={COLOR_OPTIONS} label="Colour by" />
-          <PeriodPicker value={period} onChange={setPeriod} />
           <TimeRangePicker domain={domain} value={range} onChange={setRange} />
         </div>
 
@@ -333,7 +381,7 @@ function ImpactTrendExplorer({
                   showLegend={false}
                   yTickFormat={(v) => formatThousandsNumber(Number(v))}
                   valueFormat={formatStanding}
-                  dateFormat={period === "week" ? "dayYear" : "monthYear"}
+                  dateFormat="dayYear"
                   ariaLabel="Each selected person's recency-weighted impact over time, one line per person. Use left and right arrows to move through time and up and down to move between people."
                 />
               )}
