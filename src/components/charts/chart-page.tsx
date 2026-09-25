@@ -106,7 +106,11 @@ export function ChartPage({
         {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {filters === null ? null : (
-        <div className="flex flex-wrap items-center gap-2">{filters ?? <ChartFiltersPlaceholder />}</div>
+        // data-chart-filters: the anchor ResponsiveChart's
+        // fillViewport="below-filters" sizes a chart against.
+        <div data-chart-filters className="flex flex-wrap items-center gap-2">
+          {filters ?? <ChartFiltersPlaceholder />}
+        </div>
       )}
       {children}
     </main>

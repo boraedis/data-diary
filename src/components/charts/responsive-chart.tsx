@@ -29,6 +29,11 @@ const FILL_VIEWPORT_MIN_HEIGHT = 320;
  */
 const FILL_VIEWPORT_BOTTOM_MARGIN = 48;
 
+/** `fillViewport="below-filters"`'s gap between the sticky nav and the
+ * filters row once scrolled into place — the same breathing room the page
+ * gives the filters row below the title before scrolling. */
+const BELOW_FILTERS_TOP_GAP = 16;
+
 type ResponsiveChartProps = {
   /** Fixed chart height in px — use this for a chart whose height should
    * come from its own content (a calendar's row count, a small-multiples
@@ -51,8 +56,22 @@ type ResponsiveChartProps = {
    * on window resize and on this element's own position shifting (e.g. a
    * filters row wrapping to a second line changes the chart's top offset
    * without the window itself resizing). Ignored when `height` is set.
+   *
+   * `"below-filters"` (#437 follow-up, the people network) sizes for the
+   * page *scrolled*, rather than as it first loads: the chart is made just
+   * tall enough that once the title and description scroll up under the
+   * sticky nav, the `ChartPage` filters row, the card and the chart
+   * together fill exactly the rest of the screen. It measures the chart's
+   * offset below the filters row (`[data-chart-filters]`) instead of below
+   * the viewport's top edge, and subtracts the sticky nav
+   * (`[data-sticky-nav]`) and anything the caller renders below the chart
+   * in the same parent. The chart ends up taller than `true` gives it;
+   * the cost is that on load its bottom sits below the fold, which is the
+   * point — a short scroll trades the page header for a full-screen chart
+   * and its controls. Falls back to `true`'s behaviour on a page with no
+   * filters row.
    */
-  fillViewport?: boolean;
+  fillViewport?: boolean | "below-filters";
   minWidth?: number;
   className?: string;
   /** Optional callback ref to the measured wrapper div (the `position:
@@ -124,7 +143,24 @@ export function ResponsiveChart({
     if (!el) return;
     function recompute() {
       const top = el!.getBoundingClientRect().top;
-      const available = window.innerHeight - top - FILL_VIEWPORT_BOTTOM_MARGIN;
+      let available = window.innerHeight - top - FILL_VIEWPORT_BOTTOM_MARGIN;
+      if (fillViewport === "below-filters") {
+        // Offset *within the page*, not from the viewport's top, so the
+        // result doesn't change as the page scrolls.
+        const anchor = el!.closest("main")?.querySelector("[data-chart-filters]");
+        if (anchor) {
+          const offset = top - anchor.getBoundingClientRect().top;
+          const nav = document.querySelector("[data-sticky-nav]")?.getBoundingClientRect().height ?? 0;
+          // Room for whatever the caller renders under the chart in the
+          // same container (the people network's playback row): the
+          // distance from this element's bottom to its parent's, which
+          // doesn't depend on this element's own height.
+          const parent = el!.parentElement;
+          const below = parent ? parent.getBoundingClientRect().bottom - el!.getBoundingClientRect().bottom : 0;
+          available =
+            window.innerHeight - nav - BELOW_FILTERS_TOP_GAP - offset - below - FILL_VIEWPORT_BOTTOM_MARGIN;
+        }
+      }
       setViewportFillHeight(Math.max(FILL_VIEWPORT_MIN_HEIGHT, Math.floor(available)));
     }
     recompute();

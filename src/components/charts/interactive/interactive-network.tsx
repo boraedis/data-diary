@@ -64,6 +64,10 @@ const LABEL_FONT_PX = 11;
  * starburst explode outward; the rest of the settling happens live. */
 const PREWARM_TICKS = 120;
 const FIT_PADDING = 32;
+/** Zoom cap when framing a selected node's neighbourhood. Without it a
+ * person with one or two close ties would fill the screen. */
+const FOCUS_MAX_SCALE = 2.5;
+const FOCUS_DURATION_MS = 600;
 /** Initials inside a node: the largest on-screen font that fits the
  * circle, capped, and hidden below the minimum — a 5px "JS" is noise. */
 const INITIALS_MAX_FONT_PX = 15;
@@ -128,6 +132,17 @@ export type InteractiveNetworkProps = {
    * neighbours until cleared. Omit both for hover-only highlighting. */
   selectedId?: NodeId | null;
   onSelect?: (id: NodeId | null) => void;
+  /** Called when a node drag begins moving (not on a plain press, so a
+   * click still just selects). A caller that rebuilds the graph on a
+   * timer (the people network's time-lapse) uses it to pause — a rebuild
+   * mid-drag replaces the SVG, and with it the node being held. Read
+   * through a ref, so it needn't be stable. */
+  onNodeDragStart?: () => void;
+  /** Width, px, of the chart's left edge a caller covers with its own
+   * overlay while something is selected (the people network's details
+   * panel) — the zoom-to-selection frames the neighbourhood in the space
+   * to its right instead of underneath it. */
+  focusInsetLeft?: number;
   /** Tooltip content for a hovered node. Defaults to label + count. */
   tooltip?: (node: NetworkNode) => { title: string; rows: TooltipRow[] };
   ariaLabel?: string;
@@ -149,6 +164,8 @@ export function InteractiveNetwork({
   zoomExtent = DEFAULT_ZOOM_EXTENT,
   selectedId = null,
   onSelect,
+  onNodeDragStart,
+  focusInsetLeft = 0,
   tooltip,
   ariaLabel = "Force-directed network graph. Scroll or pinch to zoom, drag the background to pan, drag a node to pull it around, click a node to highlight its connections, click the background to clear or re-fit.",
 }: InteractiveNetworkProps) {
@@ -166,10 +183,14 @@ export function InteractiveNetwork({
   const transformRef = useRef<{ transform: d3.ZoomTransform; width: number; height: number } | null>(null);
   const selectedRef = useRef<NodeId | null>(selectedId);
   const onSelectRef = useRef(onSelect);
+  const onDragStartRef = useRef(onNodeDragStart);
+  const focusInsetRef = useRef(focusInsetLeft);
   const apiRef = useRef<LiveApi | null>(null);
   useEffect(() => {
     onSelectRef.current = onSelect;
-  }, [onSelect]);
+    onDragStartRef.current = onNodeDragStart;
+    focusInsetRef.current = focusInsetLeft;
+  }, [onSelect, onNodeDragStart, focusInsetLeft]);
 
   const resolveColor = (n: NetworkNode) => (typeof color === "function" ? color(n) : color);
 
@@ -463,19 +484,25 @@ export function InteractiveNetwork({
         });
       svg.call(zoom).on("dblclick.zoom", null);
 
-      function fitTransform(): d3.ZoomTransform {
-        const x0 = d3.min(simNodes, (d) => (d.x ?? 0) - d.r) ?? 0;
-        const x1 = d3.max(simNodes, (d) => (d.x ?? 0) + d.r) ?? 0;
-        const y0 = d3.min(simNodes, (d) => (d.y ?? 0) - d.r) ?? 0;
-        const y1 = d3.max(simNodes, (d) => (d.y ?? 0) + d.r) ?? 0;
+      /** The transform that frames `subset` (every node, by default) in
+       * the viewport, minus `insetLeft` px on the left, never zooming in
+       * past `maxScale`. Labels hang off the right of a node, so the right
+       * edge gets extra room when framing a small neighbourhood. */
+      function fitTransform(subset: SimNode[] = simNodes, maxScale = 1.5, insetLeft = 0): d3.ZoomTransform {
+        const labelRoom = subset === simNodes ? 0 : 90;
+        const x0 = d3.min(subset, (d) => (d.x ?? 0) - d.r) ?? 0;
+        const x1 = (d3.max(subset, (d) => (d.x ?? 0) + d.r) ?? 0) + labelRoom;
+        const y0 = d3.min(subset, (d) => (d.y ?? 0) - d.r) ?? 0;
+        const y1 = d3.max(subset, (d) => (d.y ?? 0) + d.r) ?? 0;
         const w = Math.max(1, x1 - x0);
         const h = Math.max(1, y1 - y0);
+        const availableWidth = Math.max(1, width - insetLeft);
         const scale = Math.max(
           zoomExtent[0],
-          Math.min(1.5, (width - FIT_PADDING * 2) / w, (height - FIT_PADDING * 2) / h),
+          Math.min(maxScale, (availableWidth - FIT_PADDING * 2) / w, (height - FIT_PADDING * 2) / h),
         );
         return d3.zoomIdentity
-          .translate(width / 2, height / 2)
+          .translate(insetLeft + availableWidth / 2, height / 2)
           .scale(scale)
           .translate(-(x0 + w / 2), -(y0 + h / 2));
       }
@@ -497,6 +524,9 @@ export function InteractiveNetwork({
       // The drag's container is the node's parent <g>, which sits inside
       // the zoomed viewport, so event.x/y are already in layout
       // coordinates at any zoom level.
+      // d3-drag fires "start" on every press, clicks included; the first
+      // "drag" event is the first real movement.
+      let dragMoved = false;
       node.call(
         d3
           .drag<SVGGElement, SimNode>()
@@ -506,8 +536,13 @@ export function InteractiveNetwork({
             d.fy = d.y;
             d3.select(this).style("cursor", "grabbing");
             setHovered(null);
+            dragMoved = false;
           })
           .on("drag", (event, d) => {
+            if (!dragMoved) {
+              dragMoved = true;
+              onDragStartRef.current?.();
+            }
             d.fx = event.x;
             d.fy = event.y;
           })
@@ -575,19 +610,17 @@ export function InteractiveNetwork({
           focusId = id !== null && nodeIds.has(id) ? id : null;
           applyFocus();
           if (!reveal || focusId === null) return;
-          // Pan to a node chosen from outside the graph (search, the
-          // details panel) only if it's actually off-screen — recentring
-          // on every click would be a camera lurch for no reason.
-          const target = simNodes.find((n) => n.id === focusId)!;
-          const t = transformRef.current?.transform ?? d3.zoomIdentity;
-          const [sx, sy] = t.apply([target.x ?? 0, target.y ?? 0]);
-          const margin = 40;
-          if (sx < margin || sx > width - margin || sy < margin || sy > height - margin) {
-            svg
-              .transition()
-              .duration(500)
-              .call(zoom.translateTo, target.x ?? 0, target.y ?? 0);
-          }
+          // Zoom to frame the selected node and its neighbours, wherever
+          // the selection came from — a click in the graph, the search
+          // box, or a name in the details panel. Clearing the selection
+          // leaves the camera where it is; a background click with
+          // nothing selected is what zooms back out to the whole graph.
+          const focusSet = near!;
+          const subset = simNodes.filter((n) => focusSet.has(n.id));
+          svg
+            .transition()
+            .duration(FOCUS_DURATION_MS)
+            .call(zoom.transform, fitTransform(subset, FOCUS_MAX_SCALE, focusInsetRef.current));
         },
       };
 
