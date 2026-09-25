@@ -20,6 +20,7 @@ import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
+import type { PeopleNetworkDay, PeopleNetworkInput } from "@/lib/people-network";
 export type { LifeTimelineEntry } from "@/lib/life-timeline";
 
 // Phase 4, first batch: five chart data-fetchers, each backed entirely by
@@ -694,24 +695,28 @@ export async function getHappinessTrendData(): Promise<HappinessTrendDay[]> {
 
 // --- People network ---------------------------------------------------
 
-export type NetworkNode = { id: number; name: string; count: number; color: string | null };
-export type NetworkEdge = { source: number; target: number; weight: number };
-export type PeopleNetworkData = { nodes: NetworkNode[]; edges: NetworkEdge[] };
-
-/** A co-occurrence graph: nodes are people, sized by how many days they were
- * logged in any of the 10 person slots; edges connect two people who were
- * both logged on the same day, weighted by how often that's happened.
- * Computed in JS rather than SQL — the 10 slots are 10 separate FK columns
- * (see schema.ts), not rows in a table, so there's nothing to GROUP BY;
- * unpivoting them per day and tallying pairs is simplest done here, and
- * `days` is only ~3-4k rows, cheap to pull whole. Capped to the `maxNodes`
- * most-mentioned people — the legacy app didn't cap this at all, but a
- * force-directed layout with (in this diary's case) 700 catalog people
- * would be unreadable regardless of screen size. */
-export async function getPeopleNetworkData(maxNodes = 40): Promise<PeopleNetworkData> {
+/** Every logged day's distinct people, plus the catalog rows for anyone
+ * who appears — the raw material the people network builds its graph
+ * from *in the browser* (src/lib/people-network.ts), not a finished
+ * graph. The network's period, mention floor, and strictness controls all
+ * change which nodes exist and which edges pass the significance test, and
+ * recomputing that client-side makes them instant rather than a server
+ * round-trip per click.
+ *
+ * Unpivoted in JS rather than SQL — the 10 slots are 10 separate FK
+ * columns (see schema.ts), not rows in a table, so there's nothing to
+ * GROUP BY — and `days` is only ~4k rows, cheap to pull whole. The
+ * payload stays small for the same reason (~3.5k days of at most ten ids).
+ * The three negative slots are included alongside the seven positive ones:
+ * someone logged as a bad influence on a day was still *there* that day,
+ * which is all a co-occurrence graph asks. Days with nobody logged are
+ * dropped here; they carry no information about who's seen together, and
+ * the significance test's N is "days with someone logged". */
+export async function getPeopleNetworkData(): Promise<PeopleNetworkInput> {
   const db = getDb();
   const rows = await db
     .select({
+      date: days.date,
       p1: days.positivePerson1Id,
       p2: days.positivePerson2Id,
       p3: days.positivePerson3Id,
@@ -723,69 +728,34 @@ export async function getPeopleNetworkData(maxNodes = 40): Promise<PeopleNetwork
       n2: days.negativePerson2Id,
       n3: days.negativePerson3Id,
     })
-    .from(days);
+    .from(days)
+    .orderBy(asc(days.date));
 
-  const appearanceCount = new Map<number, number>();
-  const coOccurrence = new Map<string, number>(); // key `${lowerId}-${higherId}`
-
+  const networkDays: PeopleNetworkDay[] = [];
+  const seen = new Set<number>();
   for (const row of rows) {
     const ids = [row.p1, row.p2, row.p3, row.p4, row.p5, row.p6, row.p7, row.n1, row.n2, row.n3].filter(
       (id): id is number => id !== null,
     );
+    if (ids.length === 0) continue;
     const unique = [...new Set(ids)];
-    for (const id of unique) {
-      appearanceCount.set(id, (appearanceCount.get(id) ?? 0) + 1);
-    }
-    for (let i = 0; i < unique.length; i++) {
-      for (let j = i + 1; j < unique.length; j++) {
-        const [a, b] = unique[i] < unique[j] ? [unique[i], unique[j]] : [unique[j], unique[i]];
-        const key = `${a}-${b}`;
-        coOccurrence.set(key, (coOccurrence.get(key) ?? 0) + 1);
-      }
-    }
+    for (const id of unique) seen.add(id);
+    networkDays.push({ date: row.date, people: unique });
   }
 
-  const topIds = [...appearanceCount.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxNodes)
-    .map(([id]) => id);
-  const topSet = new Set(topIds);
+  if (seen.size === 0) return { days: [], people: [] };
 
-  if (topIds.length === 0) return { nodes: [], edges: [] };
-
-  // Left-joined for the tag's color (#23 follow-up: the network graph
-  // colors each person by their tag, same as everywhere else in the app a
-  // person shows up tagged) — a person with no tag, or no color set on
-  // their tag, falls back to the chart's own default color at the call
-  // site rather than here, so this stays a plain "what's in the DB" read.
+  // Left-joined for the tag: the network colours each person by their tag,
+  // same as everywhere else a person shows up tagged, and the legend
+  // toggles people by it. An untagged person (or a tag with no colour)
+  // falls back to a neutral colour at the call site, not here.
   const peopleRows = await db
-    .select({ id: people.id, name: people.name, color: tags.color })
+    .select({ id: people.id, name: people.name, tagId: tags.id, tagName: tags.name, color: tags.color })
     .from(people)
     .leftJoin(tags, eq(people.tagId, tags.id))
-    .where(inArray(people.id, topIds));
-  const infoById = new Map<number, { name: string; color: string | null }>(
-    peopleRows.map((p): [number, { name: string; color: string | null }] => [
-      p.id,
-      { name: p.name, color: p.color },
-    ]),
-  );
+    .where(inArray(people.id, [...seen]));
 
-  const nodes: NetworkNode[] = topIds.map((id) => ({
-    id,
-    name: infoById.get(id)?.name ?? "?",
-    count: appearanceCount.get(id) ?? 0,
-    color: infoById.get(id)?.color ?? null,
-  }));
-
-  const edges: NetworkEdge[] = [];
-  for (const [key, weight] of coOccurrence) {
-    const [aStr, bStr] = key.split("-");
-    const a = Number(aStr);
-    const b = Number(bStr);
-    if (topSet.has(a) && topSet.has(b)) edges.push({ source: a, target: b, weight });
-  }
-
-  return { nodes, edges };
+  return { days: networkDays, people: peopleRows };
 }
 
 // --- Country visits (world choropleth, #24) -------------------------------

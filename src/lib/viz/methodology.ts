@@ -50,6 +50,11 @@ export const CITY_HEATMAP_METHODOLOGY =
 export const PEOPLE_METHODOLOGY =
   "Each day, I pick up to seven people, in order, who impacted me the most that day — the same ranked-slot idea as places. Every person is also tagged with a label for how I know them (family, a friend group, work, and so on). There are also three rarely-used slots for people who had a notably negative impact on a day, but across the whole history that's only ever been used a handful of times.";
 
+/** The network's own statistics on top of the shared people logging
+ * paragraph — see src/lib/people-network.ts's header for the longer
+ * reasoning behind each choice. */
+export const PEOPLE_NETWORK_METHODOLOGY = `${PEOPLE_METHODOLOGY} For the network, a line between two people isn't just "logged on the same day a few times": it's drawn only when they show up together more often than they would if each were logged independently at their own rate (a hypergeometric test per pair, corrected for testing tens of thousands of pairs at once — a 1% false-discovery rate by default, a stricter Bonferroni bar for "Strong", 5% for "Loose"), and they share at least three days. Line thickness is the overlap between the two: shared days divided by the geometric mean of each person's total, so a pair seen together on nearly all of their days reads as strongly tied whether that's 20 days or 800. The test is run over whatever period is selected, so narrowing the period asks who was close during that stretch specifically.`;
+
 export const PEOPLE_IMPACT_METHODOLOGY =
   "This score isn't a simple day count — it combines which of the seven ranked slots a person occupied with how that day was rated for happiness, using a scoring formula carried over unchanged from the original version of this app. Presence counts for more on a day's best or hardest moments than on an unremarkable one, since that's when someone's presence tends to actually matter.";
 

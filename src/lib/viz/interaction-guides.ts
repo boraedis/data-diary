@@ -27,7 +27,7 @@ export const AREA_INTERACTION_GUIDE =
   "Hover or focus a band and use the arrow keys to inspect it. Click a legend entry to hide that category; click it again to bring it back.";
 
 export const NETWORK_INTERACTION_GUIDE =
-  "Scroll or pinch to zoom, drag the background to pan. Drag a node to reposition it, or click one to highlight its connections.";
+  "The layout is live: drag a node and its connections follow, let go and it settles back into place. Hover a node for its details; click one to highlight it and its neighbours, and click another node or the background to move or clear that. With nothing selected, clicking the background fits the whole graph back into view. Scroll or pinch to zoom, drag the background to pan. Names appear on more nodes as you zoom in, and initials inside any node big enough to hold them. Where there’s a legend, click an entry to hide that group — the rest of the graph slides to fill the gap.";
 
 export const RANKED_INTERACTION_GUIDE =
   "Use the pickers above to choose what's ranked, and at what level where there's a choice. Click a column header to sort by it, again to reverse, and a third time (or click #) to return to rank order — the # column always shows the real rank. Every entry is included: more rows load as you scroll. Hover a movement arrow for where that entry stood then and now, a shaded number for its exact value, or a header for what the column measures. On a narrow screen, scroll the table sideways; the rank and name stay pinned.";
