@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { InteractiveNetwork, type NetworkEdge, type NetworkNode } from "./interactive-network";
+import { InteractiveNetwork, initials, type NetworkEdge, type NetworkNode } from "./interactive-network";
 
 // A mounted-DOM pass over the wiring the browser check can't pin down as
 // cheaply: every node and edge is drawn, a click reports the node through
@@ -36,11 +36,13 @@ function circleFor(container: HTMLElement, label: string): SVGCircleElement {
 }
 
 describe("InteractiveNetwork", () => {
-  it("draws one circle and label per node and one line per edge", () => {
+  it("draws one circle, one set of initials and one label per node, and one line per edge", () => {
     const { container } = render(<InteractiveNetwork nodes={NODES} edges={EDGES} width={400} height={300} />);
     expect(container.querySelectorAll("circle")).toHaveLength(3);
     expect(container.querySelectorAll("line")).toHaveLength(2);
-    expect([...container.querySelectorAll("text")].map((t) => t.textContent)).toEqual(["Ann", "Bob", "Cat"]);
+    const texts = [...container.querySelectorAll("text")].map((t) => t.textContent);
+    expect(texts.filter((t) => t!.length === 1).sort()).toEqual(["A", "B", "C"]);
+    expect(texts.filter((t) => t!.length > 1).sort()).toEqual(["Ann", "Bob", "Cat"]);
   });
 
   it("drops edges whose endpoints aren't among the nodes", () => {
@@ -70,6 +72,21 @@ describe("InteractiveNetwork", () => {
     expect(onSelect).toHaveBeenLastCalledWith(null);
   });
 
+  it("never focuses on hover — only a click dims the rest of the graph", () => {
+    const { container } = render(<InteractiveNetwork nodes={NODES} edges={EDGES} width={400} height={300} />);
+    fireEvent.pointerEnter(circleFor(container, "Ann").parentElement!);
+    expect(circleFor(container, "Cat").parentElement!.getAttribute("opacity")).toBe("1");
+  });
+
+  it("a background click clears the selection", () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <InteractiveNetwork nodes={NODES} edges={EDGES} width={400} height={300} selectedId={1} onSelect={onSelect} />,
+    );
+    fireEvent.click(container.querySelector("svg")!);
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
+
   it("applies a controlled selection to the existing graph without rebuilding it", () => {
     const { container, rerender } = render(
       <InteractiveNetwork nodes={NODES} edges={EDGES} width={400} height={300} selectedId={null} />,
@@ -84,5 +101,23 @@ describe("InteractiveNetwork", () => {
     // Cat isn't Ann's neighbour, so it's dimmed; Bob is, so it isn't.
     expect(circleFor(container, "Cat").parentElement!.getAttribute("opacity")).toBe("0.15");
     expect(circleFor(container, "Bob").parentElement!.getAttribute("opacity")).toBe("1");
+  });
+});
+
+describe("initials", () => {
+  it("takes each word's first letter, as legacy did", () => {
+    expect(initials("Harry Joe Schuster")).toBe("HJS");
+    expect(initials("Aashia Bose")).toBe("AB");
+  });
+
+  it("ignores a parenthetical and a trailing numeral or suffix", () => {
+    expect(initials("Austin(Rocks Villas)")).toBe("A");
+    expect(initials("John Smith III")).toBe("JS");
+    expect(initials("Sam Jones Jr.")).toBe("SJ");
+  });
+
+  it("caps at three letters and handles non-ASCII names", () => {
+    expect(initials("Ana Maria de la Cruz")).toBe("AMD");
+    expect(initials("Eylül Kebapçıgil")).toBe("EK");
   });
 });

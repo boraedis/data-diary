@@ -2,10 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { Maximize2 } from "lucide-react";
 import { useD3 } from "@/hooks/use-d3";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
-import { categoricalColor } from "@/lib/viz/color";
+import { categoricalColor, contrastingTextColor } from "@/lib/viz/color";
 
 // InteractiveNetwork — the shared force-directed graph primitive, rebuilt
 // as a *live* simulation.
@@ -33,6 +32,14 @@ import { categoricalColor } from "@/lib/viz/color";
 // controlled by the caller (`selectedId`/`onSelect`) so a details panel
 // or search box outside the SVG can drive it; the effect that reacts to it
 // calls into the live render through `apiRef` instead of re-rendering.
+//
+// Focus (dimming everything but a node and its neighbours) is click-only
+// (#435 feedback). It used to follow hover too, which meant sweeping the
+// pointer across a dense graph strobed the whole thing, and grabbing a
+// node to drag it re-dimmed the graph around it. Hover now only shows the
+// tooltip and a ring; a drag never selects (d3-drag swallows the click
+// that ends a real drag); clicking anything else — another node, or the
+// background — moves or clears the focus.
 
 /** Module-level so they're referentially stable as useD3 deps (a default
  * parameter written as an array literal is a fresh array every render,
@@ -57,6 +64,30 @@ const LABEL_FONT_PX = 11;
  * starburst explode outward; the rest of the settling happens live. */
 const PREWARM_TICKS = 120;
 const FIT_PADDING = 32;
+/** Initials inside a node: the largest on-screen font that fits the
+ * circle, capped, and hidden below the minimum — a 5px "JS" is noise. */
+const INITIALS_MAX_FONT_PX = 15;
+const INITIALS_MIN_FONT_PX = 7;
+
+/**
+ * "Harry Joe Schuster" → "HJS", the way legacy's network labelled its
+ * nodes. A parenthetical is dropped first ("Austin (Rocks Villas)" is
+ * Austin, not "A(V"), as is a trailing regnal numeral ("John Smith III" →
+ * "JS"), and it's capped at three letters so a long name still fits a
+ * circle.
+ */
+export function initials(label: string): string {
+  const words = label
+    .replace(/\([^)]*\)/g, " ")
+    .split(/\s+/)
+    .filter((w) => /\p{L}/u.test(w));
+  if (words.length > 1 && /^(?:I{1,3}|IV|V|VI{0,3}|IX|X|Jr\.?|Sr\.?)$/.test(words[words.length - 1])) words.pop();
+  return words
+    .map((w) => [...w].find((ch) => /\p{L}/u.test(ch)) ?? "")
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+}
 
 export type NetworkNode = { id: string | number; label: string; count: number };
 /** `weight` is a normalised tie strength, 0–1: it sets edge thickness and
@@ -72,7 +103,6 @@ type SavedPosition = { x: number; y: number; vx: number; vy: number };
 
 type LiveApi = {
   setSelected: (id: NodeId | null, opts: { reveal: boolean }) => void;
-  fit: () => void;
 };
 
 type Hovered = { node: NetworkNode; clientPos: { x: number; y: number } };
@@ -120,7 +150,7 @@ export function InteractiveNetwork({
   selectedId = null,
   onSelect,
   tooltip,
-  ariaLabel = "Force-directed network graph. Scroll or pinch to zoom, drag the background to pan, drag a node to pull it around, click a node to highlight its connections.",
+  ariaLabel = "Force-directed network graph. Scroll or pinch to zoom, drag the background to pan, drag a node to pull it around, click a node to highlight its connections, click the background to clear or re-fit.",
 }: InteractiveNetworkProps) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // State-backed callback ref, not useRef — the tooltip needs the
@@ -284,6 +314,23 @@ export function InteractiveNetwork({
         .attr("stroke-width", 1)
         .attr("vector-effect", "non-scaling-stroke");
 
+      // Initials sit inside the circle, coloured black or white against
+      // that circle's own painted fill — read back with getComputedStyle,
+      // since a fill can be a `var()` (the untagged grey) that d3 can't
+      // parse. Sized per zoom level in applyZoomScale.
+      const inner = node
+        .append("text")
+        .attr("text-anchor", "middle")
+        .attr("dy", "0.35em")
+        .style("pointer-events", "none")
+        .style("user-select", "none")
+        .style("font-weight", "600")
+        .text((d) => initials(d.label));
+      inner.attr("fill", function () {
+        const shape = (this as SVGTextElement).previousElementSibling;
+        return contrastingTextColor(shape ? getComputedStyle(shape).fill : "");
+      });
+
       // Labels live in their own layer above every node rather than inside
       // each node's <g>: nodes later in paint order would otherwise cover
       // an earlier node's label wherever the graph is dense.
@@ -303,8 +350,10 @@ export function InteractiveNetwork({
         .text((d) => d.label);
 
       // Focus state, read by the tick loop's label pass as well as the
-      // hover/selection handlers below.
+      // selection handlers below. `hoverId` only rings a node; it never
+      // dims anything (see the header).
       let k = 1;
+      let hoverId: NodeId | null = null;
       let focusId: NodeId | null = selectedRef.current;
       if (focusId !== null && !nodeIds.has(focusId)) focusId = null;
       let near: Set<NodeId> | null = null;
@@ -353,9 +402,15 @@ export function InteractiveNetwork({
         label.attr("display", (d) => (shown.has(d.id) ? null : "none"));
       }
 
-      // --- Focus (hover + selection) ------------------------------------
-      function applyFocus() {
+      // --- Focus (selection) --------------------------------------------
+      function applyStroke() {
         const selected = selectedRef.current;
+        circle
+          .attr("stroke", (d) => (d.id === selected || d.id === hoverId ? "var(--foreground)" : "var(--card)"))
+          .attr("stroke-width", (d) => (d.id === selected ? 2.5 : d.id === hoverId ? 1.5 : 1));
+      }
+
+      function applyFocus() {
         near = focusId === null ? null : new Set([focusId, ...(neighbours.get(focusId) ?? [])]);
         const focusSet = near;
         const incident = (l: SimLink) => focusId !== null && (nodeId(l.source) === focusId || nodeId(l.target) === focusId);
@@ -365,11 +420,9 @@ export function InteractiveNetwork({
           )
           .attr("stroke-width", (l) => (incident(l) ? 1 + 3.5 * l.weight : 0.5 + 3 * l.weight));
         node.attr("opacity", (d) => (focusSet === null || focusSet.has(d.id) ? 1 : 0.15));
-        circle
-          .attr("stroke", (d) => (d.id === selected ? "var(--foreground)" : "var(--card)"))
-          .attr("stroke-width", (d) => (d.id === selected ? 2.5 : 1));
+        applyStroke();
         updateLabels();
-        // Selected/hovered and neighbours float above the dimmed rest, so a
+        // The selected node and its neighbours float above the dimmed rest, so a
         // highlighted circle is never half-hidden under a faded stranger.
         if (focusSet !== null) node.filter((d) => focusSet.has(d.id)).raise();
       }
@@ -379,6 +432,20 @@ export function InteractiveNetwork({
           .attr("x", (d) => d.r + 4 / k)
           .attr("font-size", LABEL_FONT_PX / k)
           .attr("stroke-width", 3 / k);
+        inner.each(function (d) {
+          const text = this as SVGTextElement;
+          const letters = Math.max(1, text.textContent?.length ?? 1);
+          const screenRadius = d.r * k;
+          // Width-bound (≈0.62em per capital, 80% of the diameter) or
+          // height-bound (a cap height inside the radius), whichever bites.
+          const px = Math.min(INITIALS_MAX_FONT_PX, (screenRadius * 1.6) / (letters * 0.62), screenRadius);
+          if (px < INITIALS_MIN_FONT_PX) {
+            text.setAttribute("display", "none");
+          } else {
+            text.removeAttribute("display");
+            text.setAttribute("font-size", String(px / k));
+          }
+        });
       }
 
       // --- Zoom / pan ---------------------------------------------------
@@ -453,21 +520,31 @@ export function InteractiveNetwork({
       );
 
       // d3-drag swallows the click that ends a real drag, so this only
-      // fires for a genuine press-and-release.
+      // fires for a genuine press-and-release — dragging never selects.
+      // Clicking the selected node again clears it; any other node takes
+      // the focus over.
       node.on("click", (event: MouseEvent, d) => {
         event.stopPropagation();
         onSelectRef.current?.(selectedRef.current === d.id ? null : d.id);
       });
-      // Likewise d3-zoom swallows the click that ends a pan.
+      // Likewise d3-zoom swallows the click that ends a pan. A background
+      // click clears the focus if there is one, and otherwise refits the
+      // view (what the old Fit button did). Deliberately two clicks, not
+      // one doing both: clearing a selection while zoomed into a cluster
+      // shouldn't also throw the camera back out to the whole graph.
       svg.on("click", () => {
-        if (selectedRef.current !== null) onSelectRef.current?.(null);
+        if (selectedRef.current !== null) {
+          onSelectRef.current?.(null);
+        } else {
+          svg.transition().duration(500).call(zoom.transform, fitTransform());
+        }
       });
 
       node
         .on("pointerenter", (event: PointerEvent, d) => {
           if (event.buttons !== 0) return; // mid-drag of something else
-          focusId = d.id;
-          applyFocus();
+          hoverId = d.id;
+          applyStroke();
           setHovered({ node: d, clientPos: { x: event.clientX, y: event.clientY } });
         })
         .on("pointermove", (event: PointerEvent, d) => {
@@ -475,8 +552,8 @@ export function InteractiveNetwork({
           setHovered({ node: d, clientPos: { x: event.clientX, y: event.clientY } });
         })
         .on("pointerleave", () => {
-          focusId = selectedRef.current;
-          applyFocus();
+          hoverId = null;
+          applyStroke();
           setHovered(null);
         });
 
@@ -512,9 +589,6 @@ export function InteractiveNetwork({
               .call(zoom.translateTo, target.x ?? 0, target.y ?? 0);
           }
         },
-        fit() {
-          svg.transition().duration(500).call(zoom.transform, fitTransform());
-        },
       };
 
       return () => {
@@ -546,18 +620,7 @@ export function InteractiveNetwork({
 
   return (
     <div ref={setContainerEl} style={{ position: "relative", width, height }}>
-      {/* role="img" on the <svg>, not the wrapper: the wrapper also holds
-          a real button, and an img role makes its children presentational. */}
       <svg ref={ref} role="img" aria-label={ariaLabel} />
-      <button
-        type="button"
-        onClick={() => apiRef.current?.fit()}
-        className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md border border-border bg-card/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm hover:text-foreground"
-        aria-label="Fit the whole network in view"
-      >
-        <Maximize2 aria-hidden className="size-3" />
-        Fit
-      </button>
       {hovered && containerRect ? (
         <ChartTooltip
           x={hovered.clientPos.x - containerRect.left}
