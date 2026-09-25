@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCompactNumber, formatDate, formatDuration, formatPercent, formatThousandsNumber } from "@/lib/viz/format";
+import { formatCompactNumber, formatDate, formatDuration, formatPercent, formatThousandsNumber, formatTitleCase } from "@/lib/viz/format";
 
 describe("formatDuration", () => {
   it("formats a whole number of hours without minutes", () => {
@@ -90,5 +90,20 @@ describe("formatPercent", () => {
   it("handles 0 and 1 edge cases", () => {
     expect(formatPercent(0)).toBe("0%");
     expect(formatPercent(1)).toBe("100%");
+  });
+});
+
+describe("formatTitleCase", () => {
+  it("title-cases lowercase tags, keeping known acronyms upper-case", () => {
+    expect(formatTitleCase("classic rock")).toBe("Classic Rock");
+    expect(formatTitleCase("k-pop")).toBe("K-Pop");
+    expect(formatTitleCase("r&b")).toBe("R&B");
+    expect(formatTitleCase("uk garage")).toBe("UK Garage");
+    expect(formatTitleCase("edm")).toBe("EDM");
+  });
+
+  it("leaves existing capitals alone", () => {
+    expect(formatTitleCase("Shoulders")).toBe("Shoulders");
+    expect(formatTitleCase("hip hop")).toBe("Hip Hop");
   });
 });

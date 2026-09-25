@@ -17,7 +17,7 @@ import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate } from "@/lib/date";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
-import { EXERCISE_CATEGORY_LABELS, EXERCISE_CATEGORY_ORDER, type ExerciseWorkoutRow, type TrainingDay } from "@/lib/charts";
+import { EXERCISE_CATEGORY_COLORS, EXERCISE_CATEGORY_LABELS, EXERCISE_CATEGORY_ORDER, type ExerciseWorkoutRow, type TrainingDay } from "@/lib/charts";
 import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { TRAINING_METHODOLOGY } from "@/lib/viz/methodology";
 import { TRAINING_TRACKING_SPAN } from "@/lib/viz/tracking-span";
@@ -80,10 +80,10 @@ function buildLanes(rows: ExerciseWorkoutRow[], groupBy: GroupBy): Lane[] {
     return [{ id: TOTAL_ID, label: "Time trained", color: categoricalColor(1) }];
   }
   if (groupBy === "category") {
-    return EXERCISE_CATEGORY_ORDER.map((id, i) => ({
+    return EXERCISE_CATEGORY_ORDER.map((id) => ({
       id,
       label: EXERCISE_CATEGORY_LABELS[id] ?? id,
-      color: categoricalColor(i),
+      color: EXERCISE_CATEGORY_COLORS[id],
     }));
   }
   const totals = new Map<number, { label: string; hours: number }>();
