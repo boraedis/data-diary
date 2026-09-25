@@ -202,11 +202,66 @@ together by the workflows in `.github/workflows/`:
   actual Vercel Preview Deployment) both fetch the connection string
   directly from the Neon API instead.
 
+- **Backups** — `scheduled-backup.yml` dumps production weekly into the
+  private [`boraedis/data-diary-backups`](https://github.com/boraedis/data-diary-backups)
+  repo, independent of Neon's own point-in-time restore. See
+  [Backups](#backups) below.
+
 `ci.yml` runs on every PR into `main`: lint, `next typegen` + `tsc --noEmit`,
 and a `next build` against the QA database (every page in the app is
 `export const dynamic = "force-dynamic"`, so the build itself never queries
 the database — but a few modules read env vars at import time, so real
 values are still needed for the build not to fail).
+
+### Backups
+
+`.github/workflows/scheduled-backup.yml` runs weekly, Sundays at 07:30 UTC (and on
+demand from the Actions tab via "Run workflow"). It `pg_dump`s production,
+gzips it, and commits it as `dumps/data-diary-YYYY-MM-DD.sql.gz` to the
+private `boraedis/data-diary-backups` repo. It keeps the last 8 weekly
+dumps (about two months) plus the earliest dump of every month indefinitely. Each run replaces that
+repo's history with a single commit, because gzipped dumps don't
+delta-compress and old commits would otherwise pile up forever. The files are
+the retention, not the history. If a run fails, it opens an issue here
+assigned to you; existing backups are left untouched.
+
+**One-time setup**: two repo-level Actions secrets (Settings → Secrets and
+variables → Actions):
+
+1. **`BACKUP_DATABASE_URL`**: a read-only role's connection string. In the
+   Neon console, create a role (e.g. `backup_reader`) on the production
+   branch, then run this against production as the owner role:
+
+   ```sql
+   GRANT pg_read_all_data TO backup_reader;
+   ```
+
+   `pg_read_all_data` covers tables created later, too. Per-table
+   `GRANT SELECT` plus `ALTER DEFAULT PRIVILEGES` would only cover tables
+   created by the role that ran it, which silently stops holding once
+   `drizzle-kit push` adds a table. Copy the **direct** connection string
+   (the host *without* `-pooler`); `pg_dump` through the pooler is
+   unreliable.
+2. **`BACKUP_REPO_TOKEN`**: a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
+   with repository access to `data-diary-backups` only, and **Contents: Read
+   and write**. When it expires, the weekly run fails and opens an issue,
+   which is your reminder to renew it.
+
+`PROD_DATABASE_URL` is deliberately not reused. It lives in the `production`
+environment, whose required-reviewer gate would pause the backup for
+approval on every run, and a backup shouldn't hold write access anyway.
+
+**Restoring**: download a dump from `data-diary-backups` and load it into an
+**empty** Postgres 18 database (a new Neon project, or a local Postgres).
+Neon can't create an empty branch, and restoring on top of existing tables
+fails on the first `CREATE TABLE`.
+
+```bash
+gunzip -c data-diary-2026-09-25.sql.gz | psql "$TARGET_DATABASE_URL"
+```
+
+The dump is made with `--no-owner --no-privileges`, so it restores under
+whatever role you connect as.
 
 ## Project structure
 
