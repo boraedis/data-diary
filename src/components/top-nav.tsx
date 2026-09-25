@@ -28,7 +28,10 @@ export function TopNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    // data-sticky-nav: ResponsiveChart's fillViewport="below-filters"
+    // subtracts this bar's height, since it stays on screen as the page
+    // scrolls and covers the top of whatever scrolls under it.
+    <nav data-sticky-nav className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-2 px-3 md:px-4">
         <ConfirmLink
           href="/home"

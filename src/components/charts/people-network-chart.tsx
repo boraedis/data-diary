@@ -12,7 +12,6 @@ import {
 } from "@/components/charts/interactive/interactive-network";
 import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
 import { Legend, SeriesKey } from "@/components/charts/interactive/legend";
-import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseDate, toDateString } from "@/lib/date";
@@ -70,7 +69,6 @@ function tagKey(tagId: number | null): string {
 export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
   const [minMentions, setMinMentions] = useState<number>(DEFAULT_MIN_MENTIONS);
   const [strictness, setStrictness] = useState<NetworkStrictness>("significant");
-  const [range, setRange] = useState<[Date, Date] | null>(null);
   const [hiddenTags, setHiddenTags] = useState<ReadonlySet<string>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -86,20 +84,21 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
     return [parseDate(data.days[0].date), parseDate(data.days[data.days.length - 1].date)];
   }, [data.days]);
 
-  // The whole selected period — what's shown outside the time-lapse, and
-  // what the legend and dot-size scale are always drawn from, so neither
-  // shifts under the viewer while frames play (a legend growing a row as a
-  // new tag first appears would resize and refit the whole graph).
+  // The whole record — what's shown outside the time-lapse, and what the
+  // legend and dot-size scale are always drawn from, so neither shifts
+  // under the viewer while frames play (a legend growing a row as a new
+  // tag first appears would resize and refit the whole graph).
   const baseBuilt = useMemo(
-    () => buildPeopleNetwork(data, { minMentions, strictness, range }),
-    [data, minMentions, strictness, range],
+    () => buildPeopleNetwork(data, { minMentions, strictness, range: null }),
+    [data, minMentions, strictness],
   );
 
-  // Cumulative frames: each one is [period start, that month's end].
-  const frames = useMemo(() => {
-    const period = range ?? extent;
-    return period ? monthlyFrameEnds(period[0], period[1]) : [];
-  }, [range, extent]);
+  // Cumulative frames: each one is [first logged day, that month's end].
+  // There's no separate Period control any more (#437 feedback): the
+  // scrubber *is* the time control — parking it on a month shows the
+  // network as it stood then — so a second range slider above the graph
+  // only duplicated it.
+  const frames = useMemo(() => (extent ? monthlyFrameEnds(extent[0], extent[1]) : []), [extent]);
   const lastFrame = frames.length - 1;
   // The last frame *is* the full period, so it reuses baseBuilt rather
   // than building the same graph twice.
@@ -109,9 +108,8 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
 
   const built = useMemo(() => {
     if (shownFrame === null) return baseBuilt;
-    const start = (range ?? extent)![0];
-    return buildPeopleNetwork(data, { minMentions, strictness, range: [start, frames[shownFrame]] });
-  }, [shownFrame, baseBuilt, range, extent, data, minMentions, strictness, frames]);
+    return buildPeopleNetwork(data, { minMentions, strictness, range: [extent![0], frames[shownFrame]] });
+  }, [shownFrame, baseBuilt, extent, data, minMentions, strictness, frames]);
 
   // The clock. Stops on its own at the last frame (isPlaying goes false,
   // which tears this down) rather than looping — the end state is the
@@ -257,20 +255,6 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
       }}
       filters={
         <>
-          {extent ? (
-            <TimeRangePicker
-              domain={extent}
-              value={range}
-              onChange={(next) => {
-                // Frames are indexed within the period, so a new period
-                // means a new set of frames: drop back to the static view.
-                setRange(next);
-                setPlaying(false);
-                setFrame(null);
-              }}
-              label="Period"
-            />
-          ) : null}
           <GroupByPicker
             value={String(minMentions)}
             onChange={(id) => setMinMentions(Number(id))}
@@ -325,25 +309,7 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
               {visibleNodes.length} people · {visibleEdges.length} connections · {built.dayCount} days
             </p>
           </div>
-          {/* Above the graph rather than below it (where the bar race has
-              its row): ResponsiveChart fills the viewport from its own top
-              edge down, so anything under it lands past the fold. */}
-          {frames.length > 1 ? (
-            <PlaybackControls
-              playing={isPlaying}
-              frame={frame ?? lastFrame}
-              lastFrame={lastFrame}
-              speed={speed}
-              onPlayPause={handlePlayPause}
-              onRestart={handleRestart}
-              onScrub={(f) => {
-                setPlaying(false);
-                setFrame(f);
-              }}
-              onSpeed={setSpeed}
-            />
-          ) : null}
-          <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={320}>
+          <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport="below-filters" minWidth={320}>
             {({ width, height }) =>
               // Outside the time-lapse an empty period gets a message; inside
               // it the graph stays mounted even while empty (the first months
@@ -366,6 +332,11 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
                     selectedId={effectiveSelected}
                     onSelect={onSelect}
                     onNodeDragStart={pause}
+                    // The details panel (w-64 at left-2, plus a gap) covers
+                    // this much of the graph once someone's selected. On a
+                    // narrow screen it covers most of the width anyway, so
+                    // framing around it would leave nothing to frame into.
+                    focusInsetLeft={width >= 640 ? 280 : 0}
                     tooltip={tooltip}
                     ariaLabel="People network. Each dot is a person, sized by days logged and coloured by tag; lines join people logged together more often than chance. Drag a person to pull them around, scroll to zoom, click to see who they're most often with."
                   />
@@ -393,6 +364,27 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
               )
             }
           </ResponsiveChart>
+          {/* Under the graph, like the bar race's row. The chart's
+              "below-filters" sizing measures whatever sits beneath it in
+              this column and leaves room for it, so this row still lands
+              on screen once the page header scrolls away. */}
+          {frames.length > 1 ? (
+            <PlaybackControls
+              playing={isPlaying}
+              frame={frame ?? lastFrame}
+              lastFrame={lastFrame}
+              speed={speed}
+              onPlayPause={handlePlayPause}
+              onRestart={handleRestart}
+              onScrub={(f) => {
+                setPlaying(false);
+                setFrame(f);
+              }}
+              onSpeed={setSpeed}
+              startLabel={formatDate(toDateString(frames[0]), "monthYear")}
+              endLabel={formatDate(toDateString(frames[lastFrame]), "monthYear")}
+            />
+          ) : null}
         </div>
       </ChartCard>
     </ChartPage>
@@ -413,6 +405,8 @@ function PlaybackControls({
   onRestart,
   onScrub,
   onSpeed,
+  startLabel,
+  endLabel,
 }: {
   playing: boolean;
   frame: number;
@@ -422,6 +416,9 @@ function PlaybackControls({
   onRestart: () => void;
   onScrub: (frame: number) => void;
   onSpeed: (speed: SpeedId) => void;
+  /** The scrubber's two ends, now that it's the page's only time control. */
+  startLabel: string;
+  endLabel: string;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -436,6 +433,7 @@ function PlaybackControls({
       <label htmlFor="people-network-scrub" className="sr-only">
         Scrub through time
       </label>
+      <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{startLabel}</span>
       <input
         id="people-network-scrub"
         type="range"
@@ -446,6 +444,7 @@ function PlaybackControls({
         onChange={(event) => onScrub(Number(event.target.value))}
         className="h-1.5 min-w-40 flex-1 cursor-pointer accent-[var(--chart-1)]"
       />
+      <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{endLabel}</span>
       <div role="group" aria-label="Speed" className="flex items-center gap-1">
         {SPEEDS.map((option) => (
           <Button

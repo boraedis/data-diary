@@ -50,9 +50,9 @@
 // logged day in the window as equally likely for everyone, so two people
 // from the same era (college, one job) co-occur "more than chance" partly
 // because they were both *around* then. That's arguably still the answer
-// you want from a friend-graph — and the period control is the tool for
-// looking inside one era — but it's why a narrowed period can drop edges
-// that show up over the whole history.
+// you want from a friend-graph, and the time-lapse scrubber shows the
+// graph as it stood at any month — but it's why an edge can appear or
+// vanish as more history accumulates.
 
 import { toDateString } from "@/lib/date";
 
