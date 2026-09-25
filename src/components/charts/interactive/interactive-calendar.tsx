@@ -29,15 +29,19 @@ const CELL_GAP = 2;
 // A single top strip per year houses both the year number (far left, in
 // LEFT_LABEL_WIDTH's column) and the month abbreviations (spanning the
 // grid) at the same y position — see the `g.append("text")` calls below.
-const YEAR_LABEL_HEIGHT = 18;
+// 20 rather than 18 to fit #449's larger (15px year / 13px month) labels.
+const YEAR_LABEL_HEIGHT = 20;
 const YEAR_GAP = 14;
 // Single-letter day labels ("M"/"T"/"W"/...) need much less horizontal
 // room than 3-letter abbreviations would, so most of this column's width
 // is unused by them — it's sized instead for the year number, which is
 // right-anchored against the grid's edge (see the `g.append("text")` call
 // below) and needs enough room for 4 digits without bleeding into
-// January's month label just to its right.
-const LEFT_LABEL_WIDTH = 30;
+// January's month label just to its right. 40 rather than 30 since #449
+// raised the year to 15px: a 4-digit year at that size is ~34px wide
+// plus its 6px gap, and at 30 it hung past the column into the SVG's
+// left edge whenever the grid was too wide to leave any centring offset.
+const LEFT_LABEL_WIDTH = 40;
 // Monday-first — see the module comment above. Index 0 = Monday, matching
 // the `dow` remap below ((getDay() + 6) % 7).
 const DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -263,6 +267,13 @@ export type InteractiveCalendarProps = {
    * blend mode, where `domainInset` does the equivalent job for the
    * sequential ramp. */
   blendIntensityCap?: number;
+  /** `SequentialLegend`'s `ticks` — rounded "nice" ticks by default
+   * (#449), or `"extent"` to label the exact min and max instead. */
+  legendTicks?: "nice" | "extent";
+  /** `SequentialLegend`'s `tickUnit`, for a value stored in a smaller unit
+   * than it's read in — sleep passes 60 so its minutes tick on whole
+   * hours. */
+  legendTickUnit?: number;
   ariaLabel?: string;
 };
 
@@ -287,6 +298,8 @@ export function InteractiveCalendar({
   colorInterpolator,
   domainInset,
   blendIntensityCap,
+  legendTicks,
+  legendTickUnit,
   ariaLabel = "Calendar heatmap. Hover a day to see its value.",
 }: InteractiveCalendarProps) {
   const years = useMemo<YearGroup[]>(() => {
@@ -530,7 +543,7 @@ export function InteractiveCalendar({
           .attr("y", -6)
           .attr("text-anchor", "end")
           .attr("fill", "var(--foreground)")
-          .style("font-size", "12px")
+          .style("font-size", "15px")
           .style("font-weight", 500)
           .text(String(yearGroup.year));
 
@@ -543,7 +556,9 @@ export function InteractiveCalendar({
           label: monthStart.toLocaleDateString(undefined, { month: "short" }),
           week: d3.timeMonday.count(yearStart, monthStart),
         }));
-        const MIN_LABEL_GAP = 24;
+        // Sized for the 13px labels (#449): a 3-letter month is ~24px wide
+        // at that size, so the old 24px gap left them touching.
+        const MIN_LABEL_GAP = 30;
         let lastLabelX = -Infinity;
         for (const tick of monthTicks) {
           const x = tick.week * rowHeight;
@@ -553,7 +568,7 @@ export function InteractiveCalendar({
             .attr("x", x)
             .attr("y", -6)
             .attr("fill", "var(--muted-foreground)")
-            .style("font-size", "10px")
+            .style("font-size", "13px")
             .text(tick.label);
         }
 
@@ -564,7 +579,10 @@ export function InteractiveCalendar({
           .attr("x", -LEFT_LABEL_WIDTH + 2)
           .attr("y", (_, i) => i * rowHeight + cellSize - 1)
           .attr("fill", "var(--muted-foreground)")
-          .style("font-size", "9px")
+          // 12px (up from 9, #449), but never taller than a row: at the
+          // MIN_CELL_SIZE floor a row is only 10px, and a 12px letter
+          // there would crowd into the next row's.
+          .style("font-size", `${Math.min(12, rowHeight)}px`)
           .text((d) => d);
 
         const cells: CellDatum[] = [...yearGroup.days.entries()].map(([dateStr, day]) => {
@@ -700,6 +718,8 @@ export function InteractiveCalendar({
           sampleDomain={domain}
           formatValue={formatValue}
           valueT={legendT}
+          ticks={legendTicks}
+          tickUnit={legendTickUnit}
           className="fixed bottom-0 z-10 border-t border-border bg-background/95 px-3 py-2 backdrop-blur"
           // Clamped to the container's own visible width, not `gridWidth`
           // outright — `position: fixed` escapes the grid's own

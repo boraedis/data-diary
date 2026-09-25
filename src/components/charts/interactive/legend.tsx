@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import * as d3 from "d3";
 import { cn } from "@/lib/utils";
+import { legendTicks } from "@/lib/viz/legend-ticks";
 
 // Shared Legend component (#17's "shared Legend component" scope item).
 // Fixed-order swatch + label rows — the dependable identity channel per
@@ -183,10 +184,15 @@ export function SequentialLegend({
   formatValue,
   valueT,
   swatches,
+  ticks = "nice",
+  scale = "linear",
+  tickUnit,
   className,
   style,
 }: {
-  /** The scale's `[min, max]` — rendered as the two end labels. */
+  /** The scale's `[min, max]`. Labeled directly as the two ends in
+   * `ticks="extent"` mode, and the range nice ticks are picked from
+   * otherwise. */
   domain: [number, number];
   /** Any d3 sequential scale exposing `.interpolator()` (linear or log —
    * this component sampling t in [0,1] for the gradient bar doesn't care
@@ -228,6 +234,23 @@ export function SequentialLegend({
    * `SeriesKey` swatch the categorical `Legend` above uses — one swatch
    * implementation across both legends, per this file's own header. */
   swatches?: { label: string; color: string }[];
+  /** `"nice"` (the default, #449) labels rounded values inside `domain`
+   * with tick marks under the bar, the way an axis would. `"extent"`
+   * labels the exact min and max at either end instead, for a chart
+   * where the precise extremes are the point. Nice mode falls back to
+   * the extent layout on its own when no two round values fit (see
+   * `legendTicks`). */
+  ticks?: "nice" | "extent";
+  /** How positions along the bar map to values, so tick marks land where
+   * the gradient actually paints that value. Must match how the bar is
+   * sampled: `"log"` for a log color scale drawn from its raw
+   * interpolator (the geo choropleths), `"linear"` otherwise, including
+   * any caller passing `sampleDomain`. Ticks are placed across
+   * `sampleDomain ?? domain`. */
+  scale?: "linear" | "log";
+  /** Round ticks in multiples of this. See `legendTicks`'s `unit`: a value
+   * stored in minutes but formatted as hours wants `60`. */
+  tickUnit?: number;
   className?: string;
   style?: React.CSSProperties;
 }) {
@@ -244,36 +267,77 @@ export function SequentialLegend({
     return d3.range(0, 1.0001, 0.1).map((t) => interpolate(t));
   }, [colorScale, sampleDomain]);
 
-  return (
-    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", className)} style={style}>
-      <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
-      <span className="relative h-2 min-w-0 flex-1">
+  const tickValues = useMemo(
+    () => (ticks === "nice" ? legendTicks(sampleDomain ?? domain, { scale, unit: tickUnit }) : null),
+    [ticks, sampleDomain, domain, scale, tickUnit],
+  );
+
+  // The ramp is h-4, twice the h-2 it was before #449: a thin line made
+  // the colour the reader is meant to match against the hardest thing on
+  // the chart to see. The hover indicator stays taller than the bar so it
+  // still reads as a marker riding on it, not a stripe painted into it.
+  const bar = (
+    <span className="relative block h-4">
+      <span
+        aria-hidden
+        className="block h-4 w-full rounded-full"
+        style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
+      />
+      {valueT !== null ? (
         <span
           aria-hidden
-          className="block h-2 w-full rounded-full"
-          style={{ background: `linear-gradient(to right, ${gradientStops.join(", ")})` }}
+          className="absolute top-1/2 h-6 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
+          style={{ left: `${valueT * 100}%` }}
         />
-        {valueT !== null ? (
-          <span
-            aria-hidden
-            className="absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
-            style={{ left: `${valueT * 100}%` }}
-          />
-        ) : null}
-      </span>
-      <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
-      {/* `shrink-0` on each row, and wrapping allowed on the container, so
-          a narrow map drops these below the bar rather than crushing the
-          gradient — the bar is `flex-1` and would otherwise give up all
-          its width to them first. */}
-      {swatches?.length
-        ? swatches.map((s) => (
-            <span key={s.label} className="flex shrink-0 items-center gap-1.5">
-              <SeriesKey color={s.color} variant="swatch" />
-              {s.label}
-            </span>
-          ))
-        : null}
+      ) : null}
+    </span>
+  );
+
+  // `shrink-0` on each row, and wrapping allowed on the container, so a
+  // narrow map drops these below the bar rather than crushing the
+  // gradient — the bar is `flex-1` and would otherwise give up all its
+  // width to them first.
+  const swatchRows = swatches?.length
+    ? swatches.map((s) => (
+        <span key={s.label} className="flex shrink-0 items-center gap-1.5">
+          <SeriesKey color={s.color} variant="swatch" />
+          {s.label}
+        </span>
+      ))
+    : null;
+
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground", className)} style={style}>
+      {tickValues ? (
+        <span className="min-w-0 flex-1">
+          {bar}
+          {/* Labels at the bar's very ends are aligned inward rather than
+              centred on their tick, or they'd hang half outside the
+              legend (and, for the calendar's fixed legend, off the card). */}
+          <span className="relative mt-0.5 block h-6">
+            {tickValues.map(({ value, t }) => (
+              <span
+                key={value}
+                className={cn(
+                  "absolute top-0 flex flex-col tabular-nums",
+                  t < 0.02 ? "items-start" : t > 0.98 ? "-translate-x-full items-end" : "-translate-x-1/2 items-center",
+                )}
+                style={{ left: `${t * 100}%` }}
+              >
+                <span aria-hidden className="h-1.5 w-px bg-muted-foreground/60" />
+                <span className="leading-tight">{formatValue(value)}</span>
+              </span>
+            ))}
+          </span>
+        </span>
+      ) : (
+        <>
+          <span className="shrink-0 tabular-nums">{formatValue(domain[0])}</span>
+          <span className="min-w-0 flex-1">{bar}</span>
+          <span className="shrink-0 tabular-nums">{formatValue(domain[1])}</span>
+        </>
+      )}
+      {swatchRows}
     </div>
   );
 }
