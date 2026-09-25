@@ -27,7 +27,10 @@ import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // pass across the boundary.
 
 /**
- * Five names plus "Other".
+ * Five names plus "Other", for the People Impact stacked area below. (The
+ * People Trend area chart that used to share this is now the People Impact
+ * Trend line chart, `people-impact-trend-chart.tsx`, which shows as many
+ * people as the reader picks.)
  *
  * 689 distinct people appear across the history, against a palette with
  * five real slots — so nearly everyone lands in "Other" by construction,
@@ -37,42 +40,6 @@ import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
  * distribution.
  */
 const MAX_PEOPLE = 5;
-
-export function PeopleAreaChart({ data }: { data: PeopleDay[] }) {
-  const { categories, keep } = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const day of data) {
-      for (const person of day.people) totals.set(person.name, (totals.get(person.name) ?? 0) + 1);
-    }
-    return foldToTopCategories(totals, MAX_PEOPLE);
-  }, [data]);
-
-  const rows = useMemo<CompositionRow[]>(
-    () =>
-      data.map((day) => {
-        const values: Record<string, number> = {};
-        for (const person of day.people) {
-          const id = keep.has(person.name) ? person.name : OTHER_ID;
-          values[id] = (values[id] ?? 0) + 1;
-        }
-        return { date: day.date, values };
-      }),
-    [data, keep],
-  );
-
-  return (
-    <CompositionExplorer
-      rows={rows}
-      categories={categories}
-      title="People Trend"
-      description="A breakdown of who you spent your time with, aggregated by period. Everyone outside the top five is folded into Other."
-      methodology={PEOPLE_METHODOLOGY}
-      trackingSpan={PEOPLE_TRACKING_SPAN}
-      valueFormat={(v) => `${Math.round(v)} day${v === 1 ? "" : "s"}`}
-      ariaLabel="Who you spent time with over time, as a share of people logged."
-    />
-  );
-}
 
 /**
  * Days coloured either by how many people were logged, or by which tagged

@@ -252,8 +252,8 @@ export const CHARTS: ChartEntry[] = [
   },
   {
     href: "/charts/people-over-time",
-    title: "People Trend",
-    description: "A breakdown of who you spent your time with, aggregated by period.",
+    title: "People Impact Trend",
+    description: "How much each person mattered over time — the top thirty, whole groups, or anyone picked by name.",
     category: "people",
   },
   {

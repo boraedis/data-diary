@@ -1667,6 +1667,18 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
   return out;
 }
 
+/**
+ * Every person's nicknames, by name — for a people picker's search (the
+ * People Impact Trend chart's), which legacy matched against nicknames as
+ * well as names. A separate lookup rather than a field on `PersonOnDay`,
+ * which would repeat each list on every day the person appears. People
+ * with none are omitted.
+ */
+export async function getPeopleNicknames(): Promise<Record<string, string[]>> {
+  const rows = await getDb().select({ name: people.name, nicknames: people.nicknames }).from(people);
+  return Object.fromEntries(rows.filter((r) => r.nicknames.length > 0).map((r) => [r.name, r.nicknames]));
+}
+
 // --- Mood calendars (#216) ------------------------------------------------
 
 /** Every logged happiness score, oldest first. */
