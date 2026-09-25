@@ -1,4 +1,4 @@
-import { asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { asc, eq, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
@@ -20,6 +20,7 @@ import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
+import type { WorkDay } from "@/lib/work";
 import type { PeopleNetworkDay, PeopleNetworkInput } from "@/lib/people-network";
 export type { LifeTimelineEntry } from "@/lib/life-timeline";
 
@@ -1686,6 +1687,65 @@ export async function getDayTypeCalendarData(): Promise<DayTypeDay[]> {
     .where(isNotNull(days.dayType))
     .orderBy(asc(days.date));
   return rows.map((r) => ({ date: r.date, dayType: r.dayType as string }));
+}
+
+// --- Work (#444) ------------------------------------------------------------
+
+/** Every day's work fields plus happiness/day type, filtered by `where`.
+ * `locations`/`commute` come back as `[]` for both a null and an empty
+ * column — see `WorkDay`'s own comment on why those mean the same thing. */
+async function selectWorkDays(where: SQL): Promise<WorkDay[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      date: days.date,
+      minutes: days.workDurationMinutes,
+      productivity: days.productivity,
+      locations: days.workLocation,
+      commute: days.commute,
+      dayType: days.dayType,
+      happiness: days.happiness,
+    })
+    .from(days)
+    .where(where)
+    .orderBy(asc(days.date));
+  return rows.map((r) => ({ ...r, locations: r.locations ?? [], commute: r.commute ?? [] }));
+}
+
+/** Days that log *any* work field, oldest first — the trend, daily and
+ * calendar charts. `cardinality(...) > 0` rather than `IS NOT NULL` for the
+ * two arrays, since years of untracked days hold `{}`. */
+export function getWorkDays(): Promise<WorkDay[]> {
+  return selectWorkDays(
+    or(
+      isNotNull(days.workDurationMinutes),
+      isNotNull(days.productivity),
+      sql`cardinality(${days.workLocation}) > 0`,
+      sql`cardinality(${days.commute}) > 0`,
+    ) as SQL,
+  );
+}
+
+/** Every day with a happiness score, with its work fields — Work vs.
+ * Happiness. All of them, not only work-logged ones: the day-type grouping
+ * compares work days against days off, which have no work fields at all. */
+export function getWorkHappinessDays(): Promise<WorkDay[]> {
+  return selectWorkDays(isNotNull(days.happiness));
+}
+
+/** `getWorkDays`, plus every day typed as a work day — the job
+ * leaderboard's days-worked measure, which reaches back to 2020 through
+ * `dayType` alone. */
+export function getWorkLeaderboardDays(): Promise<WorkDay[]> {
+  return selectWorkDays(
+    or(
+      eq(days.dayType, "work"),
+      isNotNull(days.workDurationMinutes),
+      isNotNull(days.productivity),
+      sql`cardinality(${days.workLocation}) > 0`,
+      sql`cardinality(${days.commute}) > 0`,
+    ) as SQL,
+  );
 }
 
 // --- Technology (#219) ----------------------------------------------------

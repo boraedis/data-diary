@@ -64,6 +64,22 @@ export const LIFE_METHODOLOGY =
 export const DAY_TYPE_METHODOLOGY =
   "Every day is classified into one of six categories: Work (any day with significant work on my occupation, school included), Day off (not working and not traveling — a weekend or holiday spent at home), Vacation (away from home on some kind of trip), Travel (a day spent primarily getting somewhere, like a full day of flights, trains, or driving), Sick (a day significantly affected by being unwell), and Jobless (a day off during a stretch of unemployment, distinct from an ordinary day off).";
 
+// The Work charts (#444). Deliberately limited to what the data itself
+// shows — how the fields relate and when they start — rather than claims
+// about entry habits; the owner's own first-person detail can replace it.
+
+export const WORK_METHODOLOGY =
+  "Each work day logs the time I spent working and a self-rated productivity score from 0–100%. Productive hours multiply the two, so an 8-hour day at 50% and a focused 4-hour day at 100% both come out at 4 productive hours. Averages only count the days that logged the measure being shown, so a day off never counts as zero hours. Hours and productivity have only been logged since May 2026; which days were work days goes back further, on the Day Types calendar.";
+
+export const WORK_LOCATION_METHODOLOGY =
+  "Each work day records where I worked (home, the office, a cafe, while travelling or somewhere else) and how I got there. A day can have more than one of each, so a morning at home and an afternoon in the office is logged as both. A day that records a location but no commute is counted as no commute, which is how days working from home are logged.";
+
+export const WORK_HAPPINESS_METHODOLOGY =
+  "Pairs each day's happiness score with its work log. Each row is the average happiness of the days in that group. The whiskers are a 95% confidence interval for that average: wide when a group has few days, narrow when it has many. n is the number of days in the group. The dotted line is the average across every day in the comparison. Days missing what a grouping needs (no hours logged, say) are left out of that grouping rather than shown as unknown. These are associations, not causes: a long day and a low score can share a reason, like a deadline.";
+
+export const JOB_METHODOLOGY =
+  "Every day marked as a work day is credited to the jobs active on that date in my occupation history. School counts as a job here, the same way it does for day types. Where two overlapped (a co-op during university, say), the day counts toward both. Hours come from the time-worked log, which starts in May 2026, so the hours measure only covers jobs held since then.";
+
 // The leaderboards added in #115. Same voice as the rest: what's recorded
 // and how, not how the chart is drawn.
 

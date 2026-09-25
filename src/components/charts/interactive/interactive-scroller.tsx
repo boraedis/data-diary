@@ -11,6 +11,7 @@ import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
 import { Legend, useLegendHeight, type LegendSeries } from "./legend";
 import type { InteractiveLineRegion } from "./interactive-line";
+import { drawReferenceLines, NO_REFERENCE_LINES, referenceLineValues, type ReferenceLine } from "./reference-lines";
 
 // InteractiveScroller (#117) — a standalone primitive for raw, day-cadence
 // series (every logged day gets its own point) with per-series rolling
@@ -96,6 +97,11 @@ export type InteractiveScrollerProps = {
   height: number;
   movingAverageWindow?: number;
   regions?: InteractiveScrollerRegion[];
+  /** Horizontal target/threshold lines (#444) — same shape and drawing as
+   * `InteractiveLine`'s prop of the same name (`reference-lines.ts`), so
+   * one target definition feeds a chart's trend and daily pages alike.
+   * Main plot only: the minimap is a navigation aid and stays clean. */
+  referenceLines?: readonly ReferenceLine[];
   yDomain?: [number, number];
   yTickFormat?: (value: d3.NumberValue) => string;
   valueFormat?: (value: number) => string;
@@ -431,6 +437,7 @@ export function InteractiveScroller({
   height,
   movingAverageWindow = DEFAULT_MOVING_AVERAGE_WINDOW,
   regions = [],
+  referenceLines = NO_REFERENCE_LINES,
   yDomain,
   yTickFormat,
   valueFormat = String,
@@ -512,10 +519,11 @@ export function InteractiveScroller({
         }
       }
     }
+    values.push(...referenceLineValues(referenceLines));
     const [lo, hi] = d3.extent(values.length ? values : [0, 1]) as [number, number];
     const pad = (hi - lo) * 0.1 || 1;
     return [lo - pad, hi + pad];
-  }, [yDomain, visibleSeries, visibleBySeriesId, averagesById, showAverageOverlay, effectiveDomain]);
+  }, [yDomain, visibleSeries, visibleBySeriesId, averagesById, showAverageOverlay, effectiveDomain, referenceLines]);
 
   const y = useMemo(() => d3.scaleLinear().domain(resolvedYDomain).range([innerHeight, 0]), [resolvedYDomain, innerHeight]);
 
@@ -662,6 +670,7 @@ export function InteractiveScroller({
       }
 
       drawStandardAxes({ g, x, y, innerWidth, innerHeight, yTicks: 5, yTickFormat });
+      drawReferenceLines({ g: clipped, y, innerWidth, lines: referenceLines });
 
       const lineGen = d3
         .line<InteractiveScrollerPoint>()
@@ -742,6 +751,7 @@ export function InteractiveScroller({
     [
       clipId,
       resolvedRegions,
+      referenceLines,
       width,
       mainHeight,
       x,

@@ -48,6 +48,20 @@ export const SLEEP_LOCATION_TRACKING_SPAN: TrackingSpan = { start: "2023-08-10" 
 
 export const COFFEE_TRACKING_SPAN: TrackingSpan = { start: "2023-08-19" };
 
+/** Hours and productivity (#444) both start on this day. */
+export const WORK_TRACKING_SPAN: TrackingSpan = { start: "2026-05-11" };
+
+/** The first day with a non-empty work location or commute. Both columns
+ * hold `{}` on every earlier day — an empty array, not a real value. */
+export const WORK_LOCATION_TRACKING_SPAN: TrackingSpan = { start: "2026-05-11" };
+
+/** The job leaderboard's days-worked measure reads `dayType`, so it starts
+ * where day types do; its hours measure starts with `WORK_TRACKING_SPAN`. */
+export const JOB_TRACKING_SPAN: TrackingSpan = {
+  start: "2020-01-01",
+  note: "Hours worked only from 11 May 2026.",
+};
+
 export const DISTANCE_TRACKING_SPAN: TrackingSpan = { start: "2016-02-18" };
 
 export const WEIGHT_TRACKING_SPAN: TrackingSpan = { start: "2018-01-09" };

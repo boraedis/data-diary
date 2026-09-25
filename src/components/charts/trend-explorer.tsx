@@ -7,6 +7,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveLine, type InteractiveLinePoint } from "@/components/charts/interactive/interactive-line";
 import { PeriodPicker } from "@/components/charts/interactive/period-picker";
+import type { ReferenceLine } from "@/components/charts/interactive/reference-lines";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate } from "@/lib/date";
@@ -47,6 +48,7 @@ export function TrendExplorer<T extends { date: string }>({
   backHref,
   backLabel,
   initialHiddenIds,
+  referenceLines,
   ariaLabel,
 }: {
   data: T[];
@@ -112,6 +114,10 @@ export function TrendExplorer<T extends { date: string }>({
    * through to `InteractiveLine`. For a chart with more lines than read
    * well at once (the nine subs, #120); the reader toggles the rest in. */
   initialHiddenIds?: readonly string[];
+  /** Horizontal target lines, passed straight through to `InteractiveLine`
+   * — Work Trend's and Sleep Trend's 8h lines (#444). In the same units
+   * `getValue` returns. Pass a stable (module-level or memoized) array. */
+  referenceLines?: readonly ReferenceLine[];
   ariaLabel: string;
 }) {
   const showBand = aggregate === "mean" && band !== false;
@@ -276,6 +282,7 @@ export function TrendExplorer<T extends { date: string }>({
               valueFormat={valueFormat}
               dateFormat="monthYear"
               initialHiddenIds={initialHiddenIds}
+              referenceLines={referenceLines}
               ariaLabel={ariaLabel}
             />
           )}
