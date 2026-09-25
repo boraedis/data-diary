@@ -34,17 +34,21 @@ export type { LifeTimelineEntry } from "@/lib/life-timeline";
 
 // --- Happiness histogram ---------------------------------------------------
 
+/** One happiness score with the context the histogram can split it by —
+ * the day's type (work, day off, …) and its date, for weekday/weekend. */
+export type HappinessHistDay = { date: string; happiness: number; dayType: DayType | null };
+
 /** Every recorded happiness value (0-100), oldest first. Binning is left to
  * the chart component (d3.bin has better judgment about bucket width than a
  * pre-aggregated count would) rather than done here. */
-export async function getHappinessHistogramData(): Promise<number[]> {
+export async function getHappinessHistogramData(): Promise<HappinessHistDay[]> {
   const db = getDb();
   const rows = await db
-    .select({ happiness: days.happiness })
+    .select({ date: days.date, happiness: days.happiness, dayType: days.dayType })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-  return rows.map((r) => r.happiness as number);
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, dayType: r.dayType }));
 }
 
 // --- Happiness scroller ---------------------------------------------------
@@ -426,6 +430,11 @@ export type SleepNight = SleepDay & {
    * doesn't get its own independent timeline here, just an optional
    * addend to that night's sleep value. */
   napMinutes: number | null;
+  /** The same row's `days.dayType`. A row's sleep is the night that *ends*
+   * on its date — wake times run about an hour later on Saturday and
+   * Sunday rows than on weekday ones — so this is the type of the day the
+   * night led into: a work-day row's sleep is the night before work. */
+  dayType: DayType | null;
 };
 
 function hhmmToMinutes(hhmm: string): number | null {
@@ -459,6 +468,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
       wakeCrossedMidnight: days.wakeCrossedMidnight,
       locationType: days.sleepLocationType,
       napMinutes: days.napMinutes,
+      dayType: days.dayType,
     })
     .from(days)
     .where(sql`${days.sleepTime} is not null and ${days.wakeTime} is not null`)
@@ -471,7 +481,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
     if (sleepMin === null || wakeMin === null) continue;
     const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
     if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
-    out.push({ date: r.date, durationMinutes, locationType: r.locationType, napMinutes: r.napMinutes });
+    out.push({ date: r.date, durationMinutes, locationType: r.locationType, napMinutes: r.napMinutes, dayType: r.dayType });
   }
   return out;
 }

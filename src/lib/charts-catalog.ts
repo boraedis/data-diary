@@ -91,7 +91,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/happiness-hist",
     title: "Happiness Histogram",
-    description: "The distribution of happiness ratings across every day logged.",
+    description: "The distribution of happiness ratings, splittable by work day or weekend.",
     category: "happiness",
   },
   {
@@ -158,6 +158,12 @@ export const CHARTS: ChartEntry[] = [
     href: "/charts/sleep",
     title: "Sleep Calendar",
     description: "A year-by-year heatmap of nightly sleep duration.",
+    category: "sleep",
+  },
+  {
+    href: "/charts/sleep-hist",
+    title: "Sleep Histogram",
+    description: "The distribution of nightly sleep, splittable by work day or weekend.",
     category: "sleep",
   },
   {
