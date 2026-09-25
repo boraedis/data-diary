@@ -569,15 +569,26 @@ export async function getGymWeightComboData(): Promise<GymWeightComboData> {
 // --- Exercise mix (#19's InteractiveArea proving case) -------------------
 
 // Fixed order matching exerciseCategoryEnum's own declared order
-// (src/db/schema.ts) — color-follows-the-entity depends on every consumer
-// (InteractiveArea's default categoricalColor(i)) agreeing on one order,
-// not each re-deriving it from whatever order rows happen to come back
-// from the DB in.
+// (src/db/schema.ts), so every consumer lists categories the same way
+// rather than in whatever order rows come back from the DB. Colours are
+// pinned per category in EXERCISE_CATEGORY_COLORS below (#428) rather
+// than derived from this order.
 export const EXERCISE_CATEGORY_LABELS: Record<string, string> = {
   distance: "Distance",
   sport: "Sport",
   strength: "Strength",
 };
+/** Exercise category colours, fixed per category rather than by slot
+ * index (#428): distance orange, sport green, strength gray — so a
+ * category reads the same on Training Volume, Exercise Mix and the
+ * exercise leaderboard. See `--exercise-strength` in globals.css for the
+ * validation record. */
+export const EXERCISE_CATEGORY_COLORS: Record<string, string> = {
+  distance: "var(--chart-1)",
+  sport: "var(--chart-3)",
+  strength: "var(--exercise-strength)",
+};
+
 export const EXERCISE_CATEGORY_ORDER = ["distance", "sport", "strength"] as const;
 
 export type ExerciseWorkoutRow = {

@@ -313,7 +313,7 @@ export const CHARTS: ChartEntry[] = [
   {
     href: "/charts/podcast-leaderboard",
     title: "Podcast Leaderboard",
-    description: "A leaderboard of the podcasts, episodes and categories I've listened to most.",
+    description: "A leaderboard of the podcasts and podcast categories I've listened to most.",
     category: "entertainment",
   },
   {

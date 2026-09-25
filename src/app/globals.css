@@ -21,6 +21,11 @@
   --color-chart-5: var(--chart-5);
   --color-rank-up: var(--rank-up);
   --color-rank-down: var(--rank-down);
+  --color-rank-new: var(--rank-new);
+  --color-medal-gold: var(--medal-gold);
+  --color-medal-silver: var(--medal-silver);
+  --color-medal-bronze: var(--medal-bronze);
+  --color-badge-ink: var(--badge-ink);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
@@ -127,6 +132,38 @@
      alone. */
   --rank-up: oklch(0.52 0.12 165);
   --rank-down: oklch(0.55 0.2 25);
+  /* Leaderboard badges (#428): podium medals on ranks 1-3 and the NEW tag
+     on a movement cell. Solid fills carrying dark ink, so they're the same
+     steps in both themes — a badge is its own surface, not a mark on the
+     card. Validated with the dataviz skill's `validate_palette.js`
+     (`--pairs all`, dark card #1f1611) and WCAG contrast of the ink:
+
+     | pair | normal ΔE | worst CVD ΔE |
+     |---|---|---|
+     | gold / silver / bronze (#f0c13e #c2c8cf #cd7a4d) | 16.2 | 16.3 deutan |
+     | NEW vs rank-up / rank-down / gold (#65adff …)      | 18.9 | 10.8 protan |
+
+     Ink contrast on each fill: gold 10.8, silver 10.8, bronze 5.6, NEW
+     7.8. The first bronze candidate (#de8f57) sat ΔE 13.9 from gold —
+     under the 15 normal-vision floor — so it was darkened and reddened.
+     NEW is a bright blue rather than anything warm, so it can't be read
+     as a medal, a rise or a fall. The validator's lightness-band check
+     fails all four by design: it scores series marks, and these are
+     deliberately brighter badges. */
+  --medal-gold: oklch(0.83 0.15 88);
+  --medal-silver: oklch(0.83 0.012 250);
+  --medal-bronze: oklch(0.66 0.12 48);
+  --rank-new: oklch(0.74 0.15 255);
+  --badge-ink: oklch(0.2 0.02 45);
+  /* Exercise "strength" (#428): gray by request, beside distance =
+     chart-1 (orange) and sport = chart-3 (green). A named token rather
+     than `--muted-foreground`, which categoricalColor reserves for "not a
+     real series slot". Validated with the two slots it sits beside (dark,
+     `--pairs all`): gray vs green ΔE 18.5 normal; it fails the chroma
+     floor by definition — it *is* gray. Distance vs sport is the palette's
+     existing chart-1/chart-3 pair (7.0 deutan, the legal band with a
+     legend), which every exercise chart carries. */
+  --exercise-strength: oklch(0.55 0.01 60);
   /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
   --radius: 0.75rem;
   --sidebar: oklch(0.97 0.01 65);
@@ -177,6 +214,7 @@
   --metric-happiness-workday: oklch(0.64 0.14 105);
   --rank-up: oklch(0.8 0.15 165);
   --rank-down: oklch(0.66 0.2 25);
+  --exercise-strength: oklch(0.62 0.012 60);
   --sidebar: oklch(0.19 0.016 48);
   --sidebar-foreground: oklch(0.96 0.012 70);
   --sidebar-primary: oklch(0.72 0.16 40);

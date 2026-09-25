@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PeopleDay } from "@/lib/charts";
-import { personImpact } from "@/lib/impact";
+import { personImpact, recencyWeight } from "@/lib/impact";
 import { buildPeopleLeaderboard } from "@/lib/leaderboards/people";
 import { buildEntertainmentLeaderboard, type EntertainmentSession } from "@/lib/leaderboards/entertainment";
 import { buildSportsLeaderboard, type SportsWatch } from "@/lib/leaderboards/sports";
@@ -28,29 +28,48 @@ describe("buildPeopleLeaderboard", () => {
     { date: "2026-01-03", happiness: 40, people: [person("Cy", 1, null)] },
   ];
 
-  it("counts one mention per day and shows the latest tag", () => {
-    const rows = buildPeopleLeaderboard(data, "mentions");
-    expect(byName(rows)).toEqual([
-      ["Ana", 2],
-      ["Ben", 1],
-      ["Cy", 1],
-    ]);
-    expect(rows[0]).toMatchObject({ context: "Friends", color: "#abcdef" });
-    expect(rows[2]).toMatchObject({ context: null, color: null });
-  });
-
-  it("sums impact, skipping days with no happiness score", () => {
-    const rows = buildPeopleLeaderboard(data, "impact");
+  it("ranks by recency-faded impact, skipping unscored days", () => {
+    const rows = buildPeopleLeaderboard(data, "people");
     const ana = rows.find((r) => r.name === "Ana")!;
-    expect(ana.value).toBeCloseTo(personImpact(80, 1), 2);
-    expect(ana.count).toBe(1);
+    // Ana's one scored day was two days before the latest logged day.
+    expect(ana.value).toBeCloseTo(personImpact(80, 1) * recencyWeight(2), 2);
+    const cy = rows.find((r) => r.name === "Cy")!;
+    expect(cy.value).toBeCloseTo(personImpact(40, 1), 2);
   });
 
-  it("groups person-mentions by tag, with untagged people together", () => {
-    expect(byName(buildPeopleLeaderboard(data, "tag-mentions"))).toEqual([
-      ["Friends", 3],
-      ["Untagged", 1],
-    ]);
+  it("counts every logged day as a mention, scored or not", () => {
+    const rows = buildPeopleLeaderboard(data, "people");
+    expect(rows.find((r) => r.name === "Ana")!.count).toBe(2);
+    expect(rows.find((r) => r.name === "Ana")).toMatchObject({ context: "Friends", color: "#abcdef" });
+    expect(rows.find((r) => r.name === "Cy")).toMatchObject({ context: null, color: null });
+  });
+
+  it("fades an old score so a recent one can overtake it", () => {
+    // Old: a big score two years ago. New: a smaller one yesterday. Faded,
+    // the recent day wins — the "who matters now" reading.
+    const faded = buildPeopleLeaderboard(
+      [
+        { date: "2024-01-01", happiness: 0, people: [person("Old", 1)] },
+        { date: "2026-01-01", happiness: 100, people: [person("New", 1)] },
+      ],
+      "people",
+    );
+    expect(personImpact(0, 1)).toBeGreaterThan(personImpact(100, 1));
+    expect(faded.map((r) => r.name)).toEqual(["New", "Old"]);
+    // A year ago only Old was ranked, so New is new and Old slipped.
+    const old = faded.find((r) => r.name === "Old")!;
+    expect(old.previousRanks![2]).toBe(1);
+    expect(old.gained![2]).toBeLessThan(0);
+  });
+
+  it("groups by tag, summing person-days, with untagged people together", () => {
+    const rows = buildPeopleLeaderboard(data, "tags");
+    expect(rows.map((r) => [r.name, r.count])).toEqual(
+      expect.arrayContaining([
+        ["Friends", 3],
+        ["Untagged", 1],
+      ]),
+    );
   });
 });
 
@@ -154,21 +173,38 @@ describe("buildExerciseLeaderboard", () => {
   });
   const workouts = [workout(1, "Rowing", "distance", 1), workout(2, "Bench", "strength", 0.5)];
   const focuses = new Map([
-    [1, ["Cardio", "Back"]],
-    [2, ["Chest"]],
+    [
+      1,
+      [
+        { focus: "Cardio", subfocus: "Endurance" },
+        { focus: "Strength", subfocus: "Back" },
+      ],
+    ],
+    [2, [{ focus: "Strength", subfocus: "Chest" }]],
   ]);
 
   it("credits every focus an exercise trains in full", () => {
     expect(byName(buildExerciseLeaderboard(workouts, focuses, "focus"))).toEqual([
+      ["Strength", 1.5],
       ["Cardio", 1],
-      ["Back", 1],
-      ["Chest", 0.5],
     ]);
   });
 
-  it("ranks categories by their labels", () => {
+  it("ranks subfocuses, labelled with their focus", () => {
+    const rows = buildExerciseLeaderboard(workouts, focuses, "focus", "subfocus");
+    expect(rows.map((r) => [r.name, r.detail, r.value])).toEqual([
+      ["Endurance", "Cardio", 1],
+      ["Back", "Strength", 1],
+      ["Chest", "Strength", 0.5],
+    ]);
+  });
+
+  it("ranks categories in their fixed colours", () => {
     const rows = buildExerciseLeaderboard(workouts, focuses, "category");
-    expect(rows.map((r) => r.key)).toEqual(["distance", "strength"]);
+    expect(rows.map((r) => [r.key, r.color])).toEqual([
+      ["distance", "var(--chart-1)"],
+      ["strength", "var(--exercise-strength)"],
+    ]);
   });
 });
 

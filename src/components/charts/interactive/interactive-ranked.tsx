@@ -162,6 +162,15 @@ export type InteractiveRankedProps<T> = {
 
 type SortState = { columnId: string; direction: "asc" | "desc" } | null;
 
+/** Podium badge classes by rank — `--medal-*` in globals.css, validated
+ * for separation and for the dark ink they carry. Written out in full so
+ * Tailwind's scanner sees each class. */
+const MEDAL_CLASS: Record<number, string> = {
+  1: "bg-medal-gold font-bold text-badge-ink",
+  2: "bg-medal-silver font-bold text-badge-ink",
+  3: "bg-medal-bronze font-bold text-badge-ink",
+};
+
 /** "1st", "2nd", "11th", "23rd". */
 function ordinal(n: number): string {
   const lastTwo = n % 100;
@@ -289,8 +298,11 @@ export function RankMovementCell({
   if (!movement) return <Blank />;
   if (movement.isNew) {
     return (
+      // A bright, solid blue (`--rank-new`, globals.css) so a newcomer
+      // jumps out of a long column of dashes — deliberately unlike the
+      // green/red arrows and the warm podium medals.
       <span
-        className="rounded-sm bg-accent px-1.5 py-px text-[10px] font-semibold tracking-wide text-accent-foreground uppercase"
+        className="rounded-sm bg-rank-new px-1.5 py-px text-[10px] font-bold tracking-wide text-badge-ink uppercase"
         title={`New since ${since} — not ranked then, ${ordinal(currentRank)} now`}
       >
         New
@@ -426,7 +438,11 @@ function MovementCell<T>({
           screen with no sideways scroll. */}
       {column.gained ? (
         <span className="hidden min-w-8 text-right text-xs text-muted-foreground tabular-nums sm:inline">
-          {gained !== null && gained !== 0 ? `+${(column.formatGained ?? formatThousandsNumber)(gained)}` : ""}
+          {gained !== null && gained !== 0
+            ? // Usually a gain, but a recency-faded score (people impact)
+              // can shrink over a window, so the sign is the value's own.
+              `${gained > 0 ? "+" : "−"}${(column.formatGained ?? formatThousandsNumber)(Math.abs(gained))}`
+            : ""}
         </span>
       ) : null}
       <span className="inline-flex min-w-8 justify-end">
@@ -544,7 +560,9 @@ export function InteractiveRanked<T>({
   return (
     // overflow-x-auto rather than shrinking columns past legibility — the
     // pinned rank/name columns keep each row identifiable while it scrolls.
-    <div className="-mx-1 overflow-x-auto px-1">
+    // `isolate` keeps the pinned cells' z-index inside the table: without
+    // it they stacked above the page's sticky top nav on vertical scroll.
+    <div className="isolate -mx-1 overflow-x-auto px-1">
       <table className="w-full border-separate border-spacing-0 text-left text-sm" aria-label={ariaLabel}>
         <thead>
           <tr className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -612,12 +630,12 @@ export function InteractiveRanked<T>({
           {visible.map(({ row, rank: rowRank, index }) => (
             <tr key={getKey(row)} className="group transition-colors hover:bg-accent">
               <td className={`${pinnedCell} left-0 border-b border-border/40 py-1.5 pr-2 text-center`}>
-                {/* Podium ranks get a filled badge — the standings-table
-                    cue that makes the top of a long table findable at a
-                    glance, without spending a colour on it. */}
+                {/* Podium ranks get gold / silver / bronze badges — the
+                    standings-table cue that makes the top of a long table
+                    findable at a glance. Tied ranks share a medal. */}
                 <span
                   className={`inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1 text-xs tabular-nums ${
-                    rowRank <= 3 ? "bg-muted font-semibold text-foreground" : "text-muted-foreground"
+                    MEDAL_CLASS[rowRank] ?? "text-muted-foreground"
                   }`}
                 >
                   {rowRank}

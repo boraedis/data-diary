@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { rankSnapshots, STANDARD_RANK_WINDOWS, type RankSnapshot } from "@/lib/ranking";
 import { toLeaderboardRows, type LeaderboardColumns, type LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { LeaderboardOption } from "@/lib/leaderboards/options";
+import { formatTitleCase } from "@/lib/viz/format";
 
 // Music and podcast leaderboards (#115), from the Spotify listen history.
 //
@@ -39,18 +40,28 @@ export const MUSIC_MODES: LeaderboardOption<MusicMode>[] = [
   { id: "genre", label: "Genres" },
 ];
 
-export type PodcastMode = "show" | "episode" | "category";
+// No episode mode — dropped on review (#428): podcasts are followed as
+// shows, and the show table already answers what an episode table would.
+export type PodcastMode = "show" | "category";
 
 export const PODCAST_MODES: LeaderboardOption<PodcastMode>[] = [
   { id: "show", label: "Shows" },
-  { id: "episode", label: "Episodes" },
   { id: "category", label: "Categories" },
 ];
 
 /** One mode's query: what a listen is credited to and how it's labelled.
  * Every fragment may reference the listen as `l`; `key` must determine
  * `name`/`detail`/`color`, since all four are grouped on. */
-type ListenQuery = { key: SQL; name: SQL; detail: SQL; color: SQL; from: SQL; where?: SQL };
+type ListenQuery = {
+  key: SQL;
+  name: SQL;
+  detail: SQL;
+  color: SQL;
+  from: SQL;
+  where?: SQL;
+  /** Display transform for the name — Spotify's genres come lowercase. */
+  formatName?: (name: string) => string;
+};
 
 const MS_PER_HOUR = 3_600_000;
 
@@ -101,6 +112,7 @@ const MUSIC_QUERIES: Record<MusicMode, ListenQuery> = {
     name: sql`g.name`,
     detail: sql`gg.name`,
     color: sql`gg.color`,
+    formatName: formatTitleCase,
     from: sql`music_listens l
       join artist_genres ag on ag.artist_id = l.artist_id
       join genres g on g.id = ag.genre_id
@@ -117,13 +129,6 @@ const PODCAST_QUERIES: Record<PodcastMode, ListenQuery> = {
     from: sql`music_listens l
       join podcast_shows s on s.id = l.podcast_show_id
       left join podcast_categories c on c.id = s.category_id`,
-  },
-  episode: {
-    key: sql`concat_ws(chr(31), l.episode_name, l.podcast_show_id)`,
-    name: sql`l.episode_name`,
-    detail: sql`s.name`,
-    color: sql`null::text`,
-    from: sql`music_listens l left join podcast_shows s on s.id = l.podcast_show_id`,
   },
   category: {
     key: sql`coalesce(c.id::text, 'none')`,
@@ -167,7 +172,8 @@ async function listenLeaderboard(query: ListenQuery, kind: SQL): Promise<Leaderb
 
   const labels = new Map<string, { name: string; detail: string | null; color: string | null }>();
   const snapshots: RankSnapshot[] = rows.map((r) => {
-    labels.set(r.key, { name: r.name ?? "Unknown", detail: r.detail, color: r.color });
+    const name = r.name ?? "Unknown";
+    labels.set(r.key, { name: query.formatName ? query.formatName(name) : name, detail: r.detail, color: r.color });
     const before: Record<string, number | null> = {};
     for (const w of STANDARD_RANK_WINDOWS) {
       const v = r[`before_${w.id}`];
@@ -225,8 +231,6 @@ export function podcastColumns(mode: PodcastMode): LeaderboardColumns {
   switch (mode) {
     case "show":
       return { ...TIME, nameHeader: "Show" };
-    case "episode":
-      return { ...TIME, nameHeader: "Episode" };
     case "category":
       return { ...TIME, nameHeader: "Category" };
   }

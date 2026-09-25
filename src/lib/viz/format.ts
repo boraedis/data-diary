@@ -42,6 +42,27 @@ export function formatHoursTotal(hours: number): string {
   return `${formatThousandsNumber(Math.round(hours))}h`;
 }
 
+/** Short forms that stay upper-case when title-casing a tag: Spotify's
+ * genres include "edm", "uk garage", "r&b", "lo-fi"-style names. */
+const TITLE_CASE_ACRONYMS = new Set(["edm", "idm", "uk", "us", "usa", "dc", "la", "nyc", "atl", "dnb", "ebm", "mpb", "hk", "nz"]);
+
+/**
+ * Title-cases a lowercase catalog tag for display — "classic rock" →
+ * "Classic Rock", "k-pop" → "K-Pop", "r&b" → "R&B", "uk garage" → "UK
+ * Garage". For labels stored lowercase by their source (Spotify genres,
+ * exercise focuses), not for names someone typed with their own casing:
+ * letters already upper-case are left alone.
+ */
+export function formatTitleCase(value: string): string {
+  return value
+    .split(/(\s+|-|&|\/)/)
+    .map((part) => {
+      if (TITLE_CASE_ACRONYMS.has(part.toLowerCase())) return part.toUpperCase();
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join("");
+}
+
 // --- Date ---------------------------------------------------------------
 
 export type DateFormatPreset = "short" | "month" | "monthYear" | "dayYear" | "weekday" | "weekdayYear";

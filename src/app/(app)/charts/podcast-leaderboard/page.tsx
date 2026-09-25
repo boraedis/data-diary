@@ -8,7 +8,6 @@ export const dynamic = "force-dynamic";
 
 const DESCRIPTIONS: Record<PodcastMode, string> = {
   show: "The podcasts I've listened to most, by total listening time.",
-  episode: "Every podcast episode I've played, ranked by listening time.",
   category: "Podcast listening time by category.",
 };
 
