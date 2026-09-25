@@ -1169,6 +1169,10 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         colorScale={colorScale}
         formatValue={formatValue}
         valueT={legendT}
+        // The fill is a log scale and the bar samples its interpolator
+        // evenly in t, so ticks have to be placed in log space too, the
+        // same as `legendT` above.
+        scale="log"
         swatches={legendSwatches}
         className="pt-2"
       />

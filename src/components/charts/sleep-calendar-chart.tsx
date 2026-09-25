@@ -134,6 +134,9 @@ export function SleepCalendarChart({
               valueLabel={effectiveMetric === "sleepPlusNaps" ? "sleep + naps" : "sleep"}
               colorInterpolator={interpolateRdYlBu}
               domainInset={DOMAIN_INSET_MINUTES}
+              // Minutes, read as hours: tick on whole hours, not on round
+              // minute counts that format as 6.7h.
+              legendTickUnit={60}
               ariaLabel="Sleep calendar heatmap. Hover a day to see how long you slept."
             />
           )}
