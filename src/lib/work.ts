@@ -64,9 +64,9 @@ export function workMeasureValue(day: WorkDay, measure: WorkMeasure): number | u
 
 // --- Location / commute labels ---------------------------------------------
 
-/** Every work location, in the fixed order its categorical slot follows.
- * Five options, five real palette slots, so none fold to grey. Ordered by
- * how often each is logged so the strongest hues go to the common ones. */
+/** Every work location, in legend and group order, most often logged
+ * first. Colours are named per location (`@/lib/viz/work`), not by slot,
+ * so this order only decides where each one sits in a list. */
 export const WORK_LOCATION_ORDER: readonly WorkLocationOption[] = ["home", "office", "cafe", "travel", "other"];
 
 export const WORK_LOCATION_LABELS: Record<WorkLocationOption, string> = {
@@ -77,9 +77,8 @@ export const WORK_LOCATION_LABELS: Record<WorkLocationOption, string> = {
   other: "Other",
 };
 
-/** Commute modes in slot order. Seven modes against five real slots, so the
- * last two (`carpool`, `other`) share the muted grey — ranked so that grey
- * lands on the rarest. `none` is not a schema value: see
+/** Commute modes in legend order, most often logged first. Colours are
+ * named per mode (`@/lib/viz/work`). `none` is not a schema value: see
  * `commuteCategories`. */
 export const COMMUTE_ORDER = ["public_transit", "walk", "none", "car", "bike", "taxi", "carpool", "other"] as const;
 export type CommuteCategory = (typeof COMMUTE_ORDER)[number];

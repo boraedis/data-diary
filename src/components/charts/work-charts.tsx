@@ -9,6 +9,7 @@ import { Legend } from "@/components/charts/interactive/legend";
 import { NO_REFERENCE_LINES, type ReferenceLine } from "@/components/charts/interactive/reference-lines";
 import { categoricalColor, categorySequentialInterpolator } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
+import { COMMUTE_COLORS, WORK_LOCATION_COLORS } from "@/lib/viz/work";
 import type { ProfileRegionGroups } from "@/lib/charts";
 import {
   COMMUTE_LABELS,
@@ -183,8 +184,10 @@ const PLACE_MODE_OPTIONS: GroupByOption<PlaceMode>[] = [
   { id: "commute", label: "Commute" },
 ];
 
-const locationColor = (l: (typeof WORK_LOCATION_ORDER)[number]) => categoricalColor(WORK_LOCATION_ORDER.indexOf(l));
-const commuteColor = (c: CommuteCategory) => categoricalColor(COMMUTE_ORDER.indexOf(c));
+// Named colours chosen per place/mode, not categorical slots — see
+// `@/lib/viz/work` for why and for the validation record.
+const locationColor = (l: (typeof WORK_LOCATION_ORDER)[number]) => WORK_LOCATION_COLORS[l];
+const commuteColor = (c: CommuteCategory) => COMMUTE_COLORS[c];
 
 /**
  * Where each working day happened, or how you got there — a categorical
