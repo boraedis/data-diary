@@ -102,6 +102,32 @@ export type InteractiveLineRegion = {
  */
 export type InteractiveLineZoom = "none" | "brush" | "direct" | "both";
 
+/**
+ * What hovering reads out.
+ *
+ * - "x" (default): the shared crosshair — snap to the nearest x, list every
+ *   visible series' value there. Right for a handful of lines, where the
+ *   comparison at one moment is the question.
+ * - "series": the one line nearest the pointer. It's drawn on top at full
+ *   strength, every other line fades, and the tooltip names just that
+ *   series. Built for the People Impact Trend chart, which draws thirty to
+ *   sixty lines at once in shared tag colours: there an x-slice tooltip is
+ *   a sixty-row list, and colour can't say which line is whose, so "which
+ *   line is this" has to be answered by pointing at it. This is #110's
+ *   "hover prioritizes the series" item. It's scoped as an opt-in mode on
+ *   this primitive rather than a change to the shared `useCrosshair`,
+ *   because picking a line needs each series' own points, which only this
+ *   primitive has. It stays off by default so every existing line chart
+ *   reads exactly as before. Nearest is measured vertically at the snapped
+ *   x, among series that have a point there — hit-testing
+ *   against the drawn paths themselves (legacy's Voronoi) would be
+ *   finer-grained, but snapping to periods is what every point here
+ *   already does, so the pick matches what the tooltip then reads out.
+ *   Keyboard: left/right step through time as usual, up/down move between
+ *   the lines at that moment.
+ */
+export type InteractiveLineHover = "x" | "series";
+
 export type InteractiveLineProps = {
   series: InteractiveLineSeries[];
   /** Total width/height allocated to this component — typically straight
@@ -152,6 +178,13 @@ export type InteractiveLineProps = {
    * toggles from then on, so a later change to this prop doesn't clobber
    * what they've switched on or off. */
   initialHiddenIds?: readonly string[];
+  /** Draw the built-in click-to-toggle legend (with 2+ series). Pass false
+   * when the caller renders its own key instead — e.g. a chart with dozens
+   * of series whose picker already names each one, where a legend row per
+   * line would outgrow the plot. Hidden series can't be toggled back on
+   * without it, so don't combine this with `initialHiddenIds`. */
+  showLegend?: boolean;
+  hover?: InteractiveLineHover;
 };
 
 type ResolvedSeries = InteractiveLineSeries & { color: string };
@@ -183,10 +216,26 @@ function allPixelPositions(series: ResolvedSeries[], x: d3.ScaleTime<number, num
  * on `allPixelPositions` for why this is pixel-based rather than reusing
  * tooltip.tsx's single-array `useCrosshair` directly. Handler shape matches
  * `useCrosshair`'s (pointer + keyboard parity, Escape/blur clears).
+ *
+ * In "series" hover mode (see `InteractiveLineHover`) it also tracks the
+ * pointer's y and resolves `focusedIndex`: the one series nearest it,
+ * among those with a point at the snapped x. Up/down arrows override the
+ * pointer's pick until it next moves.
  */
-function useLineCrosshair(series: ResolvedSeries[], x: d3.ScaleTime<number, number>) {
+function useLineCrosshair(
+  series: ResolvedSeries[],
+  x: d3.ScaleTime<number, number>,
+  y: d3.ScaleLinear<number, number>,
+  mode: InteractiveLineHover,
+) {
   const [pixelX, setPixelX] = useState<number | null>(null);
+  const [pointerY, setPointerY] = useState<number | null>(null);
+  const [keyFocusId, setKeyFocusId] = useState<string | null>(null);
   const positions = useMemo(() => allPixelPositions(series, x), [series, x]);
+  // Per-series pixel positions, computed once per scale rather than on
+  // every pointer move — with dozens of series of hundreds of points each,
+  // re-mapping every point on every move is the expensive part of hover.
+  const seriesPositions = useMemo(() => series.map((s) => s.points.map((p) => x(p.x))), [series, x]);
 
   const moveTo = useCallback(
     (localX: number) => {
@@ -196,11 +245,56 @@ function useLineCrosshair(series: ResolvedSeries[], x: d3.ScaleTime<number, numb
     [positions],
   );
 
+  const hoveredBySeries = useMemo<({ point: InteractiveLinePoint; index: number } | null)[]>(() => {
+    if (pixelX === null) return series.map(() => null);
+    return series.map((s, i) => {
+      if (s.points.length === 0) return null;
+      const index = d3.bisectCenter(seriesPositions[i], pixelX);
+      const point = s.points[index];
+      return point ? { point, index } : null;
+    });
+  }, [series, seriesPositions, pixelX]);
+
+  // Series with a point exactly at the crosshair, highest value first — the
+  // order up/down steps through. A series whose nearest point is some other
+  // x (it hasn't started yet, or has a gap) isn't a line under the pointer.
+  const candidates = useMemo(() => {
+    if (mode !== "series" || pixelX === null) return [];
+    return hoveredBySeries
+      .map((h, i) => (h && Math.abs(seriesPositions[i][h.index] - pixelX) < 0.5 ? { i, value: h.point.y } : null))
+      .filter((c): c is { i: number; value: number } => c !== null)
+      .sort((a, b) => b.value - a.value);
+  }, [mode, pixelX, hoveredBySeries, seriesPositions]);
+
+  const focusedIndex = useMemo<number | null>(() => {
+    if (candidates.length === 0) return null;
+    const keyed = keyFocusId === null ? undefined : candidates.find((c) => series[c.i].id === keyFocusId);
+    if (keyed) return keyed.i;
+    if (pointerY === null) return candidates[0].i;
+    let best = candidates[0];
+    for (const c of candidates) {
+      if (Math.abs(y(c.value) - pointerY) < Math.abs(y(best.value) - pointerY)) best = c;
+    }
+    return best.i;
+  }, [candidates, keyFocusId, pointerY, series, y]);
+
+  const clear = () => {
+    setPixelX(null);
+    setPointerY(null);
+    setKeyFocusId(null);
+  };
+
   const handlers = {
-    onPointerMove: (event: React.PointerEvent<HTMLElement>) => moveTo(event.nativeEvent.offsetX),
-    onPointerLeave: () => setPixelX(null),
+    onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
+      moveTo(event.nativeEvent.offsetX);
+      if (mode === "series") {
+        setPointerY(event.nativeEvent.offsetY);
+        setKeyFocusId(null);
+      }
+    },
+    onPointerLeave: clear,
     onFocus: () => setPixelX((cur) => cur ?? (positions.length ? positions[positions.length - 1] : null)),
-    onBlur: () => setPixelX(null),
+    onBlur: clear,
     onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
       if (positions.length === 0) return;
       if (event.key === "ArrowLeft") {
@@ -215,25 +309,21 @@ function useLineCrosshair(series: ResolvedSeries[], x: d3.ScaleTime<number, numb
           const idx = cur === null ? -1 : positions.indexOf(cur);
           return positions[Math.min(positions.length - 1, idx + 1)] ?? positions[positions.length - 1];
         });
+      } else if (mode === "series" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        if (candidates.length === 0) return;
+        event.preventDefault();
+        const at = candidates.findIndex((c) => c.i === focusedIndex);
+        // Up means a higher line, which is earlier in the value-descending list.
+        const next = event.key === "ArrowUp" ? Math.max(0, at - 1) : Math.min(candidates.length - 1, at + 1);
+        setKeyFocusId(series[candidates[next].i].id);
       } else if (event.key === "Escape") {
-        setPixelX(null);
+        clear();
       }
     },
     tabIndex: 0,
   };
 
-  const hoveredBySeries = useMemo<({ point: InteractiveLinePoint; index: number } | null)[]>(() => {
-    if (pixelX === null) return series.map(() => null);
-    return series.map((s) => {
-      if (s.points.length === 0) return null;
-      const seriesPositions = s.points.map((p) => x(p.x));
-      const index = d3.bisectCenter(seriesPositions, pixelX);
-      const point = s.points[index];
-      return point ? { point, index } : null;
-    });
-  }, [series, x, pixelX]);
-
-  return { pixelX, hoveredBySeries, handlers };
+  return { pixelX, hoveredBySeries, focusedIndex, handlers };
 }
 
 /** The mini navigation strip for "brush"/"both" zoom modes — every series
@@ -340,6 +430,8 @@ export function InteractiveLine({
   margin,
   ariaLabel,
   initialHiddenIds,
+  showLegend = true,
+  hover = "x",
 }: InteractiveLineProps) {
   const MARGIN = { ...DEFAULT_MARGIN, ...margin };
 
@@ -365,7 +457,7 @@ export function InteractiveLine({
   const [visibleDomain, setVisibleDomain] = useState<[Date, Date] | null>(null);
   const effectiveDomain = visibleDomain ?? fullXDomain;
 
-  const hasLegend = resolvedSeries.length >= 2;
+  const hasLegend = showLegend && resolvedSeries.length >= 2;
   const hasOverview = zoom === "brush" || zoom === "both";
   const hasDirectZoom = zoom === "direct" || zoom === "both";
 
@@ -411,7 +503,7 @@ export function InteractiveLine({
     [resolvedYDomain, innerHeight],
   );
 
-  const crosshair = useLineCrosshair(visibleSeries, x);
+  const crosshair = useLineCrosshair(visibleSeries, x, y, hover);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<{
@@ -567,6 +659,7 @@ export function InteractiveLine({
       for (const s of visibleSeries) {
         g.append("path")
           .datum(s.points)
+          .attr("data-series-line", s.id)
           .attr("fill", "none")
           .attr("stroke", s.color)
           .attr("stroke-width", MARK_SPECS.line.strokeWidth)
@@ -581,6 +674,7 @@ export function InteractiveLine({
           .attr("cx", (d) => x(d.x))
           .attr("cy", (d) => y(d.y))
           .attr("r", (d, i) => (typeof s.markers === "function" ? s.markers(d, i) : MARK_SPECS.marker.radius))
+          .attr("data-series-marker", s.id)
           .attr("fill", s.color)
           .attr("stroke", "var(--card)")
           .attr("stroke-width", MARK_SPECS.marker.ringWidth);
@@ -589,12 +683,43 @@ export function InteractiveLine({
     [visibleSeries, regions, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight],
   );
 
+  // "series" hover's emphasis, applied to the already-drawn marks rather
+  // than by rebuilding the SVG: the focus changes on every pointer move,
+  // and useD3's rebuild is only cheap on a real data/size change (see
+  // src/hooks/use-d3.ts). Declared after the useD3 call, so on a render
+  // that does rebuild, this runs against the fresh marks. The deps mirror
+  // that rebuild's own for the same reason.
+  const focusedId = crosshair.focusedIndex === null ? null : (visibleSeries[crosshair.focusedIndex]?.id ?? null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || hover !== "series") return;
+    const svg = d3.select(node);
+    svg
+      .selectAll<SVGPathElement, unknown>("[data-series-line]")
+      .attr("stroke-opacity", function () {
+        return focusedId === null || this.getAttribute("data-series-line") === focusedId ? 1 : 0.15;
+      })
+      .attr("stroke-width", function () {
+        return this.getAttribute("data-series-line") === focusedId
+          ? MARK_SPECS.line.strokeWidth + 1
+          : MARK_SPECS.line.strokeWidth;
+      });
+    svg.selectAll<SVGCircleElement, unknown>("[data-series-marker]").attr("opacity", function () {
+      return focusedId === null || this.getAttribute("data-series-marker") === focusedId ? 1 : 0.15;
+    });
+    if (focusedId !== null) {
+      svg.select(`[data-series-line="${CSS.escape(focusedId)}"]`).raise();
+    }
+  }, [ref, hover, focusedId, visibleSeries, regions, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight]);
+
   // One combined pass over every series' hovered point (skipping series
   // with no point near the current crosshair position) — the tooltip's
   // rows, its vertical anchor, and its title date all derive from this
   // same set rather than re-deriving "what's hovered" three separate ways.
+  // In "series" mode that set is just the focused line.
   const hoveredEntries = visibleSeries
     .map((s, i) => {
+      if (hover === "series" && i !== crosshair.focusedIndex) return null;
       const h = crosshair.hoveredBySeries[i];
       return h ? { series: s, point: h.point, index: h.index } : null;
     })
@@ -660,6 +785,22 @@ export function InteractiveLine({
               aria-hidden
               className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
               style={{ left: crosshair.pixelX }}
+            />
+          ) : null}
+          {hover === "series" && crosshair.pixelX !== null && hoveredEntries[0] ? (
+            // The picked point itself, so the tooltip's value visibly
+            // belongs to one spot on one line.
+            <div
+              aria-hidden
+              className="pointer-events-none absolute rounded-full"
+              style={{
+                left: crosshair.pixelX - MARK_SPECS.marker.radius,
+                top: y(hoveredEntries[0].point.y) - MARK_SPECS.marker.radius,
+                width: MARK_SPECS.marker.radius * 2,
+                height: MARK_SPECS.marker.radius * 2,
+                backgroundColor: hoveredEntries[0].series.color,
+                boxShadow: `0 0 0 ${MARK_SPECS.marker.ringWidth}px var(--card)`,
+              }}
             />
           ) : null}
         </div>

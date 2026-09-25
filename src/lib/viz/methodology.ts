@@ -58,6 +58,10 @@ export const PEOPLE_NETWORK_METHODOLOGY = `${PEOPLE_METHODOLOGY} For the network
 export const PEOPLE_IMPACT_METHODOLOGY =
   "This score isn't a simple day count — it combines which of the seven ranked slots a person occupied with how that day was rated for happiness, using a scoring formula carried over unchanged from the original version of this app. Presence counts for more on a day's best or hardest moments than on an unremarkable one, since that's when someone's presence tends to actually matter.";
 
+/** The trend's own reading on top of the impact score: the recency
+ * weighting and the per-period averaging. See src/lib/people-impact-trend.ts. */
+export const PEOPLE_IMPACT_TREND_METHODOLOGY = `${PEOPLE_IMPACT_METHODOLOGY} Each line is a running standing rather than a tally: on any given day, a person's standing adds up every score they've ever earned, with older days counting for less — they hold close to full weight for the first few months, fade most steeply around a year, and settle at a small floor rather than disappearing. Each point is the average standing over the week, month, quarter or year it covers. So a line climbs while someone is in my days and eases back down over a year or two once they're not. The first five months of the log are left off, while every standing is still climbing from zero. "Top 30" is ranked within the selected time range, and picking a group adds the people in it logged at least 15 times; anyone else can be added by name.`;
+
 export const LIFE_METHODOLOGY =
   "This tracks the start and end of engagements in three areas of my life: occupation (any job or educational engagement), residence (a living situation that was my primary home at the time), and relationship (a romantic engagement). An occupation can also carry its own roles — promotions or title changes within the same job, logged separately so a raise doesn't read as starting a whole new career.";
 
