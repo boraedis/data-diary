@@ -1426,6 +1426,13 @@ export type PlaceHierarchyRow = {
    * than re-walked here. Null for anything outside a metro's catchment
    * (most of the tree: metroId is only ever set on a Municipality). */
   metro: string | null;
+  /** The nearest Municipality ancestor's own name (or itself, when it *is*
+   * one) — the Metro grouping's fallback for a place with no `metro`: most
+   * municipalities aren't in a defined metro, and bucketing all of them
+   * together under one "No metro" catch-all was a single, uselessly huge
+   * slice (#227) — grouping by municipality instead spreads that mass
+   * back out into real, individually meaningful places. */
+  municipality: string | null;
 };
 
 /** Every place that was logged at least once, plus enough of the catalog
@@ -1482,6 +1489,7 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     rootColor: r.rootColor,
     value: Number(r.value),
     metro: levelsByPlaceId.get(r.id)?.metro ?? null,
+    municipality: levelsByPlaceId.get(r.id)?.municipality ?? null,
   }));
 }
 

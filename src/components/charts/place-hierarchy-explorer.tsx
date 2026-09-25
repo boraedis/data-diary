@@ -39,9 +39,11 @@ import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 //    and under different countries/states in the real tree (a business
 //    trip logged at a DC hotel and a weekend logged at an Arlington
 //    friend's place share a metro, not a parent), so there's no single
-//    tree position to hang it off of. `metro` is resolved server-side in
-//    `getPlaceHierarchyData` (`resolvePlaceLevels`), same as Category's
-//    own `category`/`subcategory` fields.
+//    tree position to hang it off of. A place with no metro falls back to
+//    its own municipality rather than one shared "No metro" bucket — see
+//    buildMetroTree's own comment. `metro`/`municipality` are resolved
+//    server-side in `getPlaceHierarchyData` (`resolvePlaceLevels`), same
+//    as Category's own `category`/`subcategory` fields.
 // Tags and people were floated as further candidates; both are flat
 // today (a person carries one tag, tags have no parent), so neither has a
 // second level to drill into yet — not built rather than faked with a
@@ -136,7 +138,17 @@ function buildMetroTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
   const logged = rows.filter((row) => row.value > 0);
   const tree = buildTreeFromLevels(logged, {
     rootName: "All places",
-    levels: [{ of: (row) => row.metro, fallback: "No metro" }],
+    // Most municipalities aren't in a defined metro at all, so a place
+    // with no `metro` falls back to its own municipality rather than one
+    // shared "No metro" bucket (#227) — a single catch-all for everything
+    // outside a handful of hand-entered metro areas was both the biggest
+    // slice on the chart and, once it (or the real small metros around it)
+    // folded into "Other," a dead end: drilling in just landed on a flat
+    // list of individual places with no municipal grouping at all. Falling
+    // back to municipality keeps that same "how much of this a single
+    // metro-scale place accounts for" reading for the places a metro was
+    // never defined for.
+    levels: [{ of: (row) => row.metro ?? row.municipality, fallback: "Unspecified" }],
     toLeaf: (row) => ({
       key: String(row.id),
       name: row.name,
