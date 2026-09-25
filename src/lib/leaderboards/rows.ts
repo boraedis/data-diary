@@ -85,7 +85,7 @@ export function movementOf(row: LeaderboardRow, index: number): RankMovement | n
 /** How the main stat and gains are formatted. A name rather than a
  * function, because the config is built in a server component and only
  * plain data can cross to the client table. */
-export type LeaderboardValueFormat = "count" | "hours" | "score";
+export type LeaderboardValueFormat = "count" | "days" | "hours" | "score";
 
 /** Which columns a leaderboard shows, and what they're called. */
 export type LeaderboardColumns = {

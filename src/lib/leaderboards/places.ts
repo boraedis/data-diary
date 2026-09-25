@@ -6,7 +6,7 @@ import { computeRankings, STANDARD_RANK_WINDOWS, type RankAppearance } from "@/l
 import { toLeaderboardRows, type LeaderboardColumns, type LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { LeaderboardOption } from "@/lib/leaderboards/options";
 
-// The places leaderboard (#115): the same slot-weighted mentions, ranked
+// The places leaderboard (#115): slot-weighted days at each place, ranked
 // four ways — by place, by the region it sits in, by metro, and by
 // category. Every mode is the same appearances fed through
 // `computeRankings`; only the key a mention is credited to changes.
@@ -25,6 +25,19 @@ import type { LeaderboardOption } from "@/lib/leaderboards/options";
  * (src/lib/recap-people-places.ts) so the two can't disagree about what
  * "most mentioned" means. */
 export const PLACE_SLOT_WEIGHTS = [2, 1] as const;
+
+/**
+ * Each slot's share of one day — the legacy weights divided by their sum
+ * (#428), so a place's total reads as **days** rather than as legacy's
+ * unitless 2-and-1 "mentions": ⅔ of a day to the first place, ⅓ to the
+ * second, and a full day when the same place fills both. Every logged day
+ * fills both slots (checked when this changed: 3,870 of 3,870), so a whole
+ * table's days sum to the days logged. Ranking is untouched — it's the
+ * same weighting at a third of the scale.
+ */
+export const PLACE_SLOT_DAY_SHARES = PLACE_SLOT_WEIGHTS.map(
+  (w) => w / PLACE_SLOT_WEIGHTS.reduce((sum, x) => sum + x, 0),
+);
 
 export type PlaceMode = "place" | "region" | "metro" | "category";
 
@@ -82,7 +95,7 @@ export type PlaceLeaderboardOptions =
   | { mode: "category"; level: CategoryLevel };
 
 /**
- * Ranks slot-weighted mentions under one of the four modes.
+ * Ranks slot-weighted days (see PLACE_SLOT_DAY_SHARES) under one of the four modes.
  *
  * - **place** — each place on its own.
  * - **region** — each mention credited to the nearest ancestor-or-self
@@ -185,7 +198,7 @@ export function buildPlaceLeaderboard(
       }
       if (!credit) return;
       labels.set(credit.key, credit);
-      appearances.push({ key: credit.key, date: day.date, weight: PLACE_SLOT_WEIGHTS[slot] });
+      appearances.push({ key: credit.key, date: day.date, weight: PLACE_SLOT_DAY_SHARES[slot] });
     });
   }
   if (appearances.length === 0) return [];
@@ -194,14 +207,15 @@ export function buildPlaceLeaderboard(
   return toLeaderboardRows(ranked, STANDARD_RANK_WINDOWS, (key) => labels.get(key) ?? { name: "Unknown" });
 }
 
-const MENTIONS_DESCRIPTION = "Slot-weighted: a day's first place counts 2, its second counts 1.";
+export const PLACE_DAYS_DESCRIPTION =
+  "Days, split by slot: each logged day gives ⅔ to its first place and ⅓ to its second (a full day when both are the same place).";
 
 export function placeColumns(options: PlaceLeaderboardOptions): LeaderboardColumns {
   const base = {
-    valueHeader: "Mentions",
-    valueDescription: MENTIONS_DESCRIPTION,
-    valueFormat: "count" as const,
-    gainedNoun: "mentions gained",
+    valueHeader: "Days",
+    valueDescription: PLACE_DAYS_DESCRIPTION,
+    valueFormat: "days" as const,
+    gainedNoun: "days gained",
   };
   switch (options.mode) {
     case "place":
@@ -219,14 +233,14 @@ export function placeColumns(options: PlaceLeaderboardOptions): LeaderboardColum
         ...base,
         nameHeader: options.level,
         contextHeader: "Path",
-        contextDescription: `Every mention of a place inside this ${options.level.toLowerCase()} counts toward it.`,
+        contextDescription: `Every day at a place inside this ${options.level.toLowerCase()} counts toward it.`,
       };
     case "metro":
       return {
         ...base,
         nameHeader: "Metro",
         contextHeader: "Country",
-        contextDescription: "Every mention of a place inside the metro counts toward it.",
+        contextDescription: "Every day at a place inside the metro counts toward it.",
       };
     case "category":
       return { ...base, nameHeader: options.level === "category" ? "Category" : "Subcategory" };

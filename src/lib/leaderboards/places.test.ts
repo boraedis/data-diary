@@ -20,7 +20,8 @@ const catalog: PlaceCatalogRow[] = [
 
 const metros: MetroRow[] = [{ id: 7, name: "Metro Atlanta", country: "USA" }];
 
-const names = (rows: { name: string; value: number }[]) => rows.map((r) => [r.name, r.value]);
+/** Name and days, to 2dp — a day splits ⅔ / ⅓ between its two slots. */
+const names = (rows: { name: string; value: number }[]) => rows.map((r) => [r.name, Math.round(r.value * 100) / 100]);
 
 describe("buildPlaceLeaderboard", () => {
   const days = [
@@ -28,11 +29,11 @@ describe("buildPlaceLeaderboard", () => {
     { date: "2026-01-02", place1Id: 5, place2Id: null },
   ];
 
-  it("weights a day's first slot double its second", () => {
+  it("splits each day ⅔ to its first place and ⅓ to its second", () => {
     const rows = buildPlaceLeaderboard(days, catalog, metros, { mode: "place" });
     expect(names(rows)).toEqual([
-      ["Bar/Restaurant", 3],
-      ["Home", 2],
+      ["Bar/Restaurant", 1],
+      ["Home", 0.67],
     ]);
     expect(rows.map((r) => r.rank)).toEqual([1, 2]);
   });
@@ -45,26 +46,27 @@ describe("buildPlaceLeaderboard", () => {
 
   it("rolls mentions up to the region of the chosen level", () => {
     const city = buildPlaceLeaderboard(days, catalog, metros, { mode: "region", level: "Municipality" });
-    expect(names(city)).toEqual([["Atlanta", 5]]);
+    // Every place logged is in Atlanta; day 2 only filled its first slot.
+    expect(names(city)).toEqual([["Atlanta", 1.67]]);
     expect(city[0].context).toBe("USA › Georgia");
 
     // Home sits under no neighbourhood, so it drops out rather than being
     // guessed into one.
     const hood = buildPlaceLeaderboard(days, catalog, metros, { mode: "region", level: "Neighborhood" });
-    expect(names(hood)).toEqual([["Midtown", 3]]);
+    expect(names(hood)).toEqual([["Midtown", 1]]);
   });
 
   it("rolls everything beneath a city into its metro", () => {
     const rows = buildPlaceLeaderboard(days, catalog, metros, { mode: "metro" });
-    expect(names(rows)).toEqual([["Metro Atlanta", 5]]);
+    expect(names(rows)).toEqual([["Metro Atlanta", 1.67]]);
     expect(rows[0].context).toBe("USA");
   });
 
   it("groups by category or subcategory", () => {
     const cats = buildPlaceLeaderboard(days, catalog, metros, { mode: "category", level: "category" });
     expect(names(cats)).toEqual([
-      ["Bar", 3],
-      ["Residence", 2],
+      ["Bar", 1],
+      ["Residence", 0.67],
     ]);
     const subs = buildPlaceLeaderboard(days, catalog, metros, { mode: "category", level: "subcategory" });
     expect(subs.map((r) => [r.name, r.detail])).toEqual([
@@ -97,7 +99,7 @@ describe("buildPlaceLeaderboard", () => {
     // [week, month, year]: the bar wasn't ranked a week or more ago.
     expect(bar.previousRanks).toEqual([null, null, null]);
     expect(home.previousRanks).toEqual([1, null, null]);
-    expect(bar.gained).toEqual([4, 4, 4]);
+    expect(bar.gained).toEqual([1.333, 1.333, 1.333]);
   });
 
   it("returns nothing when no place was ever logged", () => {

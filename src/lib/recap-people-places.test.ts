@@ -93,10 +93,10 @@ describe("buildRecapPeoplePlaces — places", () => {
       period,
       prior
     );
-    // Home: 2 (one first slot). Office: 1 (second slot) + 2 (first slot) = 3.
+    // In days: Home ⅔ (one first slot). Office ⅓ (second slot) + ⅔ (first slot) = 1.
     expect(result.leaderboard).toEqual([
-      { key: "11", rank: 1, name: "Office", detail: null, context: null, color: null, value: 3, count: 0, previousRanks: null, gained: null },
-      { key: "10", rank: 2, name: "Home", detail: null, context: null, color: "#abcdef", value: 2, count: 0, previousRanks: null, gained: null },
+      { key: "11", rank: 1, name: "Office", detail: null, context: null, color: null, value: 1, count: 0, previousRanks: null, gained: null },
+      { key: "10", rank: 2, name: "Home", detail: null, context: null, color: "#abcdef", value: 0.667, count: 0, previousRanks: null, gained: null },
     ]);
   });
 

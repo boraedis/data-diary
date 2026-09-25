@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
 import type { CountryVisitEntry } from "@/lib/charts";
-import { PLACE_SLOT_WEIGHTS } from "@/lib/leaderboards/places";
+import { PLACE_SLOT_DAY_SHARES } from "@/lib/leaderboards/places";
 import { competitionRanks, type LeaderboardRow } from "@/lib/leaderboards/rows";
 
 // The recap's people & places section (issue #172, epic #130).
@@ -175,7 +175,7 @@ export function buildRecapPeoplePlaces(
   for (const day of input.days) {
     if (!inPeriod(day.date, period)) continue;
     day.placeIds.forEach((id, slot) => {
-      const weight = PLACE_SLOT_WEIGHTS[slot] ?? 1;
+      const weight = PLACE_SLOT_DAY_SHARES[slot] ?? 0;
       placeScores.set(id, (placeScores.get(id) ?? 0) + weight);
     });
   }
@@ -192,7 +192,9 @@ export function buildRecapPeoplePlaces(
     detail: null,
     context: null,
     color: input.colorByPlaceId.get(id) ?? null,
-    value,
+    // Rounded like every leaderboard row (rows.ts `trim`) — thirds of a
+    // day are otherwise 0.6666… on the wire.
+    value: Math.round(value * 1000) / 1000,
     count: 0,
     previousRanks: null,
     gained: null,

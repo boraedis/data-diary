@@ -22,9 +22,17 @@ import type { TrackingSpan } from "@/lib/viz/tracking-span";
 
 const SCORE_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 const SCORE_EXACT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+const DAYS_SMALL = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
 const FORMATS: Record<LeaderboardValueFormat, { display: (v: number) => string; exact: (v: number) => string }> = {
   count: { display: (v) => formatThousandsNumber(Math.round(v)), exact: (v) => formatThousandsNumber(Math.round(v)) },
+  // Fractional by construction (places split a day ⅔ / ⅓): whole days
+  // once there are enough of them, a decimal below 10 where the fraction
+  // is most of the number, and the exact tenth on hover.
+  days: {
+    display: (v) => (Math.abs(v) < 10 ? DAYS_SMALL.format(v) : formatThousandsNumber(Math.round(v))),
+    exact: (v) => `${DAYS_SMALL.format(v)} ${Math.abs(v) === 1 ? "day" : "days"}`,
+  },
   hours: { display: formatHoursTotal, exact: formatDuration },
   score: { display: (v) => SCORE_FORMAT.format(v), exact: (v) => SCORE_EXACT.format(v) },
 };

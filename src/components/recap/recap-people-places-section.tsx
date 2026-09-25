@@ -3,6 +3,7 @@ import { LeaderboardTable } from "@/components/charts/leaderboard";
 import { WorldVisitsChart } from "@/components/charts/world-visits-chart";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { MIN_DAYS_FOR_TOTAL, toRecapStat } from "@/lib/recap";
+import { PLACE_DAYS_DESCRIPTION } from "@/lib/leaderboards/places";
 import type { LeaderboardColumns } from "@/lib/leaderboards/rows";
 import type { RecapCount, RecapDiscovery, RecapPeoplePlaces } from "@/lib/recap-people-places";
 
@@ -33,10 +34,10 @@ import type { RecapCount, RecapDiscovery, RecapPeoplePlaces } from "@/lib/recap-
  * tints the name instead. */
 const RECAP_PLACE_COLUMNS: LeaderboardColumns = {
   nameHeader: "Place",
-  valueHeader: "Mentions",
-  valueDescription: "Slot-weighted: a day's first place counts 2, its second counts 1.",
-  valueFormat: "count",
-  gainedNoun: "mentions gained",
+  valueHeader: "Days",
+  valueDescription: PLACE_DAYS_DESCRIPTION,
+  valueFormat: "days",
+  gainedNoun: "days gained",
 };
 
 export function RecapPeoplePlacesSection({

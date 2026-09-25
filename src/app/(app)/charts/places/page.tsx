@@ -15,9 +15,9 @@ export const dynamic = "force-dynamic";
 
 const DESCRIPTIONS: Record<PlaceLeaderboardOptions["mode"], string> = {
   place: "My most mentioned locations, and how each one's standing has moved over the last week, month and year.",
-  region: "Mentions rolled up into the region they sit in — every place in a neighborhood counts toward it.",
-  metro: "Mentions rolled up by metro area — everything inside a city and its surroundings counts toward it.",
-  category: "Mentions grouped by what kind of place it is.",
+  region: "Days rolled up into the region they sit in — every place in a neighborhood counts toward it.",
+  metro: "Days rolled up by metro area — everything inside a city and its surroundings counts toward it.",
+  category: "Days grouped by what kind of place it is.",
 };
 
 // The mode lives in the URL (`?by=region&level=Neighborhood`) so the server
@@ -50,7 +50,7 @@ export default async function PlacesChartPage({ searchParams }: { searchParams: 
       pickers={pickers}
       rows={rows}
       columns={placeColumns(options)}
-      ariaLabel="Places ranked by slot-weighted mentions, with how each has moved over the last week, month and year."
+      ariaLabel="Places ranked by days spent there, with how each has moved over the last week, month and year."
     />
   );
 }
