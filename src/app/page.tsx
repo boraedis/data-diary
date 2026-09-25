@@ -3,22 +3,19 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { getPublicLandingData } from "@/lib/public-profile";
 import { parseDate } from "@/lib/date";
+import { PROJECT_DEFAULTS } from "@/lib/project-defaults";
 
 // Never statically cache this — it's live data, same reasoning as
 // src/app/home/page.tsx's own dynamic dashboard.
 export const dynamic = "force-dynamic";
-
-const DEFAULT_TAGLINE = "A statistical diary of one life, logged one day at a time.";
-const DEFAULT_GOALS =
-  "Every day gets a row here — sleep, mood, work, the people and places that filled it — and this site is where the shape of that adds up over time.";
 
 // getPublicLandingData is wrapped in React's cache() (see public-profile.ts)
 // so this and the page component below only hit the DB once per request,
 // not twice (#87).
 export async function generateMetadata(): Promise<Metadata> {
   const { project } = await getPublicLandingData();
-  const title = project.name ?? "Data Diary";
-  const description = project.tagline ?? DEFAULT_TAGLINE;
+  const title = project.name ?? PROJECT_DEFAULTS.name;
+  const description = project.tagline ?? PROJECT_DEFAULTS.tagline;
   return {
     title,
     description,
@@ -72,9 +69,9 @@ function StatTile({ label, value }: { label: string; value: string }) {
 export default async function LandingPage() {
   const { project, ownerName, diaryStartDate, stats } = await getPublicLandingData();
 
-  const projectName = project.name ?? "Data Diary";
-  const tagline = project.tagline ?? DEFAULT_TAGLINE;
-  const goals = project.goalsSummary ?? DEFAULT_GOALS;
+  const projectName = project.name ?? PROJECT_DEFAULTS.name;
+  const tagline = project.tagline ?? PROJECT_DEFAULTS.tagline;
+  const goals = project.goalsSummary ?? PROJECT_DEFAULTS.goalsSummary;
   const intro = ownerName
     ? `Written and logged by ${ownerName}, running for ${formatRunningFor(diaryStartDate)} now.`
     : `Running for ${formatRunningFor(diaryStartDate)} now.`;
