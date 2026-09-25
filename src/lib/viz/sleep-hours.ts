@@ -3,6 +3,9 @@
 // timeline.ts/hierarchy.ts: the arithmetic lives here where it can be
 // tested, the drawing lives in sleep-hours-chart.tsx.
 
+import type { DayType } from "@/db/schema";
+import { addDays } from "@/lib/date";
+
 /**
  * Where the clock axis starts: noon, running to noon the next day.
  *
@@ -51,6 +54,8 @@ export type SleepBar = {
    * night's duration, never re-derived from the stored wake time. */
   end: number;
   durationMinutes: number;
+  /** The row's day type — the day the night began on. */
+  dayType: DayType | null;
 };
 
 /**
@@ -59,11 +64,41 @@ export type SleepBar = {
  * `wakeCrossedMidnight` flag and its bad-data guard), and re-deriving it
  * here from the wake time would be a second copy to keep correct.
  */
-export function buildSleepBars(nights: { date: string; bedtimeMinutes: number; durationMinutes: number }[]): SleepBar[] {
+export function buildSleepBars(
+  nights: { date: string; bedtimeMinutes: number; durationMinutes: number; dayType?: DayType | null }[],
+): SleepBar[] {
   return nights.map((n) => {
     const start = toAxisMinutes(n.bedtimeMinutes);
-    return { date: n.date, start, end: start + n.durationMinutes, durationMinutes: n.durationMinutes };
+    return {
+      date: n.date,
+      start,
+      end: start + n.durationMinutes,
+      durationMinutes: n.durationMinutes,
+      dayType: n.dayType ?? null,
+    };
   });
+}
+
+/**
+ * Minutes past the axis origin → which day that moment falls on, relative
+ * to the row's date: the axis starts at noon *of the row's date*, so
+ * anything from the following midnight on is the next day.
+ */
+function dayOffset(axisMinutes: number): number {
+  return Math.floor((axisMinutes + CLOCK_ORIGIN_MINUTES) / DAY_MINUTES);
+}
+
+/**
+ * The calendar dates a night fell asleep and woke up on.
+ *
+ * A row is dated by the evening the night began (the latest row is always
+ * last night's, logged the morning after), so a 22:30 bedtime is on the
+ * row's date and a 01:30 one is already the next day — both wake the day
+ * after. Checked against the real history: the rows either side of an
+ * after-midnight bedtime only line up read this way.
+ */
+export function sleepDates(bar: SleepBar): { asleep: string; woke: string } {
+  return { asleep: addDays(bar.date, dayOffset(bar.start)), woke: addDays(bar.date, dayOffset(bar.end)) };
 }
 
 /** The span a normal night occupies, used when there's nothing to fit to

@@ -65,7 +65,7 @@ export function formatTitleCase(value: string): string {
 
 // --- Date ---------------------------------------------------------------
 
-export type DateFormatPreset = "short" | "month" | "monthYear" | "dayYear" | "weekday" | "weekdayYear";
+export type DateFormatPreset = "short" | "month" | "monthYear" | "dayYear" | "weekday" | "weekdayYear" | "dayName";
 
 const DATE_FORMAT_OPTIONS: Record<DateFormatPreset, Intl.DateTimeFormatOptions> = {
   short: { month: "short", day: "numeric" }, // "Feb 14" — axis ticks, day-level tooltips
@@ -74,6 +74,7 @@ const DATE_FORMAT_OPTIONS: Record<DateFormatPreset, Intl.DateTimeFormatOptions> 
   dayYear: { month: "short", day: "numeric", year: "numeric" }, // "Feb 14, 2026" — a specific date on a chart spanning years (InteractiveTimeline's interval tooltips), where "short" is ambiguous about the year and "weekdayYear" spends a word on a weekday nobody asked about
   weekday: { weekday: "short", month: "short", day: "numeric" }, // "Sat, Feb 14" — tooltip headline
   weekdayYear: { weekday: "short", month: "short", day: "numeric", year: "numeric" }, // "Sat, Feb 14, 2026" — tooltip headline for a multi-year view (calendar heatmap), where the bare "weekday" preset is ambiguous about which year a cell belongs to
+  dayName: { weekday: "short" }, // "Sat" — naming a day next to a fuller date already on screen (Sleep Hours' tooltip: which night a bedtime belonged to)
 };
 
 /**

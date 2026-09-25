@@ -1,4 +1,5 @@
 import type { CommuteOption, DayType, WorkLocationOption } from "@/db/schema";
+import { DAY_TYPE_LABELS, DAY_TYPE_ORDER } from "@/lib/viz/day-type";
 
 // Pure shaping for the Work charts (#444) — which number a day contributes
 // under each measure, and which group a day falls in for Work vs.
@@ -140,16 +141,9 @@ export const PRODUCTIVITY_BANDS: readonly Band[] = [
   { id: "80+", label: "80%+", min: 80, max: Infinity },
 ];
 
-export const DAY_TYPE_ORDER: readonly DayType[] = ["work", "dayoff", "vacation", "travel", "jobless", "sick"];
-
-export const DAY_TYPE_LABELS: Record<DayType, string> = {
-  work: "Work",
-  dayoff: "Day off",
-  vacation: "Vacation",
-  travel: "Travel",
-  jobless: "Jobless",
-  sick: "Sick",
-};
+// Re-exported so the Work charts keep importing day types from here; the
+// definitions live in viz/day-type.ts alongside their colour.
+export { DAY_TYPE_LABELS, DAY_TYPE_ORDER };
 
 /** Lower edge inclusive, upper exclusive: exactly 8h is "8–10h". */
 function bandOf(value: number, bands: readonly Band[]): number {

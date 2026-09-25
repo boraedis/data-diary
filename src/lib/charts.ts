@@ -432,6 +432,10 @@ export type SleepNight = SleepDay & {
    * gets wake time from the same across-midnight derivation as every other
    * sleep chart rather than re-deriving it from `wakeTime` and the flag. */
   bedtimeMinutes: number;
+  /** `days.dayType` of the row — the day the night *began* on, so a work
+   * night is the sleep after a work day. Null before day types were
+   * tracked (2020) and on the odd unlogged day. */
+  dayType: DayType | null;
 };
 
 function hhmmToMinutes(hhmm: string): number | null {
@@ -465,6 +469,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
       wakeCrossedMidnight: days.wakeCrossedMidnight,
       locationType: days.sleepLocationType,
       napMinutes: days.napMinutes,
+      dayType: days.dayType,
     })
     .from(days)
     .where(sql`${days.sleepTime} is not null and ${days.wakeTime} is not null`)
@@ -483,6 +488,7 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
       locationType: r.locationType,
       napMinutes: r.napMinutes,
       bedtimeMinutes: sleepMin,
+      dayType: r.dayType,
     });
   }
   return out;

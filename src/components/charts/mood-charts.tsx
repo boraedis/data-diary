@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { CalendarExplorer } from "@/components/charts/calendar-explorer";
 import { Legend } from "@/components/charts/interactive/legend";
-import { categoricalColor } from "@/lib/viz/color";
+import type { DayType } from "@/db/schema";
+import { DAY_TYPE_LABELS, DAY_TYPE_ORDER, dayTypeColor } from "@/lib/viz/day-type";
 import type { DailyValue, DayTypeDay } from "@/lib/charts";
 import { DAY_TYPE_METHODOLOGY, HAPPINESS_METHODOLOGY } from "@/lib/viz/methodology";
 import { DAY_TYPE_TRACKING_SPAN, HAPPINESS_TRACKING_SPAN } from "@/lib/viz/tracking-span";
@@ -25,34 +26,6 @@ export function HappinessCalendarChart({ data }: { data: DailyValue[] }) {
       ariaLabel="Calendar heatmap of daily happiness scores."
     />
   );
-}
-
-/**
- * Day types, ordered by how often they occur.
- *
- * Order matters because it decides colour: `categoricalColor` has five real
- * slots before it flattens to one muted grey for everything beyond, and
- * there are six day types. Ranking by frequency means the grey lands on the
- * rarest — `sick`, five days in the whole history — rather than on
- * something you'd actually want to pick out of the grid.
- *
- * Fixed rather than derived from the data so a type's colour doesn't shift
- * when the visible range changes.
- */
-const DAY_TYPE_ORDER = ["work", "dayoff", "vacation", "travel", "jobless", "sick"] as const;
-
-const DAY_TYPE_LABELS: Record<string, string> = {
-  work: "Work",
-  dayoff: "Day off",
-  vacation: "Vacation",
-  travel: "Travel",
-  jobless: "Jobless",
-  sick: "Sick",
-};
-
-function dayTypeColor(dayType: string): string {
-  const index = DAY_TYPE_ORDER.indexOf(dayType as (typeof DAY_TYPE_ORDER)[number]);
-  return categoricalColor(index === -1 ? DAY_TYPE_ORDER.length : index);
 }
 
 /**
@@ -81,7 +54,7 @@ export function DayTypeCalendarChart({ data }: { data: DayTypeDay[] }) {
         // render every day at full intensity.
         value: 1,
         categories: [
-          { label: DAY_TYPE_LABELS[day.dayType] ?? day.dayType, color: dayTypeColor(day.dayType) },
+          { label: DAY_TYPE_LABELS[day.dayType as DayType] ?? day.dayType, color: dayTypeColor(day.dayType) },
         ],
       })),
     [data],
