@@ -55,6 +55,12 @@ export const COMBO_INTERACTION_GUIDE =
 export const TIMELINE_INTERACTION_GUIDE =
   "Drag the period slider or scroll the chart to zoom, drag to pan. Hover or focus an entry for its dates and length.";
 
+/** The Sleep Hours chart (#212) — bespoke, not built on a shared
+ * primitive, so it gets its own paragraph rather than borrowing one that
+ * would promise zoom it doesn't have. */
+export const SLEEP_HOURS_INTERACTION_GUIDE =
+  "Each bar is one night, from falling asleep at its top to waking at its bottom. Hover a night, or focus the chart and use the left and right arrow keys, for its exact times and length. Drag the period slider to show a different stretch — the clock axis refits to the nights in view.";
+
 /** Shown in the popup's Methodology section until a chart has real,
  * hand-written copy from #316 — the content follow-up ticket. Deliberately
  * visible rather than hidden, so a placeholder reads as "not written yet"

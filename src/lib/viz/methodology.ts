@@ -17,6 +17,8 @@ export const HAPPINESS_METHODOLOGY =
 export const SLEEP_METHODOLOGY =
   "Sleep duration comes from a sleep time and a wake time logged for each day. How those two times get captured has changed over the years — for a long stretch they were entered manually from memory, more recently they come from a sleep-tracking app, where \"sleep time\" is when I fell asleep and \"wake time\" is when I stopped the app's tracking, a close but imperfect proxy for the moment I actually woke up.";
 
+export const SLEEP_HOURS_METHODOLOGY = `${SLEEP_METHODOLOGY} Each night is placed on the day it began, so a bar dated the 24th runs from that evening into the morning of the 25th. The clock axis runs from noon to noon rather than midnight to midnight, which keeps a night that crosses midnight in one piece; the wake time is the sleep time plus that night's duration, the same figure every other sleep chart uses. Over a long stretch the clock axis is fitted to all but the most unusual 1% of bedtimes and wake times, so a stray entry (a daytime sleep, a near-20-hour night) is cut off at the chart's edge rather than squeezing every normal night into a sliver — hover it for its real times.`;
+
 export const SLEEP_LOCATION_METHODOLOGY =
   "Where I slept each night is logged in two parts. The location is a general category — home, a friend's place, family's house, at a partner's, or even a tent while camping. The sub-location is what I actually slept on or in: a bed, a couch, an air mattress, or, while traveling, the mode of transit itself — a flight, bus, train, or car.";
 

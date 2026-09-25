@@ -426,6 +426,12 @@ export type SleepNight = SleepDay & {
    * doesn't get its own independent timeline here, just an optional
    * addend to that night's sleep value. */
   napMinutes: number | null;
+  /** `days.sleepTime` as minutes past midnight (0-1439) — the clock time
+   * the night began. Only the start is carried: the end is always
+   * `bedtimeMinutes + durationMinutes`, so the Sleep Hours chart (#212)
+   * gets wake time from the same across-midnight derivation as every other
+   * sleep chart rather than re-deriving it from `wakeTime` and the flag. */
+  bedtimeMinutes: number;
 };
 
 function hhmmToMinutes(hhmm: string): number | null {
@@ -471,7 +477,13 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
     if (sleepMin === null || wakeMin === null) continue;
     const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
     if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
-    out.push({ date: r.date, durationMinutes, locationType: r.locationType, napMinutes: r.napMinutes });
+    out.push({
+      date: r.date,
+      durationMinutes,
+      locationType: r.locationType,
+      napMinutes: r.napMinutes,
+      bedtimeMinutes: sleepMin,
+    });
   }
   return out;
 }
