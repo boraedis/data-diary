@@ -16,6 +16,7 @@ export type ChartCategory =
   | "technology"
   | "health"
   | "happiness"
+  | "work"
   | "subs"
   | "places"
   | "people"
@@ -38,6 +39,10 @@ export const CHART_CATEGORIES: Record<ChartCategory, { label: string; descriptio
   happiness: {
     label: "Happiness",
     description: "Mood, journal reasons, and day types.",
+  },
+  work: {
+    label: "Work",
+    description: "Hours, productivity, where you worked and how it felt.",
   },
   subs: {
     label: "Subs",
@@ -67,6 +72,7 @@ export const CHART_CATEGORY_ORDER: ChartCategory[] = [
   "technology",
   "health",
   "happiness",
+  "work",
   "subs",
   "places",
   "people",
@@ -327,6 +333,42 @@ export const CHARTS: ChartEntry[] = [
     title: "Sports Leaderboard",
     description: "A leaderboard of the sports, leagues, conferences and teams I've watched most.",
     category: "entertainment",
+  },
+  {
+    href: "/charts/work-trend",
+    title: "Work Trend",
+    description: "Trend in hours worked, productivity and productive hours, aggregated by period.",
+    category: "work",
+  },
+  {
+    href: "/charts/work-daily",
+    title: "Daily Work",
+    description: "A day-by-day look at hours worked, productivity and productive hours.",
+    category: "work",
+  },
+  {
+    href: "/charts/work-calendar",
+    title: "Work Calendar",
+    description: "A year-by-year heatmap of hours worked, productivity or productive hours.",
+    category: "work",
+  },
+  {
+    href: "/charts/work-location-calendar",
+    title: "Work Location Calendar",
+    description: "Where each working day happened, or how you commuted there.",
+    category: "work",
+  },
+  {
+    href: "/charts/job-leaderboard",
+    title: "Job Leaderboard",
+    description: "A leaderboard of jobs, companies, roles, work locations and commutes by time worked.",
+    category: "work",
+  },
+  {
+    href: "/charts/work-happiness",
+    title: "Work vs. Happiness",
+    description: "Average happiness by hours worked, productivity, work location or day type.",
+    category: "work",
   },
   {
     href: "/charts/life-timeline",

@@ -10,6 +10,7 @@ import {
   type InteractiveScrollerSeries,
 } from "@/components/charts/interactive/interactive-scroller";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
+import type { ReferenceLine } from "@/components/charts/interactive/reference-lines";
 import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
 import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -55,6 +56,7 @@ export function DailyExplorer({
   extraFilters,
   initialWindow = 30,
   initialHiddenIds,
+  referenceLines,
   ariaLabel,
 }: {
   series: DailyExplorerSeries[];
@@ -86,6 +88,9 @@ export function DailyExplorer({
    * passed straight through to `InteractiveScroller`. For a chart with more
    * series than read well at once (the nine subs, #120). */
   initialHiddenIds?: readonly string[];
+  /** Horizontal target lines, passed straight through to
+   * `InteractiveScroller` (#444). Pass a stable array. */
+  referenceLines?: readonly ReferenceLine[];
   ariaLabel: string;
 }) {
   const [windowId, setWindowId] = useState<WindowId>(
@@ -133,6 +138,7 @@ export function DailyExplorer({
               regions={regions}
               valueFormat={valueFormat}
               initialHiddenIds={initialHiddenIds}
+              referenceLines={referenceLines}
               ariaLabel={ariaLabel}
             />
           )}

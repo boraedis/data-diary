@@ -10,6 +10,7 @@ import {
 } from "@/components/charts/composition-explorer";
 import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
+import type { ReferenceLine } from "@/components/charts/interactive/reference-lines";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { SleepNight } from "@/lib/charts";
@@ -27,6 +28,12 @@ const SLEEP_COLOR = categoricalColor(4);
 const NAP_COLOR = categoricalColor(1);
 const asHours = (minutes: number) => minutes / 60;
 const formatHours = (hours: number) => formatDuration(hours);
+
+/** The commonly-cited adult 8 hours, as a dotted target on both the trend
+ * and nightly charts (#444) — the first reuse of the reference-line prop
+ * outside the Work charts it was built for. Module-level so its identity
+ * is stable (it's a `useD3` dependency inside the primitives). */
+const SLEEP_TARGET: readonly ReferenceLine[] = [{ value: 8, label: "8h" }];
 
 /** Whether to plot sleep alone, sleep with naps folded in, or both lines at
  * once. Shared between Sleep Trend and Sleep Daily so the picker (and its
@@ -73,6 +80,7 @@ export function SleepTrendChart({ data }: { data: SleepNight[] }) {
       aggregate="mean"
       valueFormat={formatHours}
       tooltipLabel={(nights) => `${nights.length} night${nights.length === 1 ? "" : "s"}`}
+      referenceLines={SLEEP_TARGET}
       extraFilters={
         hasNaps ? (
           <GroupByPicker value={metric} onChange={setMetric} options={SLEEP_METRIC_OPTIONS} label="Measure" />
@@ -107,6 +115,7 @@ export function SleepDailyChart({ data }: { data: SleepNight[] }) {
       methodology={SLEEP_METHODOLOGY}
       trackingSpan={SLEEP_TRACKING_SPAN}
       valueFormat={formatHours}
+      referenceLines={SLEEP_TARGET}
       extraFilters={
         hasNaps ? (
           <GroupByPicker value={metric} onChange={setMetric} options={SLEEP_METRIC_OPTIONS} label="Measure" />

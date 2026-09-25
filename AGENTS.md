@@ -88,6 +88,7 @@ Current shape:
   | `InteractiveScroller` | shipped | #117 | weight |
   | `InteractiveDonut` (zoomable sunburst) | shipped | #118 | place hierarchy |
   | `InteractiveTimeline` | shipped | #119 | life timeline |
+  | `InteractiveStrip` (group means ± 95% CI, n per row) | shipped | #444 | work vs. happiness |
 
   `InteractiveDonut` is the only primitive here that takes a *tree* rather
   than a series — its input shape and the pure builders for it live in
@@ -96,6 +97,15 @@ Current shape:
   a fixed category/subcategory ladder, plus `pruneEmptyBranches` and
   `foldTailIntoOther`). Same boundary as `bin.ts`: re-shaping rows a page
   already fetched, never bulk aggregation.
+
+  **`reference-lines.ts`** (#444) is shared chrome, not a primitive: a
+  `referenceLines` prop on `InteractiveLine` and `InteractiveScroller`
+  (passed through `TrendExplorer`/`DailyExplorer`) draws dotted
+  horizontal targets such as the 8h lines on Work and Sleep. Auto-fit y
+  domains always include them. Pass a module-level or memoized array,
+  since it's a `useD3` dependency. The pure stats behind
+  `InteractiveStrip` (t-based 95% intervals) live in
+  `src/lib/viz/stats.ts`.
 
   Also in this folder: small shared **filter controls** built for #19
   (`PeriodPicker`, `TimeRangePicker`, `GroupByPicker`) — generic, reusable

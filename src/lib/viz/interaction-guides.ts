@@ -13,7 +13,7 @@
  */
 
 export const LINE_INTERACTION_GUIDE =
-  "Hover a point for its exact value and date. With more than one line, click a legend entry to hide or show that line. The shaded band is ±1 standard deviation around that period's plotted average, drawn only while a single line is visible; marker size shows how many days fed the point.";
+  "Hover a point for its exact value and date. With more than one line, click a legend entry to hide or show that line. The shaded band is ±1 standard deviation around that period's plotted average, drawn only while a single line is visible; marker size shows how many days fed the point. Where a dotted line is drawn, it marks a fixed target (8 hours, say), labelled at its right end.";
 
 /** `InteractiveLine` with `hover="series"`, for charts carrying too many
  * lines for the crosshair's every-line readout (the People Impact Trend). */
@@ -21,7 +21,10 @@ export const LINE_SERIES_HOVER_INTERACTION_GUIDE =
   "Hover near a line to pick it out: it's drawn on top, the rest fade, and the readout gives that line's name, date and value. With the chart focused, the left and right arrow keys move through time and up and down move between lines.";
 
 export const SCROLLER_INTERACTION_GUIDE =
-  "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry. Click a legend entry to hide or show that line or the rolling average.";
+  "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry. Click a legend entry to hide or show that line or the rolling average. Where a dotted line is drawn, it marks a fixed target (8 hours, say), labelled at its right end.";
+
+export const STRIP_INTERACTION_GUIDE =
+  "Each row is one group: the dot is its average, the whiskers its 95% confidence interval, and n how many days it holds. A wide interval means too few days to trust the average yet. Hover a row, or focus the chart and use the up and down arrow keys, for its exact figures. Switch Show to Every day to draw each day behind the averages. The dotted line is the average across every day shown.";
 
 export const HIST_INTERACTION_GUIDE = "Hover a bar for its exact count.";
 

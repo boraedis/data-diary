@@ -10,6 +10,7 @@ import { drawStandardAxes } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
 import { Legend, useLegendHeight } from "./legend";
+import { drawReferenceLines, NO_REFERENCE_LINES, referenceLineValues, type ReferenceLine } from "./reference-lines";
 
 // Click-to-toggle legend (`hiddenIds`/`onToggle`) added for the Exercise
 // Trend chart's category/exercise breakdown (#411) — the same pattern
@@ -153,6 +154,10 @@ export type InteractiveLineProps = {
    * scope — it needs historical datasets nobody's assembled), but the
    * capability is here and correct for when one does. */
   regions?: InteractiveLineRegion[];
+  /** Horizontal target/threshold lines (#444) — an 8h working day, say.
+   * Always kept inside an auto-fit y domain; see `reference-lines.ts` for
+   * why, and pass a stable array (it's a `useD3` dependency). */
+  referenceLines?: readonly ReferenceLine[];
   yTickFormat?: (value: d3.NumberValue) => string;
   /** Formats a series' y value for the tooltip row — defaults to `String`.
    * Axis ticks use `yTickFormat` instead; the two often differ (an axis
@@ -424,6 +429,7 @@ export function InteractiveLine({
   yDomain,
   zoom = "none",
   regions = [],
+  referenceLines = NO_REFERENCE_LINES,
   yTickFormat,
   valueFormat = String,
   dateFormat = "weekday",
@@ -493,10 +499,11 @@ export function InteractiveLine({
           return vs;
         }),
     );
+    values.push(...referenceLineValues(referenceLines));
     const [lo, hi] = (d3.extent(values.length ? values : [0, 1]) as [number, number]);
     const pad = (hi - lo) * 0.1 || 1;
     return [lo - pad, hi + pad];
-  }, [yDomain, visibleSeries, effectiveDomain]);
+  }, [yDomain, visibleSeries, effectiveDomain, referenceLines]);
 
   const y = useMemo(
     () => d3.scaleLinear().domain(resolvedYDomain).range([innerHeight, 0]),
@@ -625,6 +632,7 @@ export function InteractiveLine({
       }
 
       drawStandardAxes({ g, x, y, innerWidth, innerHeight, yTicks: 5, yTickFormat });
+      drawReferenceLines({ g, y, innerWidth, lines: referenceLines });
 
       const lineGen = d3
         .line<InteractiveLinePoint>()
@@ -680,7 +688,7 @@ export function InteractiveLine({
           .attr("stroke-width", MARK_SPECS.marker.ringWidth);
       }
     },
-    [visibleSeries, regions, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight],
+    [visibleSeries, regions, referenceLines, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight],
   );
 
   // "series" hover's emphasis, applied to the already-drawn marks rather
