@@ -1,47 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import { Maximize2 } from "lucide-react";
 import { useD3 } from "@/hooks/use-d3";
-import { attachMarkHover } from "./marks";
-import { ChartTooltip } from "./tooltip";
+import { ChartTooltip, type TooltipRow } from "./tooltip";
 import { categoricalColor } from "@/lib/viz/color";
 
-// InteractiveNetwork (#23) — the shared force-directed graph primitive.
-// Generalizes PeopleNetworkChart (already close to this shape: force
-// simulation run to convergence once rather than a live physics loop,
-// drag-to-reposition as the one interactive affordance) into a reusable
-// component with generic {nodes, edges} input instead of a people-specific
-// one-off. See that component's own comment for why a static layout was
-// chosen over legacy's live `setInterval` re-tick loop — that choice
-// carries over unchanged here, just generalized.
+// InteractiveNetwork — the shared force-directed graph primitive, rebuilt
+// as a *live* simulation.
+//
+// The first version (#23) ran the force layout to convergence once,
+// synchronously, and drew the result as a still image: dragging a node
+// moved only that node, nothing reacted, and every filter change re-laid
+// the whole graph out from scratch. It read as broken next to legacy's
+// people_network, whose appeal was exactly that the graph was *alive* —
+// grab someone and their friends follow, let go and everything settles
+// back. This version keeps the simulation running (it cools and stops on
+// its own; a drag reheats it), which is legacy's model.
+//
+// It still fits useD3's rebuild-on-deps-change pattern rather than an
+// enter/update/exit join: node positions (and velocities) are carried
+// across rebuilds in a ref, so when the caller's nodes/edges change — a
+// period slider moved, a tag hidden — the new SVG starts every surviving
+// node exactly where the old one left it and the simulation slides them
+// into the new layout, instead of a cold re-layout that jumbles the graph.
+// Brand-new nodes start next to a neighbour that's already placed.
+//
+// Hover, selection, and zoom never rebuild: they're applied by mutating
+// the existing DOM (see useD3's own doc comment on why anything that
+// changes per pointer event must stay out of deps). Selection is
+// controlled by the caller (`selectedId`/`onSelect`) so a details panel
+// or search box outside the SVG can drive it; the effect that reacts to it
+// calls into the live render through `apiRef` instead of re-rendering.
 
-// Module-level, not inline default parameter values: a `= [3, 16]`-style
-// default is a fresh array literal on *every* render, and since these feed
-// useD3's deps array below, that would rebuild the whole <svg> on every
-// render of this component — including one triggered by its own `hovered`
-// state, which attachMarkHover updates on every pointermove over a node,
-// not just on enter. That combination (unstable dep + a hover-driven
-// re-render) was silently tearing down and rebuilding the graph on nearly
-// every mouse movement over a node, orphaning any in-progress drag or
-// click mid-gesture — the real cause behind drag/click never working, not
-// just the event-target bug fixed alongside this.
-const DEFAULT_RADIUS_RANGE: [number, number] = [3, 16];
-const DEFAULT_STROKE_RANGE: [number, number] = [0.5, 3];
-const DEFAULT_ZOOM_EXTENT: [number, number] = [0.3, 8];
+/** Module-level so they're referentially stable as useD3 deps (a default
+ * parameter written as an array literal is a fresh array every render,
+ * which would rebuild the SVG on every hover-driven re-render). */
+const DEFAULT_RADIUS_RANGE: [number, number] = [3, 18];
+const DEFAULT_ZOOM_EXTENT: [number, number] = [0.2, 6];
 
-type SimNode = NetworkNode & d3.SimulationNodeDatum;
-type SimLink = d3.SimulationLinkDatum<SimNode> & { weight: number };
-
-function asNode(v: SimLink["source"]): SimNode {
-  // Safe once the simulation has ticked: d3.forceLink replaces the raw
-  // source/target ids with references to the actual node objects on its
-  // first tick.
-  return v as SimNode;
-}
+/** A node's label shows when its on-screen radius is at least this many
+ * px — so at the default zoom only the most-logged people are labelled,
+ * and zooming in reveals the rest instead of the whole graph drowning in
+ * overlapping names. Focused/hovered nodes and their neighbours are always
+ * labelled regardless. */
+const LABEL_MIN_SCREEN_RADIUS = 6;
+/** The largest nodes are labelled at any zoom, so a zoomed-out overview
+ * of a big graph still names its landmarks. */
+const ALWAYS_LABELLED = 12;
+/** Label size in screen px, held constant under zoom by counter-scaling. */
+const LABEL_FONT_PX = 11;
+/** Ticks run synchronously before the first paint of a graph with no
+ * remembered positions — enough to untangle d3's initial phyllotaxis
+ * spiral into a recognisable layout, so the reader never watches a
+ * starburst explode outward; the rest of the settling happens live. */
+const PREWARM_TICKS = 120;
+const FIT_PADDING = 32;
 
 export type NetworkNode = { id: string | number; label: string; count: number };
+/** `weight` is a normalised tie strength, 0–1: it sets edge thickness and
+ * opacity and how strongly the simulation pulls the two ends together.
+ * Callers with a raw count should normalise it themselves — the primitive
+ * doesn't guess a scale. */
 export type NetworkEdge = { source: string | number; target: string | number; weight: number };
+
+type NodeId = NetworkNode["id"];
+type SimNode = NetworkNode & d3.SimulationNodeDatum & { r: number; degree: number };
+type SimLink = d3.SimulationLinkDatum<SimNode> & { weight: number };
+type SavedPosition = { x: number; y: number; vx: number; vy: number };
+
+type LiveApi = {
+  setSelected: (id: NodeId | null, opts: { reveal: boolean }) => void;
+  fit: () => void;
+};
 
 type Hovered = { node: NetworkNode; clientPos: { x: number; y: number } };
 
@@ -50,257 +82,492 @@ export type InteractiveNetworkProps = {
   edges: NetworkEdge[];
   width: number;
   height: number;
-  /** Node fill — a single color (defaults to `categoricalColor(0)`, so it
-   * still tracks light/dark mode) or a function keying color off the node
-   * itself (e.g. a per-person tag color) when nodes aren't one
-   * undifferentiated series. */
+  /** Node fill: one colour, or a function of the node. Must be
+   * referentially stable (module-level or useCallback) — it's a rebuild
+   * dependency. */
   color?: string | ((node: NetworkNode) => string);
   /** `d3.scaleSqrt` range, px — node radius by count. */
   radiusRange?: [number, number];
-  /** `d3.scaleLinear` range, px — edge stroke width by weight. */
-  strokeRange?: [number, number];
-  /** Edges below this weight aren't drawn or simulated at all — the
-   * "minimum bar" for two nodes to be considered connected. Defaults to 1
-   * (every real co-occurrence draws an edge); raise it to declutter a
-   * dense graph down to only its stronger connections. Filtered before
-   * the simulation runs, not just at render time, so a pruned edge also
-   * stops pulling its two nodes together. */
-  minEdgeWeight?: number;
-  /** `d3.zoom` scale extent — how far a viewer can scroll-zoom in/out.
-   * Defaults to a wide range since node/label legibility at the zoomed-out
-   * end matters more here than on an axis-based chart. */
+  /** Count that maps to the top of `radiusRange`. Defaults to the largest
+   * count among `nodes`; pass it when the caller hides nodes without
+   * changing anyone's count (a legend toggle), so the survivors don't all
+   * grow to fill the scale the hidden ones used to top out. */
+  radiusDomainMax?: number;
   zoomExtent?: [number, number];
-  /** Label for the tooltip's count row, given the hovered node's count —
-   * e.g. `(n) => `day${n === 1 ? "" : "s"}`` for a per-day co-occurrence
-   * count. Defaults to the generic "count". */
-  countLabel?: (count: number) => string;
+  /** Controlled selection: the selected node stays highlighted with its
+   * neighbours until cleared. Omit both for hover-only highlighting. */
+  selectedId?: NodeId | null;
+  onSelect?: (id: NodeId | null) => void;
+  /** Tooltip content for a hovered node. Defaults to label + count. */
+  tooltip?: (node: NetworkNode) => { title: string; rows: TooltipRow[] };
   ariaLabel?: string;
 };
 
+function nodeId(v: SimLink["source"]): NodeId {
+  // forceLink swaps the raw ids for node objects when it initialises.
+  return typeof v === "object" ? (v as SimNode).id : v;
+}
+
 export function InteractiveNetwork({
   nodes,
-  edges: allEdges,
+  edges,
   width,
   height,
   color = categoricalColor(0),
   radiusRange = DEFAULT_RADIUS_RANGE,
-  strokeRange = DEFAULT_STROKE_RANGE,
-  minEdgeWeight = 1,
+  radiusDomainMax,
   zoomExtent = DEFAULT_ZOOM_EXTENT,
-  countLabel = () => "count",
-  ariaLabel = "Force-directed network graph. Scroll or pinch to zoom, drag the background to pan. Click a node to highlight its edges, drag a node to reposition it.",
+  selectedId = null,
+  onSelect,
+  tooltip,
+  ariaLabel = "Force-directed network graph. Scroll or pinch to zoom, drag the background to pan, drag a node to pull it around, click a node to highlight its connections.",
 }: InteractiveNetworkProps) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
-  // A state-backed callback ref, not a plain useRef — see interactive-hist's
-  // own comment on why this needs to be state, not a ref read during render.
+  // State-backed callback ref, not useRef — the tooltip needs the
+  // container's rect during render (see interactive-hist's comment).
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+
+  // Survive rebuilds: where every node was, the viewer's zoom/pan, and
+  // the latest selection/select callback (read from inside D3 handlers
+  // that were bound during an earlier render).
+  const positionsRef = useRef(new Map<NodeId, SavedPosition>());
+  // The camera is only meaningful for the size it was set at — see the
+  // initial-transform comment below.
+  const transformRef = useRef<{ transform: d3.ZoomTransform; width: number; height: number } | null>(null);
+  const selectedRef = useRef<NodeId | null>(selectedId);
+  const onSelectRef = useRef(onSelect);
+  const apiRef = useRef<LiveApi | null>(null);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
 
   const resolveColor = (n: NetworkNode) => (typeof color === "function" ? color(n) : color);
 
   const ref = useD3<SVGSVGElement>(
     (svg) => {
+      apiRef.current = null;
       if (nodes.length === 0) return;
 
-      const edges = allEdges.filter((e) => e.weight >= minEdgeWeight);
-
-      const simNodes: SimNode[] = nodes.map((n) => ({ ...n }));
-      const simLinks: SimLink[] = edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-        weight: e.weight,
-      }));
-
-      const radiusScale = d3
+      const radius = d3
         .scaleSqrt()
-        .domain([0, d3.max(nodes, (n) => n.count) ?? 1])
+        .domain([0, radiusDomainMax ?? d3.max(nodes, (n) => n.count) ?? 1])
         .range(radiusRange);
-      const strokeScale = d3
-        .scaleLinear()
-        .domain([0, d3.max(edges, (e) => e.weight) ?? 1])
-        .range(strokeRange);
 
-      // Run to convergence synchronously rather than animating — see the
-      // module comment above.
+      const nodeIds = new Set(nodes.map((n) => n.id));
+      const landmarks = new Set(
+        [...nodes]
+          .sort((x, y) => y.count - x.count)
+          .slice(0, ALWAYS_LABELLED)
+          .map((n) => n.id),
+      );
+      const links: SimLink[] = edges
+        .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+        .map((e) => ({ source: e.source, target: e.target, weight: e.weight }));
+
+      const neighbours = new Map<NodeId, Set<NodeId>>(nodes.map((n) => [n.id, new Set()]));
+      for (const l of links) {
+        neighbours.get(l.source as NodeId)!.add(l.target as NodeId);
+        neighbours.get(l.target as NodeId)!.add(l.source as NodeId);
+      }
+
+      // --- Seed positions ------------------------------------------------
+      const saved = positionsRef.current;
+      const hadPositions = nodes.some((n) => saved.has(n.id));
+      const simNodes: SimNode[] = nodes.map((n) => {
+        const node: SimNode = { ...n, r: radius(n.count), degree: neighbours.get(n.id)!.size };
+        const pos = saved.get(n.id);
+        if (pos) Object.assign(node, pos);
+        return node;
+      });
+      if (hadPositions) {
+        // A node joining an existing layout starts beside a placed
+        // neighbour (so it grows out of its cluster rather than flying in
+        // from the origin), or on the rim if it has none.
+        const placed = new Map(simNodes.filter((n) => saved.has(n.id)).map((n) => [n.id, n]));
+        for (const n of simNodes) {
+          if (saved.has(n.id)) continue;
+          const anchor = [...neighbours.get(n.id)!].map((id) => placed.get(id)).find(Boolean);
+          const angle = Math.random() * 2 * Math.PI;
+          const dist = anchor ? 20 : 200;
+          n.x = (anchor?.x ?? 0) + Math.cos(angle) * dist;
+          n.y = (anchor?.y ?? 0) + Math.sin(angle) * dist;
+        }
+      }
+
+      // --- Forces --------------------------------------------------------
+      // Coordinates are centred on (0, 0); the zoom transform puts that in
+      // the middle of the viewport. forceX/forceY (legacy's choice) rather
+      // than forceCenter: forceCenter only recentres the *mean*, so small
+      // disconnected clusters and isolated people drift off-screen, while
+      // a weak per-node pull keeps every island in view. Isolated nodes get
+      // a firmer pull — nothing else is holding them. The horizontal pull
+      // is scaled down by the viewport's aspect ratio so the graph spreads
+      // into a wide card as an ellipse rather than a circle that only ever
+      // uses the middle third of it.
+      const aspect = Math.max(1, width / Math.max(1, height));
       const simulation = d3
-        .forceSimulation(simNodes)
+        .forceSimulation<SimNode>(simNodes)
         .force(
           "link",
           d3
-            .forceLink<SimNode, SimLink>(simLinks)
+            .forceLink<SimNode, SimLink>(links)
             .id((d) => d.id)
-            .distance(46)
-            .strength(0.15),
+            // Strong ties sit close, weak ones long — the layout itself
+            // reads as "who's actually together".
+            .distance((l) => {
+              const s = l.source as SimNode;
+              const t = l.target as SimNode;
+              return s.r + t.r + 18 + 70 * (1 - l.weight);
+            })
+            // d3's default (1 / smaller degree) stops hubs being yanked
+            // around by dozens of springs; scaled by weight so a strong tie
+            // pulls harder than a weak one. Scaled *up* from the default
+            // for most ties, not down: a softer version of this made a
+            // dragged person slide away from their friends alone, which is
+            // exactly the "nothing reacts" feel this rebuild is replacing.
+            .strength((l) => {
+              const s = l.source as SimNode;
+              const t = l.target as SimNode;
+              return Math.min(1, (0.6 + 1.2 * l.weight) / Math.max(1, Math.min(s.degree, t.degree)));
+            }),
         )
-        .force("charge", d3.forceManyBody().strength(-70))
-        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force(
+          "charge",
+          d3
+            .forceManyBody<SimNode>()
+            .strength((d) => -25 - d.r * 3)
+            .distanceMax(420),
+        )
+        .force("x", d3.forceX<SimNode>(0).strength((d) => (d.degree === 0 ? 0.1 : 0.04) / aspect))
+        .force("y", d3.forceY<SimNode>(0).strength((d) => (d.degree === 0 ? 0.1 : 0.04)))
         .force(
           "collide",
-          d3.forceCollide<SimNode>().radius((d) => radiusScale(d.count) + 5),
+          d3.forceCollide<SimNode>().radius((d) => d.r + 2),
         )
         .stop();
 
-      for (let i = 0; i < 300; i++) simulation.tick();
+      const reduceMotion =
+        typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (!hadPositions) {
+        // Reduced motion: settle completely up front instead of animating.
+        // Dragging still moves things — that's motion the reader asked for.
+        const ticks = reduceMotion ? 300 : PREWARM_TICKS;
+        for (let i = 0; i < ticks; i++) simulation.tick();
+      }
 
-      const g = svg.attr("width", width).attr("height", height).append("g");
+      // --- DOM ----------------------------------------------------------
+      svg.attr("width", width).attr("height", height).style("display", "block").style("touch-action", "none");
+      const viewport = svg.append("g");
 
-      const link = g
+      const link = viewport
         .append("g")
-        .selectAll("line")
-        .data(simLinks)
+        .attr("stroke", "var(--foreground)")
+        .attr("stroke-linecap", "round")
+        .selectAll<SVGLineElement, SimLink>("line")
+        .data(links)
         .join("line")
-        .attr("x1", (d) => asNode(d.source).x ?? 0)
-        .attr("y1", (d) => asNode(d.source).y ?? 0)
-        .attr("x2", (d) => asNode(d.target).x ?? 0)
-        .attr("y2", (d) => asNode(d.target).y ?? 0)
-        .attr("stroke", "var(--border)")
-        .attr("stroke-width", (d) => strokeScale(d.weight));
+        .attr("vector-effect", "non-scaling-stroke")
+        .attr("stroke-width", (l) => 0.5 + 3 * l.weight);
 
-      // Click-to-highlight (declared before the drag behavior below, which
-      // reads/writes both): selecting a node highlights only its immediate
-      // edges (and dims the rest), rather than a full-node subgraph walk —
-      // matches the "immediate edges" scope, not a connected-component
-      // explorer. Selection state lives as a plain closure variable, not
-      // React state, for the same reason drag position does: useD3 fully
-      // rebuilds the <svg> on every dependency change (see this hook's own
-      // doc comment), so anything that should update *without* a rebuild —
-      // a click, same as a pointermove — has to be applied by directly
-      // mutating the DOM here instead.
-      let selectedId: SimNode["id"] | null = null;
-
-      const node = g
+      const node = viewport
         .append("g")
         .selectAll<SVGGElement, SimNode>("g")
-        .data(simNodes)
+        .data(simNodes, (d) => d.id)
         .join("g")
-        .attr("transform", (d) => `translate(${d.x},${d.y})`)
-        .style("cursor", "grab")
-        .call(
-          d3
-            .drag<SVGGElement, SimNode>()
-            .on("start", (event, d) => {
-              // Keeps the drag gesture from also panning the zoom behavior
-              // below — both listen on/under the same <svg>, and a
-              // mousedown/pointerdown on a node otherwise bubbles up to
-              // zoom's own listener on `svg`.
-              event.sourceEvent.stopPropagation();
-              d.fx = d.x;
-              d.fy = d.y;
-            })
-            .on("drag", function (event, d) {
-              d.fx = event.x;
-              d.fy = event.y;
-              // `this` (a regular function, not an arrow function) is the
-              // dragged <g> itself, per d3's own per-datum invocation
-              // context — unlike `event.sourceEvent.currentTarget`, which
-              // once dragging is underway points at whatever element the
-              // native pointermove/mousemove actually landed on (usually
-              // the document, since drag tracks the pointer outside the
-              // node's own bounds), not the node being dragged.
-              d3.select(this).attr("transform", `translate(${event.x},${event.y})`);
-              link
-                .attr("x1", (l) => asNode(l.source).x ?? 0)
-                .attr("y1", (l) => asNode(l.source).y ?? 0)
-                .attr("x2", (l) => asNode(l.target).x ?? 0)
-                .attr("y2", (l) => asNode(l.target).y ?? 0);
-            }),
-        );
+        .style("cursor", "grab");
 
       const circle = node
         .append("circle")
-        .attr("r", (d) => radiusScale(d.count))
+        .attr("r", (d) => d.r)
         .attr("fill", (d) => resolveColor(d))
-        .attr("fill-opacity", 0.85);
+        .attr("stroke", "var(--card)")
+        .attr("stroke-width", 1)
+        .attr("vector-effect", "non-scaling-stroke");
 
-      node
-        .append("text")
-        .attr("x", (d) => radiusScale(d.count) + 3)
-        .attr("y", 3)
-        .attr("fill", "var(--foreground)")
-        .style("font-size", "10px")
+      // Labels live in their own layer above every node rather than inside
+      // each node's <g>: nodes later in paint order would otherwise cover
+      // an earlier node's label wherever the graph is dense.
+      const label = viewport
+        .append("g")
         .style("pointer-events", "none")
+        .selectAll<SVGTextElement, SimNode>("text")
+        .data(simNodes, (d) => d.id)
+        .join("text")
+        .attr("dy", "0.35em")
+        .attr("fill", "var(--foreground)")
+        .attr("stroke", "var(--card)")
+        .attr("stroke-linejoin", "round")
+        .style("paint-order", "stroke")
+        .style("pointer-events", "none")
+        .style("user-select", "none")
         .text((d) => d.label);
 
-      function isIncident(l: SimLink): boolean {
-        return selectedId !== null && (asNode(l.source).id === selectedId || asNode(l.target).id === selectedId);
-      }
+      // Focus state, read by the tick loop's label pass as well as the
+      // hover/selection handlers below.
+      let k = 1;
+      let focusId: NodeId | null = selectedRef.current;
+      if (focusId !== null && !nodeIds.has(focusId)) focusId = null;
+      let near: Set<NodeId> | null = null;
+      let tickCount = 0;
 
-      function applySelection() {
+      function ticked() {
+        // Labels re-resolve every few ticks rather than every one: cheap
+        // enough either way, but re-deciding each frame makes labels on
+        // the edge of a collision flicker while the layout is moving.
+        if (++tickCount % 6 === 0) updateLabels();
         link
-          .attr("stroke", (l) => (isIncident(l) ? "var(--foreground)" : "var(--border)"))
-          .attr("stroke-opacity", (l) => (selectedId === null || isIncident(l) ? 1 : 0.25));
-        circle
-          .attr("stroke", (d) => (d.id === selectedId ? "var(--foreground)" : null))
-          .attr("stroke-width", (d) => (d.id === selectedId ? 2 : null));
+          .attr("x1", (l) => (l.source as SimNode).x ?? 0)
+          .attr("y1", (l) => (l.source as SimNode).y ?? 0)
+          .attr("x2", (l) => (l.target as SimNode).x ?? 0)
+          .attr("y2", (l) => (l.target as SimNode).y ?? 0);
+        node.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+        label.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+      }
+      ticked();
+
+      // --- Labels -------------------------------------------------------
+      // Which labels are eligible (landmarks, anything big enough on
+      // screen, or — while something is focused — just it and its
+      // neighbours), then a greedy collision pass in screen space: biggest
+      // node first, and a label that would overlap one already placed is
+      // skipped. Zooming in spreads nodes apart, so more labels fit. Widths
+      // are estimated from character count rather than measured — close
+      // enough for a collision test, and it keeps this off the DOM's
+      // layout path inside the tick loop.
+      function updateLabels() {
+        const eligible = simNodes.filter((d) =>
+          near !== null ? near.has(d.id) : landmarks.has(d.id) || d.r * k >= LABEL_MIN_SCREEN_RADIUS,
+        );
+        eligible.sort((a, b) => Number(b.id === focusId) - Number(a.id === focusId) || b.r - a.r);
+        const placed: [number, number, number, number][] = [];
+        const shown = new Set<NodeId>();
+        for (const d of eligible) {
+          const x0 = ((d.x ?? 0) + d.r) * k + 4;
+          const y0 = (d.y ?? 0) * k - LABEL_FONT_PX * 0.6;
+          const x1 = x0 + d.label.length * LABEL_FONT_PX * 0.55;
+          const y1 = y0 + LABEL_FONT_PX * 1.2;
+          if (placed.some(([a, b, c, e]) => x0 < c && x1 > a && y0 < e && y1 > b)) continue;
+          placed.push([x0, y0, x1, y1]);
+          shown.add(d.id);
+        }
+        label.attr("display", (d) => (shown.has(d.id) ? null : "none"));
       }
 
-      // A plain "click" listener works here — unlike a naive "did the
-      // drag move" check might suggest, d3-drag only suppresses the
-      // native click that follows a gesture when real pointer movement
-      // happened during it (see d3-drag's own `yesdrag`/`noclick`); a
-      // true zero-movement press-release still fires a normal click that
-      // reaches this handler undisturbed, so there's no need to reimplement
-      // click detection inside the drag behavior above.
-      circle.on("click", function (event, d) {
-        event.stopPropagation();
-        selectedId = selectedId === d.id ? null : d.id;
-        applySelection();
-      });
+      // --- Focus (hover + selection) ------------------------------------
+      function applyFocus() {
+        const selected = selectedRef.current;
+        near = focusId === null ? null : new Set([focusId, ...(neighbours.get(focusId) ?? [])]);
+        const focusSet = near;
+        const incident = (l: SimLink) => focusId !== null && (nodeId(l.source) === focusId || nodeId(l.target) === focusId);
+        link
+          .attr("stroke-opacity", (l) =>
+            focusSet === null ? 0.1 + 0.4 * l.weight : incident(l) ? 0.35 + 0.6 * l.weight : 0.03,
+          )
+          .attr("stroke-width", (l) => (incident(l) ? 1 + 3.5 * l.weight : 0.5 + 3 * l.weight));
+        node.attr("opacity", (d) => (focusSet === null || focusSet.has(d.id) ? 1 : 0.15));
+        circle
+          .attr("stroke", (d) => (d.id === selected ? "var(--foreground)" : "var(--card)"))
+          .attr("stroke-width", (d) => (d.id === selected ? 2.5 : 1));
+        updateLabels();
+        // Selected/hovered and neighbours float above the dimmed rest, so a
+        // highlighted circle is never half-hidden under a faded stranger.
+        if (focusSet !== null) node.filter((d) => focusSet.has(d.id)).raise();
+      }
 
-      // Clicking the background clears the selection. A click that started
-      // on a node stopPropagation()s above before it can bubble here — but
-      // only for a true click; a real drag's click gets suppressed by
-      // d3-drag itself before it's dispatched at all, so this never runs
-      // for one of those either.
-      svg.on("click", () => {
-        if (selectedId === null) return;
-        selectedId = null;
-        applySelection();
-      });
+      function applyZoomScale() {
+        label
+          .attr("x", (d) => d.r + 4 / k)
+          .attr("font-size", LABEL_FONT_PX / k)
+          .attr("stroke-width", 3 / k);
+      }
 
-      // Direct zoom/pan (#23 follow-up) — the same `d3.zoom` mechanism
-      // InteractiveLine/InteractiveArea use for their own direct zoom mode
-      // (see #14's locked decision), just applied as a plain 2D transform
-      // on `g` instead of rescaling an axis: a force layout has no
-      // meaningful "domain" to zoom into, only a viewport onto the same
-      // fixed node positions.
+      // --- Zoom / pan ---------------------------------------------------
+      const zoom = d3
+        .zoom<SVGSVGElement, unknown>()
+        .scaleExtent(zoomExtent)
+        .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+          viewport.attr("transform", event.transform.toString());
+          transformRef.current = { transform: event.transform, width, height };
+          if (event.transform.k !== k) {
+            k = event.transform.k;
+            applyZoomScale();
+            applyFocus();
+          }
+        });
+      svg.call(zoom).on("dblclick.zoom", null);
+
+      function fitTransform(): d3.ZoomTransform {
+        const x0 = d3.min(simNodes, (d) => (d.x ?? 0) - d.r) ?? 0;
+        const x1 = d3.max(simNodes, (d) => (d.x ?? 0) + d.r) ?? 0;
+        const y0 = d3.min(simNodes, (d) => (d.y ?? 0) - d.r) ?? 0;
+        const y1 = d3.max(simNodes, (d) => (d.y ?? 0) + d.r) ?? 0;
+        const w = Math.max(1, x1 - x0);
+        const h = Math.max(1, y1 - y0);
+        const scale = Math.max(
+          zoomExtent[0],
+          Math.min(1.5, (width - FIT_PADDING * 2) / w, (height - FIT_PADDING * 2) / h),
+        );
+        return d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(scale)
+          .translate(-(x0 + w / 2), -(y0 + h / 2));
+      }
+
+      // Keep the viewer's own zoom/pan across rebuilds (a filter change
+      // shouldn't yank the camera); fit the first layout, and refit after a
+      // resize, where the old translate would frame the graph off-centre.
+      const kept = transformRef.current;
       svg.call(
+        zoom.transform,
+        kept && kept.width === width && kept.height === height ? kept.transform : fitTransform(),
+      );
+      applyZoomScale();
+      applyFocus();
+
+      // --- Drag ---------------------------------------------------------
+      // Legacy's behaviour: grabbing a node reheats the simulation so its
+      // neighbours follow; letting go releases it back into the layout.
+      // The drag's container is the node's parent <g>, which sits inside
+      // the zoomed viewport, so event.x/y are already in layout
+      // coordinates at any zoom level.
+      node.call(
         d3
-          .zoom<SVGSVGElement, unknown>()
-          .scaleExtent(zoomExtent)
-          .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
-            g.attr("transform", event.transform.toString());
+          .drag<SVGGElement, SimNode>()
+          .on("start", function (event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+            d3.select(this).style("cursor", "grabbing");
+            setHovered(null);
+          })
+          .on("drag", (event, d) => {
+            d.fx = event.x;
+            d.fy = event.y;
+          })
+          .on("end", function (event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+            d3.select(this).style("cursor", "grab");
           }),
       );
 
-      // Replaces the native <title> the pre-#23 PeopleNetworkChart used —
-      // shared hover tooltip instead, matching every other primitive's
-      // per-mark hover pattern (also reachable via keyboard focus, which a
-      // native <title> never was). Cast to attachMarkHover's own BaseType
-      // signature: `circle`'s parent element type is pinned to SVGGElement
-      // (needed above for the `.call(d3.drag<SVGGElement, ...>())` typing),
-      // which TS won't structurally match against attachMarkHover's generic
-      // BaseType parent — same underlying selection either way.
-      attachMarkHover<SimNode>(circle as unknown as d3.Selection<d3.BaseType, SimNode, d3.BaseType, unknown>, {
-        onHover: (d, clientPos) => setHovered({ node: d, clientPos }),
-        onLeave: () => setHovered(null),
+      // d3-drag swallows the click that ends a real drag, so this only
+      // fires for a genuine press-and-release.
+      node.on("click", (event: MouseEvent, d) => {
+        event.stopPropagation();
+        onSelectRef.current?.(selectedRef.current === d.id ? null : d.id);
       });
+      // Likewise d3-zoom swallows the click that ends a pan.
+      svg.on("click", () => {
+        if (selectedRef.current !== null) onSelectRef.current?.(null);
+      });
+
+      node
+        .on("pointerenter", (event: PointerEvent, d) => {
+          if (event.buttons !== 0) return; // mid-drag of something else
+          focusId = d.id;
+          applyFocus();
+          setHovered({ node: d, clientPos: { x: event.clientX, y: event.clientY } });
+        })
+        .on("pointermove", (event: PointerEvent, d) => {
+          if (event.buttons !== 0) return;
+          setHovered({ node: d, clientPos: { x: event.clientX, y: event.clientY } });
+        })
+        .on("pointerleave", () => {
+          focusId = selectedRef.current;
+          applyFocus();
+          setHovered(null);
+        });
+
+      // --- Run ----------------------------------------------------------
+      simulation.on("tick", ticked).on("end", updateLabels);
+      if (reduceMotion && !hadPositions) {
+        simulation.alpha(0);
+      } else {
+        // A fresh graph keeps settling from wherever the prewarm cooled to
+        // (reheating it would re-expand the layout the fit was just framed
+        // around); a rebuilt one gets enough heat to slide into its new
+        // shape.
+        if (hadPositions) simulation.alpha(0.5);
+        simulation.restart();
+      }
+
+      apiRef.current = {
+        setSelected(id, { reveal }) {
+          focusId = id !== null && nodeIds.has(id) ? id : null;
+          applyFocus();
+          if (!reveal || focusId === null) return;
+          // Pan to a node chosen from outside the graph (search, the
+          // details panel) only if it's actually off-screen — recentring
+          // on every click would be a camera lurch for no reason.
+          const target = simNodes.find((n) => n.id === focusId)!;
+          const t = transformRef.current?.transform ?? d3.zoomIdentity;
+          const [sx, sy] = t.apply([target.x ?? 0, target.y ?? 0]);
+          const margin = 40;
+          if (sx < margin || sx > width - margin || sy < margin || sy > height - margin) {
+            svg
+              .transition()
+              .duration(500)
+              .call(zoom.translateTo, target.x ?? 0, target.y ?? 0);
+          }
+        },
+        fit() {
+          svg.transition().duration(500).call(zoom.transform, fitTransform());
+        },
+      };
+
+      return () => {
+        simulation.stop();
+        const next = new Map<NodeId, SavedPosition>();
+        for (const n of simNodes) {
+          next.set(n.id, { x: n.x ?? 0, y: n.y ?? 0, vx: n.vx ?? 0, vy: n.vy ?? 0 });
+        }
+        // Merge rather than replace, so a node filtered out and later
+        // restored comes back where it was.
+        for (const [id, pos] of next) positionsRef.current.set(id, pos);
+        svg.on(".zoom", null);
+        svg.interrupt();
+      };
     },
-    [nodes, allEdges, minEdgeWeight, width, height, color, radiusRange, strokeRange, zoomExtent],
+    [nodes, edges, width, height, color, radiusRange, radiusDomainMax, zoomExtent],
   );
 
+  // Selection changes arrive as a prop; apply them to the live graph
+  // without a rebuild.
+  useEffect(() => {
+    const changed = selectedRef.current !== selectedId;
+    selectedRef.current = selectedId;
+    if (changed) apiRef.current?.setSelected(selectedId, { reveal: true });
+  }, [selectedId]);
+
   const containerRect = containerEl?.getBoundingClientRect();
+  const tip = hovered ? (tooltip?.(hovered.node) ?? null) : null;
 
   return (
-    <div ref={setContainerEl} style={{ position: "relative", width, height }} role="img" aria-label={ariaLabel}>
-      <svg ref={ref} />
+    <div ref={setContainerEl} style={{ position: "relative", width, height }}>
+      {/* role="img" on the <svg>, not the wrapper: the wrapper also holds
+          a real button, and an img role makes its children presentational. */}
+      <svg ref={ref} role="img" aria-label={ariaLabel} />
+      <button
+        type="button"
+        onClick={() => apiRef.current?.fit()}
+        className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md border border-border bg-card/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm hover:text-foreground"
+        aria-label="Fit the whole network in view"
+      >
+        <Maximize2 aria-hidden className="size-3" />
+        Fit
+      </button>
       {hovered && containerRect ? (
         <ChartTooltip
           x={hovered.clientPos.x - containerRect.left}
           y={hovered.clientPos.y - containerRect.top}
-          title={hovered.node.label}
-          rows={[
-            { label: countLabel(hovered.node.count), value: `${hovered.node.count}`, color: resolveColor(hovered.node) },
-          ]}
+          title={tip?.title ?? hovered.node.label}
+          rows={
+            tip?.rows ?? [
+              { label: "count", value: `${hovered.node.count}`, color: resolveColor(hovered.node) },
+            ]
+          }
           containerWidth={width}
         />
       ) : null}

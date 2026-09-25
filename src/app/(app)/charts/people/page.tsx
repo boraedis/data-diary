@@ -1,34 +1,13 @@
-import { ChartCard } from "@/components/charts/chart-card";
-import { ChartPage } from "@/components/charts/chart-page";
 import { PeopleNetworkChart } from "@/components/charts/people-network-chart";
 import { getPeopleNetworkData } from "@/lib/charts";
-import { NETWORK_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
-import { PEOPLE_METHODOLOGY } from "@/lib/viz/methodology";
-import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 export const dynamic = "force-dynamic";
 
-// Raised from the original 40 (#23 follow-up) now that InteractiveNetwork
-// supports scroll/pinch zoom — a denser graph is still navigable instead of
-// just unreadable at a fixed size.
-const MAX_NODES = 100;
-
+// The chart component owns the page shell (ChartPage + filters + card),
+// the same way /charts/life-timeline does: the filters and the graph share
+// state, and the graph is built client-side from the raw per-day lists so
+// those filters respond without a server round-trip.
 export default async function PeopleNetworkChartPage() {
-  const data = await getPeopleNetworkData(MAX_NODES);
-
-  return (
-    <ChartPage
-      title="People Network"
-      description="A network graph showing the relationship between people who get logged on the same days often."
-      info={{
-        interactionGuide: NETWORK_INTERACTION_GUIDE,
-        methodology: PEOPLE_METHODOLOGY,
-        trackingSpan: PEOPLE_TRACKING_SPAN,
-      }}
-    >
-      <ChartCard empty={data.nodes.length === 0}>
-        <PeopleNetworkChart data={data} />
-      </ChartCard>
-    </ChartPage>
-  );
+  const data = await getPeopleNetworkData();
+  return <PeopleNetworkChart data={data} />;
 }
