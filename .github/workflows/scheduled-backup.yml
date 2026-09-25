@@ -1,6 +1,6 @@
 name: Scheduled database backup
 
-# Nightly pg_dump of the production database into the private
+# Weekly pg_dump of the production database into the private
 # boraedis/data-diary-backups repo (#47) — an off-Neon copy, so the data
 # doesn't depend on Neon's own short-retention point-in-time restore alone.
 # See README's "Backups" section for one-time setup and how to restore.
@@ -9,7 +9,7 @@ name: Scheduled database backup
 # - BACKUP_DATABASE_URL — a *read-only* Neon role's connection string, as a
 #   repo-level secret. Deliberately not PROD_DATABASE_URL: that one lives in
 #   the "production" environment, whose required-reviewer gate would pause
-#   this job for approval every night — and a backup has no reason to hold
+#   this job for approval on every run — and a backup has no reason to hold
 #   write access anyway. Use the direct (non "-pooler") host; pg_dump over
 #   PgBouncer's transaction pooling is unreliable.
 # - BACKUP_REPO_TOKEN — a fine-grained PAT scoped to data-diary-backups only,
@@ -20,12 +20,14 @@ name: Scheduled database backup
 # dump, the connection string, or the token. (GitHub masks secret values,
 # but the dump's contents aren't a secret it knows about.)
 #
-# Retention: the last 30 nightly dumps, plus every 1st-of-the-month dump
-# indefinitely (~12 extra files a year) for damage that isn't noticed within
-# a month. Deleting a file doesn't shrink git history, though — gzipped
-# dumps are binary and don't delta-compress, so committing one a night on
-# top of the last would grow the backup repo by every dump ever taken
-# (~2GB/year at the current ~43MB database). So each run replaces the backup
+# Retention: the last 8 weekly dumps (~2 months), plus the earliest dump of
+# every month indefinitely (~12 extra files a year) for damage that isn't
+# noticed within a couple of months. "Earliest of the month" rather than
+# "the 1st": a weekly run only lands on the 1st about one month in seven.
+# Deleting a file doesn't shrink git history, though — gzipped dumps are
+# binary and don't delta-compress, so committing one a week on top of the
+# last would grow the backup repo by every dump ever taken (~300MB/year at
+# the current ~43MB database, and rising with it). So each run replaces the backup
 # repo's history with a single fresh commit holding just the retained files,
 # and the old commits become unreferenced. The files themselves are the
 # retention; the git history isn't.
@@ -36,8 +38,10 @@ name: Scheduled database backup
 
 on:
   schedule:
-    # Nightly, 07:30 UTC (~03:30 US Eastern). GitHub Actions cron is UTC.
-    - cron: "30 7 * * *"
+    # Weekly, Sundays 07:30 UTC (~03:30 US Eastern). GitHub Actions cron
+    # is UTC. Weekly was the owner's call on #47 — a lost week of logging
+    # is recoverable from memory/journal in a way a lost year isn't.
+    - cron: "30 7 * * 0"
   workflow_dispatch: {}
 
 # Two overlapping runs would each force-push their own snapshot; the second
@@ -55,7 +59,7 @@ defaults:
 
 env:
   BACKUP_REPO: boraedis/data-diary-backups
-  KEEP_DAILY: 30
+  KEEP_WEEKLY: 8
   # A dump smaller than this is treated as a failed/wrong-database dump
   # rather than a real backup (the database is ~43MB, and the gzipped dump
   # several MB). Catches e.g. a URL pointing at an empty branch before it
@@ -119,11 +123,14 @@ jobs:
           mv "$FILE" backups/dumps/
           cd backups
 
-          # Newest first (ISO dates sort lexically). Keep the newest
-          # $KEEP_DAILY, and any 1st-of-month dump regardless of age.
-          ls dumps/data-diary-*.sql.gz | sort -r | tail -n +$((KEEP_DAILY + 1)) \
-            | { grep -v -- '-01\.sql\.gz$' || true; } \
-            | xargs -r rm --
+          # ISO dates sort lexically, oldest first. Keep the newest
+          # $KEEP_WEEKLY, plus the first dump of each YYYY-MM regardless of
+          # age (filename fields split on "-": $3 = year, $4 = month).
+          # Lists live in $RUNNER_TEMP so they don't get committed.
+          all="$RUNNER_TEMP/all.txt"; keep="$RUNNER_TEMP/keep.txt"
+          ls dumps/data-diary-*.sql.gz | sort > "$all"
+          { tail -n "$KEEP_WEEKLY" "$all"; awk -F- '!seen[$3"-"$4]++' "$all"; } | sort -u > "$keep"
+          { grep -vxF -f "$keep" "$all" || true; } | xargs -r rm --
 
           git config user.name "github-actions[bot]"
           git config user.email "41898+github-actions[bot]@users.noreply.github.com"
@@ -159,7 +166,7 @@ jobs:
               title: `Scheduled database backup failed (run #${context.runNumber})`,
               assignees: [context.repo.owner],
               body: [
-                "Tonight's database backup didn't complete, so no new dump was rotated into `data-diary-backups` (existing backups are untouched).",
+                "This week's database backup didn't complete, so no new dump was rotated into `data-diary-backups` (existing backups are untouched).",
                 "",
                 `Run: ${runUrl}`,
                 "",
