@@ -28,22 +28,31 @@ import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // row lives in ChartPage's dedicated slot above the card, so the state
 // driving it has to sit above both — see that file's header comment.
 //
-// Two hierarchies over one fetch, because the rows are identical and only
+// Three hierarchies over one fetch, because the rows are identical and only
 // the grouping differs:
 //  - Geography: the real places tree (parentId), the legacy chart's own view.
 //  - Category: category > subcategory > place, the taxonomy legacy had
 //    half-written and commented out (`structureCategories` in
 //    location_burst.js) but never shipped.
+//  - Metro: metro > place (#227), flat like Category rather than nested
+//    like Geography — a metro merges places that sit at different depths
+//    and under different countries/states in the real tree (a business
+//    trip logged at a DC hotel and a weekend logged at an Arlington
+//    friend's place share a metro, not a parent), so there's no single
+//    tree position to hang it off of. `metro` is resolved server-side in
+//    `getPlaceHierarchyData` (`resolvePlaceLevels`), same as Category's
+//    own `category`/`subcategory` fields.
 // Tags and people were floated as further candidates; both are flat
 // today (a person carries one tag, tags have no parent), so neither has a
 // second level to drill into yet — not built rather than faked with a
 // one-ring "hierarchy."
 
-type PlaceGrouping = "geography" | "category";
+type PlaceGrouping = "geography" | "category" | "metro";
 
 const GROUPING_OPTIONS: GroupByOption<PlaceGrouping>[] = [
   { id: "geography", label: "Geography" },
   { id: "category", label: "Category" },
+  { id: "metro", label: "Metro" },
 ];
 
 type RingCount = "1" | "2" | "3" | "all";
@@ -120,14 +129,36 @@ function buildCategoryTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
   return pruned ? foldTailIntoOther(pruned, { keep: CATEGORY_BRANCHES_KEPT }) : null;
 }
 
+function buildMetroTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
+  // Same reasoning as buildCategoryTree: only a place's own mentions count
+  // here, since an unlogged ancestor is never a required link in a flat
+  // metro > place grouping the way it is in the real (parentId) tree.
+  const logged = rows.filter((row) => row.value > 0);
+  const tree = buildTreeFromLevels(logged, {
+    rootName: "All places",
+    levels: [{ of: (row) => row.metro, fallback: "No metro" }],
+    toLeaf: (row) => ({
+      key: String(row.id),
+      name: row.name,
+      value: row.value,
+      ...(row.alias ? { shortName: row.alias } : {}),
+    }),
+  });
+  const pruned = pruneEmptyBranches(tree);
+  return pruned ? foldTailIntoOther(pruned, { keep: CATEGORY_BRANCHES_KEPT }) : null;
+}
+
+const TREE_BUILDERS: Record<PlaceGrouping, (rows: PlaceHierarchyRow[]) => HierarchyDatum | null> = {
+  geography: buildGeographyTree,
+  category: buildCategoryTree,
+  metro: buildMetroTree,
+};
+
 export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) {
   const [grouping, setGrouping] = useState<PlaceGrouping>("geography");
   const [rings, setRings] = useState<RingCount>("2");
 
-  const tree = useMemo(
-    () => (grouping === "geography" ? buildGeographyTree(rows) : buildCategoryTree(rows)),
-    [rows, grouping],
-  );
+  const tree = useMemo(() => TREE_BUILDERS[grouping](rows), [rows, grouping]);
 
   /** Depth of the deepest branch, so "All" draws exactly as many rings as
    * the tree actually has rather than a guessed ceiling. Measured from the
