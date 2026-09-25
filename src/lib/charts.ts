@@ -1422,6 +1422,13 @@ export type PlaceHierarchyRow = {
    * it lays out, so pre-rolling them up here would double-count every
    * ancestor. */
   value: number;
+  /** The metro of this place's nearest Municipality ancestor (or itself,
+   * when it *is* one) — `resolvePlaceLevels`' own field, reused rather
+   * than re-walked here. Null for anything outside a metro's catchment
+   * (most of the tree: metroId is only ever set on a Municipality). Used
+   * together with `subcategory === "Municipality"` to regroup the real
+   * geography subtree by metro (#227) rather than flattening it. */
+  metro: string | null;
 };
 
 /** Every place that was logged at least once, plus enough of the catalog
@@ -1466,6 +1473,8 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     )
     .groupBy(places.id, hierarchyRootPlaces.color);
 
+  const levelsByPlaceId = await resolvePlaceLevels(rows.map((r) => r.id));
+
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -1475,6 +1484,7 @@ export async function getPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
     subcategory: r.subcategory,
     rootColor: r.rootColor,
     value: Number(r.value),
+    metro: levelsByPlaceId.get(r.id)?.metro ?? null,
   }));
 }
 
@@ -1666,6 +1676,18 @@ export async function getPeopleDailyData(): Promise<PeopleDay[]> {
     if (present.length > 0) out.push({ date: row.date, happiness: row.happiness, people: present });
   }
   return out;
+}
+
+/**
+ * Every person's nicknames, by name — for a people picker's search (the
+ * People Impact Trend chart's), which legacy matched against nicknames as
+ * well as names. A separate lookup rather than a field on `PersonOnDay`,
+ * which would repeat each list on every day the person appears. People
+ * with none are omitted.
+ */
+export async function getPeopleNicknames(): Promise<Record<string, string[]>> {
+  const rows = await getDb().select({ name: people.name, nicknames: people.nicknames }).from(people);
+  return Object.fromEntries(rows.filter((r) => r.nicknames.length > 0).map((r) => [r.name, r.nicknames]));
 }
 
 // --- Mood calendars (#216) ------------------------------------------------
