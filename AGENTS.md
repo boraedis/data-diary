@@ -82,7 +82,7 @@ Current shape:
   | `InteractiveCalendar` | shipped | #21 | sleep calendar |
   | `InteractiveArea` | shipped | #19 | exercise mix |
   | `InteractiveNetwork` | shipped | #23 | people network |
-  | `InteractiveBar`/`Ranked` | shipped (reworked into a leaderboard table, #115) | #22 | places leaderboard, people table |
+  | `InteractiveBar`/`Ranked` | shipped (reworked into a leaderboard table, #115) | #22 | every `*-leaderboard` page, via `LeaderboardExplorer` |
   | Geo/Choropleth | shipped | #24 | world map |
   | Migrate remaining chart pages onto the primitives above, delete old bespoke components | shipped | #25 | — |
   | `InteractiveScroller` | shipped | #117 | weight |
@@ -104,6 +104,30 @@ Current shape:
 - **`src/components/charts/chart-page.tsx`** / **`chart-card.tsx`** — the
   shared page shell (title, back link, filters row) and card wrapper every
   `/charts/*` page uses.
+
+## Leaderboards
+
+Reworked under #115. Every leaderboard page (places, people, music,
+podcasts, entertainment, sports, exercise) is the same stack:
+
+- **`src/lib/leaderboards/<domain>.ts`** — a pure builder that decides
+  what each mention/session/listen is *credited to* under each mode, plus a
+  fetcher and a `*Columns(mode)` config. Output is always
+  `LeaderboardRow[]` (`rows.ts`), a compact shape because song mode is
+  ~17k rows.
+- **`src/lib/ranking.ts`** — the one movement definition (point-in-time
+  standing at week/month/year, `STANDARD_RANK_WINDOWS`). Small domains feed
+  it appearances (`computeRankings`); music/podcasts aggregate to
+  `RankSnapshot`s in SQL first (`rankSnapshots`), so the listens never
+  leave the database.
+- **`src/components/charts/leaderboard.tsx`** — `LeaderboardExplorer` (page
+  shell + pickers) and `LeaderboardTable`. Pickers live in the URL
+  (`?by=…&level=…`), so the server ranks only the mode on screen.
+- **`InteractiveRanked`** renders every row but draws them in batches as you
+  scroll — there's deliberately no "Top N" limit picker.
+
+Adding a leaderboard means writing a domain module and a page, not a
+component.
 
 ## The public landing page
 

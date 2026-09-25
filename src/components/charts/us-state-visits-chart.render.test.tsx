@@ -5,6 +5,7 @@ import * as d3 from "d3";
 import type { Feature, Geometry } from "geojson";
 import { UsStateVisitsChart } from "./us-state-visits-chart";
 import type { UsCountyVisitData, UsStateVisitEntry } from "@/lib/charts";
+import { noDataFill } from "@/lib/viz/color";
 
 // A mounted-DOM pass over the two things this chart does that nothing
 // else in the codebase covers: that geoAlbersUsa actually produces real
@@ -129,10 +130,10 @@ describe("UsStateVisitsChart", () => {
     const { container } = renderChart([{ state: "Georgia", days: 100 }]);
     const fillFor = (name: string) => regions(container).find((p) => nameOf(p) === name)?.getAttribute("fill");
 
-    expect(fillFor("Georgia")).not.toBe("var(--muted)");
+    expect(fillFor("Georgia")).not.toBe(noDataFill());
     // Not an error, not a hole — a state with no logged days is a real,
     // muted "no data" fill (issue #287's own acceptance criterion).
-    expect(fillFor("Wisconsin")).toBe("var(--muted)");
+    expect(fillFor("Wisconsin")).toBe(noDataFill());
   });
 
   it("reports a resolved territory the map can't draw instead of dropping its days", () => {
@@ -164,7 +165,7 @@ describe("UsStateVisitsChart", () => {
     // muted no-data fill rather than a colour or a gap.
     const { container } = renderChart([{ state: "Georgia", days: 3 }]);
     expect(regions(container)).toHaveLength(51);
-    const unshaded = regions(container).filter((p) => p.getAttribute("fill") === "var(--muted)");
+    const unshaded = regions(container).filter((p) => p.getAttribute("fill") === noDataFill());
     expect(unshaded).toHaveLength(50);
   });
 
@@ -279,10 +280,10 @@ describe("UsStateVisitsChart", () => {
       await waitFor(() => expect(regionNames(container)).toContain("Fulton"));
 
       const fillOf = (name: string) => regions(container).find((p) => nameOf(p) === name)?.getAttribute("fill");
-      expect(fillOf("Fulton")).not.toBe("var(--muted)");
+      expect(fillOf("Fulton")).not.toBe(noDataFill());
       // A county with no logged days reads as no data, same as an
       // unvisited state does.
-      expect(fillOf("DeKalb")).toBe("var(--muted)");
+      expect(fillOf("DeKalb")).toBe(noDataFill());
     });
 
     it("resets the whole map on a single background click", async () => {
@@ -336,9 +337,9 @@ describe("UsStateVisitsChart", () => {
       // Alabama has no logged days, but contains a travelled county — so
       // it reads as travelled rather than as no-data.
       const alabama = fillFor(container, "Alabama");
-      expect(alabama).not.toBe("var(--muted)");
+      expect(alabama).not.toBe(noDataFill());
       // ...and is distinct from a state that has neither.
-      expect(fillFor(container, "Wisconsin")).toBe("var(--muted)");
+      expect(fillFor(container, "Wisconsin")).toBe(noDataFill());
       expect(alabama).not.toBe(fillFor(container, "Wisconsin"));
     });
 
@@ -356,7 +357,7 @@ describe("UsStateVisitsChart", () => {
       const { container } = renderChart([{ state: "Georgia", days: 100 }], NO_COUNTIES, []);
       // Same assertion the pre-#365 no-data test makes — the default path
       // has to be untouched for a caller that passes no travelled data.
-      expect(fillFor(container, "Alabama")).toBe("var(--muted)");
+      expect(fillFor(container, "Alabama")).toBe(noDataFill());
     });
 
     it("only describes the travelled tint in the aria label when some exists", () => {
@@ -386,7 +387,7 @@ describe("UsStateVisitsChart", () => {
       // wiring that would silently do nothing if the expansion didn't
       // carry its own accessor.
       const fulton = fillFor(container, "Fulton");
-      expect(fulton).not.toBe("var(--muted)");
+      expect(fulton).not.toBe(noDataFill());
 
       // Some other polygon on the map — a neighbouring state, or one of
       // Georgia's other counties — with neither days nor travel is still
@@ -395,7 +396,7 @@ describe("UsStateVisitsChart", () => {
         const name = nameOf(p);
         return name !== undefined && name !== "Fulton" && name !== "Georgia";
       });
-      expect(others.some((p) => p.getAttribute("fill") === "var(--muted)")).toBe(true);
+      expect(others.some((p) => p.getAttribute("fill") === noDataFill())).toBe(true);
     });
   });
 

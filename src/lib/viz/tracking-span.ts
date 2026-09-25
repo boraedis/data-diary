@@ -54,6 +54,18 @@ export const WEIGHT_TRACKING_SPAN: TrackingSpan = { start: "2018-01-09" };
 
 export const TRAINING_TRACKING_SPAN: TrackingSpan = { start: "2022-11-11" };
 
+/** First imported Spotify listen — the export reaches back to 2018 even
+ * though the import itself is much newer. */
+export const MUSIC_TRACKING_SPAN: TrackingSpan = { start: "2018-09-13" };
+
+export const PODCAST_TRACKING_SPAN: TrackingSpan = { start: "2018-09-18" };
+
+/** Earliest session across every entertainment table (movies, TV, books,
+ * sports, games and the generic kinds). */
+export const ENTERTAINMENT_TRACKING_SPAN: TrackingSpan = { start: "2016-03-14" };
+
+export const SPORTS_TRACKING_SPAN: TrackingSpan = { start: "2023-05-29" };
+
 /** Phone and laptop usage only — Instagram usage minutes started much
  * later (see `INSTAGRAM_USAGE_TRACKING_SPAN`) and isn't plotted by any
  * chart on this span yet anyway (#326). */

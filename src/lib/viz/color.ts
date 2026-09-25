@@ -258,31 +258,40 @@ export function travelledFill(mode: ColorMode = "light"): string {
   return TRAVELLED_FILL[mode];
 }
 
-// Fill for a region with no data — intentionally light regardless of page
-// theme so it distinguishes from the ocean background. The map uses
-// colorMode="light" and renders visited regions in light terracotta, so
-// no-data regions should also be light rather than falling back to
-// var(--muted), which is dark in this app's dark-only page context.
+// Fill for a region with no data (#426). It used to be `var(--muted)`,
+// which in this app's dark-only page context is `#291f1a`, close enough
+// to the dark card behind the map (`#1f1611`, contrast 1.11:1) that
+// no-data countries all but disappeared into it.
 //
-// Deliberately paler than the ramp's low end (#fee1d7) to create clear
-// visual distinction: no-data is a neutral light tone, not a step on the
-// magnitude scale. Slightly warmer than pure neutral to harmonize with
-// the terracotta ramp's own warm hue family.
+// A dark warm gray, deliberately. #426 tried two lighter values first:
+// `#f5ede7` read as near-white and dominated the map, and `#7a6f66` was
+// still more than wanted. This one sits roughly midway between `#7a6f66`
+// and the old `--muted`. It sits clearly above the surface without competing with the
+// ramp, so it reads as background, not a step on the magnitude scale. The
+// slight warmth keeps it in the terracotta ramp's hue family. One value
+// for both modes, not a `Record<ColorMode, ...>` like `TRAVELLED_FILL`,
+// because the page it sits on is always dark whichever `colorMode` the
+// map's own ramp uses.
 //
-// Validated with the dataviz skill's `validate_palette.js` for separation
-// from ramp low (#fee1d7) and travelledFill light (#8ad0eb):
-//
-// Dark-warm gray midway between the original dark `var(--muted)` and a
-// lighter tone. Provides subtle brightening without becoming too prominent.
+// Validated with the dataviz skill's `validate_palette.js` (dark mode,
+// surface `#1f1611`):
 //
 // | pair | normal ΔE | worst CVD ΔE |
 // |---|---|---|
-// | no-data `#5a5349` vs ramp low `#fee1d7` | 54.8 PASS | 53.2 protan PASS |
-// | no-data `#5a5349` vs travelled `#8ad0eb` | 31.2 PASS | 22.9 protan PASS |
+// | no-data `#5a5349` vs ramp low `#fee1d7`       | 48.6 PASS | 47.6 protan PASS |
+// | no-data `#5a5349` vs travelled `#8ad0eb`      | 38.7 PASS | 37.5 deutan PASS |
+// | no-data `#5a5349` vs old `--muted` `#291f1a`  | 19.7 PASS | 19.6 deutan PASS |
+//
+// Contrast against the card is 2.34:1, under the validator's 3:1 mark
+// bar, which it flags as WARN. That's intended: no-data is the recessive
+// state, it isn't a mark anyone reads a value off, and the legend names it
+// in text ("no data"). The lightness-band/chroma-floor FAILs are the
+// same categorical-only checks `TRAVELLED_FILL` explains above.
 const NO_DATA_FILL = "#5a5349";
 
-/** Fill for a region with no logged data — a light neutral gray that
- * distinguishes from both the sequential ramp and the ocean background. */
+/** Fill for a region with no logged data. A dark warm gray that stays
+ * visible against the dark card while reading as recessive next to the
+ * sequential ramp and the travelled tint. */
 export function noDataFill(): string {
   return NO_DATA_FILL;
 }

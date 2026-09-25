@@ -4,7 +4,8 @@ import { getDb } from "@/lib/db";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
 import type { CountryVisitEntry } from "@/lib/charts";
-import { PLACE_SLOT_WEIGHTS, type PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
+import { PLACE_SLOT_DAY_SHARES } from "@/lib/leaderboards/places";
+import { competitionRanks, type LeaderboardRow } from "@/lib/leaderboards/rows";
 
 // The recap's people & places section (issue #172, epic #130).
 //
@@ -63,7 +64,7 @@ export type RecapPeoplePlaces = {
   placesVisited: RecapCount;
   countriesVisited: RecapCount;
   /** Period-scoped, in the exact shape `PlaceLeaderboard` already takes. */
-  leaderboard: PlaceLeaderboardEntry[];
+  leaderboard: LeaderboardRow[];
   /** Period-scoped, in the exact shape `WorldVisitsChart` already takes. */
   countryVisits: CountryVisitEntry[];
 };
@@ -174,24 +175,28 @@ export function buildRecapPeoplePlaces(
   for (const day of input.days) {
     if (!inPeriod(day.date, period)) continue;
     day.placeIds.forEach((id, slot) => {
-      const weight = PLACE_SLOT_WEIGHTS[slot] ?? 1;
+      const weight = PLACE_SLOT_DAY_SHARES[slot] ?? 0;
       placeScores.set(id, (placeScores.get(id) ?? 0) + weight);
     });
   }
   // No path or movement here: the recap has no place hierarchy to hand,
   // and movement over week/month/year windows means nothing inside a
-  // period that's already a fixed window. `PlaceLeaderboard` drops those
-  // columns when they're null.
-  const sortedScores = [...placeScores.entries()].sort((a, b) => b[1] - a[1]);
-  const leaderboard: PlaceLeaderboardEntry[] = sortedScores.slice(0, LEADERBOARD_SIZE).map(([id, value]) => ({
-    id,
+  // period that's already a fixed window. The table drops those columns
+  // when a row carries none.
+  const sortedScores = [...placeScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, LEADERBOARD_SIZE);
+  const ranks = competitionRanks(sortedScores.map(([, value]) => value));
+  const leaderboard: LeaderboardRow[] = sortedScores.map(([id, value], i) => ({
+    key: String(id),
+    rank: ranks[i],
     name: input.placeNames.get(id) ?? "Unknown",
-    path: null,
-    value,
+    detail: null,
+    context: null,
     color: input.colorByPlaceId.get(id) ?? null,
-    // Ties share the better rank, same rule as src/lib/ranking.ts.
-    rank: sortedScores.findIndex(([, v]) => v === value) + 1,
-    movements: null,
+    // Rounded like every leaderboard row (rows.ts `trim`) — thirds of a
+    // day are otherwise 0.6666… on the wire.
+    value: Math.round(value * 1000) / 1000,
+    count: 0,
+    previousRanks: null,
     gained: null,
   }));
 

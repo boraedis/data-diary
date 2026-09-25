@@ -17,7 +17,6 @@ import dubaiTopo from "@/data/geo/dubai.topo.json";
 import nycTopo from "@/data/geo/nyc.topo.json";
 import istanbulTopo from "@/data/geo/istanbul.topo.json";
 import { addDays, parseDate } from "@/lib/date";
-import { buildPlaceLeaderboard, type PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
@@ -571,15 +570,26 @@ export async function getGymWeightComboData(): Promise<GymWeightComboData> {
 // --- Exercise mix (#19's InteractiveArea proving case) -------------------
 
 // Fixed order matching exerciseCategoryEnum's own declared order
-// (src/db/schema.ts) — color-follows-the-entity depends on every consumer
-// (InteractiveArea's default categoricalColor(i)) agreeing on one order,
-// not each re-deriving it from whatever order rows happen to come back
-// from the DB in.
+// (src/db/schema.ts), so every consumer lists categories the same way
+// rather than in whatever order rows come back from the DB. Colours are
+// pinned per category in EXERCISE_CATEGORY_COLORS below (#428) rather
+// than derived from this order.
 export const EXERCISE_CATEGORY_LABELS: Record<string, string> = {
   distance: "Distance",
   sport: "Sport",
   strength: "Strength",
 };
+/** Exercise category colours, fixed per category rather than by slot
+ * index (#428): distance orange, sport green, strength gray — so a
+ * category reads the same on Training Volume, Exercise Mix and the
+ * exercise leaderboard. See `--exercise-strength` in globals.css for the
+ * validation record. */
+export const EXERCISE_CATEGORY_COLORS: Record<string, string> = {
+  distance: "var(--chart-1)",
+  sport: "var(--chart-3)",
+  strength: "var(--exercise-strength)",
+};
+
 export const EXERCISE_CATEGORY_ORDER = ["distance", "sport", "strength"] as const;
 
 export type ExerciseWorkoutRow = {
@@ -649,43 +659,8 @@ export async function getExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {
 }
 
 // --- Place leaderboard ---------------------------------------------------
-
-export type { PlaceLeaderboardEntry } from "@/lib/place-leaderboard";
-
-// places.color is only ever set on a top-level ("country") place — see
-// that column's own comment in schema.ts — so a leaf place's own "country
-// color" is its root ancestor's color, not its own. idPath is
-// "<id>/<id>/.../<id>/" from root to self inclusive (schema.ts), so the
-// root's id is always the first segment; self-joining places against that
-// gives the root row (and, for a place that's already a root, joins back
-// to itself). Left-joined and nullable throughout: idPath is null until
-// backfilled (see schema.ts), and a root place may simply have no color
-// set — both cases fall back to the toolkit default at the call site
-// rather than here, matching getPeopleNetworkData's own tag-color
-// convention just below.
-const rootPlaces = alias(places, "root_places");
-
-/** Every logged place, ranked by slot-weighted mentions (legacy
- * `location_leaderboard`'s 2x-slot-1 / 1x-slot-2 scheme), with its
- * ancestor path and week/month/year rank movement (#115). No top-N limit
- * any more: the page's own "Show" control picks how many rows to draw,
- * and a few hundred places is a small payload. The ranking itself is
- * `buildPlaceLeaderboard`'s job — see src/lib/place-leaderboard.ts for why
- * it's no longer a GROUP BY. */
-export async function getPlaceLeaderboardData(): Promise<PlaceLeaderboardEntry[]> {
-  const db = getDb();
-  const [dayRows, catalog] = await Promise.all([
-    db
-      .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
-      .from(days)
-      .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id))),
-    db
-      .select({ id: places.id, name: places.name, idPath: places.idPath, rootColor: rootPlaces.color })
-      .from(places)
-      .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`),
-  ]);
-  return buildPlaceLeaderboard(dayRows, catalog);
-}
+// Moved to src/lib/leaderboards/places.ts with the rest of the leaderboard
+// data layer (#115).
 
 // --- Happiness trend --------------------------------------------------
 

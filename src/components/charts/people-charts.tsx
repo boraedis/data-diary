@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState } from "react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { CalendarExplorer } from "@/components/charts/calendar-explorer";
-import { InteractiveRanked, type RankedColumn } from "@/components/charts/interactive/interactive-ranked";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import {
   CompositionExplorer,
@@ -13,14 +12,13 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { personImpact, recencyWeight } from "@/lib/impact";
-import { computeRankings, STANDARD_RANK_WINDOWS, type RankedItem } from "@/lib/ranking";
 import { categoricalColor } from "@/lib/viz/color";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveBarRace } from "@/components/charts/interactive/interactive-bar-race";
 import type { RaceFrame } from "@/lib/viz/race";
 import { daysBetween, parseDate } from "@/lib/date";
 import type { PeopleDay } from "@/lib/charts";
-import { BAR_RACE_INTERACTION_GUIDE, RANKED_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { BAR_RACE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PEOPLE_IMPACT_METHODOLOGY, PEOPLE_METHODOLOGY } from "@/lib/viz/methodology";
 import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
@@ -213,130 +211,6 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
     />
   );
 }
-
-type PeopleTableRow = {
-  name: string;
-  tagName: string | null;
-  tagColor: string | null;
-  item: RankedItem;
-};
-
-/**
- * The people table: everyone ranked by days logged, with how their standing
- * has moved lately.
- *
- * Legacy's `people_table` showed trailing *counts* for week/month/year;
- * this shows the count and the **rank movement** alongside it, which is
- * what the counts were really being read for. See `src/lib/ranking.ts` for
- * the definition — each window is a *point in time*, so the week column
- * asks where someone stood a week ago and compares it with now. Both sides
- * are all-time standings; only the moment differs, which is what keeps the
- * movement column consistent with the total it sits beside.
- *
- * Anchored on the latest logged day rather than today: a gap in logging
- * would otherwise empty the recent windows and report everyone as having
- * vanished at once.
- */
-export function PeopleTableChart({ data }: { data: PeopleDay[] }) {
-  const [limit, setLimit] = useState<TableLimit>("50");
-
-  const rows = useMemo<PeopleTableRow[]>(() => {
-    const appearances = data.flatMap((day) =>
-      day.people.map((person) => ({ key: person.name, date: day.date })),
-    );
-    const asOf = data.length > 0 ? data[data.length - 1].date : "";
-    const ranked = asOf ? computeRankings(appearances, asOf, STANDARD_RANK_WINDOWS) : [];
-
-    // Latest tag wins where someone has been retagged — the table is a
-    // "who are they now" view, not a history of their tagging. The colour
-    // travels with the tag from the data rather than being assigned here,
-    // so it matches the people calendar's groups mode.
-    const tags = new Map<string, { name: string | null; color: string | null }>();
-    for (const day of data) {
-      for (const person of day.people) {
-        tags.set(person.name, { name: person.tagName, color: person.tagColor });
-      }
-    }
-
-    return ranked.map((item) => {
-      const tag = tags.get(item.key);
-      return { name: item.key, tagName: tag?.name ?? null, tagColor: tag?.color ?? null, item };
-    });
-  }, [data]);
-
-  const shown = useMemo(() => (limit === "all" ? rows : rows.slice(0, Number(limit))), [rows, limit]);
-
-  const columns = useMemo<RankedColumn<PeopleTableRow>[]>(
-    () => [
-      { kind: "text", id: "name", header: "Name", value: (r) => r.name },
-      {
-        kind: "text",
-        id: "tag",
-        header: "Tag",
-        description: "How I know them, in the tag's own colour.",
-        value: (r) => r.tagName,
-        cellColor: { color: (r) => (r.tagName ? r.tagColor : null) },
-        hideBelow: "md",
-      },
-      {
-        kind: "number",
-        id: "days",
-        header: "Days",
-        value: (r) => r.item.total,
-        // Log for the same reason as place mentions: the top handful are
-        // hundreds of days ahead of a long tail of ones and twos.
-        conditional: { type: "scale", log: true },
-      },
-      ...STANDARD_RANK_WINDOWS.map(
-        (window): RankedColumn<PeopleTableRow> => ({
-          kind: "movement",
-          id: window.id,
-          header: window.label,
-          description: `Days gained, and places moved in the ranking, since ${window.since ?? window.label}.`,
-          movement: (r) => r.item.movements[window.id] ?? null,
-          gained: (r) => r.item.counts[window.id] ?? null,
-          since: window.since ?? window.label,
-          // Week stays on a phone; month and year are the first to go.
-          hideBelow: window.id === "week" ? undefined : window.id === "month" ? "sm" : "md",
-        }),
-      ),
-    ],
-    [],
-  );
-
-  return (
-    <ChartPage
-      title="People Leaderboard"
-      description="A leaderboard of the people you've logged the most. Each window shows days gained in that period and how the overall ranking has moved since then."
-      info={{
-        interactionGuide: RANKED_INTERACTION_GUIDE,
-        methodology: PEOPLE_METHODOLOGY,
-        trackingSpan: PEOPLE_TRACKING_SPAN,
-      }}
-      filters={
-        <GroupByPicker value={limit} onChange={setLimit} options={LIMIT_OPTIONS} label="Show" />
-      }
-    >
-      <ChartCard empty={shown.length === 0}>
-        <InteractiveRanked
-          rows={shown}
-          getKey={(r) => r.name}
-          rank={(r) => r.item.rank}
-          columns={columns}
-          ariaLabel="People ranked by days logged, with how their ranking has moved since a week, a month and a year ago."
-        />
-      </ChartCard>
-    </ChartPage>
-  );
-}
-
-type TableLimit = "25" | "50" | "all";
-
-const LIMIT_OPTIONS: GroupByOption<TableLimit>[] = [
-  { id: "25", label: "Top 25" },
-  { id: "50", label: "Top 50" },
-  { id: "all", label: "Everyone" },
-];
 
 /**
  * The people bar race: who mattered most, week by week.
