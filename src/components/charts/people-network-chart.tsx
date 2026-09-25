@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Pause, Play, RotateCcw, X } from "lucide-react";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
@@ -13,11 +13,13 @@ import {
 import { GroupByPicker } from "@/components/charts/interactive/group-by-picker";
 import { Legend, SeriesKey } from "@/components/charts/interactive/legend";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { parseDate } from "@/lib/date";
+import { parseDate, toDateString } from "@/lib/date";
 import {
   buildPeopleNetwork,
   MIN_MENTION_OPTIONS,
+  monthlyFrameEnds,
   STRICTNESS_OPTIONS,
   type NetworkStrictness,
   type PeopleNetworkInput,
@@ -48,6 +50,19 @@ const DEFAULT_MIN_MENTIONS = 10;
 /** How many of a person's ties the details panel lists. */
 const PANEL_CONNECTIONS = 10;
 
+/** Time-lapse speeds, in monthly frames per second — the same three named
+ * choices InteractiveBarRace offers, rather than a free slider. A frame
+ * re-runs the significance test and rebuilds the SVG: a near-full frame
+ * of the whole history measured 50–90ms in the (unminified) dev build,
+ * inside even 2×'s 125ms. Default 1× plays the decade in about half a
+ * minute. */
+const SPEEDS = [
+  { id: "slow", label: "0.5×", framesPerSecond: 2 },
+  { id: "normal", label: "1×", framesPerSecond: 4 },
+  { id: "fast", label: "2×", framesPerSecond: 8 },
+] as const;
+type SpeedId = (typeof SPEEDS)[number]["id"];
+
 function tagKey(tagId: number | null): string {
   return tagId === null ? UNTAGGED_KEY : String(tagId);
 }
@@ -59,16 +74,72 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
   const [hiddenTags, setHiddenTags] = useState<ReadonlySet<string>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  // Time-lapse (#437). `frame` indexes `frames` below; null means "not in
+  // the time-lapse", i.e. the whole selected period, which is also what
+  // the last frame shows.
+  const [frame, setFrame] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<SpeedId>("normal");
 
   const extent = useMemo<[Date, Date] | null>(() => {
     if (data.days.length === 0) return null;
     return [parseDate(data.days[0].date), parseDate(data.days[data.days.length - 1].date)];
   }, [data.days]);
 
-  const built = useMemo(
+  // The whole selected period — what's shown outside the time-lapse, and
+  // what the legend and dot-size scale are always drawn from, so neither
+  // shifts under the viewer while frames play (a legend growing a row as a
+  // new tag first appears would resize and refit the whole graph).
+  const baseBuilt = useMemo(
     () => buildPeopleNetwork(data, { minMentions, strictness, range }),
     [data, minMentions, strictness, range],
   );
+
+  // Cumulative frames: each one is [period start, that month's end].
+  const frames = useMemo(() => {
+    const period = range ?? extent;
+    return period ? monthlyFrameEnds(period[0], period[1]) : [];
+  }, [range, extent]);
+  const lastFrame = frames.length - 1;
+  // The last frame *is* the full period, so it reuses baseBuilt rather
+  // than building the same graph twice.
+  const shownFrame = frame !== null && frame < lastFrame ? frame : null;
+  const atEnd = frame !== null && frame >= lastFrame;
+  const isPlaying = playing && !atEnd;
+
+  const built = useMemo(() => {
+    if (shownFrame === null) return baseBuilt;
+    const start = (range ?? extent)![0];
+    return buildPeopleNetwork(data, { minMentions, strictness, range: [start, frames[shownFrame]] });
+  }, [shownFrame, baseBuilt, range, extent, data, minMentions, strictness, frames]);
+
+  // The clock. Stops on its own at the last frame (isPlaying goes false,
+  // which tears this down) rather than looping — the end state is the
+  // full graph, which is the natural place to stop and look.
+  const framesPerSecond = SPEEDS.find((sp) => sp.id === speed)!.framesPerSecond;
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = window.setInterval(() => {
+      setFrame((f) => Math.min(lastFrame, (f ?? -1) + 1));
+    }, 1000 / framesPerSecond);
+    return () => window.clearInterval(id);
+  }, [isPlaying, framesPerSecond, lastFrame]);
+
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      setPlaying(false);
+      return;
+    }
+    // From the static view or the end, a Play starts over from the first
+    // month — the time-lapse is about watching it grow.
+    if (frame === null || atEnd) setFrame(0);
+    setPlaying(true);
+  };
+  const handleRestart = () => {
+    setFrame(0);
+    setPlaying(true);
+  };
+  const pause = useCallback(() => setPlaying(false), []);
 
   const visibleNodes = useMemo(
     () => built.nodes.filter((n) => !hiddenTags.has(tagKey(n.tagId))),
@@ -102,7 +173,7 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
 
   // The size scale tops out at the busiest person in the period, hidden
   // tags included — hiding a group shouldn't resize everyone else.
-  const maxCount = useMemo(() => Math.max(1, ...built.nodes.map((n) => n.count)), [built.nodes]);
+  const maxCount = useMemo(() => Math.max(1, ...baseBuilt.nodes.map((n) => n.count)), [baseBuilt.nodes]);
 
   const builtById = useMemo(() => new Map(built.nodes.map((n) => [n.id, n])), [built.nodes]);
   const degree = useMemo(() => {
@@ -133,12 +204,13 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
     [builtById, degree, color],
   );
 
-  // Legend: every tag among the people currently in the graph, plus any
-  // the viewer has hidden (or hiding one would remove its own toggle).
+  // Legend: every tag among the people in the selected period (not just
+  // the current time-lapse frame — see baseBuilt), plus any the viewer has
+  // hidden (or hiding one would remove its own toggle).
   // Alphabetical with Untagged last — a fixed order, never by size, so a
   // tag doesn't hop around the legend as the period changes.
   const legendSeries = useMemo(() => {
-    const present = new Set([...built.nodes.map((n) => tagKey(n.tagId)), ...hiddenTags]);
+    const present = new Set([...baseBuilt.nodes.map((n) => tagKey(n.tagId)), ...hiddenTags]);
     const byKey = new Map<string, { id: string; label: string; color: string }>();
     for (const p of data.people) {
       const key = tagKey(p.tagId);
@@ -148,7 +220,7 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
     return [...byKey.values()].sort((a, b) =>
       a.id === UNTAGGED_KEY ? 1 : b.id === UNTAGGED_KEY ? -1 : a.label.localeCompare(b.label),
     );
-  }, [data.people, built.nodes, hiddenTags]);
+  }, [data.people, baseBuilt.nodes, hiddenTags]);
 
   const toggleTag = useCallback((id: string) => {
     setHiddenTags((cur) => {
@@ -186,7 +258,18 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
       filters={
         <>
           {extent ? (
-            <TimeRangePicker domain={extent} value={range} onChange={setRange} label="Period" />
+            <TimeRangePicker
+              domain={extent}
+              value={range}
+              onChange={(next) => {
+                // Frames are indexed within the period, so a new period
+                // means a new set of frames: drop back to the static view.
+                setRange(next);
+                setPlaying(false);
+                setFrame(null);
+              }}
+              label="Period"
+            />
           ) : null}
           <GroupByPicker
             value={String(minMentions)}
@@ -228,13 +311,46 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
             <Legend series={legendSeries} onToggle={toggleTag} hiddenIds={hiddenTags} className="text-xs" />
+            {/* The accessible reading of the time-lapse: announced only once
+                it's settled (paused or scrubbed), not on every frame, the
+                same rule the bar race's live region follows. Kept inside this
+                row: as its own item in the column, its flex gap alone pushed
+                the card past the viewport's bottom edge. */}
+            <div role="status" aria-live="polite" className="sr-only">
+              {frame !== null && !isPlaying && frames[frame]
+                ? `${formatDate(toDateString(frames[frame]), "monthYear")}: ${visibleNodes.length} people, ${visibleEdges.length} connections`
+                : ""}
+            </div>
             <p className="shrink-0 text-xs text-muted-foreground tabular-nums">
               {visibleNodes.length} people · {visibleEdges.length} connections · {built.dayCount} days
             </p>
           </div>
+          {/* Above the graph rather than below it (where the bar race has
+              its row): ResponsiveChart fills the viewport from its own top
+              edge down, so anything under it lands past the fold. */}
+          {frames.length > 1 ? (
+            <PlaybackControls
+              playing={isPlaying}
+              frame={frame ?? lastFrame}
+              lastFrame={lastFrame}
+              speed={speed}
+              onPlayPause={handlePlayPause}
+              onRestart={handleRestart}
+              onScrub={(f) => {
+                setPlaying(false);
+                setFrame(f);
+              }}
+              onSpeed={setSpeed}
+            />
+          ) : null}
           <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={320}>
             {({ width, height }) =>
-              networkNodes.length === 0 ? (
+              // Outside the time-lapse an empty period gets a message; inside
+              // it the graph stays mounted even while empty (the first months
+              // rarely have anyone at 10+ days yet) — unmounting would drop
+              // every remembered position, and the time-lapse depends on
+              // those to grow smoothly.
+              networkNodes.length === 0 && frame === null ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   Nobody was logged on {minMentions}+ days in this period.
                 </p>
@@ -249,9 +365,21 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
                     radiusDomainMax={maxCount}
                     selectedId={effectiveSelected}
                     onSelect={onSelect}
+                    onNodeDragStart={pause}
                     tooltip={tooltip}
                     ariaLabel="People network. Each dot is a person, sized by days logged and coloured by tag; lines join people logged together more often than chance. Drag a person to pull them around, scroll to zoom, click to see who they're most often with."
                   />
+                  {frame !== null && frames[frame] ? (
+                    // The frame's date, large and quiet, where the eye can
+                    // find it without leaving the graph — the same job the
+                    // bar race's period label does.
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute top-1 right-3 font-heading text-3xl text-muted-foreground/70 tabular-nums select-none md:text-4xl"
+                    >
+                      {formatDate(toDateString(frames[frame]), "monthYear")}
+                    </span>
+                  ) : null}
                   {selected ? (
                     <DetailsPanel
                       person={selected}
@@ -268,6 +396,71 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
         </div>
       </ChartCard>
     </ChartPage>
+  );
+}
+
+/** Play/Pause, Restart, a scrubber and speed — laid out and labelled like
+ * InteractiveBarRace's control row, so the two time-lapses in the app
+ * read as one control. Frames are whole months (see monthlyFrameEnds), so
+ * the scrubber steps by one rather than the bar race's fractional
+ * positions: there's no in-between graph to interpolate to. */
+function PlaybackControls({
+  playing,
+  frame,
+  lastFrame,
+  speed,
+  onPlayPause,
+  onRestart,
+  onScrub,
+  onSpeed,
+}: {
+  playing: boolean;
+  frame: number;
+  lastFrame: number;
+  speed: SpeedId;
+  onPlayPause: () => void;
+  onRestart: () => void;
+  onScrub: (frame: number) => void;
+  onSpeed: (speed: SpeedId) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" size="xs" variant="secondary" onClick={onPlayPause} aria-label={playing ? "Pause" : "Play"}>
+        {playing ? <Pause aria-hidden className="size-3.5" /> : <Play aria-hidden className="size-3.5" />}
+        {playing ? "Pause" : "Play"}
+      </Button>
+      <Button type="button" size="xs" variant="ghost" onClick={onRestart} aria-label="Restart">
+        <RotateCcw aria-hidden className="size-3.5" />
+        Restart
+      </Button>
+      <label htmlFor="people-network-scrub" className="sr-only">
+        Scrub through time
+      </label>
+      <input
+        id="people-network-scrub"
+        type="range"
+        min={0}
+        max={lastFrame}
+        step={1}
+        value={frame}
+        onChange={(event) => onScrub(Number(event.target.value))}
+        className="h-1.5 min-w-40 flex-1 cursor-pointer accent-[var(--chart-1)]"
+      />
+      <div role="group" aria-label="Speed" className="flex items-center gap-1">
+        {SPEEDS.map((option) => (
+          <Button
+            key={option.id}
+            type="button"
+            size="xs"
+            variant={speed === option.id ? "secondary" : "ghost"}
+            aria-pressed={speed === option.id}
+            onClick={() => onSpeed(option.id)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -3,6 +3,7 @@ import {
   buildPeopleNetwork,
   hypergeometricUpperTail,
   MIN_SHARED_DAYS,
+  monthlyFrameEnds,
   significanceCutoff,
   type PeopleNetworkDay,
   type PeopleNetworkPerson,
@@ -146,5 +147,30 @@ describe("buildPeopleNetwork", () => {
       edges: [],
       dayCount: 0,
     });
+  });
+});
+
+describe("monthlyFrameEnds", () => {
+  const ymd = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+
+  it("steps through month ends and clamps the last frame to the end date", () => {
+    expect(monthlyFrameEnds(parseDate("2019-11-15"), parseDate("2020-02-10")).map(ymd)).toEqual([
+      "2019-11-30",
+      "2019-12-31",
+      "2020-1-31",
+      "2020-2-10",
+    ]);
+  });
+
+  it("handles leap years and a period inside a single month", () => {
+    expect(monthlyFrameEnds(parseDate("2020-02-01"), parseDate("2020-03-31")).map(ymd)).toEqual([
+      "2020-2-29",
+      "2020-3-31",
+    ]);
+    expect(monthlyFrameEnds(parseDate("2020-05-03"), parseDate("2020-05-20")).map(ymd)).toEqual(["2020-5-20"]);
+  });
+
+  it("is empty for an inverted period", () => {
+    expect(monthlyFrameEnds(parseDate("2020-05-03"), parseDate("2020-05-01"))).toEqual([]);
   });
 });

@@ -128,6 +128,12 @@ export type InteractiveNetworkProps = {
    * neighbours until cleared. Omit both for hover-only highlighting. */
   selectedId?: NodeId | null;
   onSelect?: (id: NodeId | null) => void;
+  /** Called when a node drag begins moving (not on a plain press, so a
+   * click still just selects). A caller that rebuilds the graph on a
+   * timer (the people network's time-lapse) uses it to pause — a rebuild
+   * mid-drag replaces the SVG, and with it the node being held. Read
+   * through a ref, so it needn't be stable. */
+  onNodeDragStart?: () => void;
   /** Tooltip content for a hovered node. Defaults to label + count. */
   tooltip?: (node: NetworkNode) => { title: string; rows: TooltipRow[] };
   ariaLabel?: string;
@@ -149,6 +155,7 @@ export function InteractiveNetwork({
   zoomExtent = DEFAULT_ZOOM_EXTENT,
   selectedId = null,
   onSelect,
+  onNodeDragStart,
   tooltip,
   ariaLabel = "Force-directed network graph. Scroll or pinch to zoom, drag the background to pan, drag a node to pull it around, click a node to highlight its connections, click the background to clear or re-fit.",
 }: InteractiveNetworkProps) {
@@ -166,10 +173,12 @@ export function InteractiveNetwork({
   const transformRef = useRef<{ transform: d3.ZoomTransform; width: number; height: number } | null>(null);
   const selectedRef = useRef<NodeId | null>(selectedId);
   const onSelectRef = useRef(onSelect);
+  const onDragStartRef = useRef(onNodeDragStart);
   const apiRef = useRef<LiveApi | null>(null);
   useEffect(() => {
     onSelectRef.current = onSelect;
-  }, [onSelect]);
+    onDragStartRef.current = onNodeDragStart;
+  }, [onSelect, onNodeDragStart]);
 
   const resolveColor = (n: NetworkNode) => (typeof color === "function" ? color(n) : color);
 
@@ -497,6 +506,9 @@ export function InteractiveNetwork({
       // The drag's container is the node's parent <g>, which sits inside
       // the zoomed viewport, so event.x/y are already in layout
       // coordinates at any zoom level.
+      // d3-drag fires "start" on every press, clicks included; the first
+      // "drag" event is the first real movement.
+      let dragMoved = false;
       node.call(
         d3
           .drag<SVGGElement, SimNode>()
@@ -506,8 +518,13 @@ export function InteractiveNetwork({
             d.fy = d.y;
             d3.select(this).style("cursor", "grabbing");
             setHovered(null);
+            dragMoved = false;
           })
           .on("drag", (event, d) => {
+            if (!dragMoved) {
+              dragMoved = true;
+              onDragStartRef.current?.();
+            }
             d.fx = event.x;
             d.fy = event.y;
           })

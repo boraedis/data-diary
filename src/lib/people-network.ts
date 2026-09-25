@@ -302,3 +302,32 @@ export function buildPeopleNetwork(input: PeopleNetworkInput, options: BuildOpti
 
   return { nodes, edges, dayCount: N };
 }
+
+// --- Time-lapse -----------------------------------------------------------
+
+/**
+ * Frame end dates for the cumulative time-lapse (#437): the last day of
+ * each calendar month from `start`'s month on, with the final frame
+ * clamped to `end` itself so the last frame is exactly the full period.
+ * Each frame is then built over [start, frame end] — cumulative, as
+ * legacy's network animation was, rather than a rolling window.
+ *
+ * Monthly rather than legacy's daily steps: a frame rebuilds the graph
+ * (re-running every pair's significance test), and a decade of days is
+ * ~3,600 of those; ~125 months still reads as continuous growth once the
+ * force layout smooths each step into a slide.
+ */
+export function monthlyFrameEnds(start: Date, end: Date): Date[] {
+  if (end < start) return [];
+  const frames: Date[] = [];
+  for (let month = start.getMonth(), year = start.getFullYear(); ; month++) {
+    // Day 0 of the next month is the last day of this one; JS rolls the
+    // month/year over on its own.
+    const monthEnd = new Date(year, month + 1, 0);
+    if (monthEnd >= end) {
+      frames.push(new Date(end.getFullYear(), end.getMonth(), end.getDate()));
+      return frames;
+    }
+    frames.push(monthEnd);
+  }
+}
