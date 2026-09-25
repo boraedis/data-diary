@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { OwnerIdentityForm } from "@/components/profile/owner-identity-form";
+import { ProjectSettingsForm } from "@/components/profile/project-settings-form";
 import { ProfileTimelineEditor } from "@/components/profile/profile-timeline-editor";
 import { listPeopleCatalog, listPlacesCatalog } from "@/lib/days";
+import { getProjectSettings } from "@/lib/project";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +13,13 @@ export const dynamic = "force-dynamic";
 // birthdate, diary start date) plus the three profile timelines
 // (occupation, residence, relationship). Not under /manage — this isn't a
 // "fix a typo'd catalog entry" page, it's the app's own about-you section,
-// same distinction the issue thread draws between this and a catalog.
+// same distinction the issue thread draws between this and a catalog. The
+// public landing page's project copy (#452) sits here too for the same
+// reason: it's a singleton "about this diary" row, not a catalog.
 export default async function ProfilePage() {
-  const [settings, occupations, residences, relationships, places, people] = await Promise.all([
+  const [settings, project, occupations, residences, relationships, places, people] = await Promise.all([
     getProfileSettings(),
+    getProjectSettings(),
     listProfileOccupations(),
     listProfileResidences(),
     listProfileRelationships(),
@@ -35,6 +40,7 @@ export default async function ProfilePage() {
       </div>
 
       <OwnerIdentityForm initial={settings} />
+      <ProjectSettingsForm initial={project} />
 
       <ProfileTimelineEditor type="occupation" title="Occupation" entries={occupations} places={placeOptions} />
       <ProfileTimelineEditor type="residence" title="Residence" entries={residences} places={placeOptions} />
