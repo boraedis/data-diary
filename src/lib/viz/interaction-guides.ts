@@ -32,7 +32,7 @@ export const CALENDAR_INTERACTION_GUIDE =
   "Each cell is one day, shaded by its value — hover a cell for the exact figure. Where a day is made of several categories, its colour is their mix, and the tooltip lists what went into it. Use the range picker above to focus on a shorter stretch.";
 
 export const AREA_INTERACTION_GUIDE =
-  "Hover or focus a band and use the arrow keys to inspect it. Click a legend entry to hide that category; click it again to bring it back.";
+  "Each band is labelled inside itself, as large as it fits; bands too thin for a label are still there — hover or focus any band to see what it is, and use the arrow keys to step through its values. Where a category has its own colour elsewhere in the app (a tag, a place) the band uses it; otherwise the top five get distinct colours and the rest share a pale beige. Past 100 bands, the smallest are folded into one Other band.";
 
 export const NETWORK_INTERACTION_GUIDE =
   "The layout is live: drag a node and its connections follow, let go and it settles back into place. Hover a node for its details; click one to highlight it and its neighbours and zoom in on them, and click another node or the background to move or clear that. With nothing selected, clicking the background fits the whole graph back into view. Scroll or pinch to zoom, drag the background to pan. Names appear on more nodes as you zoom in, and initials inside any node big enough to hold them. Where there’s a legend, click an entry to hide that group — the rest of the graph slides to fill the gap. Where there’s a Play control, it grows the graph month by month from the first logged day — drag the scrubber to see the network as it stood at any month, pick a speed, and drag a node to pause.";
