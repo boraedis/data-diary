@@ -7,8 +7,7 @@ import { CalendarExplorer } from "@/components/charts/calendar-explorer";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import {
   CompositionExplorer,
-  foldToTopCategories,
-  OTHER_ID,
+  rankCategories,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { personImpact, recencyWeight } from "@/lib/impact";
@@ -25,21 +24,6 @@ import { PEOPLE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
 // pass across the boundary.
-
-/**
- * Five names plus "Other", for the People Impact stacked area below. (The
- * People Trend area chart that used to share this is now the People Impact
- * Trend line chart, `people-impact-trend-chart.tsx`, which shows as many
- * people as the reader picks.)
- *
- * 689 distinct people appear across the history, against a palette with
- * five real slots — so nearly everyone lands in "Other" by construction,
- * and that band is the honest answer rather than a rounding error. The top
- * five are far ahead of the tail (the leader has 862 days, the fifth 520),
- * so the cut is a real one rather than an arbitrary slice through a flat
- * distribution.
- */
-const MAX_PEOPLE = 5;
 
 /**
  * Days coloured either by how many people were logged, or by which tagged
@@ -140,7 +124,12 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
     [data],
   );
 
-  const { categories, keep } = useMemo(() => {
+  // Every person is their own band (#456), not a top five plus "Other".
+  // 689 people against five real palette slots means nearly everyone is
+  // in the muted neutral, but each is still named on hover, and the top
+  // five are far enough ahead (the leader has 862 days, the fifth 520)
+  // that the coloured bands are the ones worth telling apart anyway.
+  const categories = useMemo(() => {
     const totals = new Map<string, number>();
     for (const day of scored) {
       for (const person of day.people) {
@@ -148,7 +137,7 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
         totals.set(person.name, (totals.get(person.name) ?? 0) + score);
       }
     }
-    return foldToTopCategories(totals, MAX_PEOPLE);
+    return rankCategories(totals);
   }, [scored]);
 
   const rows = useMemo<CompositionRow[]>(
@@ -156,12 +145,11 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
       scored.map((day) => {
         const values: Record<string, number> = {};
         for (const person of day.people) {
-          const id = keep.has(person.name) ? person.name : OTHER_ID;
-          values[id] = (values[id] ?? 0) + personImpact(day.happiness as number, person.slot);
+          values[person.name] = (values[person.name] ?? 0) + personImpact(day.happiness as number, person.slot);
         }
         return { date: day.date, values };
       }),
-    [scored, keep],
+    [scored],
   );
 
   return (
@@ -169,7 +157,7 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
       rows={rows}
       categories={categories}
       title="People Impact"
-      description="How much each person contributed to how your days went, using the original scoring from the legacy app. Everyone outside the top five is folded into Other."
+      description="How much each person contributed to how your days went, using the original scoring from the legacy app. Everyone past the top five shares one grey; hover a band to see who it is."
       methodology={PEOPLE_IMPACT_METHODOLOGY}
       trackingSpan={PEOPLE_TRACKING_SPAN}
       valueFormat={(v) => v.toFixed(1)}

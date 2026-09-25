@@ -5,11 +5,11 @@ import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { toDateString } from "@/lib/date";
 import { formatDate, formatPercent, type DateFormatPreset } from "@/lib/viz/format";
-import { categoricalColor } from "@/lib/viz/color";
+import { categoricalColor, contrastingTextColor } from "@/lib/viz/color";
+import { fitBandLabelWithAlias, type LabelFitOptions } from "@/lib/viz/area-labels";
 import { drawStandardAxes, drawYGridlines } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
-import { Legend } from "./legend";
 
 // InteractiveArea (#19) - the shared stacked/proportional area primitive,
 // replacing legacy's Area/AreaAverager constructors (18 legacy call sites:
@@ -45,15 +45,27 @@ import { Legend } from "./legend";
 // reordering by value (`stackOrderInsideOut` etc.) - color follows the
 // entity, and so does stacking order, per the dataviz skill's fixed-order
 // rule.
+//
+// #456 made the in-band labels the legend, as they were in legacy: the
+// separate `Legend` (and its click-to-hide) is gone, each band's label is
+// sized to fill the band (`src/lib/viz/area-labels.ts`), and nothing is
+// folded into "Other" any more - every category is its own band, with
+// slots past the 5th in the muted neutral, individually labelled where
+// there's room and always individually hoverable.
 
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
-const LEGEND_HEIGHT = 28;
 const MIN_MAIN_HEIGHT = 160;
 // The full MARK_SPECS.bar.surfaceGap (2px), applied entirely to one edge
 // of each internal boundary rather than split 1px+1px across both
 // neighbors - see the per-layer render loop below for why one-sided is
 // simpler here (and avoids a second clamp for the layer above).
 const GAP_INSET = MARK_SPECS.bar.surfaceGap;
+// A band never gives up more than this fraction of its own thickness to
+// the gap. Without it, a stack of hundreds of sub-pixel bands (every
+// person in People Impact, now that nothing folds into "Other") would be
+// all gap and no band - each one clamped to zero height, leaving the
+// card showing through where the tail should be.
+const GAP_MAX_SHARE = 0.25;
 // Deliberately NOT MARK_SPECS.area.fillOpacity (0.1) - that constant is
 // calibrated for a translucent confidence band drawn *behind* a solid
 // line (InteractiveLine's `band` series), where staying faint matters
@@ -69,33 +81,26 @@ const STACK_FILL_OPACITY = 1;
 // as highlighted, without changing its own fill/line/label colors.
 const DIMMED_OPACITY = 0.35;
 
-// In-band label placement (per-layer, inside the render loop below): find
-// the band's single widest point, then confirm a real measured label
-// actually fits in a contiguous run of sufficiently-thick points around
-// it before committing to drawing it there. Thresholds loosened this
-// round ("where are the labels I asked for") - the real root cause was
-// almost certainly the chart's own height (see exercise-mix-explorer.tsx:
-// it was rendering at a smaller height than every other chart page in the
-// app, leaving little vertical room for any one band in a multi-category
-// stack to clear the old, stricter minimum), but the thresholds below are
-// also given more headroom as insurance against genuinely thin bands.
-const LABEL_FONT_SIZE = 11;
-// Minimum band thickness, px, for a label to be considered at all -
-// font size plus a little breathing room above/below the text.
-const LABEL_MIN_THICKNESS = LABEL_FONT_SIZE + 4;
-// Horizontal breathing room required on either side of the measured
-// label width, within the qualifying run, before it counts as "fits."
-const LABEL_PADDING_X = 6;
+// In-band labels (#456) - see `src/lib/viz/area-labels.ts` for the
+// search itself. Legacy's floor was 5px; 7 is the smallest that's still
+// readable on a laptop screen at this weight, and a label too small to
+// read is no better than none (the tooltip still names every band).
+const LABEL_FIT: LabelFitOptions = { minFont: 7, capFont: 24, padX: 4, padY: 2 };
+const LABEL_FONT_WEIGHT = 600;
+// Labels are measured once at this size and scaled, rather than re-measured
+// at every candidate size - text width is linear in font size.
+const MEASURE_FONT_SIZE = 100;
 
 export type InteractiveAreaCategory = {
   id: string;
   label: string;
+  /** A shorter name for the in-band label, used when the full `label` only
+   * fits small and the alias fits much larger - legacy's fallback rule, see
+   * `fitBandLabelWithAlias`. The tooltip always shows the full `label`. */
+  alias?: string;
   /** Defaults to `categoricalColor(i)` using this category's index in the
-   * *original* `categories` array (fixed slot order) - pass this only to
-   * pin a specific slot regardless of array order. Resolved once up front
-   * from the full list, before any hiding/filtering, so a toggled-off
-   * category never causes the survivors to shift color (see Legend's own
-   * doc comment on the same rule). */
+   * `categories` array (fixed slot order) - pass this only to pin a
+   * specific slot regardless of array order. */
   color?: string;
 };
 
@@ -154,6 +159,25 @@ type StackPoint = d3.SeriesPoint<InteractiveAreaPoint>;
  * outside useD3's own deps) and the single-row tooltip's content/position. */
 type HoveredBand = { categoryId: string; pointIndex: number };
 
+/**
+ * Rendered width per pixel of font size, measured off a throwaway text node
+ * styled like the real label. jsdom has no layout, so tests fall back to a
+ * typical average glyph width rather than zero (which would make every
+ * label "fit" anywhere).
+ */
+function measureWidthRatio(parent: d3.Selection<SVGGElement, unknown, null, undefined>, text: string): number {
+  const probe = parent
+    .append("text")
+    .style("font-size", `${MEASURE_FONT_SIZE}px`)
+    .style("font-weight", LABEL_FONT_WEIGHT)
+    .attr("visibility", "hidden")
+    .text(text);
+  const node = probe.node() as SVGTextElement;
+  const width = typeof node.getComputedTextLength === "function" ? node.getComputedTextLength() : 0;
+  probe.remove();
+  return width > 0 ? width / MEASURE_FONT_SIZE : text.length * 0.6;
+}
+
 function resolveCategoryColors(categories: InteractiveAreaCategory[]): ResolvedCategory[] {
   return categories.map((c, i) => ({ ...c, color: c.color ?? categoricalColor(i) }));
 }
@@ -174,25 +198,10 @@ export function InteractiveArea({
 }: InteractiveAreaProps) {
   const MARGIN = { ...DEFAULT_MARGIN, ...margin };
 
-  const resolvedCategories = useMemo(() => resolveCategoryColors(categories), [categories]);
-
-  // Click-to-toggle state lives here, not in the caller - the same "it's
-  // just part of how this primitive works" ownership InteractiveLine's
-  // zoom state has, so every consumer gets it for free rather than having
-  // to wire up its own hidden-set plumbing.
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleCategory = (id: string) =>
-    setHiddenIds((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      // Refuse to hide the last visible category - an empty stack isn't a
-      // useful state and d3.stack's own proportional (expand) offset is
-      // only well-defined with at least one visible series.
-      if (next.size === resolvedCategories.length) return cur;
-      return next;
-    });
-  const visibleCategories = resolvedCategories.filter((c) => !hiddenIds.has(c.id));
+  // No hiding any more (#456): the legend that toggled categories is gone,
+  // and a click-to-hide on a band's own label would leave no way to bring
+  // it back once hidden. Every category is always drawn.
+  const visibleCategories = useMemo(() => resolveCategoryColors(categories), [categories]);
 
   const fullXDomain = useMemo<[Date, Date]>(() => {
     if (xDomain) return xDomain;
@@ -200,9 +209,7 @@ export function InteractiveArea({
     return extent[0] && extent[1] ? (extent as [Date, Date]) : [new Date(), new Date()];
   }, [xDomain, points]);
 
-  const hasLegend = resolvedCategories.length >= 2;
-  const legendReserve = hasLegend ? LEGEND_HEIGHT : 0;
-  const mainHeight = Math.max(MIN_MAIN_HEIGHT, height - legendReserve);
+  const mainHeight = Math.max(MIN_MAIN_HEIGHT, height);
 
   const innerWidth = width - MARGIN.left - MARGIN.right;
   const innerHeight = mainHeight - MARGIN.top - MARGIN.bottom;
@@ -235,7 +242,8 @@ export function InteractiveArea({
   function bandPixelBounds(d: StackPoint, isBottom: boolean): [number, number] {
     const rawBottom = y(d[0]);
     const topPx = y(d[1]);
-    const bottomPx = isBottom ? rawBottom : Math.max(rawBottom - GAP_INSET, topPx);
+    const gap = Math.min(GAP_INSET, (rawBottom - topPx) * GAP_MAX_SHARE);
+    const bottomPx = isBottom ? rawBottom : rawBottom - gap;
     return [bottomPx, topPx];
   }
 
@@ -313,65 +321,45 @@ export function InteractiveArea({
           .attr("stroke-width", MARK_SPECS.line.strokeWidth)
           .attr("d", lineGen);
 
-        // In-shape label: find this band's single widest point (by pixel
-        // thickness), then walk outward from it while thickness stays
-        // above the legibility floor to find the full contiguous run it
-        // sits inside - the run's pixel width is what actually has to fit
-        // the label, not just the one (possibly needle-thin between two
-        // wide neighbors) peak point. Placed and measured for real via
-        // getComputedTextLength() rather than a guessed chars-per-px
-        // ratio, then removed if it genuinely doesn't fit anywhere on
-        // this band - a label overlapping its neighbor is worse than no
-        // label, and the legend + tooltip both still say what this band
-        // is either way.
-        if (layer.length > 0) {
-          const xs = layer.map((d) => x(d.data.x));
+        // In-band label - the legend, since #456. The layout search runs
+        // here, inside the render, so it re-runs only when the data or
+        // dimensions change, never per pointer move (use-d3.ts's rule).
+        // Bands that never get thick enough for the smallest label skip
+        // measurement entirely, which is most of a long muted tail.
+        if (layer.length > 1) {
           const bounds = layer.map((d) => bandPixelBounds(d, isBottom));
-          const thickness = bounds.map(([bottomPx, topPx]) => bottomPx - topPx);
-
-          let peakIndex = 0;
-          for (let j = 1; j < thickness.length; j++) {
-            if (thickness[j] > thickness[peakIndex]) peakIndex = j;
-          }
-
-          if (thickness[peakIndex] >= LABEL_MIN_THICKNESS) {
-            const [peakBottom, peakTop] = bounds[peakIndex];
-            const label = bandG
-              .append("text")
-              .attr("x", xs[peakIndex])
-              .attr("y", (peakBottom + peakTop) / 2)
-              .attr("text-anchor", "middle")
-              .attr("dominant-baseline", "central")
-              .style("font-size", `${LABEL_FONT_SIZE}px`)
-              .style("font-weight", 600)
-              // A stroked halo behind the fill, not a plain fill color -
-              // the label sits on whatever hue this category's color
-              // happens to be (any of the fixed 5 categorical slots, or
-              // the muted overflow gray for a 6th+ category), so a single
-              // fixed fill color can't guarantee contrast on its own the
-              // way it could against one known surface color.
-              .attr("paint-order", "stroke")
-              .attr("stroke", "var(--card)")
-              .attr("stroke-width", 3)
-              .attr("stroke-linejoin", "round")
-              .attr("fill", "var(--foreground)")
-              .text(cat.label);
-
-            const labelWidth = (label.node() as SVGTextElement).getComputedTextLength();
-
-            let lo = peakIndex;
-            let hi = peakIndex;
-            while (lo > 0 && thickness[lo - 1] >= LABEL_MIN_THICKNESS) lo--;
-            while (hi < thickness.length - 1 && thickness[hi + 1] >= LABEL_MIN_THICKNESS) hi++;
-            const availableWidth = xs[hi] - xs[lo];
-
-            if (availableWidth < labelWidth + LABEL_PADDING_X) {
-              label.remove();
-            } else {
-              // Center within the whole qualifying run, not pinned to the
-              // single peak point - reads better when the peak sits near
-              // one edge of an otherwise-wide-enough stretch.
-              label.attr("x", (xs[lo] + xs[hi]) / 2);
+          const maxThickness = d3.max(bounds, ([bottomPx, topPx]) => bottomPx - topPx) ?? 0;
+          if (maxThickness >= LABEL_FIT.minFont + 2 * (LABEL_FIT.padY ?? 0)) {
+            const profile = {
+              xs: layer.map((d) => x(d.data.x)),
+              bottoms: bounds.map(([bottomPx]) => bottomPx),
+              tops: bounds.map(([, topPx]) => topPx),
+            };
+            const fit = fitBandLabelWithAlias(
+              profile,
+              { text: cat.label, widthRatio: measureWidthRatio(bandG, cat.label) },
+              cat.alias ? { text: cat.alias, widthRatio: measureWidthRatio(bandG, cat.alias) } : null,
+              LABEL_FIT,
+            );
+            if (fit) {
+              bandG
+                .append("text")
+                .attr("class", "area-label")
+                .attr("x", fit.x)
+                .attr("y", fit.y)
+                .attr("text-anchor", "middle")
+                .attr("dominant-baseline", "central")
+                .style("font-size", `${fit.fontSize}px`)
+                .style("font-weight", LABEL_FONT_WEIGHT)
+                // Black or white per this band's own painted fill, the
+                // same call InteractiveTimeline makes: the fill is a
+                // `var(--chart-N)` (or the muted neutral), so it has to be
+                // read back resolved before its lightness can be judged.
+                .attr("fill", contrastingTextColor(getComputedStyle(fillPath.node() as SVGPathElement).fill))
+                // The band underneath owns hover; a label intercepting the
+                // pointer would drop the highlight whenever it's crossed.
+                .style("pointer-events", "none")
+                .text(fit.text);
             }
           }
         }
@@ -460,25 +448,15 @@ export function InteractiveArea({
   }
 
   return (
-    <div style={{ position: "relative", width, height }}>
-      {hasLegend ? (
-        <Legend
-          series={resolvedCategories.map((c) => ({ id: c.id, label: c.label, color: c.color }))}
-          onToggle={toggleCategory}
-          hiddenIds={hiddenIds}
-          className="mb-1.5"
-        />
+    <div style={{ position: "relative", width, height: mainHeight }}>
+      <svg
+        ref={ref}
+        role="img"
+        aria-label={ariaLabel ?? "Interactive chart. Hover or focus a band and use arrow keys to inspect its values."}
+      />
+      {tooltip ? (
+        <ChartTooltip x={tooltip.x} y={tooltip.y} title={tooltip.title} rows={tooltip.rows} containerWidth={width} />
       ) : null}
-      <div style={{ position: "relative", width, height: mainHeight }}>
-        <svg
-          ref={ref}
-          role="img"
-          aria-label={ariaLabel ?? "Interactive chart. Hover or focus a band and use arrow keys to inspect its values."}
-        />
-        {tooltip ? (
-          <ChartTooltip x={tooltip.x} y={tooltip.y} title={tooltip.title} rows={tooltip.rows} containerWidth={width} />
-        ) : null}
-      </div>
     </div>
   );
 }

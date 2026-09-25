@@ -3,8 +3,7 @@
 import { useMemo } from "react";
 import {
   CompositionExplorer,
-  foldToTopCategories,
-  OTHER_ID,
+  rankCategories,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import type { CountryDay } from "@/lib/charts";
@@ -14,16 +13,6 @@ import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // See coffee-charts.tsx for why this thin client layer exists: the shared
 // explorers take formatter functions, which a server-component page can't
 // pass across the boundary.
-
-/**
- * Five countries plus "Other".
- *
- * Countries are the one level of the place tree with few enough members to
- * sit inside a categorical palette, and even then the tail is long — most
- * countries are a holiday rather than a place you lived. Folding them keeps
- * the chart about where life actually happened.
- */
-const MAX_COUNTRIES = 5;
 
 /**
  * Where you were, over time.
@@ -37,14 +26,18 @@ const MAX_COUNTRIES = 5;
  * moving, where a stacked count mostly just tracks how much was logged.
  */
 export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
-  const { categories, keep } = useMemo(() => {
+  // Every country is its own band (#456), not a top five plus "Other".
+  // The long tail (most countries are a holiday rather than a place you
+  // lived) takes the muted neutral, so the chart still reads as where
+  // life happened, but each trip stays named on hover.
+  const categories = useMemo(() => {
     const totals = new Map<string, number>();
     for (const day of data) {
       for (const country of day.countries) {
         totals.set(country, (totals.get(country) ?? 0) + 1);
       }
     }
-    return foldToTopCategories(totals, MAX_COUNTRIES);
+    return rankCategories(totals);
   }, [data]);
 
   const rows = useMemo<CompositionRow[]>(
@@ -52,12 +45,11 @@ export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
       data.map((day) => {
         const values: Record<string, number> = {};
         for (const country of day.countries) {
-          const id = keep.has(country) ? country : OTHER_ID;
-          values[id] = (values[id] ?? 0) + 1;
+          values[country] = (values[country] ?? 0) + 1;
         }
         return { date: day.date, values };
       }),
-    [data, keep],
+    [data],
   );
 
   return (
