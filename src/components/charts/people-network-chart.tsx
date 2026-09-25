@@ -46,6 +46,16 @@ const UNTAGGED_KEY = "untagged";
 const MIN_MENTION_PICKER = MIN_MENTION_OPTIONS.map((n) => ({ id: String(n), label: `${n}+` }));
 const DEFAULT_MIN_MENTIONS = 10;
 
+/** Below this chart width (px) the details panel isn't shown at all.
+ * On a phone it covered nearly the whole graph, and the selection still
+ * does its real work without it: the person and their neighbours are
+ * highlighted and zoomed to, and tapping gives the tooltip. The same
+ * cutoff decides whether the zoom leaves room for the panel. */
+const DETAILS_PANEL_MIN_WIDTH = 640;
+/** The panel's footprint from the chart's left edge: w-64 at left-2, plus
+ * a gap before the zoomed-to neighbourhood starts. */
+const DETAILS_PANEL_INSET = 280;
+
 /** How many of a person's ties the details panel lists. */
 const PANEL_CONNECTIONS = 10;
 
@@ -332,11 +342,9 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
                     selectedId={effectiveSelected}
                     onSelect={onSelect}
                     onNodeDragStart={pause}
-                    // The details panel (w-64 at left-2, plus a gap) covers
-                    // this much of the graph once someone's selected. On a
-                    // narrow screen it covers most of the width anyway, so
-                    // framing around it would leave nothing to frame into.
-                    focusInsetLeft={width >= 640 ? 280 : 0}
+                    // The details panel covers this much of the graph once
+                    // someone's selected; on a narrow chart there's no panel.
+                    focusInsetLeft={width >= DETAILS_PANEL_MIN_WIDTH ? DETAILS_PANEL_INSET : 0}
                     tooltip={tooltip}
                     ariaLabel="People network. Each dot is a person, sized by days logged and coloured by tag; lines join people logged together more often than chance. Drag a person to pull them around, scroll to zoom, click to see who they're most often with."
                   />
@@ -351,7 +359,7 @@ export function PeopleNetworkChart({ data }: { data: PeopleNetworkInput }) {
                       {formatDate(toDateString(frames[frame]), "monthYear")}
                     </span>
                   ) : null}
-                  {selected ? (
+                  {selected && width >= DETAILS_PANEL_MIN_WIDTH ? (
                     <DetailsPanel
                       person={selected}
                       color={color({ id: selected.id, label: selected.name, count: selected.count })}
