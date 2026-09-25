@@ -151,8 +151,9 @@ export function SleepLocationChart({ data }: { data: SleepNight[] }) {
   const recorded = useMemo(() => data.filter((n) => n.locationType !== null), [data]);
 
   // All seven location types are their own bands (#456), not four plus
-  // "Other". The two smallest share the muted neutral past the palette's
-  // five slots; they're 42 nights between them against 844 at home, so
+  // "Other". There's no established colour for location types, so the
+  // five biggest take the palette slots and the two smallest the pale
+  // tail colour; they're 42 nights between them against 844 at home, so
   // they're thin, but each is still named in its label or on hover.
   const categories = useMemo(() => {
     const totals = new Map<string, number>();

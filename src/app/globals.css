@@ -164,6 +164,13 @@
      existing chart-1/chart-3 pair (7.0 deutan, the legal band with a
      legend), which every exercise chart carries. */
   --exercise-strength: oklch(0.55 0.01 60);
+  /* The stacked-area tail (#456): every band past the five categorical
+     slots, and the "Other" fold past 100 bands. Pale beige by request,
+     rather than `--muted-foreground`'s mid-grey — a long tail of hundreds
+     of bands should recede behind the coloured ones, not compete with
+     them. Deliberately low contrast against the card: it's background
+     mass, and each band is still named on hover. */
+  --chart-tail: oklch(0.89 0.03 75);
   /* A little rounder than the old 0.5rem — warmer, less dashboard-corporate. */
   --radius: 0.75rem;
   --sidebar: oklch(0.97 0.01 65);
@@ -215,6 +222,9 @@
   --rank-up: oklch(0.8 0.15 165);
   --rank-down: oklch(0.66 0.2 25);
   --exercise-strength: oklch(0.62 0.012 60);
+  /* Dark-mode tail: "pale" relative to this card, not an absolute pale
+     beige, which would be the brightest thing on a dark chart. */
+  --chart-tail: oklch(0.36 0.03 70);
   --sidebar: oklch(0.19 0.016 48);
   --sidebar-foreground: oklch(0.96 0.012 70);
   --sidebar-primary: oklch(0.72 0.16 40);

@@ -11,7 +11,7 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { personImpact, recencyWeight } from "@/lib/impact";
-import { categoricalColor } from "@/lib/viz/color";
+import { categoricalColor, colorByScheme } from "@/lib/viz/color";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveBarRace } from "@/components/charts/interactive/interactive-bar-race";
 import type { RaceFrame } from "@/lib/viz/race";
@@ -124,20 +124,22 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
     [data],
   );
 
-  // Every person is their own band (#456), not a top five plus "Other".
-  // 689 people against five real palette slots means nearly everyone is
-  // in the muted neutral, but each is still named on hover, and the top
-  // five are far enough ahead (the leader has 862 days, the fifth 520)
-  // that the coloured bands are the ones worth telling apart anyway.
+  // Every person is their own band up to InteractiveArea's 100-band cap
+  // (#456), and each is coloured by their tag - the same colours the
+  // People calendar and network use - so a stretch of the chart reads as
+  // which circle you were spending time with. Untagged people take the
+  // pale tail colour rather than a palette slot that would pass for a tag.
   const categories = useMemo(() => {
     const totals = new Map<string, number>();
+    const tagColor = new Map<string, string>();
     for (const day of scored) {
       for (const person of day.people) {
+        if (person.tagColor) tagColor.set(person.name, person.tagColor);
         const score = personImpact(day.happiness as number, person.slot);
         totals.set(person.name, (totals.get(person.name) ?? 0) + score);
       }
     }
-    return rankCategories(totals);
+    return colorByScheme(rankCategories(totals), (name) => tagColor.get(name));
   }, [scored]);
 
   const rows = useMemo<CompositionRow[]>(
@@ -157,7 +159,7 @@ export function PeopleImpactChart({ data }: { data: PeopleDay[] }) {
       rows={rows}
       categories={categories}
       title="People Impact"
-      description="How much each person contributed to how your days went, using the original scoring from the legacy app. Everyone past the top five shares one grey; hover a band to see who it is."
+      description="How much each person contributed to how your days went, using the original scoring from the legacy app. Each person is coloured by their tag; hover a band to see who it is."
       methodology={PEOPLE_IMPACT_METHODOLOGY}
       trackingSpan={PEOPLE_TRACKING_SPAN}
       valueFormat={(v) => v.toFixed(1)}

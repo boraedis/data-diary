@@ -81,3 +81,41 @@ describe("InteractiveArea labels (#456)", () => {
     expect(container.querySelector('text[visibility="hidden"]')).toBeNull();
   });
 });
+
+describe("InteractiveArea colours and band cap (#456)", () => {
+  const fillOf = (container: HTMLElement, id: string) =>
+    container.querySelector(`g.area-band[data-category-id="${id}"] path`)?.getAttribute("fill");
+
+  it("gives the first five the palette slots and everything after the pale tail", () => {
+    const { container } = renderArea();
+    expect(fillOf(container, "home")).toBe("var(--chart-1)");
+    expect(fillOf(container, "friend")).toBe("var(--chart-5)");
+    expect(fillOf(container, "transport")).toBe("var(--chart-tail)");
+    expect(fillOf(container, "outdoors")).toBe("var(--chart-tail)");
+  });
+
+  it("keeps a caller's scheme colour", () => {
+    const { container } = render(
+      <InteractiveArea
+        categories={[{ id: "a", label: "A", color: "#123456" }, { id: "b", label: "B" }]}
+        points={months(3).map((x) => ({ x, values: { a: 1, b: 1 } }))}
+        width={600}
+        height={400}
+      />,
+    );
+    expect(fillOf(container, "a")).toBe("#123456");
+  });
+
+  it("folds everything past 100 bands into one Other on top", () => {
+    const many = Array.from({ length: 105 }, (_, i) => ({ id: `c${i}`, label: `C${i}` }));
+    const values = Object.fromEntries(many.map((c, i) => [c.id, 105 - i]));
+    const { container } = render(
+      <InteractiveArea categories={many} points={months(3).map((x) => ({ x, values }))} width={600} height={400} />,
+    );
+    const ids = [...container.querySelectorAll("g.area-band")].map((g) => g.getAttribute("data-category-id"));
+    expect(ids).toHaveLength(101);
+    expect(ids.at(-1)).toBe("__other__");
+    expect(ids).not.toContain("c100");
+    expect(fillOf(container, "__other__")).toBe("var(--chart-tail)");
+  });
+});

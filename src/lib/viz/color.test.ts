@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AREA_TAIL_COLOR,
+  colorByScheme,
   categoricalColor,
   categorySequentialInterpolator,
   divergingScale,
@@ -99,5 +101,19 @@ describe("divergingScale", () => {
     const light = divergingScale([-100, 0, 100], "light");
     const dark = divergingScale([-100, 0, 100], "dark");
     expect(light(100)).not.toBe(dark(100));
+  });
+});
+
+describe("colorByScheme", () => {
+  it("leaves categories alone when nothing has a scheme colour", () => {
+    const cats = [{ id: "a" }, { id: "b" }];
+    expect(colorByScheme(cats, () => null)).toEqual(cats);
+  });
+
+  it("uses scheme colours and gives the rest the tail, not a palette slot", () => {
+    expect(colorByScheme([{ id: "a" }, { id: "b" }], (id) => (id === "a" ? "#abcdef" : undefined))).toEqual([
+      { id: "a", color: "#abcdef" },
+      { id: "b", color: AREA_TAIL_COLOR },
+    ]);
   });
 });

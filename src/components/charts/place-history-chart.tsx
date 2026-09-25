@@ -7,6 +7,7 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import type { CountryDay } from "@/lib/charts";
+import { colorByScheme } from "@/lib/viz/color";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
@@ -25,10 +26,18 @@ import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
  * Share mode is the interesting one: it turns the chart into a picture of
  * moving, where a stacked count mostly just tracks how much was logged.
  */
-export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
-  // Every country is its own band (#456), not a top five plus "Other".
-  // The long tail (most countries are a holiday rather than a place you
-  // lived) takes the muted neutral, so the chart still reads as where
+export function PlaceHistoryChart({
+  data,
+  countryColors,
+}: {
+  data: CountryDay[];
+  /** Country name -> the colour set on its place (`getCountryColors`). */
+  countryColors: Record<string, string>;
+}) {
+  // Every country is its own band (#456), not a top five plus "Other",
+  // coloured by the colour set on its place - the same one the rest of the
+  // app uses for it. A country with none takes the pale tail colour, so
+  // the long tail of holidays recedes and the chart still reads as where
   // life happened, but each trip stays named on hover.
   const categories = useMemo(() => {
     const totals = new Map<string, number>();
@@ -37,8 +46,8 @@ export function PlaceHistoryChart({ data }: { data: CountryDay[] }) {
         totals.set(country, (totals.get(country) ?? 0) + 1);
       }
     }
-    return rankCategories(totals);
-  }, [data]);
+    return colorByScheme(rankCategories(totals), (country) => countryColors[country]);
+  }, [data, countryColors]);
 
   const rows = useMemo<CompositionRow[]>(
     () =>

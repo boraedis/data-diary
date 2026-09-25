@@ -5,7 +5,8 @@ import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { toDateString } from "@/lib/date";
 import { formatDate, formatPercent, type DateFormatPreset } from "@/lib/viz/format";
-import { categoricalColor, contrastingTextColor } from "@/lib/viz/color";
+import { AREA_TAIL_COLOR, CATEGORICAL_SLOT_COUNT, categoricalColor, contrastingTextColor } from "@/lib/viz/color";
+import { AREA_OTHER_ID, capAreaCategories } from "@/lib/viz/area-fold";
 import { fitBandLabelWithAlias, type LabelFitOptions } from "@/lib/viz/area-labels";
 import { drawStandardAxes, drawYGridlines } from "./axis";
 import { MARK_SPECS } from "./marks";
@@ -47,11 +48,13 @@ import { ChartTooltip, type TooltipRow } from "./tooltip";
 // rule.
 //
 // #456 made the in-band labels the legend, as they were in legacy: the
-// separate `Legend` (and its click-to-hide) is gone, each band's label is
-// sized to fill the band (`src/lib/viz/area-labels.ts`), and nothing is
-// folded into "Other" any more - every category is its own band, with
-// slots past the 5th in the muted neutral, individually labelled where
-// there's room and always individually hoverable.
+// separate `Legend` (and its click-to-hide) is gone, and each band's label
+// is sized to fill the band (`src/lib/viz/area-labels.ts`). Up to 100
+// categories are each their own band; only the tail past that folds into
+// "Other" (`src/lib/viz/area-fold.ts`). Bands past the five categorical
+// slots, and "Other", take the pale `AREA_TAIL_COLOR` unless the caller
+// passes a colour - which it should wherever the domain already has a
+// colour scheme (tags, place colours, exercise categories).
 
 const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
 const MIN_MAIN_HEIGHT = 160;
@@ -99,8 +102,10 @@ export type InteractiveAreaCategory = {
    * `fitBandLabelWithAlias`. The tooltip always shows the full `label`. */
   alias?: string;
   /** Defaults to `categoricalColor(i)` using this category's index in the
-   * `categories` array (fixed slot order) - pass this only to pin a
-   * specific slot regardless of array order. */
+   * `categories` array (fixed slot order) for the first five, and
+   * `AREA_TAIL_COLOR` for every one after. Pass it wherever the domain has
+   * its own established colours - a tag's, a place's - so the chart agrees
+   * with the rest of the app about what colour a thing is. */
   color?: string;
 };
 
@@ -178,13 +183,20 @@ function measureWidthRatio(parent: d3.Selection<SVGGElement, unknown, null, unde
   return width > 0 ? width / MEASURE_FONT_SIZE : text.length * 0.6;
 }
 
+// Resolved against the caller's full list, before the band cap, so a
+// category's slot never depends on whether the tail happened to fold.
 function resolveCategoryColors(categories: InteractiveAreaCategory[]): ResolvedCategory[] {
-  return categories.map((c, i) => ({ ...c, color: c.color ?? categoricalColor(i) }));
+  return categories.map((c, i) => ({
+    ...c,
+    color: c.color ?? (i < CATEGORICAL_SLOT_COUNT ? categoricalColor(i) : AREA_TAIL_COLOR),
+  }));
 }
+
+const OTHER_CATEGORY: ResolvedCategory = { id: AREA_OTHER_ID, label: "Other", color: AREA_TAIL_COLOR };
 
 export function InteractiveArea({
   categories,
-  points,
+  points: rawPoints,
   width,
   height,
   mode = "stacked",
@@ -201,7 +213,13 @@ export function InteractiveArea({
   // No hiding any more (#456): the legend that toggled categories is gone,
   // and a click-to-hide on a band's own label would leave no way to bring
   // it back once hidden. Every category is always drawn.
-  const visibleCategories = useMemo(() => resolveCategoryColors(categories), [categories]);
+  const { visibleCategories, points } = useMemo(() => {
+    const capped = capAreaCategories(resolveCategoryColors(categories), rawPoints);
+    return {
+      visibleCategories: capped.folded ? [...capped.kept, OTHER_CATEGORY] : capped.kept,
+      points: capped.points,
+    };
+  }, [categories, rawPoints]);
 
   const fullXDomain = useMemo<[Date, Date]>(() => {
     if (xDomain) return xDomain;
