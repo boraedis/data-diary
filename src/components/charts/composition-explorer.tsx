@@ -29,9 +29,11 @@ import type { TrackingSpan } from "@/lib/viz/tracking-span";
  *
  * 1. **The palette runs out.** Five real categorical slots before it
  *    flattens to one muted grey, against domains with hundreds of members
- *    (689 distinct people). Callers fold a tail into "Other" before passing
- *    categories in — this component doesn't guess how, because what's worth
- *    keeping differs per domain.
+ *    (689 distinct people). Callers don't fold (#456): every member is
+ *    its own band up to `InteractiveArea`'s 100-band cap, coloured by the
+ *    domain's own scheme where it has one (`colorByScheme`), else the
+ *    biggest five get the real slots (see `rankCategories`) and the rest a
+ *    pale tail colour.
  * 2. **Colour must follow the entity, not its rank.** Slots are resolved
  *    once from the `categories` array, so a category keeps its colour when
  *    the bucket size changes or a filter removes its neighbours.
@@ -130,25 +132,17 @@ export function CompositionExplorer({
 }
 
 /**
- * Ranks category keys by total weight, keeps the top `max`, and folds the
- * rest into one "Other" bucket.
+ * Orders category keys by total weight, biggest first, so the five real
+ * palette slots go to the five biggest and the rest take the tail colour.
+ * Every key is kept here; `InteractiveArea` folds only past 100 bands.
  *
  * Exported because every consumer of the explorer needs it and the rule
  * should be identical across them: rank by overall total, not by
  * within-bucket presence, so a category's slot doesn't move when the
- * bucketing changes.
+ * bucketing changes. Biggest first also puts the biggest bands at the
+ * bottom of the stack, where the flat baseline gives their labels the
+ * most room.
  */
-export const OTHER_ID = "__other__";
-
-export function foldToTopCategories(
-  totals: Map<string, number>,
-  max: number,
-): { categories: InteractiveAreaCategory[]; keep: Set<string> } {
-  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
-  const keep = new Set(ranked.slice(0, max));
-  const categories: InteractiveAreaCategory[] = ranked
-    .slice(0, max)
-    .map((id) => ({ id, label: id }));
-  if (ranked.length > max) categories.push({ id: OTHER_ID, label: "Other" });
-  return { categories, keep };
+export function rankCategories(totals: Map<string, number>): InteractiveAreaCategory[] {
+  return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => ({ id, label: id }));
 }

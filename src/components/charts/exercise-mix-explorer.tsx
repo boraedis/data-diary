@@ -16,6 +16,7 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { groupByPeriod, type Period } from "@/lib/viz/bin";
 import { parseDate, toDateString } from "@/lib/date";
 import { formatDate, formatDuration } from "@/lib/viz/format";
+import { AREA_TAIL_COLOR } from "@/lib/viz/color";
 import { EXERCISE_CATEGORY_COLORS, EXERCISE_CATEGORY_LABELS, EXERCISE_CATEGORY_ORDER, type ExerciseWorkoutRow } from "@/lib/charts";
 import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { TRAINING_METHODOLOGY } from "@/lib/viz/methodology";
@@ -82,29 +83,32 @@ function dimensionKey(row: ExerciseWorkoutRow, dim: GroupByDimension): { id: str
  *
  * No top-N/"Other" cut here - every distinct value gets its own band, per
  * explicit follow-up feedback ("get rid of the other just put everything
- * on there"). Worth flagging honestly: viz/color.ts's categoricalColor()
- * only has 5 fixed slots (CATEGORICAL_SLOT_COUNT) before it falls back to
- * a single flat muted-gray for every slot beyond that - so once "exercise"
- * or "subtype" surfaces more than 5 distinct values, the 6th+ bands will
- * share that same gray and rely on the legend/tooltip/in-shape labels to
- * stay distinguishable rather than color. That's an existing, unmodified
- * property of the shared color scale, not something new to this chart -
- * extending the categorical palette itself is a separate, bigger decision
- * than what was asked for here.
+ * on there"). InteractiveArea itself folds only past 100 bands (#456).
+ * Colour comes from each band's exercise category, below, not from rank.
  */
 function buildCategories(rows: ExerciseWorkoutRow[], dim: GroupByDimension): InteractiveAreaCategory[] {
   if (dim === "category") {
     return EXERCISE_CATEGORY_ORDER.map((id) => ({ id, label: EXERCISE_CATEGORY_LABELS[id], color: EXERCISE_CATEGORY_COLORS[id] }));
   }
-  const totals = new Map<string, { label: string; hours: number }>();
+  // Exercises and subtypes are coloured by their exercise category (#456),
+  // the scheme the category view and the rest of the gym charts already
+  // use, rather than by volume rank. An exercise always has exactly one
+  // category; a subtype is free text that can span several (a "(none)"
+  // spans all of them), and takes the tail colour when it does.
+  const totals = new Map<string, { label: string; hours: number; categories: Set<string> }>();
   for (const row of rows) {
     const { id, label } = dimensionKey(row, dim);
     const existing = totals.get(id);
-    if (existing) existing.hours += row.hours;
-    else totals.set(id, { label, hours: row.hours });
+    if (existing) {
+      existing.hours += row.hours;
+      existing.categories.add(row.category);
+    } else totals.set(id, { label, hours: row.hours, categories: new Set([row.category]) });
   }
   const ranked = [...totals.entries()].sort((a, b) => b[1].hours - a[1].hours);
-  return ranked.map(([id, v]) => ({ id, label: v.label }));
+  return ranked.map(([id, v]) => {
+    const only = v.categories.size === 1 ? [...v.categories][0] : null;
+    return { id, label: v.label, color: (only && EXERCISE_CATEGORY_COLORS[only]) || AREA_TAIL_COLOR };
+  });
 }
 
 function buildPoints(rows: ExerciseWorkoutRow[], dim: GroupByDimension, period: Period): InteractiveAreaPoint[] {

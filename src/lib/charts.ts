@@ -1,4 +1,4 @@
-import { asc, eq, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
@@ -1894,6 +1894,23 @@ export type CountryDay = { date: string; countries: string[] };
  * or venue would need the "which ancestor is the neighbourhood" question
  * settled first — see #214.
  */
+/**
+ * Country name -> the colour set on that country's place row, for charts
+ * that colour by country (#456). Legacy only ever set `places.color` on
+ * top-level places, which is exactly the country level. Keys go through
+ * `normalizeCountryName`, the same as `getCountryHistoryData`'s, so the
+ * two line up.
+ */
+export async function getCountryColors(): Promise<Record<string, string>> {
+  const rows = await getDb()
+    .select({ name: places.name, color: places.color })
+    .from(places)
+    .where(and(isNull(places.parentId), isNotNull(places.color)));
+  const out: Record<string, string> = {};
+  for (const row of rows) if (row.color) out[normalizeCountryName(row.name)] = row.color;
+  return out;
+}
+
 export async function getCountryHistoryData(): Promise<CountryDay[]> {
   const db = getDb();
   const dayRows = await db
