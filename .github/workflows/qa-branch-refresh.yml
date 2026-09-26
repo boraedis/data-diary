@@ -10,9 +10,10 @@ jobs:
   reset-branch:
     runs-on: ubuntu-latest
     steps:
-      - uses: neondatabase/reset-branch-action@v1
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: qa
-          parent: true
-          api_key: ${{ secrets.NEON_API_KEY }}
+      - name: Reset QA branch to production parent
+        run: |
+          neonctl branches reset qa \
+            --project-id ${{ vars.NEON_PROJECT_ID }} \
+            --role-name neondb_owner
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
