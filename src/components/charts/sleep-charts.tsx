@@ -7,12 +7,14 @@ import {
   rankCategories,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
+import { SplitHistExplorer } from "@/components/charts/split-hist-explorer";
 import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import type { ReferenceLine } from "@/components/charts/interactive/reference-lines";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
 import type { SleepNight } from "@/lib/charts";
+import type { DaySplit } from "@/lib/day-split";
 import { SLEEP_LOCATION_METHODOLOGY, SLEEP_METHODOLOGY } from "@/lib/viz/methodology";
 import { SLEEP_LOCATION_TRACKING_SPAN, SLEEP_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
@@ -125,6 +127,52 @@ export function SleepDailyChart({ data }: { data: SleepNight[] }) {
   );
 }
 
+// --- Sleep Histogram ----------------------------------------------------------
+
+/** Quarter-hour buckets: fine enough to show the shape (the pile-up just
+ * under 8h), coarse enough that a decade of nights doesn't turn every bar
+ * into a spike of one or two. */
+const SLEEP_HIST_STEP = 0.25;
+/** Matches getSleepNightsData's own >20h bad-data guard. */
+const SLEEP_HIST_BOUNDS: [number, number] = [0, 20];
+
+const SLEEP_HIST_DESCRIPTIONS: Record<DaySplit, string> = {
+  none: "The distribution of nightly sleep across every night logged.",
+  work: "Sleep on the nights before a work day against the nights before any other kind of day.",
+  weekend: "Sleep on the nights before a weekday against the nights before a weekend day (Friday and Saturday nights).",
+};
+
+/** A night belongs to the day it leads into (see `SleepNight.dayType`), so
+ * the split's sides read as "before" that kind of day. */
+const beforeDay = (label: string) => `Before ${label.toLowerCase()}`;
+const formatSleepRange = (x0: number, x1: number) => `${formatHours(x0)}–${formatHours(x1)}`;
+const countNights = (n: number) => `night${n === 1 ? "" : "s"}`;
+
+export function SleepHistChart({ data }: { data: SleepNight[] }) {
+  const nights = useMemo(
+    () => data.map((n) => ({ date: n.date, dayType: n.dayType, value: sleepHours(n) })),
+    [data],
+  );
+
+  return (
+    <SplitHistExplorer
+      data={nights}
+      title="Sleep Histogram"
+      descriptions={SLEEP_HIST_DESCRIPTIONS}
+      methodology={SLEEP_METHODOLOGY}
+      trackingSpan={SLEEP_TRACKING_SPAN}
+      color={SLEEP_COLOR}
+      step={SLEEP_HIST_STEP}
+      bounds={SLEEP_HIST_BOUNDS}
+      sideLabel={beforeDay}
+      formatRange={formatSleepRange}
+      xTickFormat={formatHours}
+      formatValue={formatHours}
+      countLabel={countNights}
+      ariaLabel="Sleep duration histogram. Hover a bar to see its range and how many nights fell in it."
+    />
+  );
+}
 
 type LocationMetric = "nights" | "hours";
 

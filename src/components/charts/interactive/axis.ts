@@ -87,6 +87,7 @@ export function drawStandardAxes({
   xTicks,
   yTicks,
   yTickFormat,
+  xTickFormat,
 }: {
   g: d3.Selection<SVGGElement, unknown, null, undefined>;
   x: d3.AxisScale<d3.NumberValue> | d3.AxisScale<Date>;
@@ -96,6 +97,9 @@ export function drawStandardAxes({
   xTicks?: number;
   yTicks?: number;
   yTickFormat?: (domainValue: d3.NumberValue, index: number) => string;
+  /** Only meaningful for a numeric x scale (a histogram's value axis, e.g.
+   * "8h" rather than "8"); a time axis keeps d3's own date formatting. */
+  xTickFormat?: (domainValue: d3.NumberValue, index: number) => string;
 }): {
   xAxisG: d3.Selection<SVGGElement, unknown, null, undefined>;
   yAxisG: d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -107,7 +111,9 @@ export function drawStandardAxes({
   const resolvedXTicks = xTicks ?? Math.max(2, Math.floor(innerWidth / 90));
 
   const xAxisG = g.append("g").attr("transform", `translate(0,${innerHeight})`);
-  styleAxis(xAxisG, d3.axisBottom(x as d3.AxisScale<d3.AxisDomain>).ticks(resolvedXTicks));
+  const xAxis = d3.axisBottom(x as d3.AxisScale<d3.AxisDomain>).ticks(resolvedXTicks);
+  if (xTickFormat) xAxis.tickFormat(xTickFormat as (v: d3.AxisDomain, i: number) => string);
+  styleAxis(xAxisG, xAxis);
 
   const yAxis = d3.axisLeft(y).ticks(yTicks ?? 5);
   if (yTickFormat) yAxis.tickFormat(yTickFormat);

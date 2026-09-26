@@ -34,17 +34,21 @@ export type { LifeTimelineEntry } from "@/lib/life-timeline";
 
 // --- Happiness histogram ---------------------------------------------------
 
+/** One happiness score with the context the histogram can split it by —
+ * the day's type (work, day off, …) and its date, for weekday/weekend. */
+export type HappinessHistDay = { date: string; happiness: number; dayType: DayType | null };
+
 /** Every recorded happiness value (0-100), oldest first. Binning is left to
  * the chart component (d3.bin has better judgment about bucket width than a
  * pre-aggregated count would) rather than done here. */
-export async function getHappinessHistogramData(): Promise<number[]> {
+export async function getHappinessHistogramData(): Promise<HappinessHistDay[]> {
   const db = getDb();
   const rows = await db
-    .select({ happiness: days.happiness })
+    .select({ date: days.date, happiness: days.happiness, dayType: days.dayType })
     .from(days)
     .where(isNotNull(days.happiness))
     .orderBy(asc(days.date));
-  return rows.map((r) => r.happiness as number);
+  return rows.map((r) => ({ date: r.date, happiness: r.happiness as number, dayType: r.dayType }));
 }
 
 // --- Happiness scroller ---------------------------------------------------
@@ -432,9 +436,16 @@ export type SleepNight = SleepDay & {
    * gets wake time from the same across-midnight derivation as every other
    * sleep chart rather than re-deriving it from `wakeTime` and the flag. */
   bedtimeMinutes: number;
-  /** `days.dayType` of the row — the day the night *began* on, so a work
-   * night is the sleep after a work day. Null before day types were
-   * tracked (2020) and on the odd unlogged day. */
+  /** The same row's `days.dayType`. The data says a row's sleep is the
+   * night that *ends* on its date: rows dated Saturday and Sunday have the
+   * latest bedtimes and wake times, and weekday rows the earliest — the
+   * reverse of what "the night that began on its date" would produce, where
+   * Sunday's row would be a school night. So this is the type of the day the
+   * night led into: a work-day row's sleep is the night before work. Null
+   * before day types were tracked (2020) and on the odd unlogged day.
+   *
+   * Sleep Hours (#466) documents this the other way round (the night after
+   * a work day, bars dated by the evening they began) — see #471. */
   dayType: DayType | null;
 };
 
