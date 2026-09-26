@@ -173,6 +173,12 @@ export const CHARTS: ChartEntry[] = [
     category: "sleep",
   },
   {
+    href: "/charts/sleep-hours",
+    title: "Sleep Hours",
+    description: "When I slept each night — a bar from falling asleep to waking, against the clock.",
+    category: "sleep",
+  },
+  {
     href: "/charts/sleep-locations",
     title: "Sleep Locations",
     description: "Where you slept, as a share of nights over time.",
