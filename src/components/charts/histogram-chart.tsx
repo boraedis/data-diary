@@ -12,9 +12,15 @@ import { HAPPINESS_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // chart's identity (a single-series chart, not a multi-series categorical
 // assignment the dataviz skill's fixed-slot-order rule governs), not the
 // toolkit default. Same choice made in happiness-averager-chart.tsx for the
-// trend line, so every "happiness" chart reads the same color. A split
-// switches to the split explorer's own side colors instead.
+// trend line, so every "happiness" chart reads the same color.
 const HAPPINESS_COLOR = categoricalColor(2);
+/** The same work-day/other pair Happiness Trend's work-day split uses
+ * (#415): a mustardy olive for work days against happiness's own green, so
+ * the split reads as "one metric, two conditions" — see globals.css's
+ * comment on `--metric-happiness-workday` for its colorblind validation.
+ * The weekend split reuses it (weekdays olive, weekends green) rather than
+ * introducing a second pair for the same metric. */
+const HAPPINESS_SIDE_COLORS: readonly [string, string] = ["var(--metric-happiness-workday)", HAPPINESS_COLOR];
 const HAPPINESS_BOUNDS: [number, number] = [0, 100];
 
 const DESCRIPTIONS: Record<DaySplit, string> = {
@@ -42,6 +48,7 @@ export function HappinessHistChart({ data }: { data: HappinessHistDay[] }) {
       methodology={HAPPINESS_METHODOLOGY}
       trackingSpan={HAPPINESS_TRACKING_SPAN}
       color={HAPPINESS_COLOR}
+      sideColors={HAPPINESS_SIDE_COLORS}
       step={1}
       bounds={HAPPINESS_BOUNDS}
       formatValue={formatScore}

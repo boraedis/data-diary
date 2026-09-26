@@ -34,13 +34,13 @@ const MODE_OPTIONS: GroupByOption<HistMode>[] = [
   { id: "stacked", label: "Stacked" },
 ];
 
-/** Blue then orange for the two sides of a split, on every split chart —
- * the most distinct pair in the palette (hue 225 vs. 40, and the classic
+/** Default colors for the two sides of a split: blue then orange, the most
+ * distinct pair in the palette (hue 225 vs. 40, and the classic
  * colorblind-safe pairing), which matters more here than anywhere else
- * because overlaid layers have to stay separable where they blend. Fixed by
- * side, not by chart: "Work days" is blue on the happiness and sleep pages
- * alike. */
-const SIDE_COLORS = [categoricalColor(4), categoricalColor(0)] as const;
+ * because overlaid layers have to stay separable where they blend. A chart
+ * whose metric already has a split pair elsewhere passes that instead
+ * (happiness — see `sideColors`). */
+const DEFAULT_SIDE_COLORS: readonly [string, string] = [categoricalColor(4), categoricalColor(0)];
 
 /** Module-level so the default keeps one identity (it's a memo dependency). */
 const identityLabel = (label: string) => label;
@@ -62,6 +62,10 @@ export type SplitHistExplorerProps = {
   /** Extra buckets of air either side of the data's own extent, so the
    * outermost bars aren't flush against the axis edge. */
   paddingSteps?: number;
+  /** Colors for the split's first and second side (work/weekday, then
+   * non-work/weekend). Pass the metric's existing pair where one exists, so
+   * a work day reads the same on every chart of that metric. */
+  sideColors?: readonly [string, string];
   /** Rewords a side's label for this chart — sleep's "Before work days". */
   sideLabel?: (label: string) => string;
   formatRange?: (x0: number, x1: number) => string;
@@ -81,6 +85,7 @@ export function SplitHistExplorer({
   step,
   bounds,
   paddingSteps = 3,
+  sideColors = DEFAULT_SIDE_COLORS,
   sideLabel = identityLabel,
   formatRange,
   xTickFormat,
@@ -114,10 +119,10 @@ export function SplitHistExplorer({
       // n in the legend: the two sides are rarely close in size, and that
       // is what "Share" vs. "Count" is about.
       label: `${sideLabel(group.label)} · ${formatThousandsNumber(group.days.length)}`,
-      color: SIDE_COLORS[i],
+      color: sideColors[i],
       values: group.days.map((d) => d.value),
     }));
-  }, [data, split, sideLabel]);
+  }, [data, split, sideLabel, sideColors]);
 
   const values = useMemo(() => data.map((d) => d.value), [data]);
 
