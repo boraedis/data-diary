@@ -33,7 +33,7 @@ export const CALENDAR_INTERACTION_GUIDE =
   "Each cell is one day, shaded by its value — hover a cell for the exact figure. Where a day is made of several categories, its colour is their mix, and the tooltip lists what went into it. Use the range picker above to focus on a shorter stretch.";
 
 export const AREA_INTERACTION_GUIDE =
-  "Hover or focus a band and use the arrow keys to inspect it. Click a legend entry to hide that category; click it again to bring it back.";
+  "Each band is labelled inside itself, as large as it fits; bands too thin for a label are still there — hover or focus any band to see what it is, and use the arrow keys to step through its values. Where a category has its own colour elsewhere in the app (a tag, a place) the band uses it; otherwise the top five get distinct colours and the rest share a pale beige. Past 100 bands, the smallest are folded into one Other band.";
 
 export const NETWORK_INTERACTION_GUIDE =
   "The layout is live: drag a node and its connections follow, let go and it settles back into place. Hover a node for its details; click one to highlight it and its neighbours and zoom in on them, and click another node or the background to move or clear that. With nothing selected, clicking the background fits the whole graph back into view. Scroll or pinch to zoom, drag the background to pan. Names appear on more nodes as you zoom in, and initials inside any node big enough to hold them. Where there’s a legend, click an entry to hide that group — the rest of the graph slides to fill the gap. Where there’s a Play control, it grows the graph month by month from the first logged day — drag the scrubber to see the network as it stood at any month, pick a speed, and drag a node to pause.";
@@ -55,6 +55,12 @@ export const COMBO_INTERACTION_GUIDE =
 
 export const TIMELINE_INTERACTION_GUIDE =
   "Drag the period slider or scroll the chart to zoom, drag to pan. Hover or focus an entry for its dates and length.";
+
+/** The Sleep Hours chart (#212) — bespoke, not built on a shared
+ * primitive, so it gets its own paragraph rather than borrowing one that
+ * would promise zoom it doesn't have. */
+export const SLEEP_HOURS_INTERACTION_GUIDE =
+  "Each bar is one night, from falling asleep at its top to waking at its bottom, coloured by the kind of day it followed. Scroll on the chart to zoom, drag to pan, double-click to show everything; the period slider moves the same window. Hover a night, or focus the chart and use the left and right arrow keys, for when you fell asleep and woke up. Click a legend entry to hide that day type. The Regions picker shades jobs, homes, relationships or age behind the bars. The clock axis refits to the nights in view.";
 
 /** Shown in the popup's Methodology section until a chart has real,
  * hand-written copy from #316 — the content follow-up ticket. Deliberately

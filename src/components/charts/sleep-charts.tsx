@@ -4,8 +4,7 @@ import { useMemo, useState } from "react";
 import { DailyExplorer } from "@/components/charts/daily-explorer";
 import {
   CompositionExplorer,
-  foldToTopCategories,
-  OTHER_ID,
+  rankCategories,
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { SplitHistExplorer } from "@/components/charts/split-hist-explorer";
@@ -175,15 +174,6 @@ export function SleepHistChart({ data }: { data: SleepNight[] }) {
   );
 }
 
-/** Four locations plus "Other".
- *
- * There are seven location types but the categorical palette has five real
- * slots before it flattens to one muted grey. The tail is genuinely small —
- * `Family's`, `Transport` and `Outdoors` are 42 nights between them against
- * 844 at home — so folding loses very little, where letting them fall off
- * the palette would silently make three categories indistinguishable. */
-const MAX_LOCATIONS = 4;
-
 type LocationMetric = "nights" | "hours";
 
 const METRIC_OPTIONS: GroupByOption<LocationMetric>[] = [
@@ -208,26 +198,29 @@ export function SleepLocationChart({ data }: { data: SleepNight[] }) {
 
   const recorded = useMemo(() => data.filter((n) => n.locationType !== null), [data]);
 
-  const { categories, keep } = useMemo(() => {
+  // All seven location types are their own bands (#456), not four plus
+  // "Other". There's no established colour for location types, so the
+  // five biggest take the palette slots and the two smallest the pale
+  // tail colour; they're 42 nights between them against 844 at home, so
+  // they're thin, but each is still named in its label or on hover.
+  const categories = useMemo(() => {
     const totals = new Map<string, number>();
     for (const night of recorded) {
       const key = night.locationType as string;
       totals.set(key, (totals.get(key) ?? 0) + 1);
     }
-    return foldToTopCategories(totals, MAX_LOCATIONS);
+    return rankCategories(totals);
   }, [recorded]);
 
   const rows = useMemo<CompositionRow[]>(
     () =>
       recorded.map((night) => {
-        const raw = night.locationType as string;
-        const id = keep.has(raw) ? raw : OTHER_ID;
         return {
           date: night.date,
-          values: { [id]: metric === "nights" ? 1 : asHours(night.durationMinutes) },
+          values: { [night.locationType as string]: metric === "nights" ? 1 : asHours(night.durationMinutes) },
         };
       }),
-    [recorded, keep, metric],
+    [recorded, metric],
   );
 
   return (

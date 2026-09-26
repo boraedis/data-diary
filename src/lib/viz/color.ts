@@ -17,7 +17,7 @@ import type { ScaleDiverging, ScaleSequential } from "d3";
 
 export type ColorMode = "light" | "dark";
 
-const CATEGORICAL_SLOT_COUNT = 5;
+export const CATEGORICAL_SLOT_COUNT = 5;
 
 /**
  * Fixed-order categorical color for series index `i` (0-based), resolving
@@ -362,6 +362,66 @@ export function divergingScale(
 }
 
 /**
+ * The stacked-area tail colour (#456) — see `--chart-tail` in globals.css.
+ * A named token rather than a 6th categorical slot: it's the colour of
+ * "one of the many", never a series identity.
+ */
+export const AREA_TAIL_COLOR = "var(--chart-tail)";
+
+/**
+ * Colours categories from a domain's own established scheme (a tag's
+ * colour, a place's) where one exists, so a chart agrees with the rest of
+ * the app about what colour a thing is (#456).
+ *
+ * Once *any* category has a scheme colour, the ones without get the tail
+ * colour rather than falling through to the categorical slots: a slot
+ * colour next to user-chosen ones would read as another member of the
+ * scheme (a sixth "tag") when it's really "no colour set". When nothing
+ * has one, the categories come back untouched and the chart's own default
+ * slot order applies.
+ */
+export function colorByScheme<C extends { id: string; color?: string }>(
+  categories: readonly C[],
+  schemeColor: (id: string) => string | null | undefined,
+): C[] {
+  const colors = categories.map((c) => schemeColor(c.id) ?? null);
+  if (colors.every((c) => c === null)) return [...categories];
+  return categories.map((c, i) => ({ ...c, color: colors[i] ?? AREA_TAIL_COLOR }));
+}
+
+let rasterContext: CanvasRenderingContext2D | null | undefined;
+
+/**
+ * Resolves any colour the browser understands to sRGB by painting one
+ * pixel and reading it back. d3-color predates CSS Color 4 and can't parse
+ * `oklch(...)`, which is exactly what `getComputedStyle` hands back for
+ * every token in globals.css, so without this `contrastingTextColor`
+ * silently answered white for the whole palette. Returns null where
+ * there's no canvas (SSR, and jsdom, which doesn't implement one); the
+ * context is created once and a failure is remembered, so jsdom logs its
+ * "not implemented" once rather than per label.
+ */
+function rasterizeColor(fill: string): { r: number; g: number; b: number } | null {
+  if (!fill || typeof document === "undefined") return null;
+  if (rasterContext === undefined) {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      rasterContext = canvas.getContext("2d", { willReadFrequently: true });
+    } catch {
+      rasterContext = null;
+    }
+  }
+  if (!rasterContext) return null;
+  rasterContext.clearRect(0, 0, 1, 1);
+  rasterContext.fillStyle = "#000";
+  rasterContext.fillStyle = fill;
+  rasterContext.fillRect(0, 0, 1, 1);
+  const [r, g, b] = rasterContext.getImageData(0, 0, 1, 1).data;
+  return { r, g, b };
+}
+
+/**
  * Black or white for a label sitting *on* `fill`, whichever the reader can
  * actually see.
  *
@@ -372,9 +432,11 @@ export function divergingScale(
  * fixed white would fail on the pale colours a user can pick for an entry
  * in the profile admin UI.
  *
- * `fill` must be a colour d3 can parse — a `var(--chart-N)` reference is
- * not, which is why InteractiveTimeline reads the fill back off the painted
- * element with `getComputedStyle` before asking. Where there's no resolved
+ * `fill` must be a resolved colour — a `var(--chart-N)` reference is not,
+ * which is why InteractiveTimeline reads the fill back off the painted
+ * element with `getComputedStyle` before asking. What that returns for
+ * this app's tokens is `oklch(...)`, which d3 can't parse, so those go
+ * through `rasterizeColor` (#456) instead. Where there's no resolved
  * colour to measure (a `var()`, or jsdom, which computes no styles), white
  * is the safer guess: the default palette is mid-to-dark.
  *
@@ -387,7 +449,7 @@ export function divergingScale(
  * colours.
  */
 export function contrastingTextColor(fill: string): string {
-  const rgb = color(fill)?.rgb();
+  const rgb = color(fill)?.rgb() ?? rasterizeColor(fill);
   if (!rgb || Number.isNaN(rgb.r)) return "#ffffff";
   const channel = (v: number) => {
     const s = v / 255;

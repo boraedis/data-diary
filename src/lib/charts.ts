@@ -1,4 +1,4 @@
-import { asc, eq, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
@@ -430,10 +430,22 @@ export type SleepNight = SleepDay & {
    * doesn't get its own independent timeline here, just an optional
    * addend to that night's sleep value. */
   napMinutes: number | null;
-  /** The same row's `days.dayType`. A row's sleep is the night that *ends*
-   * on its date — wake times run about an hour later on Saturday and
-   * Sunday rows than on weekday ones — so this is the type of the day the
-   * night led into: a work-day row's sleep is the night before work. */
+  /** `days.sleepTime` as minutes past midnight (0-1439) — the clock time
+   * the night began. Only the start is carried: the end is always
+   * `bedtimeMinutes + durationMinutes`, so the Sleep Hours chart (#212)
+   * gets wake time from the same across-midnight derivation as every other
+   * sleep chart rather than re-deriving it from `wakeTime` and the flag. */
+  bedtimeMinutes: number;
+  /** The same row's `days.dayType`. The data says a row's sleep is the
+   * night that *ends* on its date: rows dated Saturday and Sunday have the
+   * latest bedtimes and wake times, and weekday rows the earliest — the
+   * reverse of what "the night that began on its date" would produce, where
+   * Sunday's row would be a school night. So this is the type of the day the
+   * night led into: a work-day row's sleep is the night before work. Null
+   * before day types were tracked (2020) and on the odd unlogged day.
+   *
+   * Sleep Hours (#466) documents this the other way round (the night after
+   * a work day, bars dated by the evening they began) — see #471. */
   dayType: DayType | null;
 };
 
@@ -481,7 +493,14 @@ export async function getSleepNightsData(): Promise<SleepNight[]> {
     if (sleepMin === null || wakeMin === null) continue;
     const durationMinutes = wakeMin - sleepMin + (r.wakeCrossedMidnight ? 24 * 60 : 0);
     if (durationMinutes <= 0 || durationMinutes > 20 * 60) continue; // guard against bad data
-    out.push({ date: r.date, durationMinutes, locationType: r.locationType, napMinutes: r.napMinutes, dayType: r.dayType });
+    out.push({
+      date: r.date,
+      durationMinutes,
+      locationType: r.locationType,
+      napMinutes: r.napMinutes,
+      bedtimeMinutes: sleepMin,
+      dayType: r.dayType,
+    });
   }
   return out;
 }
@@ -1904,6 +1923,23 @@ export type CountryDay = { date: string; countries: string[] };
  * or venue would need the "which ancestor is the neighbourhood" question
  * settled first — see #214.
  */
+/**
+ * Country name -> the colour set on that country's place row, for charts
+ * that colour by country (#456). Legacy only ever set `places.color` on
+ * top-level places, which is exactly the country level. Keys go through
+ * `normalizeCountryName`, the same as `getCountryHistoryData`'s, so the
+ * two line up.
+ */
+export async function getCountryColors(): Promise<Record<string, string>> {
+  const rows = await getDb()
+    .select({ name: places.name, color: places.color })
+    .from(places)
+    .where(and(isNull(places.parentId), isNotNull(places.color)));
+  const out: Record<string, string> = {};
+  for (const row of rows) if (row.color) out[normalizeCountryName(row.name)] = row.color;
+  return out;
+}
+
 export async function getCountryHistoryData(): Promise<CountryDay[]> {
   const db = getDb();
   const dayRows = await db
