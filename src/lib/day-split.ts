@@ -57,16 +57,35 @@ export function daySplitSide(day: SplittableDay, split: Exclude<DaySplit, "none"
   }
 }
 
+/** Id of the optional third group `splitDays` returns for days it can't
+ * place on either side (see `includeUnplaced`). */
+export const UNPLACED_GROUP_ID = "unplaced";
+
 /** Splits `days` into the two sides of `split`, always both sides in fixed
  * order (an empty side stays, so its color slot and legend entry don't
- * move). `none` returns every day as one group. */
-export function splitDays<T extends SplittableDay>(days: readonly T[], split: DaySplit): DaySplitGroup<T>[] {
+ * move). `none` returns every day as one group.
+ *
+ * `includeUnplaced` adds the days neither side takes as a third group,
+ * last — only when there are any, so the weekend split (which places every
+ * day) never grows an empty legend entry. A stacked histogram needs this:
+ * its bars are meant to add back up to the unsplit histogram, and the work
+ * split alone drops every day before day types existed (all of 2016–2019
+ * for happiness, over a third of it). */
+export function splitDays<T extends SplittableDay>(
+  days: readonly T[],
+  split: DaySplit,
+  { includeUnplaced = false }: { includeUnplaced?: boolean } = {},
+): DaySplitGroup<T>[] {
   if (split === "none") return [{ id: "all", label: "All days", days: [...days] }];
   const groups = DAY_SPLIT_SIDES[split].map((side) => ({ ...side, days: [] as T[] }));
+  const unplaced: T[] = [];
   for (const day of days) {
     const side = daySplitSide(day, split);
-    if (side === null) continue;
-    groups.find((g) => g.id === side)?.days.push(day);
+    if (side === null) unplaced.push(day);
+    else groups.find((g) => g.id === side)?.days.push(day);
+  }
+  if (includeUnplaced && unplaced.length > 0) {
+    groups.push({ id: UNPLACED_GROUP_ID, label: "Not recorded", days: unplaced });
   }
   return groups;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daySplitSide, splitDays, type SplittableDay } from "@/lib/day-split";
+import { daySplitSide, splitDays, UNPLACED_GROUP_ID, type SplittableDay } from "@/lib/day-split";
 
 // 2026-09-19 is a Saturday, 2026-09-21 a Monday.
 const SAT = "2026-09-19";
@@ -50,5 +50,19 @@ describe("splitDays", () => {
 
   it("returns every day as one group for none", () => {
     expect(splitDays(days, "none")).toEqual([{ id: "all", label: "All days", days }]);
+  });
+
+  it("returns the days it can't place as a third group when asked, so the groups add back up", () => {
+    const groups = splitDays(days, "work", { includeUnplaced: true });
+    expect(groups.map((g) => [g.id, g.days.length])).toEqual([
+      ["work", 1],
+      ["off", 1],
+      [UNPLACED_GROUP_ID, 1],
+    ]);
+    expect(groups.reduce((n, g) => n + g.days.length, 0)).toBe(days.length);
+  });
+
+  it("adds no empty third group when every day is placed", () => {
+    expect(splitDays(days, "weekend", { includeUnplaced: true }).map((g) => g.id)).toEqual(["weekday", "weekend"]);
   });
 });

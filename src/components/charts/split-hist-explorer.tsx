@@ -7,7 +7,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { InteractiveHist, type HistMode, type HistSeries } from "@/components/charts/interactive/interactive-hist";
-import { splitDays, type DaySplit, type SplittableDay } from "@/lib/day-split";
+import { splitDays, UNPLACED_GROUP_ID, type DaySplit, type SplittableDay } from "@/lib/day-split";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 import { HIST_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -41,6 +41,13 @@ const MODE_OPTIONS: GroupByOption<HistMode>[] = [
  * whose metric already has a split pair elsewhere passes that instead
  * (happiness — see `sideColors`). */
 const DEFAULT_SIDE_COLORS: readonly [string, string] = [categoricalColor(4), categoricalColor(0)];
+
+/** Days a split can't place (no day type recorded), drawn only in Stacked
+ * mode. The same half-strength neutral Sleep Hours uses for its "Not
+ * recorded" nights, so "unknown" reads the same across charts and quieter
+ * than either real side — deliberately not `categoricalColor`'s overflow
+ * grey, which is a real day type's colour elsewhere. */
+const UNPLACED_COLOR = "color-mix(in oklab, var(--muted-foreground) 45%, transparent)";
 
 /** Module-level so the default keeps one identity (it's a memo dependency). */
 const identityLabel = (label: string) => label;
@@ -112,24 +119,35 @@ export function SplitHistExplorer({
     };
   }, [data, bounds, step, paddingSteps]);
 
+  // Stacked is the one mode whose bars should add back up to the unsplit
+  // histogram, so it's the one that keeps the days the split can't place
+  // (as a grey top layer). Share and Count compare the two sides, where a
+  // third, mostly-2016–2019 layer would only get in the way.
+  const stacked = mode === "stacked";
   const series = useMemo<HistSeries[] | undefined>(() => {
     if (split === "none") return undefined;
-    return splitDays(data, split).map((group, i) => ({
-      id: group.id,
-      // n in the legend: the two sides are rarely close in size, and that
-      // is what "Share" vs. "Count" is about.
-      label: `${sideLabel(group.label)} · ${formatThousandsNumber(group.days.length)}`,
-      color: sideColors[i],
-      values: group.days.map((d) => d.value),
-    }));
-  }, [data, split, sideLabel, sideColors]);
+    return splitDays(data, split, { includeUnplaced: stacked }).map((group, i) => {
+      const unplaced = group.id === UNPLACED_GROUP_ID;
+      return {
+        id: group.id,
+        // n in the legend: the two sides are rarely close in size, and that
+        // is what "Share" vs. "Count" is about.
+        label: `${unplaced ? group.label : sideLabel(group.label)} · ${formatThousandsNumber(group.days.length)}`,
+        color: unplaced ? UNPLACED_COLOR : sideColors[i],
+        values: group.days.map((d) => d.value),
+      };
+    });
+  }, [data, split, stacked, sideLabel, sideColors]);
 
   const values = useMemo(() => data.map((d) => d.value), [data]);
 
   // Day types start later than most fields, so the work split's honest
-  // span is whichever of the two started last.
+  // span is whichever of the two started last — except in Stacked, which
+  // keeps the untyped days and so covers the field's whole history.
   const span =
-    split === "work" && DAY_TYPE_TRACKING_SPAN.start > trackingSpan.start ? DAY_TYPE_TRACKING_SPAN : trackingSpan;
+    split === "work" && !stacked && DAY_TYPE_TRACKING_SPAN.start > trackingSpan.start
+      ? DAY_TYPE_TRACKING_SPAN
+      : trackingSpan;
 
   return (
     <ChartPage
