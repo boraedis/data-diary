@@ -9,7 +9,6 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import {
   buildTreeFromLevels,
   buildTreeFromParents,
-  foldTailIntoOther,
   pruneEmptyBranches,
   type HierarchyDatum,
 } from "@/lib/viz/hierarchy";
@@ -83,12 +82,6 @@ const RING_OPTIONS: GroupByOption<RingCount>[] = [
   { id: "all", label: "All" },
 ];
 
-/** Top-level branches kept before the tail folds into "Other" in category
- * mode — `categoricalColor`'s real slot count, since those branches take
- * palette colors rather than owning one in the data. Geography mode
- * doesn't fold: its countries carry their own `places.color`. */
-const CATEGORY_BRANCHES_KEPT = 5;
-
 function buildGeographyTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
   const tree = buildTreeFromParents(rows, {
     rootName: "All places",
@@ -109,6 +102,14 @@ function buildGeographyTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
 }
 
 function buildCategoryTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
+  // Used to fold the tail of top-level categories into "Other" past
+  // categoricalColor's 5 real slots — dropped once #166 shipped exclusion,
+  // which makes the fold redundant (and worse than redundant: it forced
+  // small categories behind a click just to get to a slice big enough to
+  // exclude). A category beyond the 5th still just gets the flattened
+  // muted-gray color, which is `categoricalColor`'s own documented
+  // behavior for an uncolored 6th+ branch, not a regression here.
+  //
   // Only places with their own mentions take part: unlike the geography
   // tree, an unlogged place is never a required link here (its category is
   // reachable through any other place that shares it), so including them
@@ -127,8 +128,7 @@ function buildCategoryTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
       ...(row.alias ? { shortName: row.alias } : {}),
     }),
   });
-  const pruned = pruneEmptyBranches(tree);
-  return pruned ? foldTailIntoOther(pruned, { keep: CATEGORY_BRANCHES_KEPT }) : null;
+  return pruneEmptyBranches(tree);
 }
 
 /**
@@ -214,8 +214,7 @@ function buildMetroTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
     topLevel.push({ key: "__unspecified__", name: "Unspecified", children: remainder.children });
   }
 
-  const pruned = pruneEmptyBranches({ key: "__root__", name: "All places", children: topLevel });
-  return pruned ? foldTailIntoOther(pruned, { keep: CATEGORY_BRANCHES_KEPT }) : null;
+  return pruneEmptyBranches({ key: "__root__", name: "All places", children: topLevel });
 }
 
 const TREE_BUILDERS: Record<PlaceGrouping, (rows: PlaceHierarchyRow[]) => HierarchyDatum | null> = {

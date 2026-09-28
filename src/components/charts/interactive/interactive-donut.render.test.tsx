@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import * as d3 from "d3";
-import { InteractiveDonut } from "./interactive-donut";
+import { InteractiveDonut, ZOOM_DURATION_MS } from "./interactive-donut";
 import type { HierarchyDatum } from "@/lib/viz/hierarchy";
 
 // A mounted-DOM pass over what the pure-geometry tests in
@@ -222,27 +222,48 @@ describe("InteractiveDonut", () => {
   });
 
   describe("excluding a slice (#166)", () => {
-    it("right-clicking a slice removes it and re-bases the remaining total", () => {
+    // The exclude commit is deliberately gated behind the same 750ms
+    // tween `zoomTo` runs (see excludeArc's own comment) — the collapse
+    // has to actually finish playing before the excluded row, the
+    // re-based total, or the pruned arc show up. Real time, not fake
+    // timers: the d3 transition schedules itself off real timers/rAF, the
+    // same reason `vitest.setup.ts`'s SVG geometry shim has to be
+    // permanent rather than per-test.
+    async function settle() {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, ZOOM_DURATION_MS + 50));
+      });
+    }
+
+    it("right-clicking a slice collapses it, then removes it and re-bases the remaining total", async () => {
       const { container } = renderDonut();
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
 
+      // Mid-collapse: the arc is still mounted (it's animating to a
+      // hairline, not gone yet) and nothing has committed to React state.
+      expect(arcs(container).map(keyOf)).toContain("fr");
+      expect(centerLines()).toEqual(["All places", "100", "visits"]);
+
+      await settle();
+
       // France (40) is gone from the arcs and the grand total re-bases to
-      // the remaining 60 (Georgia 30 + NY 10 + Atlanta's parent Georgia
-      // already counts Atlanta) — center reports the new total, not the
-      // original 100.
+      // the remaining 60 (Georgia 30 + NY 10, Atlanta already counted
+      // inside Georgia) — center reports the new total, not the original
+      // 100.
       expect(arcs(container).map(keyOf)).not.toContain("fr");
       expect(centerLines()).toEqual(["All places", "60", "visits"]);
       expect(screen.getByText(/France \(40\)/)).toBeTruthy();
       expect(screen.getByText("Showing 60.0% of total")).toBeTruthy();
     });
 
-    it("restores an excluded item on click, and grows the total back", () => {
+    it("restores an excluded item on click, and grows the total back", async () => {
       const { container } = renderDonut();
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
+      await settle();
       expect(centerLines()).toEqual(["All places", "60", "visits"]);
 
       act(() => {
@@ -252,23 +273,25 @@ describe("InteractiveDonut", () => {
       expect(arcs(container).map(keyOf)).toContain("fr");
     });
 
-    it("excludes a nested branch via keyboard (Delete), leaving its siblings", () => {
+    it("excludes a nested branch via keyboard (Delete), leaving its siblings", async () => {
       const { container } = renderDonut({ visibleRings: 2 });
       act(() => {
         arcFor(container, "ga").dispatchEvent(
           new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }),
         );
       });
+      await settle();
 
       expect(arcs(container).map(keyOf)).not.toContain("ga");
       expect(arcs(container).map(keyOf)).toContain("ny");
     });
 
-    it("survives a zoom: excluding, then zooming into a different branch, keeps it excluded", () => {
+    it("survives a zoom: excluding, then zooming into a different branch, keeps it excluded", async () => {
       const { container } = renderDonut();
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
+      await settle();
       act(() => {
         arcFor(container, "usa").dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
@@ -277,11 +300,12 @@ describe("InteractiveDonut", () => {
       expect(screen.getByText(/France \(40\)/)).toBeTruthy();
     });
 
-    it("resets exclusions when the data prop changes", () => {
+    it("resets exclusions when the data prop changes", async () => {
       const { container, rerender } = renderDonut();
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
+      await settle();
       expect(screen.getByText(/France \(40\)/)).toBeTruthy();
 
       rerender(<InteractiveDonut data={{ ...TREE }} width={600} height={600} valueLabel="visits" />);

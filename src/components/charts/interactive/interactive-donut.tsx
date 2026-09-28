@@ -55,7 +55,17 @@ import { cn } from "@/lib/utils";
 // is undone per-item or all at once from that same row. Deliberately kept
 // out of `foldTailIntoOther`: folding into "Other" still counts the tail
 // toward the whole, excluding removes it from the whole — conflating them
-// was the one thing #166 called out not to do.
+// was the one thing #166 called out not to do. Places' own consumer
+// (`PlaceHierarchyExplorer`) stopped calling `foldTailIntoOther` for its
+// category/metro tail once this shipped, for the same reason: a chart
+// nobody's folded now offers a strictly better way to get to the same
+// "just the big ones" view — exclude the small branches directly, instead
+// of a forced top-N-then-"Other" grouping the reader can't undo per-item.
+//
+// The collapse itself gets `zoomTo`'s own tween treatment, not a flat cut:
+// see `excludeArc`, defined alongside `zoomTo` inside the d3 render
+// function below, for how a right-click's animation is kept off React
+// state until it actually finishes.
 
 /** Arc extent in the layout's own units: `x` is angle in radians [0, 2π],
  * `y` is ring depth (root = 0). The subset of a d3 partition node that
@@ -77,7 +87,10 @@ type AnimatedNode = DonutNode & { current: ArcBox; target: ArcBox; uid: number }
  * clicked; it's cheaper to hide it than to render thousands of them. */
 export const MIN_ARC_ANGLE = 0.001;
 
-const ZOOM_DURATION_MS = 750;
+/** Exported for tests — an exclude's commit to React state (see
+ * `excludeArc`) waits on this same tween, so a test asserting on the
+ * post-collapse state has to actually wait this long, not guess a number. */
+export const ZOOM_DURATION_MS = 750;
 /** Height reserved out of the caller's `height` for the breadcrumb row —
  * same fixed-budget approach as InteractiveGeo's LEGEND_AREA_HEIGHT, and
  * for the same reason (the caller's `h-[min(62vh,640px)]` class is a hard
@@ -450,12 +463,19 @@ export function InteractiveDonut({
   // would otherwise still find) and re-base every remaining percentage
   // honestly, since the grand total the center/tooltip divide by comes
   // from this already-filtered layout.
+  //
+  // Committing straight to this state on right-click would tear the SVG
+  // down mid-gesture: `layout` (a `useD3` dependency) is derived from
+  // `excluded`, and `useD3` fully rebuilds on any dependency change — the
+  // exact thing that must NOT happen while the collapse animation defined
+  // inside the d3 render function (`excludeArc`, alongside `zoomTo`) is
+  // running. So that animation mutates the live `nodes` array directly,
+  // the same way `zoomTo` does, and only calls `setExcluded` once the
+  // transition has actually settled. `pendingExcludeIdsRef` is what lets a
+  // second exclusion started before that commit lands still compute
+  // correct target angles against the first one's outcome.
   const [excluded, setExcluded] = useState<ExcludedItem[]>([]);
-  const excludeNode = useCallback((node: DonutNode) => {
-    const path = keyPathOf(node);
-    const id = pathId(path);
-    setExcluded((prev) => (prev.some((item) => item.id === id) ? prev : [...prev, { id, path, name: node.data.name, value: node.value ?? 0 }]));
-  }, []);
+  const pendingExcludeIdsRef = useRef<Set<string>>(new Set());
   const restoreItem = useCallback((id: string) => {
     setExcluded((prev) => prev.filter((item) => item.id !== id));
   }, []);
@@ -636,7 +656,7 @@ export function InteractiveDonut({
        * to see, but its geometry still has to be right for the moment a
        * later zoom brings it back on screen.
        */
-      function draw(animate: boolean) {
+      function draw(animate: boolean, onSettled?: () => void) {
         const inPlay: AnimatedNode[] = [];
         for (const node of nodes) {
           if (isArcInPlay(node.current, node.target, visibleRings)) inPlay.push(node);
@@ -693,7 +713,7 @@ export function InteractiveDonut({
           // that menu would otherwise be useful for.
           .on("contextmenu", (event: MouseEvent, d) => {
             event.preventDefault();
-            excludeNode(d);
+            excludeArc(d);
           })
           .on("keydown", (event: KeyboardEvent, d) => {
             if (event.key === "Enter" || event.key === " ") {
@@ -706,7 +726,7 @@ export function InteractiveDonut({
               // Right-click has no keyboard equivalent otherwise — this is
               // the a11y path to the same exclusion.
               event.preventDefault();
-              excludeNode(d);
+              excludeArc(d);
             }
           });
 
@@ -813,10 +833,14 @@ export function InteractiveDonut({
         // and labels that were only mounted for the animation's sake.
         // `.end()` rejects when another zoom interrupts this one — that
         // zoom does its own settling, so there is nothing to do here.
+        // `onSettled`, when given, runs after that snap — `excludeArc`
+        // uses it to commit the exclusion to React state only once the
+        // collapse has actually finished playing out.
         t.end().then(
           () => {
             for (const node of nodes) copyBox(node.target, node.current);
             draw(false);
+            onSettled?.();
           },
           () => {},
         );
@@ -846,6 +870,73 @@ export function InteractiveDonut({
         draw(true);
       }
 
+      /**
+       * Right-click / Delete (#166): collapses the excluded arc to a
+       * hairline while its siblings sweep in to fill the gap — the same
+       * tween `zoomTo` runs, just retargeting every node's angle to a
+       * freshly-computed post-exclusion layout instead of a new focus.
+       *
+       * Runs a whole separate `d3.hierarchy`/`partition` pass over the
+       * tree `excludeByKeyPaths` would produce, purely to read off where
+       * everything *would* land — `nodes` itself isn't replaced until the
+       * transition settles and commits to React state. A survivor's new
+       * angle is normalized against its own freshly-recomputed focus span
+       * (`nextFocusBox`), not the live `focus`'s old one: d3.partition
+       * reallocates every ancestor's absolute width whenever a sibling's
+       * value changes, but a node's *local* share of its own parent is
+       * unaffected by that — normalizing against the fresh span is what
+       * cancels the reallocation out and leaves only the redistribution
+       * the animation is actually for. Anything with no match (the
+       * excluded node itself, or one of its now-gone descendants)
+       * collapses to a hairline at whatever angle it's already sitting
+       * at, rather than popping out of existence.
+       */
+      function excludeArc(node: AnimatedNode) {
+        const path = keyPathOf(node);
+        const id = pathId(path);
+        if (pendingExcludeIdsRef.current.has(id)) return;
+        pendingExcludeIdsRef.current.add(id);
+
+        const nextExcludedIds = new Set([...excluded.map((item) => item.id), ...pendingExcludeIdsRef.current]);
+        const nextRoot = d3
+          .hierarchy(excludeByKeyPaths(data, nextExcludedIds))
+          .sum((d) => Math.max(0, d.value ?? 0))
+          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0)) as DonutNode;
+        d3.partition<HierarchyDatum>().size([2 * Math.PI, nextRoot.height + 1])(nextRoot);
+
+        const nextBoxByPath = new Map<string, ArcBox>();
+        nextRoot.each((d) => {
+          nextBoxByPath.set(pathId(keyPathOf(d)), { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 });
+        });
+
+        const nextFocusBox = nextBoxByPath.get(pathId(keyPathOf(focus))) ?? { x0: 0, x1: 2 * Math.PI, y0: 0, y1: 0 };
+        const focusSpan = nextFocusBox.x1 - nextFocusBox.x0;
+        const focusDepth = focus.depth;
+
+        for (const n of nodes) {
+          const next = focusSpan > 0 ? nextBoxByPath.get(pathId(keyPathOf(n))) : undefined;
+          if (next) {
+            n.target.x0 = Math.max(0, Math.min(1, (next.x0 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
+            n.target.x1 = Math.max(0, Math.min(1, (next.x1 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
+            n.target.y0 = Math.max(0, next.y0 - focusDepth);
+            n.target.y1 = Math.max(0, next.y1 - focusDepth);
+          } else {
+            const mid = (n.target.x0 + n.target.x1) / 2;
+            n.target.x0 = mid;
+            n.target.x1 = mid;
+          }
+        }
+
+        draw(true, () => {
+          pendingExcludeIdsRef.current.delete(id);
+          setExcluded((prev) =>
+            prev.some((item) => item.id === id)
+              ? prev
+              : [...prev, { id, path, name: node.data.name, value: node.value ?? 0 }],
+          );
+        });
+      }
+
       zoomToPathRef.current = (path) => {
         const target = findByKeyPath(root, path);
         if (target) zoomTo(target as AnimatedNode);
@@ -857,7 +948,7 @@ export function InteractiveDonut({
         zoomToPathRef.current = null;
       };
     },
-    [layout, width, chartHeight, radius, visibleRings, zoomable, resolveColor, readContainerRect, excludeNode],
+    [layout, width, chartHeight, radius, visibleRings, zoomable, resolveColor, readContainerRect],
   );
 
   // --- Breadcrumb + center summary (React, deliberately outside useD3) ---
