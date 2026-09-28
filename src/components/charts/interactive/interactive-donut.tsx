@@ -7,7 +7,7 @@ import { attachMarkHover } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatPercent, formatThousandsNumber } from "@/lib/viz/format";
-import { excludeByKeyPaths, pathId, sumValues, type HierarchyDatum } from "@/lib/viz/hierarchy";
+import { excludeByKeyPaths, pathId, type HierarchyDatum } from "@/lib/viz/hierarchy";
 import { cn } from "@/lib/utils";
 
 // InteractiveDonut (#118) — the shared radial part-of-whole primitive: a
@@ -46,26 +46,41 @@ import { cn } from "@/lib/utils";
 // split out of #118). The direction locked on that issue after weeks
 // open as an `idea`: exclusion re-bases the remaining slices honestly
 // against the reduced total (never a silent "100% of what's left"), and
-// a row below the breadcrumb names every excluded branch with its own
-// weight plus a running "showing X% of total" readout, so a reader can
-// never mistake a chart with something hidden for a complete one. An
-// exclusion is scoped to the exact node right-clicked — see
-// `excludeByKeyPaths` — not to "every node with this name," survives a
-// zoom (it filters the tree the layout is built from, not the view), and
-// is undone per-item or all at once from that same row. Deliberately kept
-// out of `foldTailIntoOther`: folding into "Other" still counts the tail
-// toward the whole, excluding removes it from the whole — conflating them
-// was the one thing #166 called out not to do. Places' own consumer
+// the breadcrumb row names every excluded branch with its own weight plus
+// a running "showing X% of total" readout, so a reader can never mistake
+// a chart with something hidden for a complete one. An exclusion is
+// scoped to the exact node right-clicked — see `excludeByKeyPaths` — not
+// to "every node with this name," survives a zoom, and is undone per-item
+// or all at once from that same row. Deliberately kept out of
+// `foldTailIntoOther`: folding into "Other" still counts the tail toward
+// the whole, excluding removes it from the whole — conflating them was
+// the one thing #166 called out not to do. Places' own consumer
 // (`PlaceHierarchyExplorer`) stopped calling `foldTailIntoOther` for its
 // category/metro tail once this shipped, for the same reason: a chart
 // nobody's folded now offers a strictly better way to get to the same
 // "just the big ones" view — exclude the small branches directly, instead
 // of a forced top-N-then-"Other" grouping the reader can't undo per-item.
 //
-// The collapse itself gets `zoomTo`'s own tween treatment, not a flat cut:
-// see `excludeArc`, defined alongside `zoomTo` inside the d3 render
-// function below, for how a right-click's animation is kept off React
-// state until it actually finishes.
+// The collapse (and, symmetrically, a restore) gets `zoomTo`'s own tween
+// treatment, not a flat cut — and, just as importantly, never tears the
+// `<svg>` down to do it. An earlier version of this filtered the *tree*
+// an exclusion applied to before laying it out, which meant the excluded
+// set had to be a `useD3` dependency, and any change to it re-ran the
+// whole render function — `useD3`'s documented behavior on a dependency
+// change is to clear and fully rebuild the `<svg>` from scratch, so every
+// exclude or restore, however smoothly it animated, ended with a visible
+// "reload" the instant that dependency changed underneath it. `layout`
+// now stays pinned to the raw, unfiltered `data` forever (same as before
+// #166) — the same reason a *zoom* never rebuilds. Excluding is purely an
+// animation-time concern: `applyExclusion`, defined alongside `zoomTo`
+// inside the d3 render function below, computes what a fresh partition of
+// the post-exclusion tree would look like and retargets the *existing*
+// nodes' angles to it, the same way `zoomTo` retargets them to a new
+// focus, so the same long-lived arcs sweep smoothly into their new shape
+// instead of the whole thing disappearing and reappearing. React state
+// (`excluded`) is still the source of truth for *what's* excluded (the
+// breadcrumb row, the re-based percentages) — it's just no longer
+// anything `layout` depends on.
 
 /** Arc extent in the layout's own units: `x` is angle in radians [0, 2π],
  * `y` is ring depth (root = 0). The subset of a d3 partition node that
@@ -73,15 +88,23 @@ import { cn } from "@/lib/utils";
 export type ArcBox = { x0: number; x1: number; y0: number; y1: number };
 
 type DonutNode = d3.HierarchyRectangularNode<HierarchyDatum>;
-/** The layout node plus the two mutable frames the zoom tween runs
- * between: `current` is what's on screen right now, `target` is where the
- * in-flight transition is taking it. Both are mutated in place (never
- * reallocated) — this is per-frame animation data on every node in the
- * tree, and it must cost nothing and never reach React state.
+/** The layout node plus the mutable frames the tweens run between:
+ * `current` is what's on screen right now, `target` is where the in-flight
+ * transition is taking it, both focus-relative (normalized to whatever's
+ * currently zoomed into, per `zoomTo`). `effective` is the *absolute*
+ * (root-relative) box this node would occupy in a fresh partition of
+ * whatever's currently excluded — see `applyExclusion`. It starts equal to
+ * the node's own static, immutable `x0`/`x1`/`y0`/`y1` (what a plain,
+ * nothing-excluded partition gives it) and only changes when an exclusion
+ * changes the proportions; `zoomTo` reads it instead of the static fields
+ * so a zoom started after an exclusion still lands correctly. All three
+ * are mutated in place (never reallocated) — this is per-frame animation
+ * data on every node in the tree, and it must cost nothing and never reach
+ * React state.
  *
  * `uid` is a stable identity for the data join below; `data.key` is only
  * unique among siblings, and the join is across the whole tree. */
-type AnimatedNode = DonutNode & { current: ArcBox; target: ArcBox; uid: number };
+type AnimatedNode = DonutNode & { current: ArcBox; target: ArcBox; effective: ArcBox; uid: number };
 
 /** Below this angular width an arc is a hairline that can't be seen or
  * clicked; it's cheaper to hide it than to render thousands of them. */
@@ -96,10 +119,6 @@ export const ZOOM_DURATION_MS = 750;
  * for the same reason (the caller's `h-[min(62vh,640px)]` class is a hard
  * cap on the whole component, not just the drawing). */
 const BREADCRUMB_AREA_HEIGHT = 32;
-/** Height reserved for the excluded-slices row, same fixed-budget idea as
- * the breadcrumb — but only spent when there's something to show, so a
- * chart nobody has excluded from looks exactly as it did before #166. */
-const EXCLUDED_AREA_HEIGHT = 28;
 
 /**
  * Center-hole radii, in px, at which the summary drops a line.
@@ -457,31 +476,44 @@ export function InteractiveDonut({
    * path. */
   const zoomToPathRef = useRef<((path: string[]) => void) | null>(null);
 
-  // Branches excluded via right-click/Delete (#166). Filters the *base*
-  // tree the layout is built from, not the rendered view — which is what
-  // makes an exclusion survive a zoom (it's gone from the data a zoom
-  // would otherwise still find) and re-base every remaining percentage
-  // honestly, since the grand total the center/tooltip divide by comes
-  // from this already-filtered layout.
+  // Branches excluded via right-click/Delete (#166) — the list shown in
+  // the breadcrumb row and the source `applyExclusion` (inside the d3
+  // render function) reads to know what to lay out around. Committed
+  // immediately on both exclude and restore, the same way `focusPath` is:
+  // `layout` never depends on it (see the header comment), so there's
+  // nothing here that would tear the `<svg>` down.
   //
-  // Committing straight to this state on right-click would tear the SVG
-  // down mid-gesture: `layout` (a `useD3` dependency) is derived from
-  // `excluded`, and `useD3` fully rebuilds on any dependency change — the
-  // exact thing that must NOT happen while the collapse animation defined
-  // inside the d3 render function (`excludeArc`, alongside `zoomTo`) is
-  // running. So that animation mutates the live `nodes` array directly,
-  // the same way `zoomTo` does, and only calls `setExcluded` once the
-  // transition has actually settled. `pendingExcludeIdsRef` is what lets a
-  // second exclusion started before that commit lands still compute
-  // correct target angles against the first one's outcome.
+  // Mirrored into a ref alongside the state itself, not read out of
+  // `useState` inside the d3 closure: that closure is only re-created when
+  // `layout`'s own deps change, which excluding deliberately never
+  // triggers, so a value captured from `useState` at mount time would go
+  // stale after the very first exclusion. `commitExcluded` is the only
+  // place either is written, so they can't drift apart.
   const [excluded, setExcluded] = useState<ExcludedItem[]>([]);
-  const pendingExcludeIdsRef = useRef<Set<string>>(new Set());
-  const restoreItem = useCallback((id: string) => {
-    setExcluded((prev) => prev.filter((item) => item.id !== id));
+  const excludedRef = useRef<ExcludedItem[]>(excluded);
+  const commitExcluded = useCallback((items: ExcludedItem[]) => {
+    excludedRef.current = items;
+    setExcluded(items);
   }, []);
-  const restoreAll = useCallback(() => setExcluded([]), []);
+  /** Set by the d3 render function so a restore (triggered from the
+   * breadcrumb row, outside the d3 closure) can drive the same animated
+   * retarget an exclude does, instead of a second, differently-animated
+   * code path — same idea as `zoomToPathRef`. */
+  const applyExclusionRef = useRef<((nextIds: ReadonlySet<string>) => void) | null>(null);
+  const restoreItem = useCallback(
+    (id: string) => {
+      const next = excludedRef.current.filter((item) => item.id !== id);
+      commitExcluded(next);
+      applyExclusionRef.current?.(new Set(next.map((item) => item.id)));
+    },
+    [commitExcluded],
+  );
+  const restoreAll = useCallback(() => {
+    commitExcluded([]);
+    applyExclusionRef.current?.(new Set());
+  }, [commitExcluded]);
 
-  const chartHeight = Math.max(0, height - BREADCRUMB_AREA_HEIGHT - (excluded.length > 0 ? EXCLUDED_AREA_HEIGHT : 0));
+  const chartHeight = Math.max(0, height - BREADCRUMB_AREA_HEIGHT);
   // The center disc plus `visibleRings` rings have to fit the smaller of
   // the two dimensions, so a unit of radius is that over the number of
   // bands sharing it.
@@ -511,17 +543,14 @@ export function InteractiveDonut({
     containerRectRef.current = null;
   }, [width, chartHeight]);
 
-  // The tree actually laid out, with every excluded branch pruned out —
-  // `data` itself stays untouched so an excluded item's captured `value`
-  // (and, if it's ever restored, its position) still make sense.
-  const filteredData = useMemo(
-    () => (excluded.length === 0 ? data : excludeByKeyPaths(data, new Set(excluded.map((item) => item.id)))),
-    [data, excluded],
-  );
-
+  // Always the raw, unfiltered tree — see the header comment for why
+  // exclusion deliberately doesn't touch this. `effective` seeds equal to
+  // the node's own static box (what a plain, nothing-excluded partition
+  // gives it); `applyExclusion` is the only thing that ever moves it
+  // afterward.
   const layout = useMemo(() => {
     const root = d3
-      .hierarchy(filteredData)
+      .hierarchy(data)
       .sum((d) => Math.max(0, d.value ?? 0))
       // Descending value, so the biggest slice starts at 12 o'clock and
       // the ring reads as a ranking clockwise — and so a branch's palette
@@ -534,28 +563,44 @@ export function InteractiveDonut({
       node.uid = uid++;
       node.current = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
       node.target = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
+      node.effective = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
     });
     return partitioned;
-  }, [filteredData]);
+  }, [data]);
+
+  // A second, much cheaper hierarchy pass — sum only, no partition/angles
+  // — purely so the React-rendered numbers (center summary, tooltip, the
+  // breadcrumb row's readout) can read an *effective* (post-exclusion)
+  // value for any node by path. Deliberately not part of `layout`: this
+  // is exactly the kind of derived value that's fine to recompute on every
+  // `excluded` change, since — unlike `layout` — nothing here is a `useD3`
+  // dependency, so recomputing it never touches the `<svg>`.
+  const valueRoot = useMemo(() => {
+    const tree = excluded.length === 0 ? data : excludeByKeyPaths(data, new Set(excluded.map((item) => item.id)));
+    return d3.hierarchy(tree).sum((d) => Math.max(0, d.value ?? 0));
+  }, [data, excluded]);
 
   // New data means both the remembered focus and any exclusions are
-  // meaningless — reset all three. Compared against `data` itself, not
-  // `layout`: `layout` also changes when only `excluded` changes, and that
-  // case must NOT reset the focus (excluding a slice elsewhere shouldn't
-  // kick the reader back to the root — see the fallback in `findByKeyPath
-  // (root, focusPath) ?? root` below for what happens when the focused
-  // branch itself is the one excluded). Written as React's documented
-  // "adjust state when a prop changes" pattern (compare against the
-  // previous value *during* render) rather than an effect: an effect
-  // would reset one render too late, leaving the breadcrumb briefly
-  // claiming a path that no longer exists, and
-  // `react-hooks/set-state-in-effect` rightly rejects it.
+  // meaningless — reset both. Written as React's documented "adjust state
+  // when a prop changes" pattern (compare against the previous value
+  // *during* render) rather than an effect: an effect would reset one
+  // render too late, leaving the breadcrumb briefly claiming a path that
+  // no longer exists, and `react-hooks/set-state-in-effect` rightly
+  // rejects it. `excludedRef` itself is reset separately, in the effect
+  // below: writing to a ref during render (rather than in an event
+  // handler or effect) is exactly what `react-hooks/refs` exists to catch,
+  // and unlike `focusPath`, nothing here reads `excludedRef` *during*
+  // render — only later, from inside a d3 event handler — so a same-tick
+  // effect reset is soon enough.
   const [renderedData, setRenderedData] = useState(data);
   if (renderedData !== data) {
     setRenderedData(data);
     setFocusPath([]);
     setExcluded([]);
   }
+  useEffect(() => {
+    excludedRef.current = [];
+  }, [data]);
 
   const resolveColor = useMemo(() => color ?? defaultColorOf, [color]);
 
@@ -656,7 +701,7 @@ export function InteractiveDonut({
        * to see, but its geometry still has to be right for the moment a
        * later zoom brings it back on screen.
        */
-      function draw(animate: boolean, onSettled?: () => void) {
+      function draw(animate: boolean) {
         const inPlay: AnimatedNode[] = [];
         for (const node of nodes) {
           if (isArcInPlay(node.current, node.target, visibleRings)) inPlay.push(node);
@@ -831,16 +876,13 @@ export function InteractiveDonut({
         // Settle once the tween lands: snap every node onto its target and
         // redraw without animating, which is what actually sheds the arcs
         // and labels that were only mounted for the animation's sake.
-        // `.end()` rejects when another zoom interrupts this one — that
-        // zoom does its own settling, so there is nothing to do here.
-        // `onSettled`, when given, runs after that snap — `excludeArc`
-        // uses it to commit the exclusion to React state only once the
-        // collapse has actually finished playing out.
+        // `.end()` rejects when another zoom (or exclude) interrupts this
+        // one — that one does its own settling, so there is nothing to do
+        // here.
         t.end().then(
           () => {
             for (const node of nodes) copyBox(node.target, node.current);
             draw(false);
-            onSettled?.();
           },
           () => {},
         );
@@ -848,8 +890,11 @@ export function InteractiveDonut({
 
       function zoomTo(target: AnimatedNode) {
         // A zero-width focus can't define a frame to map the tree into
-        // (every arc would divide by zero); leave the view alone.
-        if (!(target.x1 > target.x0)) return;
+        // (every arc would divide by zero); leave the view alone. Reads
+        // `effective`, not the node's own static box: after an exclusion,
+        // that's the only field that still reflects the current
+        // proportions (see the header comment and `applyExclusion` below).
+        if (!(target.effective.x1 > target.effective.x0)) return;
 
         focus = target;
         setFocusPath(keyPathOf(target));
@@ -858,48 +903,46 @@ export function InteractiveDonut({
         // Written in place, for the same reason the tween is: this runs
         // over every node in the tree on every zoom, and a fresh object
         // per node is thousands of allocations for four numbers.
-        const span = target.x1 - target.x0;
+        const span = target.effective.x1 - target.effective.x0;
         for (const node of nodes) {
           const box = node.target;
-          box.x0 = Math.max(0, Math.min(1, (node.x0 - target.x0) / span)) * 2 * Math.PI;
-          box.x1 = Math.max(0, Math.min(1, (node.x1 - target.x0) / span)) * 2 * Math.PI;
-          box.y0 = Math.max(0, node.y0 - target.depth);
-          box.y1 = Math.max(0, node.y1 - target.depth);
+          box.x0 = Math.max(0, Math.min(1, (node.effective.x0 - target.effective.x0) / span)) * 2 * Math.PI;
+          box.x1 = Math.max(0, Math.min(1, (node.effective.x1 - target.effective.x0) / span)) * 2 * Math.PI;
+          box.y0 = Math.max(0, node.effective.y0 - target.depth);
+          box.y1 = Math.max(0, node.effective.y1 - target.depth);
         }
 
         draw(true);
       }
 
       /**
-       * Right-click / Delete (#166): collapses the excluded arc to a
-       * hairline while its siblings sweep in to fill the gap — the same
-       * tween `zoomTo` runs, just retargeting every node's angle to a
-       * freshly-computed post-exclusion layout instead of a new focus.
+       * The shared machinery behind exclude *and* restore (#166): given
+       * the full next set of excluded ids, works out what a fresh
+       * partition of that post-exclusion tree would look like and
+       * retargets every existing node's angle to it — the same way
+       * `zoomTo` retargets to a new focus — so the same long-lived arcs
+       * sweep smoothly into their new shape instead of the tree being
+       * rebuilt. See the header comment for why this, and not filtering
+       * the tree `layout` itself is built from, is what keeps the `<svg>`
+       * from tearing down on every exclude/restore.
        *
-       * Runs a whole separate `d3.hierarchy`/`partition` pass over the
-       * tree `excludeByKeyPaths` would produce, purely to read off where
-       * everything *would* land — `nodes` itself isn't replaced until the
-       * transition settles and commits to React state. A survivor's new
-       * angle is normalized against its own freshly-recomputed focus span
-       * (`nextFocusBox`), not the live `focus`'s old one: d3.partition
-       * reallocates every ancestor's absolute width whenever a sibling's
-       * value changes, but a node's *local* share of its own parent is
-       * unaffected by that — normalizing against the fresh span is what
-       * cancels the reallocation out and leaves only the redistribution
-       * the animation is actually for. Anything with no match (the
-       * excluded node itself, or one of its now-gone descendants)
-       * collapses to a hairline at whatever angle it's already sitting
-       * at, rather than popping out of existence.
+       * `effective` is updated to the fresh *absolute* box for every
+       * surviving node — that's what makes a zoom or a later exclude
+       * started after this one still correct (see `zoomTo`). `target` is
+       * updated too, normalized against the target node's own
+       * freshly-recomputed focus span rather than the live `focus`'s old
+       * one: d3.partition reallocates every ancestor's absolute width
+       * whenever a sibling's value changes, but a node's *local* share of
+       * its own parent is unaffected by that — normalizing against the
+       * fresh span is what cancels the reallocation out and leaves only
+       * the redistribution the animation is actually for. Anything with
+       * no match (an excluded node, or one of its descendants) collapses
+       * to a hairline at whatever angle it's already sitting at, in both
+       * fields, rather than popping out of existence.
        */
-      function excludeArc(node: AnimatedNode) {
-        const path = keyPathOf(node);
-        const id = pathId(path);
-        if (pendingExcludeIdsRef.current.has(id)) return;
-        pendingExcludeIdsRef.current.add(id);
-
-        const nextExcludedIds = new Set([...excluded.map((item) => item.id), ...pendingExcludeIdsRef.current]);
+      function applyExclusion(nextIds: ReadonlySet<string>) {
         const nextRoot = d3
-          .hierarchy(excludeByKeyPaths(data, nextExcludedIds))
+          .hierarchy(nextIds.size > 0 ? excludeByKeyPaths(data, nextIds) : data)
           .sum((d) => Math.max(0, d.value ?? 0))
           .sort((a, b) => (b.value ?? 0) - (a.value ?? 0)) as DonutNode;
         d3.partition<HierarchyDatum>().size([2 * Math.PI, nextRoot.height + 1])(nextRoot);
@@ -916,25 +959,49 @@ export function InteractiveDonut({
         for (const n of nodes) {
           const next = focusSpan > 0 ? nextBoxByPath.get(pathId(keyPathOf(n))) : undefined;
           if (next) {
+            copyBox(next, n.effective);
             n.target.x0 = Math.max(0, Math.min(1, (next.x0 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
             n.target.x1 = Math.max(0, Math.min(1, (next.x1 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
             n.target.y0 = Math.max(0, next.y0 - focusDepth);
             n.target.y1 = Math.max(0, next.y1 - focusDepth);
           } else {
-            const mid = (n.target.x0 + n.target.x1) / 2;
-            n.target.x0 = mid;
-            n.target.x1 = mid;
+            const emid = (n.effective.x0 + n.effective.x1) / 2;
+            n.effective.x0 = emid;
+            n.effective.x1 = emid;
+            const tmid = (n.target.x0 + n.target.x1) / 2;
+            n.target.x0 = tmid;
+            n.target.x1 = tmid;
           }
         }
 
-        draw(true, () => {
-          pendingExcludeIdsRef.current.delete(id);
-          setExcluded((prev) =>
-            prev.some((item) => item.id === id)
-              ? prev
-              : [...prev, { id, path, name: node.data.name, value: node.value ?? 0 }],
-          );
-        });
+        draw(true);
+      }
+      applyExclusionRef.current = applyExclusion;
+
+      /** Right-click / Delete (#166): commits the new excluded item to
+       * React state immediately (matching `zoomTo`'s immediate
+       * `setFocusPath` — neither one is a `layout` dependency, so neither
+       * needs to wait for anything) and animates the collapse via
+       * `applyExclusion`. */
+      function excludeArc(node: AnimatedNode) {
+        const path = keyPathOf(node);
+        const id = pathId(path);
+        if (excludedRef.current.some((item) => item.id === id)) return;
+
+        // The node's own *effective* weight right now — not its raw,
+        // unfiltered subtree total, which would double-count any
+        // already-excluded descendant nested inside it (excluding a leaf,
+        // then its parent, is a real and easy-to-hit sequence).
+        const currentIds = new Set(excludedRef.current.map((item) => item.id));
+        const currentValueRoot =
+          currentIds.size > 0
+            ? d3.hierarchy(excludeByKeyPaths(data, currentIds)).sum((d) => Math.max(0, d.value ?? 0))
+            : d3.hierarchy(data).sum((d) => Math.max(0, d.value ?? 0));
+        const effectiveValue = findByKeyPath(currentValueRoot, path)?.value ?? node.value ?? 0;
+
+        const nextItems = [...excludedRef.current, { id, path, name: node.data.name, value: effectiveValue }];
+        commitExcluded(nextItems);
+        applyExclusion(new Set(nextItems.map((item) => item.id)));
       }
 
       zoomToPathRef.current = (path) => {
@@ -946,6 +1013,7 @@ export function InteractiveDonut({
 
       return () => {
         zoomToPathRef.current = null;
+        applyExclusionRef.current = null;
       };
     },
     [layout, width, chartHeight, radius, visibleRings, zoomable, resolveColor, readContainerRect],
@@ -957,10 +1025,16 @@ export function InteractiveDonut({
   // typography, wrapping and focus handling — and, more importantly, keeps
   // `focusPath` out of the d3 dependency array.
 
+  // Structural — name, ancestry, depth — always comes from `layout` (the
+  // tree shape never changes). Any *value*, though, has to come from
+  // `valueRoot` instead: `layout`'s own `.value` is the raw, unfiltered
+  // subtree sum and stays that way forever now (see the header comment),
+  // so reading it directly here would silently ignore every exclusion.
   const focusNode = useMemo(() => findByKeyPath(layout, focusPath) ?? layout, [layout, focusPath]);
   const trail = useMemo(() => focusNode.ancestors().reverse(), [focusNode]);
-  const grandTotal = layout.value ?? 0;
-  const focusTotal = focusNode.value ?? 0;
+  const focusValueNode = useMemo(() => findByKeyPath(valueRoot, focusPath), [valueRoot, focusPath]);
+  const grandTotal = valueRoot.value ?? 0;
+  const focusTotal = focusValueNode?.value ?? 0;
 
   const navigate = useCallback((node: d3.HierarchyNode<HierarchyDatum>) => {
     zoomToPathRef.current?.(keyPathOf(node));
@@ -974,10 +1048,15 @@ export function InteractiveDonut({
     : "";
 
   const hoveredNode = hovered?.node;
+  const hoveredValueNode = useMemo(
+    () => (hoveredNode ? findByKeyPath(valueRoot, keyPathOf(hoveredNode)) : null),
+    [valueRoot, hoveredNode],
+  );
   const shareOfWhole = formatPercent(grandTotal > 0 ? focusTotal / grandTotal : 0, 1);
-  // Against the *unfiltered* `data`, not `grandTotal` — `grandTotal` is
-  // already post-exclusion, so dividing by it would always read 100%.
-  const unfilteredTotal = useMemo(() => sumValues(data), [data]);
+  // `layout.value`, not `grandTotal` — `layout` is always the raw,
+  // unfiltered total, and `grandTotal` is already post-exclusion, so
+  // dividing by it would always read 100%.
+  const unfilteredTotal = layout.value ?? 0;
   const showingShare = formatPercent(unfilteredTotal > 0 ? grandTotal / unfilteredTotal : 1, 1);
   /** How much of the summary the center hole can hold — see
    * CENTER_FULL_RADIUS. */
@@ -986,6 +1065,13 @@ export function InteractiveDonut({
 
   return (
     <div style={{ width, height }} className="flex flex-col">
+      {/* Both the drill-down trail and #166's excluded-slices readout
+          share this one fixed-height, horizontally-scrolling row — never
+          a second reserved area of its own, which would mean `chartHeight`
+          (and with it `radius`, a `useD3` dependency) changing the moment
+          the excluded list goes from empty to non-empty, tearing the
+          `<svg>` down right when the animation it's meant to protect is
+          what triggered it. See the header comment. */}
       <nav
         aria-label="Chart drill-down path"
         style={{ height: BREADCRUMB_AREA_HEIGHT }}
@@ -1010,43 +1096,36 @@ export function InteractiveDonut({
             </button>
           </span>
         ))}
-      </nav>
 
-      {excluded.length > 0 ? (
-        // #166's readout: reserved only while there's something to show
-        // (see `chartHeight` above), so a chart nobody has excluded from
-        // is pixel-identical to before this shipped. `aria-live` for the
-        // same reason the center summary is — the arcs re-basing is
-        // otherwise silent to a screen reader.
-        <div
-          role="status"
-          aria-live="polite"
-          style={{ height: EXCLUDED_AREA_HEIGHT }}
-          className="flex items-center gap-2 overflow-x-auto text-xs text-muted-foreground"
-        >
-          <span className="shrink-0 tabular-nums">Showing {showingShare} of total</span>
-          <span aria-hidden className="shrink-0">
-            ·
+        {excluded.length > 0 ? (
+          // `aria-live` for the same reason the center summary is — the
+          // arcs re-basing is otherwise silent to a screen reader.
+          <span role="status" aria-live="polite" className="ml-2 flex shrink-0 items-center gap-2 border-l pl-2">
+            <span className="shrink-0 tabular-nums">Showing {showingShare} of total</span>
+            {excluded.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => restoreItem(item.id)}
+                title={`Restore ${item.name}`}
+                className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+              >
+                <span aria-hidden>×</span>
+                {item.name} ({formatValue(item.value)})
+              </button>
+            ))}
+            {excluded.length > 1 ? (
+              <button
+                type="button"
+                onClick={restoreAll}
+                className="shrink-0 rounded px-1.5 py-0.5 underline hover:text-foreground"
+              >
+                Restore all
+              </button>
+            ) : null}
           </span>
-          {excluded.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => restoreItem(item.id)}
-              title={`Restore ${item.name}`}
-              className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
-            >
-              <span aria-hidden>×</span>
-              {item.name} ({formatValue(item.value)})
-            </button>
-          ))}
-          {excluded.length > 1 ? (
-            <button type="button" onClick={restoreAll} className="shrink-0 rounded px-1.5 py-0.5 underline hover:text-foreground">
-              Restore all
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+      </nav>
 
       <div
         ref={containerRef}
@@ -1118,7 +1197,11 @@ export function InteractiveDonut({
             rows={[
               {
                 label: valueLabel,
-                value: formatValue(hoveredNode.value ?? 0),
+                // From `valueRoot`, not the raw `hoveredNode.value` — a
+                // hovered branch may have an excluded descendant nested
+                // inside it, and the tooltip should read the same
+                // already-re-based number the center summary does.
+                value: formatValue(hoveredValueNode?.value ?? 0),
                 color: hoveredSwatch,
                 variant: "swatch",
               },
@@ -1129,8 +1212,8 @@ export function InteractiveDonut({
                 // ring is actually drawn to show.
                 label: `of ${hoveredNode.parent?.data.name ?? layout.data.name}`,
                 value: formatPercent(
-                  (hoveredNode.parent?.value ?? 0) > 0
-                    ? (hoveredNode.value ?? 0) / (hoveredNode.parent?.value ?? 1)
+                  (hoveredValueNode?.parent?.value ?? 0) > 0
+                    ? (hoveredValueNode?.value ?? 0) / (hoveredValueNode?.parent?.value ?? 1)
                     : 0,
                   1,
                 ),

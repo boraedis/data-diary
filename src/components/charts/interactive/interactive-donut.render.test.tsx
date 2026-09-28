@@ -69,10 +69,15 @@ function visibleCenterLines(): string[] {
     .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim());
 }
 
+/** Only the drill-down trail's own buttons, not the excluded-slices
+ * chips (#166) sharing the same `<nav>` row — those are scoped under
+ * their own `[role=status]` span. */
 function crumbs(): string[] {
-  return [...screen.getByRole("navigation", { name: /drill-down path/i }).querySelectorAll("button")].map(
-    (b) => b.textContent ?? "",
-  );
+  return [
+    ...screen
+      .getByRole("navigation", { name: /drill-down path/i })
+      .querySelectorAll(':scope > span:not([role="status"]) > button'),
+  ].map((b) => b.textContent ?? "");
 }
 
 function renderDonut(props: Partial<React.ComponentProps<typeof InteractiveDonut>> = {}) {
@@ -222,55 +227,79 @@ describe("InteractiveDonut", () => {
   });
 
   describe("excluding a slice (#166)", () => {
-    // The exclude commit is deliberately gated behind the same 750ms
-    // tween `zoomTo` runs (see excludeArc's own comment) — the collapse
-    // has to actually finish playing before the excluded row, the
-    // re-based total, or the pruned arc show up. Real time, not fake
-    // timers: the d3 transition schedules itself off real timers/rAF, the
-    // same reason `vitest.setup.ts`'s SVG geometry shim has to be
-    // permanent rather than per-test.
+    // The re-based total, the excluded chip and the "Showing X%" readout
+    // all commit to React state immediately — `layout` never depends on
+    // `excluded` (see the primitive's header comment), so there's nothing
+    // gating that commit behind the animation the way a filtered-tree
+    // approach would need. Only the *arc actually leaving the DOM* lags
+    // behind, since it's animating to a hairline over the same 750ms
+    // `zoomTo` uses rather than popping out of existence — `settle()`
+    // below waits out that part specifically. Real time, not fake timers:
+    // the d3 transition schedules itself off real timers/rAF, the same
+    // reason `vitest.setup.ts`'s SVG geometry shim has to be permanent
+    // rather than per-test.
     async function settle() {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, ZOOM_DURATION_MS + 50));
       });
     }
 
-    it("right-clicking a slice collapses it, then removes it and re-bases the remaining total", async () => {
+    it("right-clicking a slice re-bases the total immediately, then collapses the arc out of the DOM", async () => {
       const { container } = renderDonut();
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
 
-      // Mid-collapse: the arc is still mounted (it's animating to a
-      // hairline, not gone yet) and nothing has committed to React state.
-      expect(arcs(container).map(keyOf)).toContain("fr");
-      expect(centerLines()).toEqual(["All places", "100", "visits"]);
-
-      await settle();
-
-      // France (40) is gone from the arcs and the grand total re-bases to
-      // the remaining 60 (Georgia 30 + NY 10, Atlanta already counted
-      // inside Georgia) — center reports the new total, not the original
-      // 100.
-      expect(arcs(container).map(keyOf)).not.toContain("fr");
+      // Committed right away: the grand total re-bases to the remaining
+      // 60 (Georgia 30 + NY 10, Atlanta already counted inside Georgia)
+      // and the excluded row shows up — but the arc itself is still
+      // mounted, mid-collapse to a hairline rather than gone yet.
       expect(centerLines()).toEqual(["All places", "60", "visits"]);
       expect(screen.getByText(/France \(40\)/)).toBeTruthy();
       expect(screen.getByText("Showing 60.0% of total")).toBeTruthy();
+      expect(arcs(container).map(keyOf)).toContain("fr");
+
+      await settle();
+
+      // Now the collapse has finished, the arc is pruned from the DOM.
+      expect(arcs(container).map(keyOf)).not.toContain("fr");
     });
 
-    it("restores an excluded item on click, and grows the total back", async () => {
+    it("restores an excluded item on click, and grows the total back immediately", async () => {
       const { container } = renderDonut();
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
-      await settle();
       expect(centerLines()).toEqual(["All places", "60", "visits"]);
 
       act(() => {
         screen.getByRole("button", { name: /France/i }).click();
       });
       expect(centerLines()).toEqual(["All places", "100", "visits"]);
+      expect(screen.queryByText(/France \(40\)/)).toBeNull();
+      // The arc is back in the DOM right away too, animating back in from
+      // its collapsed hairline rather than popping back at full size.
       expect(arcs(container).map(keyOf)).toContain("fr");
+    });
+
+    it("captures a branch's effective weight, not its raw total, when a descendant was already excluded", async () => {
+      // Atlanta (20) is nested inside Georgia (30 of its own, 50 raw
+      // total including Atlanta). Excluding Atlanta first, then Georgia,
+      // should credit Georgia's chip with 30 — its own weight once
+      // Atlanta's is no longer double-counted — not the raw 50.
+      const { container } = renderDonut({ visibleRings: 3 });
+      act(() => {
+        arcFor(container, "atl").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      act(() => {
+        arcFor(container, "ga").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+
+      expect(screen.getByText(/Georgia \(30\)/)).toBeTruthy();
+      // Georgia's whole subtree (50, Atlanta included) is now gone from
+      // the total — not double-subtracted just because Atlanta had its
+      // own chip first: 100 - 50 = 50.
+      expect(centerLines()).toEqual(["All places", "50", "visits"]);
     });
 
     it("excludes a nested branch via keyboard (Delete), leaving its siblings", async () => {
@@ -291,7 +320,6 @@ describe("InteractiveDonut", () => {
       act(() => {
         arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
-      await settle();
       act(() => {
         arcFor(container, "usa").dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
