@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as d3 from "d3";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
+import type { FeatureCollection, Geometry } from "geojson";
 import atlantaTopoRaw from "@/data/geo/atlanta.topo.json";
 import dcMetroTopoRaw from "@/data/geo/dc-metro.topo.json";
 import dubaiTopoRaw from "@/data/geo/dubai.topo.json";
@@ -15,6 +16,7 @@ import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/respons
 import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import { loadCityWater, type WaterProperties } from "@/lib/geo/water";
 import type { CityHeatmapData } from "@/lib/charts";
 import { formatFirstVisited } from "@/lib/viz/first-visited";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -85,6 +87,32 @@ export function CityHeatmapExplorer({
     const topo = CITY_TOPOLOGIES[city];
     return feature(topo, topo.objects[city]);
   }, [city]);
+
+  // Water under the map (#286), lazy-loaded per city — see
+  // src/lib/geo/water.ts for why it isn't statically imported like the
+  // neighborhoods above. Stored with the city it belongs to, so for the
+  // moment between switching city and the new file arriving the map shows
+  // no water rather than the *previous* city's water through the new
+  // city's projection. The map simply gains its water a beat after the
+  // neighborhoods — no loading state, since nothing about reading the
+  // chart waits on it. A failed load leaves the map water-less, which is
+  // exactly how it looked before this overlay existed.
+  const [loadedWater, setLoadedWater] = useState<{
+    city: CityKey;
+    features: FeatureCollection<Geometry, WaterProperties>;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadCityWater(city)
+      .then((features) => {
+        if (!cancelled) setLoadedWater({ city, features });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [city]);
+  const water = loadedWater?.city === city ? loadedWater.features : undefined;
 
   const daysByFeature = useMemo(() => {
     const map = new Map<string, number>();
@@ -169,6 +197,7 @@ export function CityHeatmapExplorer({
                 const date = firstVisitedByFeature.get(neighborhoodKey(f.properties.root, f.properties.name));
                 return date ? formatFirstVisited(date, diaryStartDate) : null;
               }}
+              contextFeatures={water}
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"
@@ -183,7 +212,7 @@ export function CityHeatmapExplorer({
               // that dots no longer balloon on zoom (below) and can be
               // hidden entirely via the toggle above when they crowd a
               // small neighborhood.
-              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
+              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there, with surrounding water shown in blue; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
             />
           )}
         </ResponsiveChart>

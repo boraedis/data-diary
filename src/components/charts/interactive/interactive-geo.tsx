@@ -7,7 +7,15 @@ import { useD3 } from "@/hooks/use-d3";
 import { attachMarkHover, MARK_SPECS } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { SequentialLegend } from "./legend";
-import { categoricalColor, sequentialLogScale, travelledFill, noDataFill, type ColorMode } from "@/lib/viz/color";
+import {
+  categoricalColor,
+  sequentialLogScale,
+  travelledFill,
+  noDataFill,
+  waterFill,
+  waterLine,
+  type ColorMode,
+} from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
 
 // InteractiveGeo (#24) — the shared choropleth primitive. Generic over any
@@ -62,6 +70,11 @@ import { formatThousandsNumber } from "@/lib/viz/format";
 // leaving. Collapsing there would make the map appear to undo your work.
 // See the `expansion` state below for why accumulating open regions
 // turned out worse than replacing them.
+//
+// Water (#286) is an optional third layer, `contextFeatures`, painted
+// *beneath* the regions: flat, non-interactive, and outside every
+// data-driven part of the component (domain, legend, tooltip, fitting).
+// See that prop's own comment for why beneath rather than on top.
 //
 // A caller that passes nothing, or returns null for a given feature,
 // keeps exactly the old behavior: click zooms to that feature's bounds.
@@ -445,6 +458,37 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * Only affects framing. Everything in `features` is still drawn,
    * hoverable and clickable. */
   fitTo?: GeoFitTarget;
+  /** Optional geographic context drawn *beneath* the regions (#286) —
+   * the city heatmaps' water: polygons (sea, bays, lakes) filled flat
+   * water-blue, lines (rivers) stroked in a lighter step of it. Styled by
+   * geometry type, so a caller passes one mixed collection and nothing
+   * else.
+   *
+   * **Beneath, deliberately.** The regions are the chart; the context is
+   * a second, independently-sourced dataset (OSM water, for the city
+   * heatmaps — see scripts/geo-build-water.mjs) that will never agree
+   * with them to the metre. Painted underneath, wherever the two disagree
+   * the region wins: water overshooting onto land is covered by the
+   * region above it, and water only shows through the gaps the regions
+   * themselves leave. On top, every disagreement would be drawn across a
+   * region. The cost is that water inside a region (a park lake, a river
+   * a neighborhood boundary runs down the middle of) is hidden —
+   * acceptable for context, and exactly how the regions' own data
+   * already describes that ground.
+   *
+   * **Non-interactive.** `pointer-events: none`, so a click on open water
+   * falls through to the background handler and resets the view like any
+   * other empty space — to a reader, water *is* background. It has no
+   * tooltip, no legend entry, and never enters the colour domain.
+   *
+   * **Doesn't affect framing.** The projection is still fitted to
+   * `fitTo ?? features`; context is clipped to whatever that frame shows.
+   * Water that extended the fit would shrink the city to make room for
+   * the sea around it.
+   *
+   * Pass a stable reference (module-level or memoized) — it's a useD3
+   * dependency, same caveat as `markers`. */
+  contextFeatures?: FeatureCollection<Geometry, GeoJsonProperties>;
 };
 
 /** Discriminated union so one hover state serves both layers — a marker
@@ -486,6 +530,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
   resolveExpansion,
   fitTo,
+  contextFeatures,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // The one region currently shown as its own subdivisions, together with
@@ -738,6 +783,31 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       function markerRadius(d: { marker: GeoMarker }) {
         const v = getMarkerValue?.(d.marker);
         return scaleMarkersByValue && markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
+      }
+
+      // Context layer (#286), appended before the regions so it paints
+      // beneath them — see `contextFeatures`' own prop comment. Inside the
+      // same zoom-transformed `g`, so it pans/zooms in lockstep for free.
+      // One wrapper <g> carrying `pointer-events: none` rather than the
+      // attribute on every path.
+      if (contextFeatures && contextFeatures.features.length > 0) {
+        const isLine = (f: GeoFeature) => f.geometry?.type === "LineString" || f.geometry?.type === "MultiLineString";
+        g.append("g")
+          .attr("class", "geo-context")
+          .attr("aria-hidden", "true")
+          .style("pointer-events", "none")
+          .selectAll<SVGPathElement, GeoFeature>("path")
+          .data(contextFeatures.features)
+          .join("path")
+          .attr("d", (f) => path(f))
+          .attr("fill", (f) => (isLine(f) ? "none" : waterFill()))
+          .attr("stroke", (f) => (isLine(f) ? waterLine() : "none"))
+          .attr("stroke-width", 1.5)
+          .attr("stroke-linejoin", "round")
+          .attr("stroke-linecap", "round")
+          // Same constant-screen-width treatment as region borders below,
+          // so a river doesn't swell into a band at 128x.
+          .attr("vector-effect", "non-scaling-stroke");
       }
 
       const regions = g
@@ -1014,6 +1084,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       drawn,
       features,
       fitTo,
+      contextFeatures,
       expansion,
       width,
       mapHeight,

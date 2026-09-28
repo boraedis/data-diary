@@ -1,0 +1,72 @@
+{
+  "atlanta": {
+    "source": "Overture Maps base/water (OpenStreetMap)",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://docs.overturemaps.org/attribution/",
+    "release": "2026-09-23.1",
+    "clipBox": [
+      -84.6815,
+      33.5174,
+      -84.159,
+      34.0175
+    ],
+    "waterBodies": 31,
+    "pointsKept": 1
+  },
+  "dc-metro": {
+    "source": "Overture Maps base/water (OpenStreetMap)",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://docs.overturemaps.org/attribution/",
+    "release": "2026-09-23.1",
+    "clipBox": [
+      -77.3038,
+      38.6544,
+      -76.7779,
+      39.1273
+    ],
+    "waterBodies": 42,
+    "pointsKept": 0.5
+  },
+  "dubai": {
+    "source": "Overture Maps base/water (OpenStreetMap)",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://docs.overturemaps.org/attribution/",
+    "release": "2026-09-23.1",
+    "clipBox": [
+      54.2314,
+      23.9649,
+      56.8641,
+      26.0148
+    ],
+    "waterBodies": 81,
+    "pointsKept": 0.1
+  },
+  "istanbul": {
+    "source": "Overture Maps base/water (OpenStreetMap)",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://docs.overturemaps.org/attribution/",
+    "release": "2026-09-23.1",
+    "clipBox": [
+      26.9769,
+      39.8087,
+      30.9528,
+      42.5773
+    ],
+    "waterBodies": 117,
+    "pointsKept": 0.05
+  },
+  "nyc": {
+    "source": "Overture Maps base/water (OpenStreetMap)",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://docs.overturemaps.org/attribution/",
+    "release": "2026-09-23.1",
+    "clipBox": [
+      -74.5334,
+      40.2183,
+      -73.4222,
+      41.1933
+    ],
+    "waterBodies": 178,
+    "pointsKept": 0.07
+  }
+}
