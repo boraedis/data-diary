@@ -284,7 +284,7 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
                 visibleRings={rings === "all" ? maxDepth : Number(rings)}
                 zoomable={rings !== "all"}
                 valueLabel="visit score"
-                ariaLabel="Sunburst of logged places, nested by the selected breakdown. Click a slice to zoom into it, click the center or press Escape on a slice to zoom back out."
+                ariaLabel="Sunburst of logged places, nested by the selected breakdown. Click a slice to zoom into it, click the center or press Escape on a slice to zoom back out. Right-click, or press Delete or x on a focused slice, to exclude it from the chart."
               />
             ) : null
           }

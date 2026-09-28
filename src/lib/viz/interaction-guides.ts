@@ -42,7 +42,7 @@ export const RANKED_INTERACTION_GUIDE =
   "Use the pickers above to choose what's ranked, and at what level where there's a choice. Click a column header to sort by it, again to reverse, and a third time (or click #) to return to rank order — the # column always shows the real rank. Every entry is included: more rows load as you scroll. Hover a movement arrow for where that entry stood then and now, a shaded number for its exact value, or a header for what the column measures. On a narrow screen, scroll the table sideways; the rank and name stay pinned.";
 
 export const DONUT_INTERACTION_GUIDE =
-  "Click a slice to zoom into it; click the center (or press Escape) to zoom back out. Hover a slice for its exact value.";
+  "Click a slice to zoom into it; click the center (or press Escape) to zoom back out. Hover a slice for its exact value. Right-click a slice — or focus it and press Delete or x — to exclude it from the chart; the remaining slices re-base against the reduced total, and a row below the breadcrumb lists what's excluded, with its own weight, and lets you restore it one at a time or all at once.";
 
 export const GEO_INTERACTION_GUIDE =
   "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show.";

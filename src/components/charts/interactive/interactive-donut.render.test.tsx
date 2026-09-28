@@ -220,4 +220,73 @@ describe("InteractiveDonut", () => {
     expect(arcs(container)).toHaveLength(0);
     expect(crumbs()).toEqual(["Empty"]);
   });
+
+  describe("excluding a slice (#166)", () => {
+    it("right-clicking a slice removes it and re-bases the remaining total", () => {
+      const { container } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+
+      // France (40) is gone from the arcs and the grand total re-bases to
+      // the remaining 60 (Georgia 30 + NY 10 + Atlanta's parent Georgia
+      // already counts Atlanta) — center reports the new total, not the
+      // original 100.
+      expect(arcs(container).map(keyOf)).not.toContain("fr");
+      expect(centerLines()).toEqual(["All places", "60", "visits"]);
+      expect(screen.getByText(/France \(40\)/)).toBeTruthy();
+      expect(screen.getByText("Showing 60.0% of total")).toBeTruthy();
+    });
+
+    it("restores an excluded item on click, and grows the total back", () => {
+      const { container } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      expect(centerLines()).toEqual(["All places", "60", "visits"]);
+
+      act(() => {
+        screen.getByRole("button", { name: /France/i }).click();
+      });
+      expect(centerLines()).toEqual(["All places", "100", "visits"]);
+      expect(arcs(container).map(keyOf)).toContain("fr");
+    });
+
+    it("excludes a nested branch via keyboard (Delete), leaving its siblings", () => {
+      const { container } = renderDonut({ visibleRings: 2 });
+      act(() => {
+        arcFor(container, "ga").dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }),
+        );
+      });
+
+      expect(arcs(container).map(keyOf)).not.toContain("ga");
+      expect(arcs(container).map(keyOf)).toContain("ny");
+    });
+
+    it("survives a zoom: excluding, then zooming into a different branch, keeps it excluded", () => {
+      const { container } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      act(() => {
+        arcFor(container, "usa").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(crumbs()).toEqual(["All places", "USA"]);
+      expect(screen.getByText(/France \(40\)/)).toBeTruthy();
+    });
+
+    it("resets exclusions when the data prop changes", () => {
+      const { container, rerender } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      expect(screen.getByText(/France \(40\)/)).toBeTruthy();
+
+      rerender(<InteractiveDonut data={{ ...TREE }} width={600} height={600} valueLabel="visits" />);
+      expect(screen.queryByText(/France \(40\)/)).toBeNull();
+      expect(centerLines()).toEqual(["All places", "100", "visits"]);
+    });
+  });
 });

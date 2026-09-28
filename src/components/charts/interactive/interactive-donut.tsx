@@ -7,7 +7,7 @@ import { attachMarkHover } from "./marks";
 import { ChartTooltip } from "./tooltip";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatPercent, formatThousandsNumber } from "@/lib/viz/format";
-import type { HierarchyDatum } from "@/lib/viz/hierarchy";
+import { excludeByKeyPaths, pathId, sumValues, type HierarchyDatum } from "@/lib/viz/hierarchy";
 import { cn } from "@/lib/utils";
 
 // InteractiveDonut (#118) — the shared radial part-of-whole primitive: a
@@ -42,11 +42,20 @@ import { cn } from "@/lib/utils";
 //    reasoning; the short version is that only what's on screen exists in
 //    the DOM, and the other ~1,900 nodes live purely as numbers.
 //
-// Right-click-to-exclude-a-slice (the user's own long-standing want) is
-// explicitly NOT here: the hard part isn't the interaction, it's showing
-// the excluded weight somewhere that keeps the remaining percentages
-// honest, and that needs its own design pass. Filed as follow-up rather
-// than half-built here.
+// Right-click (or Delete/"x" with a slice focused) excludes it (#166,
+// split out of #118). The direction locked on that issue after weeks
+// open as an `idea`: exclusion re-bases the remaining slices honestly
+// against the reduced total (never a silent "100% of what's left"), and
+// a row below the breadcrumb names every excluded branch with its own
+// weight plus a running "showing X% of total" readout, so a reader can
+// never mistake a chart with something hidden for a complete one. An
+// exclusion is scoped to the exact node right-clicked — see
+// `excludeByKeyPaths` — not to "every node with this name," survives a
+// zoom (it filters the tree the layout is built from, not the view), and
+// is undone per-item or all at once from that same row. Deliberately kept
+// out of `foldTailIntoOther`: folding into "Other" still counts the tail
+// toward the whole, excluding removes it from the whole — conflating them
+// was the one thing #166 called out not to do.
 
 /** Arc extent in the layout's own units: `x` is angle in radians [0, 2π],
  * `y` is ring depth (root = 0). The subset of a d3 partition node that
@@ -74,6 +83,10 @@ const ZOOM_DURATION_MS = 750;
  * for the same reason (the caller's `h-[min(62vh,640px)]` class is a hard
  * cap on the whole component, not just the drawing). */
 const BREADCRUMB_AREA_HEIGHT = 32;
+/** Height reserved for the excluded-slices row, same fixed-budget idea as
+ * the breadcrumb — but only spent when there's something to show, so a
+ * chart nobody has excluded from looks exactly as it did before #166. */
+const EXCLUDED_AREA_HEIGHT = 28;
 
 /**
  * Center-hole radii, in px, at which the summary drops a line.
@@ -246,6 +259,13 @@ export function labelTransform(box: ArcBox, radius: number): string {
   return `rotate(${angle - 90}) translate(${r},0) rotate(${angle < 180 ? 0 : 180})`;
 }
 
+/** One excluded branch, as shown in the row below the breadcrumb: its
+ * `pathId` (so it can be un-excluded and de-duplicated), its display name,
+ * and the value it was carrying at the moment it was excluded — captured
+ * then rather than looked up live, since the branch no longer exists in
+ * the filtered tree to look up. */
+export type ExcludedItem = { id: string; path: string[]; name: string; value: number };
+
 /** Root-relative path of `key`s identifying a node — the root itself
  * contributes nothing, so `[]` means "the root". Stable across a
  * re-layout (unlike a node object), which is what makes it usable as the
@@ -383,7 +403,7 @@ export function InteractiveDonut({
   formatValue = formatThousandsNumber,
   valueLabel = "total",
   color,
-  ariaLabel = "Sunburst chart. Click a slice to zoom into it, click the center to zoom back out. Hover or focus a slice to see its value.",
+  ariaLabel = "Sunburst chart. Click a slice to zoom into it, click the center to zoom back out. Hover or focus a slice to see its value. Right-click, or press Delete or x on a focused slice, to exclude it from the chart.",
 }: InteractiveDonutProps) {
   // Container-*local* coordinates, resolved when the hover happens rather
   // than during render — see `readContainerRect` below for why that
@@ -424,7 +444,24 @@ export function InteractiveDonut({
    * path. */
   const zoomToPathRef = useRef<((path: string[]) => void) | null>(null);
 
-  const chartHeight = Math.max(0, height - BREADCRUMB_AREA_HEIGHT);
+  // Branches excluded via right-click/Delete (#166). Filters the *base*
+  // tree the layout is built from, not the rendered view — which is what
+  // makes an exclusion survive a zoom (it's gone from the data a zoom
+  // would otherwise still find) and re-base every remaining percentage
+  // honestly, since the grand total the center/tooltip divide by comes
+  // from this already-filtered layout.
+  const [excluded, setExcluded] = useState<ExcludedItem[]>([]);
+  const excludeNode = useCallback((node: DonutNode) => {
+    const path = keyPathOf(node);
+    const id = pathId(path);
+    setExcluded((prev) => (prev.some((item) => item.id === id) ? prev : [...prev, { id, path, name: node.data.name, value: node.value ?? 0 }]));
+  }, []);
+  const restoreItem = useCallback((id: string) => {
+    setExcluded((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+  const restoreAll = useCallback(() => setExcluded([]), []);
+
+  const chartHeight = Math.max(0, height - BREADCRUMB_AREA_HEIGHT - (excluded.length > 0 ? EXCLUDED_AREA_HEIGHT : 0));
   // The center disc plus `visibleRings` rings have to fit the smaller of
   // the two dimensions, so a unit of radius is that over the number of
   // bands sharing it.
@@ -454,9 +491,17 @@ export function InteractiveDonut({
     containerRectRef.current = null;
   }, [width, chartHeight]);
 
+  // The tree actually laid out, with every excluded branch pruned out —
+  // `data` itself stays untouched so an excluded item's captured `value`
+  // (and, if it's ever restored, its position) still make sense.
+  const filteredData = useMemo(
+    () => (excluded.length === 0 ? data : excludeByKeyPaths(data, new Set(excluded.map((item) => item.id)))),
+    [data, excluded],
+  );
+
   const layout = useMemo(() => {
     const root = d3
-      .hierarchy(data)
+      .hierarchy(filteredData)
       .sum((d) => Math.max(0, d.value ?? 0))
       // Descending value, so the biggest slice starts at 12 o'clock and
       // the ring reads as a ranking clockwise — and so a branch's palette
@@ -471,18 +516,25 @@ export function InteractiveDonut({
       node.target = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
     });
     return partitioned;
-  }, [data]);
+  }, [filteredData]);
 
-  // New data means the remembered focus is meaningless — reset both
-  // copies. Written as React's documented "adjust state when a prop
-  // changes" pattern (compare against the previous value *during* render)
-  // rather than an effect: an effect would reset one render too late,
-  // leaving the breadcrumb briefly claiming a path that no longer exists,
-  // and `react-hooks/set-state-in-effect` rightly rejects it.
-  const [renderedLayout, setRenderedLayout] = useState(layout);
-  if (renderedLayout !== layout) {
-    setRenderedLayout(layout);
+  // New data means both the remembered focus and any exclusions are
+  // meaningless — reset all three. Compared against `data` itself, not
+  // `layout`: `layout` also changes when only `excluded` changes, and that
+  // case must NOT reset the focus (excluding a slice elsewhere shouldn't
+  // kick the reader back to the root — see the fallback in `findByKeyPath
+  // (root, focusPath) ?? root` below for what happens when the focused
+  // branch itself is the one excluded). Written as React's documented
+  // "adjust state when a prop changes" pattern (compare against the
+  // previous value *during* render) rather than an effect: an effect
+  // would reset one render too late, leaving the breadcrumb briefly
+  // claiming a path that no longer exists, and
+  // `react-hooks/set-state-in-effect` rightly rejects it.
+  const [renderedData, setRenderedData] = useState(data);
+  if (renderedData !== data) {
+    setRenderedData(data);
     setFocusPath([]);
+    setExcluded([]);
   }
 
   const resolveColor = useMemo(() => color ?? defaultColorOf, [color]);
@@ -636,6 +688,13 @@ export function InteractiveDonut({
             // the ring and immediately zooms back out.
             event.stopPropagation();
           })
+          // #166's gesture. `preventDefault` swaps the browser's own
+          // context menu for the exclusion — there's nothing on a slice
+          // that menu would otherwise be useful for.
+          .on("contextmenu", (event: MouseEvent, d) => {
+            event.preventDefault();
+            excludeNode(d);
+          })
           .on("keydown", (event: KeyboardEvent, d) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
@@ -643,6 +702,11 @@ export function InteractiveDonut({
             } else if (event.key === "Escape" || event.key === "Backspace") {
               event.preventDefault();
               zoomTo((focus.parent ?? root) as AnimatedNode);
+            } else if (event.key === "Delete" || event.key === "x") {
+              // Right-click has no keyboard equivalent otherwise — this is
+              // the a11y path to the same exclusion.
+              event.preventDefault();
+              excludeNode(d);
             }
           });
 
@@ -793,7 +857,7 @@ export function InteractiveDonut({
         zoomToPathRef.current = null;
       };
     },
-    [layout, width, chartHeight, radius, visibleRings, zoomable, resolveColor, readContainerRect],
+    [layout, width, chartHeight, radius, visibleRings, zoomable, resolveColor, readContainerRect, excludeNode],
   );
 
   // --- Breadcrumb + center summary (React, deliberately outside useD3) ---
@@ -820,6 +884,10 @@ export function InteractiveDonut({
 
   const hoveredNode = hovered?.node;
   const shareOfWhole = formatPercent(grandTotal > 0 ? focusTotal / grandTotal : 0, 1);
+  // Against the *unfiltered* `data`, not `grandTotal` — `grandTotal` is
+  // already post-exclusion, so dividing by it would always read 100%.
+  const unfilteredTotal = useMemo(() => sumValues(data), [data]);
+  const showingShare = formatPercent(unfilteredTotal > 0 ? grandTotal / unfilteredTotal : 1, 1);
   /** How much of the summary the center hole can hold — see
    * CENTER_FULL_RADIUS. */
   const centerDetail: "full" | "value" | "name" =
@@ -852,6 +920,42 @@ export function InteractiveDonut({
           </span>
         ))}
       </nav>
+
+      {excluded.length > 0 ? (
+        // #166's readout: reserved only while there's something to show
+        // (see `chartHeight` above), so a chart nobody has excluded from
+        // is pixel-identical to before this shipped. `aria-live` for the
+        // same reason the center summary is — the arcs re-basing is
+        // otherwise silent to a screen reader.
+        <div
+          role="status"
+          aria-live="polite"
+          style={{ height: EXCLUDED_AREA_HEIGHT }}
+          className="flex items-center gap-2 overflow-x-auto text-xs text-muted-foreground"
+        >
+          <span className="shrink-0 tabular-nums">Showing {showingShare} of total</span>
+          <span aria-hidden className="shrink-0">
+            ·
+          </span>
+          {excluded.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => restoreItem(item.id)}
+              title={`Restore ${item.name}`}
+              className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
+            >
+              <span aria-hidden>×</span>
+              {item.name} ({formatValue(item.value)})
+            </button>
+          ))}
+          {excluded.length > 1 ? (
+            <button type="button" onClick={restoreAll} className="shrink-0 rounded px-1.5 py-0.5 underline hover:text-foreground">
+              Restore all
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         ref={containerRef}
