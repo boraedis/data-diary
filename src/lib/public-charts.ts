@@ -18,20 +18,30 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
 import {
+  getAdminRegionVisitData,
   getCountryVisitData,
   getExerciseWorkoutRows,
   getPlaceHierarchyData,
+  getUsCountyVisitData,
   getUsStateVisitData,
+  type AdminRegionVisitData,
   type CountryVisitEntry,
   type DailyValue,
   type DeviceDay,
   type ExerciseWorkoutRow,
   type PlaceHierarchyRow,
   type SleepNight,
+  type UsCountyVisitData,
   type UsStateVisitEntry,
 } from "@/lib/charts";
 import { getMusicLeaderboardData, type MusicMode } from "@/lib/leaderboards/listens";
 import type { LeaderboardRow } from "@/lib/leaderboards/rows";
+import {
+  getUnloggedTravelCodes,
+  getUnloggedTravelDetails,
+  type UnloggedTravelDetail,
+  type UnloggedTravelKind,
+} from "@/lib/unlogged-travel";
 
 // Widened alongside charts.ts's own WeightMetricsPoint (issue #117
 // follow-up) — body fat % and muscle mass are body-composition data, not
@@ -230,6 +240,40 @@ export function getPublicCountryVisitData(): Promise<CountryVisitEntry[]> {
 
 export function getPublicUsStateVisitData(): Promise<UsStateVisitEntry[]> {
   return getUsStateVisitData();
+}
+
+/** Enables World's country -> state/admin-region drill-down publicly
+ * (#453 follow-up) — subdivision names and day counts only, no
+ * coordinates, same safety profile as the country/state tiers above. */
+export function getPublicAdminRegionVisitData(): Promise<AdminRegionVisitData> {
+  return getAdminRegionVisitData();
+}
+
+/** Enables US Heatmap's state -> county/metro drill-down publicly (#453
+ * follow-up) — county names/FIPS and day counts only, no coordinates. */
+export function getPublicUsCountyVisitData(): Promise<UsCountyVisitData> {
+  return getUsCountyVisitData();
+}
+
+/** Unlogged-travel membership (#453 follow-up) — which countries/counties
+ * were travelled to or through, with no logged day. Codes/FIPS and
+ * membership only; safe as-is (same shape `getPublicCountryVisitData`
+ * etc. already expose). See getPublicUnloggedTravelDetails below for the
+ * one field this module masks out of the *details* variant. */
+export function getPublicUnloggedTravelCodes(kind: UnloggedTravelKind): Promise<Set<string>> {
+  return getUnloggedTravelCodes(kind);
+}
+
+/** Per-code `firstVisited` only — `note` is free text an owner could put
+ * anything in (a companion's name, a private reason for the trip), so
+ * unlike this file's other reused aggregators, this one *does* mask a
+ * field rather than reuse UnloggedTravelDetail whole. Only used for the
+ * tooltip's "first visited" line; nothing here reads `note`. */
+export async function getPublicUnloggedTravelDetails(
+  kind: UnloggedTravelKind,
+): Promise<Map<string, UnloggedTravelDetail>> {
+  const details = await getUnloggedTravelDetails(kind);
+  return new Map([...details].map(([code, detail]) => [code, { firstVisited: detail.firstVisited, note: null }]));
 }
 
 export function getPublicPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {

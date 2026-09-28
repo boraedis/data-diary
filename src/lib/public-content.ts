@@ -8,8 +8,12 @@
 // reasoning — see src/lib/public-charts.ts for the queries behind each.
 //
 // #453 added the rest, per the owner's per-chart decision posted on that
-// issue: world/us-states (country/state-level only — no admin-region/
-// county drill-down or unlogged-travel overlay publicly), sleep-trend,
+// issue: world/us-states — including the full admin-region/county
+// drill-down and the unlogged-travel overlay (owner's follow-up call on
+// #453: none of that is address/lat-lng/people/free-text, just
+// subdivision names, day counts, and travel membership — the one
+// exception is unlogged travel's own free-text `note`, masked out at the
+// public boundary, see getPublicUnloggedTravelDetails) — sleep-trend,
 // coffee-trend, distance-trend, exercise-mix, screen-time,
 // music-leaderboard (artist/song names are public figures, not private
 // people), and place-hierarchy (place names and mention counts, no lat/
