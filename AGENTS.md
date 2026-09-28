@@ -323,8 +323,12 @@ that don't exist as labels:
 - **LOE** — mirrors the `LOE: *` label (kept in sync manually, not by
   automation — set both when filing or triaging an issue).
 
-When filing a new issue via `gh issue create`, also add it to the project
-and set these fields, e.g.:
+**Filing an issue without also adding it to project #3 is an incomplete
+filing, not just a missed nice-to-have — GitHub does not do this
+automatically, regardless of which interface created the issue** (`gh
+issue create`, the GitHub MCP tools, the web UI, an agent session). Every
+new issue, whichever tool created it, must be added to the project in the
+same action as filing it:
 
 ```bash
 gh project item-add 3 --owner boraedis --url <issue-url>
@@ -332,6 +336,11 @@ gh project item-add 3 --owner boraedis --url <issue-url>
 
 then set `Status`/`Priority`/`LOE` with `gh project item-edit` (or just
 ask the user which values to use if it's not obvious from the issue body).
+If the environment you're in has no `gh` CLI and no tool that reaches
+project-v2 fields (some agent sessions only have GitHub MCP tools, which
+may not expose this board), you cannot silently skip this step — say so
+explicitly when you report the new issue, and ask the user to add it (or
+do it yourself once you have access), rather than leaving it unstated.
 Epics/sub-issues still use GitHub's native parent/sub-issue linking, not a
 project field — the board's `Parent issue` / `Sub-issues progress` columns
 read that relationship automatically.
