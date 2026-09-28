@@ -51,6 +51,48 @@ export function sumValues(node: HierarchyDatum): number {
   return (node.value ?? 0) + (node.children ?? []).reduce((total, child) => total + sumValues(child), 0);
 }
 
+/** Separator for `pathId` — a control character rather than "/", since a
+ * `buildTreeFromLevels` key can itself legitimately contain "/" (its
+ * category-path prefixing), and a naive join would collide two different
+ * ancestries into the same id. */
+const PATH_ID_SEP = "\u0000";
+
+/** Joins a root-relative key path (as `InteractiveDonut`'s `keyPathOf`
+ * produces) into one stable string id — for keying a Set/Map by "this
+ * exact node, at this exact position in the tree" rather than by its bare
+ * (only sibling-unique) `key`. */
+export function pathId(path: string[]): string {
+  return path.join(PATH_ID_SEP);
+}
+
+/**
+ * Drops the branches named by `excluded` (a set of `pathId`s) from `node`,
+ * keeping everything else — including each excluded branch's siblings and
+ * every other node that happens to share its bare `key` elsewhere in the
+ * tree. An exclusion is scoped to the exact position it was made at, not
+ * to "every node with this identity," which is what makes it safe to
+ * exclude, say, one country's "Unspecified" bucket without also hiding
+ * every other country's.
+ *
+ * `node` itself is never excludable by this function (the root has no
+ * path), matching `InteractiveDonut`, which only offers the gesture on a
+ * rendered arc — the root is never one.
+ */
+export function excludeByKeyPaths(
+  node: HierarchyDatum,
+  excluded: ReadonlySet<string>,
+  path: string[] = [],
+): HierarchyDatum {
+  const children = node.children ?? [];
+  if (children.length === 0) return node;
+  const kept = children
+    .filter((child) => !excluded.has(pathId([...path, child.key])))
+    .map((child) => excludeByKeyPaths(child, excluded, [...path, child.key]));
+  return kept.length === children.length && kept.every((c, i) => c === children[i])
+    ? node
+    : { ...node, children: kept };
+}
+
 /**
  * Builds a nested tree from flat rows that each name their own parent —
  * the shape a self-referencing table (`places.parentId`) comes back as.

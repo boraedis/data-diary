@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildTreeFromLevels,
   buildTreeFromParents,
+  excludeByKeyPaths,
   foldTailIntoOther,
+  pathId,
   pruneEmptyBranches,
   sumValues,
   type HierarchyDatum,
@@ -225,5 +227,68 @@ describe("foldTailIntoOther", () => {
       ],
     };
     expect(childNames(foldTailIntoOther(tree, { keep: 1 }))).toEqual(["Big", "Other"]);
+  });
+});
+
+describe("excludeByKeyPaths", () => {
+  const tree: HierarchyDatum = {
+    key: "root",
+    name: "Root",
+    children: [
+      {
+        key: "usa",
+        name: "USA",
+        children: [
+          { key: "ga", name: "Georgia", value: 30 },
+          { key: "ny", name: "New York", value: 10 },
+        ],
+      },
+      { key: "fr", name: "France", value: 40 },
+    ],
+  };
+
+  it("drops only the exact node excluded, keeping its siblings", () => {
+    const pruned = excludeByKeyPaths(tree, new Set([pathId(["usa", "ga"])]));
+    expect(childNames(pruned.children?.[0] ?? null)).toEqual(["New York"]);
+    expect(childNames(pruned)).toEqual(["USA", "France"]);
+  });
+
+  it("drops a whole branch, subtree included", () => {
+    const pruned = excludeByKeyPaths(tree, new Set([pathId(["usa"])]));
+    expect(childNames(pruned)).toEqual(["France"]);
+  });
+
+  it("does not touch a same-keyed node at a different position", () => {
+    // Two different "ga"s at two different positions — only the one
+    // actually named by its full path is excluded.
+    const twoGas: HierarchyDatum = {
+      key: "root",
+      name: "Root",
+      children: [
+        { key: "usa", name: "USA", children: [{ key: "ga", name: "Georgia (US)", value: 1 }] },
+        { key: "eu", name: "Europe", children: [{ key: "ga", name: "Georgia (country)", value: 1 }] },
+      ],
+    };
+    const pruned = excludeByKeyPaths(twoGas, new Set([pathId(["usa", "ga"])]));
+    expect(childNames(pruned.children?.[0] ?? null)).toEqual([]);
+    expect(childNames(pruned.children?.[1] ?? null)).toEqual(["Georgia (country)"]);
+  });
+
+  it("returns the same object when nothing is excluded from it", () => {
+    expect(excludeByKeyPaths(tree, new Set())).toBe(tree);
+    expect(excludeByKeyPaths(tree, new Set(["not-a-real-path"]))).toBe(tree);
+  });
+
+  it("leaves a leaf node untouched", () => {
+    const leaf: HierarchyDatum = { key: "ga", name: "Georgia", value: 30 };
+    expect(excludeByKeyPaths(leaf, new Set([pathId(["ga"])]))).toBe(leaf);
+  });
+});
+
+describe("pathId", () => {
+  it("distinguishes paths that would collide on a naive '/' join", () => {
+    // buildTreeFromLevels keys already contain "/" — a join on "/" would
+    // make these two different ancestries produce the same id.
+    expect(pathId(["Restaurant/Cafe", "x"])).not.toBe(pathId(["Restaurant", "Cafe/x"]));
   });
 });
