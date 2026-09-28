@@ -169,6 +169,19 @@ export type InteractiveLineProps = {
    * "monthYear" instead, since every point already sits on the 1st and a
    * weekday there is meaningless. */
   dateFormat?: DateFormatPreset;
+  /** Labels for an x-axis whose dates stand in for something that isn't a
+   * point in time — TrendExplorer's seasonal folds (#451), which place Mon–Sun,
+   * Jan–Dec or day 1–366 on reference dates in one fixed year (see
+   * `src/lib/viz/bin.ts`'s cyclical-folding section). `tick` names axis ticks
+   * and `title` the tooltip's heading, replacing `dateFormat` (whose presets
+   * would print that reference year); `tickValues` pins the ticks to exact
+   * stops. Pass a stable (memoized or module-level) object — it's a `useD3`
+   * dependency. */
+  xLabels?: {
+    tick: (date: Date) => string;
+    title: (date: Date) => string;
+    tickValues?: readonly Date[];
+  };
   margin?: Partial<typeof DEFAULT_MARGIN>;
   /** Accessible label for the hover/keyboard interaction surface — always
    * pass something chart-specific ("Weight over time...", not the
@@ -433,6 +446,7 @@ export function InteractiveLine({
   yTickFormat,
   valueFormat = String,
   dateFormat = "weekday",
+  xLabels,
   margin,
   ariaLabel,
   initialHiddenIds,
@@ -631,7 +645,21 @@ export function InteractiveLine({
           .text(region.label);
       }
 
-      drawStandardAxes({ g, x, y, innerWidth, innerHeight, yTicks: 5, yTickFormat });
+      drawStandardAxes({
+        g,
+        x,
+        y,
+        innerWidth,
+        innerHeight,
+        yTicks: 5,
+        yTickFormat,
+        ...(xLabels
+          ? {
+              xTickFormat: (value: d3.NumberValue) => xLabels.tick(value instanceof Date ? value : new Date(+value)),
+              xTickValues: xLabels.tickValues,
+            }
+          : {}),
+      });
       drawReferenceLines({ g, y, innerWidth, lines: referenceLines });
 
       const lineGen = d3
@@ -688,7 +716,7 @@ export function InteractiveLine({
           .attr("stroke-width", MARK_SPECS.marker.ringWidth);
       }
     },
-    [visibleSeries, regions, referenceLines, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight],
+    [visibleSeries, regions, referenceLines, width, mainHeight, x, y, yTickFormat, xLabels, innerWidth, innerHeight],
   );
 
   // "series" hover's emphasis, applied to the already-drawn marks rather
@@ -816,7 +844,7 @@ export function InteractiveLine({
           <ChartTooltip
             x={MARGIN.left + crosshair.pixelX}
             y={MARGIN.top + tooltipY}
-            title={formatDate(toDateString(tooltipTitleDate), dateFormat)}
+            title={xLabels ? xLabels.title(tooltipTitleDate) : formatDate(toDateString(tooltipTitleDate), dateFormat)}
             rows={tooltipRows}
             containerWidth={width}
           />

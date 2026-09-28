@@ -9,10 +9,69 @@ import { InteractiveLine, type InteractiveLinePoint } from "@/components/charts/
 import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import type { ReferenceLine } from "@/components/charts/interactive/reference-lines";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
-import { groupByPeriod, type Period } from "@/lib/viz/bin";
-import { parseDate } from "@/lib/date";
+import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
+import {
+  cycleOccurrenceKey,
+  cycleReferenceDate,
+  foldByCycle,
+  formatCyclePosition,
+  groupByPeriod,
+  poolCircularWindow,
+  type Cycle,
+  type Period,
+} from "@/lib/viz/bin";
+import { parseDate, toDateString } from "@/lib/date";
 import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import type { TrackingSpan } from "@/lib/viz/tracking-span";
+
+/** "timeline" is the ordinary calendar view; the rest fold every year (or
+ * week) onto one axis — see `src/lib/viz/bin.ts`'s cyclical-folding section
+ * (#451). A separate picker from `PeriodPicker` rather than extra buttons on
+ * it, because a fold isn't a coarser or finer bucket of the same timeline:
+ * it replaces the time axis, so the period buttons are hidden while one is
+ * on. The range picker stays — it chooses which years get folded. */
+type View = "timeline" | Cycle;
+
+const VIEW_OPTIONS: GroupByOption<View>[] = [
+  { id: "timeline", label: "Timeline" },
+  { id: "weekday", label: "Weekday" },
+  { id: "monthOfYear", label: "Month" },
+  { id: "dayOfYear", label: "Day of year" },
+];
+
+/** ±7 days, so each day-of-year point pools a fortnight of every year logged
+ * — wide enough that a handful of years reads as a curve rather than 366
+ * jittering single-day means, narrow enough to keep a seasonal turn (the
+ * weeks around a holiday) visible. See `poolCircularWindow`. */
+const DAY_OF_YEAR_RADIUS = 7;
+
+/** Below this plot width the month-based folds label every third month
+ * (Jan/Apr/Jul/Oct) instead of all twelve, which would overlap. */
+const NARROW_WIDTH = 480;
+
+function referenceDates(cycle: Cycle, positions: number[]): Date[] {
+  return positions.map((p) => parseDate(cycleReferenceDate(cycle, p)));
+}
+
+/** Axis ticks and tooltip titles for a fold — `InteractiveLine`'s `xLabels`.
+ * Built per (cycle, narrow) pair and memoized by the caller, since the
+ * object is a `useD3` dependency. Day of year ticks at each month's 1st and
+ * names only the month there; its tooltip gives the full "March 14". */
+function foldLabels(cycle: Cycle, narrow: boolean) {
+  const months = Array.from({ length: 12 }, (_, m) => m).filter((m) => !narrow || m % 3 === 0);
+  // Day of year's month-1st reference dates are the month fold's own.
+  const tickValues =
+    cycle === "weekday" ? referenceDates(cycle, [0, 1, 2, 3, 4, 5, 6]) : referenceDates("monthOfYear", months);
+  return {
+    tick: (date: Date) =>
+      formatCyclePosition(cycle === "dayOfYear" ? "monthOfYear" : cycle, toDateString(date), true),
+    // Day of year's point is a pooled window, not the one day, so its
+    // heading says so.
+    title: (date: Date) =>
+      formatCyclePosition(cycle, toDateString(date)) + (cycle === "dayOfYear" ? ` ±${DAY_OF_YEAR_RADIUS} days` : ""),
+    tickValues,
+  };
+}
 
 /**
  * Legacy's "averager" shape with real controls: a value per period, over a
@@ -122,14 +181,18 @@ export function TrendExplorer<T extends { date: string }>({
 }) {
   const showBand = aggregate === "mean" && band !== false;
   const [period, setPeriod] = useState<Period>("month");
+  const [view, setView] = useState<View>("timeline");
   const [range, setRange] = useState<[Date, Date] | null>(null);
+  const cycle = view === "timeline" ? null : view;
 
   const domain = useMemo<[Date, Date] | null>(() => {
     if (data.length === 0) return null;
     return [parseDate(data[0].date), parseDate(data[data.length - 1].date)];
   }, [data]);
 
-  const buckets = useMemo(() => {
+  // Timeline periods and fold positions both reduce to "a start date and
+  // its rows" here — all the point math below needs from either.
+  const buckets = useMemo<{ start: string; items: T[] }[]>(() => {
     const [from, to] = range ?? [];
     const scoped =
       from && to
@@ -138,8 +201,10 @@ export function TrendExplorer<T extends { date: string }>({
             return date >= from && date <= to;
           })
         : data;
-    return groupByPeriod(scoped, period, (item) => item.date);
-  }, [data, period, range]);
+    if (cycle === null) return groupByPeriod(scoped, period, (item) => item.date);
+    const folded = foldByCycle(scoped, cycle, (item) => item.date);
+    return cycle === "dayOfYear" ? poolCircularWindow(folded, cycle, DAY_OF_YEAR_RADIUS) : folded;
+  }, [data, period, cycle, range]);
 
   // Shared by the primary series and every `extraSeries` entry — they all
   // bucket the exact same rows, just summarized by different `getValue`s,
@@ -159,7 +224,20 @@ export function TrendExplorer<T extends { date: string }>({
     for (const { start, items } of buckets) {
       const included = items.filter((item) => valueOf(item) !== undefined);
       if (included.length === 0) continue;
-      const values = included.map((item) => valueOf(item) as number);
+      // A folded sum averages each occurrence's total (a typical January's
+      // hours, not every January's added together — see
+      // `cycleOccurrenceKey`), so its values are those totals; a folded or
+      // unfolded mean pools the days themselves.
+      const values =
+        cycle !== null && aggregate === "sum"
+          ? Array.from(
+              d3.rollup(
+                included,
+                (group) => group.reduce((sum, item) => sum + (valueOf(item) as number), 0),
+                (item) => cycleOccurrenceKey(cycle, item.date),
+              ).values(),
+            )
+          : included.map((item) => valueOf(item) as number);
       const total = values.reduce((sum, v) => sum + v, 0);
       const mean = total / values.length;
       // A spread band only means something for a mean — for a sum it
@@ -179,7 +257,7 @@ export function TrendExplorer<T extends { date: string }>({
       const stdDev = Math.sqrt(variance);
       points.push({
         x: parseDate(start),
-        y: aggregate === "sum" ? total : mean,
+        y: aggregate === "sum" && cycle === null ? total : mean,
         ...(aggregate === "mean" ? { bandLow: mean - stdDev, bandHigh: mean + stdDev } : {}),
       });
       itemsByPoint.push(included);
@@ -202,7 +280,7 @@ export function TrendExplorer<T extends { date: string }>({
   const primary = useMemo(
     () => computePoints(getValue),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate, primaryKey],
+    [buckets, aggregate, cycle, primaryKey],
   );
   const points = primary.points;
 
@@ -210,7 +288,7 @@ export function TrendExplorer<T extends { date: string }>({
     () => (extraSeries ?? []).map((s) => computePoints(s.getValue)),
     // See `extraSeriesKey` above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate, extraSeriesKey],
+    [buckets, aggregate, cycle, extraSeriesKey],
   );
 
   // With more than one line, every tooltip row needs its line's name: the
@@ -234,6 +312,14 @@ export function TrendExplorer<T extends { date: string }>({
     [buckets],
   );
 
+  // Both widths up front, so the render prop below only picks one — it
+  // can't call hooks itself, and a fresh object per render would rebuild
+  // the SVG on every render (`xLabels` is a `useD3` dependency).
+  const xLabels = useMemo(
+    () => (cycle === null ? null : { wide: foldLabels(cycle, false), narrow: foldLabels(cycle, true) }),
+    [cycle],
+  );
+
   return (
     <ChartPage
       title={title}
@@ -245,7 +331,8 @@ export function TrendExplorer<T extends { date: string }>({
         domain ? (
           <>
             {extraFilters}
-            <PeriodPicker value={period} onChange={setPeriod} />
+            <GroupByPicker label="View" value={view} onChange={setView} options={VIEW_OPTIONS} />
+            {cycle === null ? <PeriodPicker value={period} onChange={setPeriod} /> : null}
             <TimeRangePicker domain={domain} value={range} onChange={setRange} />
           </>
         ) : null
@@ -281,6 +368,7 @@ export function TrendExplorer<T extends { date: string }>({
               height={height}
               valueFormat={valueFormat}
               dateFormat="monthYear"
+              xLabels={xLabels ? (width < NARROW_WIDTH ? xLabels.narrow : xLabels.wide) : undefined}
               initialHiddenIds={initialHiddenIds}
               referenceLines={referenceLines}
               ariaLabel={ariaLabel}
