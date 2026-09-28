@@ -48,6 +48,18 @@ function arcFor(container: HTMLElement, key: string): SVGPathElement {
   return match;
 }
 
+/** The focus-relative start angle (`target.x0`) the primitive's own
+ * internal `AnimatedNode` is currently animating toward — reads it
+ * straight off the bound datum rather than parsing the `d` path string,
+ * since that's the value `applyExclusion`'s collapse-anchor logic (#166)
+ * actually sets. Not part of the primitive's public/exported surface — an
+ * internal-shape read, acceptable here since it's the only way to observe
+ * the collapse target without a browser to look at the rendered arc in. */
+function targetX0(container: HTMLElement, key: string): number {
+  const datum = d3.select(arcFor(container, key)).datum() as { target: { x0: number } };
+  return datum.target.x0;
+}
+
 function visibleArcs(container: HTMLElement): SVGPathElement[] {
   return arcs(container).filter((p) => Number(p.getAttribute("fill-opacity")) > 0);
 }
@@ -313,6 +325,46 @@ describe("InteractiveDonut", () => {
 
       expect(arcs(container).map(keyOf)).not.toContain("ga");
       expect(arcs(container).map(keyOf)).toContain("ny");
+    });
+
+    it("collapses a whole excluded branch toward its own start angle, not each descendant's own", async () => {
+      // "excl" is the second top-level branch (A is bigger, so it takes
+      // the first/biggest slot and excl's start angle is non-zero — not
+      // 12 o'clock). Within excl, E2 is the *second* child, so E2's own
+      // start angle sits partway through excl's span — genuinely
+      // different from excl's own start. If descendants collapsed toward
+      // their own angle (the old, wrong behavior) or toward a fixed
+      // origin (12 o'clock, an earlier attempt at this), E2 would land
+      // somewhere other than excl's own start.
+      const anchorTree: HierarchyDatum = {
+        key: "root",
+        name: "Root",
+        children: [
+          { key: "a", name: "A", value: 20 },
+          {
+            key: "excl",
+            name: "Excl",
+            children: [
+              { key: "e1", name: "E1", value: 10 },
+              { key: "e2", name: "E2", value: 5 },
+            ],
+          },
+        ],
+      };
+      const { container } = renderDonut({ data: anchorTree, visibleRings: 2 });
+
+      const exclStart = targetX0(container, "excl");
+      const e2StartBefore = targetX0(container, "e2");
+      // Sanity check the fixture actually exercises the distinction.
+      expect(e2StartBefore).toBeGreaterThan(exclStart + 0.01);
+
+      act(() => {
+        arcFor(container, "excl").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+
+      expect(targetX0(container, "excl")).toBeCloseTo(exclStart, 6);
+      expect(targetX0(container, "e1")).toBeCloseTo(exclStart, 6);
+      expect(targetX0(container, "e2")).toBeCloseTo(exclStart, 6);
     });
 
     it("survives a zoom: excluding, then zooming into a different branch, keeps it excluded", async () => {

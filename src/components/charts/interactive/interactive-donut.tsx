@@ -102,9 +102,22 @@ type DonutNode = d3.HierarchyRectangularNode<HierarchyDatum>;
  * data on every node in the tree, and it must cost nothing and never reach
  * React state.
  *
+ * `anchorX` is the absolute angle an excluded node (or one of its
+ * descendants) is currently collapsed toward — the *start* angle the
+ * excluded branch had at the moment it was excluded, inherited unchanged
+ * by every one of its descendants so the whole subtree collapses into one
+ * point rather than each node shrinking into its own separate spot. `null`
+ * for anything not currently excluded. See `applyExclusion`.
+ *
  * `uid` is a stable identity for the data join below; `data.key` is only
  * unique among siblings, and the join is across the whole tree. */
-type AnimatedNode = DonutNode & { current: ArcBox; target: ArcBox; effective: ArcBox; uid: number };
+type AnimatedNode = DonutNode & {
+  current: ArcBox;
+  target: ArcBox;
+  effective: ArcBox;
+  anchorX: number | null;
+  uid: number;
+};
 
 /** Below this angular width an arc is a hairline that can't be seen or
  * clicked; it's cheaper to hide it than to render thousands of them. */
@@ -581,6 +594,7 @@ export function InteractiveDonut({
       node.current = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
       node.target = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
       node.effective = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
+      node.anchorX = null;
     });
     return partitioned;
   }, [data]);
@@ -952,15 +966,22 @@ export function InteractiveDonut({
        * whenever a sibling's value changes, but a node's *local* share of
        * its own parent is unaffected by that — normalizing against the
        * fresh span is what cancels the reallocation out and leaves only
-       * the redistribution the animation is actually for. Anything with
-       * no match (an excluded node, or one of its descendants) collapses
-       * to a hairline at the origin — angle 0, 12 o'clock, in both
-       * fields — rather than at wherever it already happens to be sitting.
-       * A restore runs the same code with the id removed from `nextIds`,
-       * so growing back in starts from that same origin too: every
-       * exclude/restore reads as slices sweeping in and out of one fixed
-       * point rather than each vanishing into its own arbitrary spot on
-       * the ring.
+       * the redistribution the animation is actually for.
+       *
+       * Anything with no match — an excluded node, or one of its
+       * descendants — collapses to a hairline at `anchorX`: the *start*
+       * angle the excluded branch itself had at the moment it was
+       * excluded, computed once and inherited unchanged down the whole
+       * subtree (`nodes` is walked parent-before-child, so a descendant's
+       * `n.parent`'s `anchorX` is always already set by the time `n` is
+       * reached). That's what makes a whole excluded branch read as
+       * sweeping into the single point where it began, rather than each
+       * node — including every descendant, at its own, different angle —
+       * shrinking into its own separate spot. A restore runs the same
+       * code with the id removed from `nextIds`; since nothing here
+       * touches `anchorX` for a *matched* node except to clear it back to
+       * `null`, growing back in starts from that same point it vanished
+       * into.
        */
       function applyExclusion(nextIds: ReadonlySet<string>) {
         const nextRoot = d3
@@ -981,16 +1002,27 @@ export function InteractiveDonut({
         for (const n of nodes) {
           const next = focusSpan > 0 ? nextBoxByPath.get(pathId(keyPathOf(n))) : undefined;
           if (next) {
+            n.anchorX = null;
             copyBox(next, n.effective);
             n.target.x0 = Math.max(0, Math.min(1, (next.x0 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
             n.target.x1 = Math.max(0, Math.min(1, (next.x1 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
             n.target.y0 = Math.max(0, next.y0 - focusDepth);
             n.target.y1 = Math.max(0, next.y1 - focusDepth);
           } else {
-            n.effective.x0 = 0;
-            n.effective.x1 = 0;
-            n.target.x0 = 0;
-            n.target.x1 = 0;
+            // First time this node has gone unmatched: inherit the
+            // parent's anchor if it's collapsing too (the whole subtree
+            // sweeps into one shared point), otherwise this *is* the
+            // excluded branch — anchor to its own current start angle,
+            // captured before it's overwritten below.
+            if (n.anchorX === null) {
+              const parent = n.parent as AnimatedNode | null;
+              n.anchorX = parent?.anchorX ?? n.effective.x0;
+            }
+            n.effective.x0 = n.anchorX;
+            n.effective.x1 = n.anchorX;
+            const collapsedX = focusSpan > 0 ? Math.max(0, Math.min(1, (n.anchorX - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI : 0;
+            n.target.x0 = collapsedX;
+            n.target.x1 = collapsedX;
           }
         }
 
