@@ -1,26 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as d3 from "d3";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
+import type { FeatureCollection, Geometry } from "geojson";
 import atlantaTopoRaw from "@/data/geo/atlanta.topo.json";
 import dcMetroTopoRaw from "@/data/geo/dc-metro.topo.json";
 import dubaiTopoRaw from "@/data/geo/dubai.topo.json";
 import nycTopoRaw from "@/data/geo/nyc.topo.json";
 import istanbulTopoRaw from "@/data/geo/istanbul.topo.json";
-import atlantaWaterRaw from "@/data/geo/water/atlanta.topo.json";
-import dcMetroWaterRaw from "@/data/geo/water/dc-metro.topo.json";
-import dubaiWaterRaw from "@/data/geo/water/dubai.topo.json";
-import nycWaterRaw from "@/data/geo/water/nyc.topo.json";
-import istanbulWaterRaw from "@/data/geo/water/istanbul.topo.json";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ChartCard } from "@/components/charts/chart-card";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
-import { WATER_TOPOLOGY_OBJECT, type WaterProperties } from "@/lib/geo/water";
+import { loadCityWater, type WaterProperties } from "@/lib/geo/water";
 import type { CityHeatmapData } from "@/lib/charts";
 import { formatFirstVisited } from "@/lib/viz/first-visited";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -49,20 +45,6 @@ const CITY_TOPOLOGIES: Record<CityKey, Topology<{ [key: string]: GeometryCollect
   dubai: dubaiTopoRaw as unknown as Topology<{ dubai: GeometryCollection<CityProperties> }>,
   nyc: nycTopoRaw as unknown as Topology<{ nyc: GeometryCollection<CityProperties> }>,
   istanbul: istanbulTopoRaw as unknown as Topology<{ istanbul: GeometryCollection<CityProperties> }>,
-};
-
-// Water under each city (#286) — built by scripts/geo-build-water.mjs, see
-// its header for the source and why it's drawn beneath the neighborhoods.
-// Statically imported alongside the neighborhood files for the same reason
-// they are (see this file's header): 2–42KB per city, smaller than any
-// city's own neighborhoods, not worth a loading state on city switch.
-type WaterTopology = Topology<{ [WATER_TOPOLOGY_OBJECT]: GeometryCollection<WaterProperties> }>;
-const WATER_TOPOLOGIES: Record<CityKey, WaterTopology> = {
-  atlanta: atlantaWaterRaw as unknown as WaterTopology,
-  "dc-metro": dcMetroWaterRaw as unknown as WaterTopology,
-  dubai: dubaiWaterRaw as unknown as WaterTopology,
-  nyc: nycWaterRaw as unknown as WaterTopology,
-  istanbul: istanbulWaterRaw as unknown as WaterTopology,
 };
 
 // Display order for the picker — CITIES is a Record, not inherently
@@ -106,13 +88,31 @@ export function CityHeatmapExplorer({
     return feature(topo, topo.objects[city]);
   }, [city]);
 
-  // Memoized per city, not decoded inline — it's a useD3 dependency in
-  // InteractiveGeo, and a fresh FeatureCollection every render would
-  // rebuild the whole map on every hover.
-  const water = useMemo(() => {
-    const topo = WATER_TOPOLOGIES[city];
-    return feature(topo, topo.objects[WATER_TOPOLOGY_OBJECT]);
+  // Water under the map (#286), lazy-loaded per city — see
+  // src/lib/geo/water.ts for why it isn't statically imported like the
+  // neighborhoods above. Stored with the city it belongs to, so for the
+  // moment between switching city and the new file arriving the map shows
+  // no water rather than the *previous* city's water through the new
+  // city's projection. The map simply gains its water a beat after the
+  // neighborhoods — no loading state, since nothing about reading the
+  // chart waits on it. A failed load leaves the map water-less, which is
+  // exactly how it looked before this overlay existed.
+  const [loadedWater, setLoadedWater] = useState<{
+    city: CityKey;
+    features: FeatureCollection<Geometry, WaterProperties>;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadCityWater(city)
+      .then((features) => {
+        if (!cancelled) setLoadedWater({ city, features });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [city]);
+  const water = loadedWater?.city === city ? loadedWater.features : undefined;
 
   const daysByFeature = useMemo(() => {
     const map = new Map<string, number>();

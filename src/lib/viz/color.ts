@@ -309,9 +309,11 @@ export function noDataFill(): string {
 // "travelled through" region beside the sea can't read as more sea.
 //
 // Two steps, not one. Filled water shows as broad areas, where a very
-// quiet step is plenty; a river is a 1.5px line, and at the fill's 1.32:1
-// against the card it all but vanished in a rendered check. The line step
-// is lighter for that reason only.
+// quiet step is plenty; a river centerline is a 1.5px line, and at the
+// fill's 1.32:1 against the card it all but vanished in a rendered check.
+// The line step is lighter for that reason only. (The city heatmaps' own
+// water, from OSM, is all areas — rivers included — so today only a
+// future line-carrying context layer would use it.)
 //
 // Validated with the dataviz skill's `validate_palette.js` (dark mode,
 // surface `#1f1611`, all pairs):

@@ -464,15 +464,17 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * geometry type, so a caller passes one mixed collection and nothing
    * else.
    *
-   * **Beneath, deliberately.** The city neighborhood polygons are already
-   * shoreline-accurate, while published water geometry at this scale is
-   * coarse (~1km — see scripts/geo-build-water.mjs). Painted underneath,
-   * any overshoot onto land is covered by the region above it and water
-   * only shows through the gaps the regions themselves leave, so the
-   * sharper of the two datasets always wins the shared edge. On top, the
-   * coarse one would. The cost is that a river crossing a region is
-   * hidden where it crosses — acceptable for context, and exactly how the
-   * regions' own data already describes that ground.
+   * **Beneath, deliberately.** The regions are the chart; the context is
+   * a second, independently-sourced dataset (OSM water, for the city
+   * heatmaps — see scripts/geo-build-water.mjs) that will never agree
+   * with them to the metre. Painted underneath, wherever the two disagree
+   * the region wins: water overshooting onto land is covered by the
+   * region above it, and water only shows through the gaps the regions
+   * themselves leave. On top, every disagreement would be drawn across a
+   * region. The cost is that water inside a region (a park lake, a river
+   * a neighborhood boundary runs down the middle of) is hidden —
+   * acceptable for context, and exactly how the regions' own data
+   * already describes that ground.
    *
    * **Non-interactive.** `pointer-events: none`, so a click on open water
    * falls through to the background handler and resets the view like any
