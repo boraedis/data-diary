@@ -3,6 +3,7 @@ import * as d3 from "d3";
 import {
   LABEL_FONT_TIERS,
   MIN_ARC_ANGLE,
+  defaultColorOf,
   depthFill,
   findByKeyPath,
   isArcInPlay,
@@ -225,6 +226,45 @@ describe("depthFill", () => {
 
   it("passes a raw hex through the same way as a token", () => {
     expect(depthFill("#3b7dd8", 1)).toBe("color-mix(in oklch, #3b7dd8, white 10%)");
+  });
+});
+
+describe("defaultColorOf", () => {
+  function treeWithBranches(count: number): HierarchyDatum {
+    return {
+      key: "root",
+      name: "Root",
+      children: Array.from({ length: count }, (_, i) => ({ key: `b${i}`, name: `Branch ${i}`, value: 1 })),
+    };
+  }
+
+  it("assigns the first five branches distinct slots in rank order", () => {
+    const root = d3.hierarchy(treeWithBranches(5)).sum((d) => d.value ?? 0);
+    const colors = root.children!.map((c) => defaultColorOf(c));
+    expect(colors).toEqual(["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"]);
+  });
+
+  it("wraps the 6th+ branch back to the fixed slots rather than a muted overflow color", () => {
+    const root = d3.hierarchy(treeWithBranches(8)).sum((d) => d.value ?? 0);
+    const colors = root.children!.map((c) => defaultColorOf(c));
+    expect(colors[5]).toBe(colors[0]); // rank 5 -> slot 0 again
+    expect(colors[6]).toBe(colors[1]); // rank 6 -> slot 1 again
+    expect(colors[7]).toBe(colors[2]);
+    expect(colors.every((c) => c !== "var(--muted-foreground)")).toBe(true);
+  });
+
+  it("still prefers a branch's own author-assigned color over any slot", () => {
+    const tree: HierarchyDatum = {
+      key: "root",
+      name: "Root",
+      children: [
+        { key: "a", name: "A", value: 1, color: "#abcdef" },
+        { key: "b", name: "B", value: 1 },
+      ],
+    };
+    const root = d3.hierarchy(tree).sum((d) => d.value ?? 0);
+    expect(defaultColorOf(root.children![0])).toBe("#abcdef");
+    expect(defaultColorOf(root.children![1])).toBe("var(--chart-2)");
   });
 });
 

@@ -5,7 +5,7 @@ import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { attachMarkHover } from "./marks";
 import { ChartTooltip } from "./tooltip";
-import { categoricalColor } from "@/lib/viz/color";
+import { categoricalColor, CATEGORICAL_SLOT_COUNT } from "@/lib/viz/color";
 import { formatPercent, formatThousandsNumber } from "@/lib/viz/format";
 import { excludeByKeyPaths, pathId, type HierarchyDatum } from "@/lib/viz/hierarchy";
 import { cn } from "@/lib/utils";
@@ -333,15 +333,32 @@ export function findByKeyPath<T extends d3.HierarchyNode<HierarchyDatum>>(root: 
  * author-assigned identity color (`places.color`, set per country), not a
  * palette slot, so there's no "never cycle" concern with having more than
  * five of them. Branches without one fall back to `categoricalColor` by
- * rank, which means the 6th+ branch goes muted by design; a consumer with
- * a long uncolored tail should fold it with `foldTailIntoOther` before
- * passing the tree in.
+ * rank, wrapped modulo `CATEGORICAL_SLOT_COUNT` rather than left to fall
+ * through to `categoricalColor`'s own muted-gray overflow.
+ *
+ * This is a deliberate, sunburst-specific exception to
+ * `categoricalColor`'s repo-wide "never cycle" rule (still the right
+ * default everywhere else it's called — a legend or a bar chart repaints
+ * nothing when a series drops out precisely *because* nothing cycles).
+ * What's different here: a branch's hue is fixed for the branch's whole
+ * lifetime regardless of how many siblings it has (rank, not a filtered
+ * survivor count, decides the slot), and #166 gave every branch — colored
+ * or not — its own undo: excluding a slice, not a repainted uncolored
+ * tail, is now how a reader gets down to "just the distinguishable ones."
+ * A consumer with many uncolored top-level branches (`PlaceHierarchyExplorer`'s
+ * category/metro modes, since #166 stopped folding their tail into
+ * "Other") would otherwise paint most of the ring one flat gray, which
+ * reads as "these are all the same" rather than "these are many" — two
+ * branches sharing a hue by wrapping are still visually distinct from
+ * each other (rank, position, label, tooltip), which uniform gray never
+ * was.
  */
-function defaultColorOf(node: d3.HierarchyNode<HierarchyDatum>): string {
+export function defaultColorOf(node: d3.HierarchyNode<HierarchyDatum>): string {
   const branch = node.depth <= 1 ? node : node.ancestors()[node.depth - 1];
   if (branch?.data.color) return branch.data.color;
   const siblings = branch?.parent?.children ?? [];
-  return categoricalColor(Math.max(0, siblings.indexOf(branch)));
+  const rank = Math.max(0, siblings.indexOf(branch));
+  return categoricalColor(rank % CATEGORICAL_SLOT_COUNT);
 }
 
 /**
@@ -937,8 +954,13 @@ export function InteractiveDonut({
        * fresh span is what cancels the reallocation out and leaves only
        * the redistribution the animation is actually for. Anything with
        * no match (an excluded node, or one of its descendants) collapses
-       * to a hairline at whatever angle it's already sitting at, in both
-       * fields, rather than popping out of existence.
+       * to a hairline at the origin — angle 0, 12 o'clock, in both
+       * fields — rather than at wherever it already happens to be sitting.
+       * A restore runs the same code with the id removed from `nextIds`,
+       * so growing back in starts from that same origin too: every
+       * exclude/restore reads as slices sweeping in and out of one fixed
+       * point rather than each vanishing into its own arbitrary spot on
+       * the ring.
        */
       function applyExclusion(nextIds: ReadonlySet<string>) {
         const nextRoot = d3
@@ -965,12 +987,10 @@ export function InteractiveDonut({
             n.target.y0 = Math.max(0, next.y0 - focusDepth);
             n.target.y1 = Math.max(0, next.y1 - focusDepth);
           } else {
-            const emid = (n.effective.x0 + n.effective.x1) / 2;
-            n.effective.x0 = emid;
-            n.effective.x1 = emid;
-            const tmid = (n.target.x0 + n.target.x1) / 2;
-            n.target.x0 = tmid;
-            n.target.x1 = tmid;
+            n.effective.x0 = 0;
+            n.effective.x1 = 0;
+            n.target.x0 = 0;
+            n.target.x1 = 0;
           }
         }
 
