@@ -28,9 +28,9 @@ export const PUBLIC_CHARTS: ChartEntry[] = PUBLIC_CHART_TYPES.map((type) => {
 // Only categories with at least one public chart — a category page with
 // nothing in it has nothing to link to or browse.
 export const PUBLIC_CHART_CATEGORY_ORDER: ChartCategory[] = CHART_CATEGORY_ORDER.filter((category) =>
-  PUBLIC_CHARTS.some((chart) => chart.category === category)
+  PUBLIC_CHARTS.some((chart) => chart.categories.includes(category))
 );
 
 export function publicChartsByCategory(category: ChartCategory): ChartEntry[] {
-  return PUBLIC_CHARTS.filter((chart) => chart.category === category);
+  return PUBLIC_CHARTS.filter((chart) => chart.categories.includes(category));
 }
