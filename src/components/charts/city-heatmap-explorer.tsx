@@ -9,12 +9,18 @@ import dcMetroTopoRaw from "@/data/geo/dc-metro.topo.json";
 import dubaiTopoRaw from "@/data/geo/dubai.topo.json";
 import nycTopoRaw from "@/data/geo/nyc.topo.json";
 import istanbulTopoRaw from "@/data/geo/istanbul.topo.json";
+import atlantaWaterRaw from "@/data/geo/water/atlanta.topo.json";
+import dcMetroWaterRaw from "@/data/geo/water/dc-metro.topo.json";
+import dubaiWaterRaw from "@/data/geo/water/dubai.topo.json";
+import nycWaterRaw from "@/data/geo/water/nyc.topo.json";
+import istanbulWaterRaw from "@/data/geo/water/istanbul.topo.json";
 import { ChartPage } from "@/components/charts/chart-page";
 import { ChartCard } from "@/components/charts/chart-card";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import { WATER_TOPOLOGY_OBJECT, type WaterProperties } from "@/lib/geo/water";
 import type { CityHeatmapData } from "@/lib/charts";
 import { formatFirstVisited } from "@/lib/viz/first-visited";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -43,6 +49,20 @@ const CITY_TOPOLOGIES: Record<CityKey, Topology<{ [key: string]: GeometryCollect
   dubai: dubaiTopoRaw as unknown as Topology<{ dubai: GeometryCollection<CityProperties> }>,
   nyc: nycTopoRaw as unknown as Topology<{ nyc: GeometryCollection<CityProperties> }>,
   istanbul: istanbulTopoRaw as unknown as Topology<{ istanbul: GeometryCollection<CityProperties> }>,
+};
+
+// Water under each city (#286) — built by scripts/geo-build-water.mjs, see
+// its header for the source and why it's drawn beneath the neighborhoods.
+// Statically imported alongside the neighborhood files for the same reason
+// they are (see this file's header): 2–42KB per city, smaller than any
+// city's own neighborhoods, not worth a loading state on city switch.
+type WaterTopology = Topology<{ [WATER_TOPOLOGY_OBJECT]: GeometryCollection<WaterProperties> }>;
+const WATER_TOPOLOGIES: Record<CityKey, WaterTopology> = {
+  atlanta: atlantaWaterRaw as unknown as WaterTopology,
+  "dc-metro": dcMetroWaterRaw as unknown as WaterTopology,
+  dubai: dubaiWaterRaw as unknown as WaterTopology,
+  nyc: nycWaterRaw as unknown as WaterTopology,
+  istanbul: istanbulWaterRaw as unknown as WaterTopology,
 };
 
 // Display order for the picker — CITIES is a Record, not inherently
@@ -84,6 +104,14 @@ export function CityHeatmapExplorer({
   const features = useMemo(() => {
     const topo = CITY_TOPOLOGIES[city];
     return feature(topo, topo.objects[city]);
+  }, [city]);
+
+  // Memoized per city, not decoded inline — it's a useD3 dependency in
+  // InteractiveGeo, and a fresh FeatureCollection every render would
+  // rebuild the whole map on every hover.
+  const water = useMemo(() => {
+    const topo = WATER_TOPOLOGIES[city];
+    return feature(topo, topo.objects[WATER_TOPOLOGY_OBJECT]);
   }, [city]);
 
   const daysByFeature = useMemo(() => {
@@ -169,6 +197,7 @@ export function CityHeatmapExplorer({
                 const date = firstVisitedByFeature.get(neighborhoodKey(f.properties.root, f.properties.name));
                 return date ? formatFirstVisited(date, diaryStartDate) : null;
               }}
+              contextFeatures={water}
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"
@@ -183,7 +212,7 @@ export function CityHeatmapExplorer({
               // that dots no longer balloon on zoom (below) and can be
               // hidden entirely via the toggle above when they crowd a
               // small neighborhood.
-              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
+              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there, with surrounding water shown in blue; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
             />
           )}
         </ResponsiveChart>

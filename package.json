@@ -19,6 +19,7 @@
     "geo:build": "tsx scripts/geo-build.mjs",
     "geo:add-feature": "tsx scripts/geo-add-feature.mjs",
     "geo:build-admin": "tsx scripts/geo-build-admin.mjs",
+    "geo:build-water": "tsx scripts/geo-build-water.mjs",
     "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs",
     "seed:pr-fixture": "node scripts/seed-pr-fixture.mjs"
   },

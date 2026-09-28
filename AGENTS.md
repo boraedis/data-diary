@@ -219,6 +219,13 @@ helps:
   adding a country is one entry there, one loader line in
   `admin-geometry.ts`, and a rebuild. Legacy's GADM files were
   deliberately not reused — GADM forbids redistribution.
+- **City water overlay** (#286) — sea/lakes/rivers drawn beneath each
+  city heatmap — is the same build-artifact pattern as the admin layers:
+  `npm run geo:build-water` clips Natural Earth 10m (public domain, pinned
+  commit in `SOURCES.json`) to each city's padded bounds and writes
+  `src/data/geo/water/<city>.topo.json`. Coarse (~1km), which is fine only
+  because it's painted *under* the shoreline-accurate neighborhoods — see
+  that script's header and `InteractiveGeo`'s `contextFeatures` prop.
 - **Binary media** (images, the facelapse video from #15) goes to **Vercel
   Blob** (`@vercel/blob`, `BLOB_READ_WRITE_TOKEN`) instead. A re-encoded
   video or replaced photo produces a wholly new blob every time — no delta

@@ -296,6 +296,53 @@ export function noDataFill(): string {
   return NO_DATA_FILL;
 }
 
+// Water under a city heatmap (#286) — InteractiveGeo's `contextFeatures`.
+// Decorative context, not data, so both steps are chosen to *recede*: a
+// dark, desaturated blue that separates from the card without competing
+// with the terracotta ramp the reader is actually there for. Blue because
+// that's what water is on every map anyone has seen — any other hue would
+// need a legend entry to explain itself, and this layer deliberately has
+// none.
+//
+// Kept well away from the travelled tint (`TRAVELLED_FILL`, also a blue):
+// that one is a light cyan data state, this is a near-surface navy, so a
+// "travelled through" region beside the sea can't read as more sea.
+//
+// Two steps, not one. Filled water shows as broad areas, where a very
+// quiet step is plenty; a river is a 1.5px line, and at the fill's 1.32:1
+// against the card it all but vanished in a rendered check. The line step
+// is lighter for that reason only.
+//
+// Validated with the dataviz skill's `validate_palette.js` (dark mode,
+// surface `#1f1611`, all pairs):
+//
+// | pair | normal ΔE | worst CVD ΔE |
+// |---|---|---|
+// | water `#16304a` vs no-data `#5a5349`      | 16.2 PASS | 14.3 protan PASS |
+// | water `#16304a` vs ramp high `#f16935`    | 44.4 PASS | 32.0 protan PASS |
+// | water `#16304a` vs ramp low `#fee1d7`     | 63.5 PASS | 60.6 protan PASS |
+// | water `#16304a` vs travelled `#8ad0eb`    | 52.0 PASS | 51.8 deutan PASS |
+// | river `#2f5e88` vs water `#16304a`        | 16.9 PASS | 16.6 deutan PASS |
+//
+// The river step fails against no-data (ΔE 10.6, under the 15 floor), and
+// that pair is deliberately not a constraint: rivers are drawn beneath the
+// region fill, so a river is only ever visible over bare card or over
+// filled water — never beside a region. Both steps are under the 3:1 mark-contrast bar
+// (1.32:1, 2.61:1), the same intended WARN `NO_DATA_FILL` explains above:
+// nobody reads a value off water.
+const WATER_FILL = "#16304a";
+const WATER_LINE = "#2f5e88";
+
+/** Fill for water areas (sea, bays, lakes) under a map. See WATER_FILL. */
+export function waterFill(): string {
+  return WATER_FILL;
+}
+
+/** Stroke for river centerlines under a map. See WATER_FILL. */
+export function waterLine(): string {
+  return WATER_LINE;
+}
+
 // #403's first pass at this (a desaturated near-gray midpoint, `#312d2a`
 // then `#d4ccc3`) fixed the dark-mode contrast bug but still read as flat
 // and washed out next to the two real poles — because a *neutral* midpoint

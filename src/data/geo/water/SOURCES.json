@@ -1,0 +1,117 @@
+{
+  "atlanta": {
+    "source": "Natural Earth 10m physical vectors",
+    "license": "Public domain",
+    "licenseSource": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "commit": "ca96624a56bd078437bca8184e78163e5039ad19",
+    "layers": [
+      "ne_10m_ocean",
+      "ne_10m_lakes",
+      "ne_10m_lakes_north_america",
+      "ne_10m_lakes_europe",
+      "ne_10m_rivers_lake_centerlines",
+      "ne_10m_rivers_north_america",
+      "ne_10m_rivers_europe"
+    ],
+    "clipBox": [
+      -84.8121,
+      33.3868,
+      -84.0284,
+      34.1481
+    ],
+    "areas": 1,
+    "rivers": 6
+  },
+  "dc-metro": {
+    "source": "Natural Earth 10m physical vectors",
+    "license": "Public domain",
+    "licenseSource": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "commit": "ca96624a56bd078437bca8184e78163e5039ad19",
+    "layers": [
+      "ne_10m_ocean",
+      "ne_10m_lakes",
+      "ne_10m_lakes_north_america",
+      "ne_10m_lakes_europe",
+      "ne_10m_rivers_lake_centerlines",
+      "ne_10m_rivers_north_america",
+      "ne_10m_rivers_europe"
+    ],
+    "clipBox": [
+      -77.4352,
+      38.5229,
+      -76.6464,
+      39.2587
+    ],
+    "areas": 1,
+    "rivers": 2
+  },
+  "dubai": {
+    "source": "Natural Earth 10m physical vectors",
+    "license": "Public domain",
+    "licenseSource": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "commit": "ca96624a56bd078437bca8184e78163e5039ad19",
+    "layers": [
+      "ne_10m_ocean",
+      "ne_10m_lakes",
+      "ne_10m_lakes_north_america",
+      "ne_10m_lakes_europe",
+      "ne_10m_rivers_lake_centerlines",
+      "ne_10m_rivers_north_america",
+      "ne_10m_rivers_europe"
+    ],
+    "clipBox": [
+      53.5732,
+      23.3067,
+      57.5223,
+      26.6729
+    ],
+    "areas": 1,
+    "rivers": 0
+  },
+  "istanbul": {
+    "source": "Natural Earth 10m physical vectors",
+    "license": "Public domain",
+    "licenseSource": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "commit": "ca96624a56bd078437bca8184e78163e5039ad19",
+    "layers": [
+      "ne_10m_ocean",
+      "ne_10m_lakes",
+      "ne_10m_lakes_north_america",
+      "ne_10m_lakes_europe",
+      "ne_10m_rivers_lake_centerlines",
+      "ne_10m_rivers_north_america",
+      "ne_10m_rivers_europe"
+    ],
+    "clipBox": [
+      25.9829,
+      38.8147,
+      31.9468,
+      43.5713
+    ],
+    "areas": 12,
+    "rivers": 21
+  },
+  "nyc": {
+    "source": "Natural Earth 10m physical vectors",
+    "license": "Public domain",
+    "licenseSource": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "commit": "ca96624a56bd078437bca8184e78163e5039ad19",
+    "layers": [
+      "ne_10m_ocean",
+      "ne_10m_lakes",
+      "ne_10m_lakes_north_america",
+      "ne_10m_lakes_europe",
+      "ne_10m_rivers_lake_centerlines",
+      "ne_10m_rivers_north_america",
+      "ne_10m_rivers_europe"
+    ],
+    "clipBox": [
+      -74.8112,
+      39.9406,
+      -73.1444,
+      41.4711
+    ],
+    "areas": 1,
+    "rivers": 5
+  }
+}
