@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
 import { MARK_SPECS, attachMarkHover } from "./marks";
@@ -65,6 +65,143 @@ const WEEKS_PER_YEAR = 53;
 // sleep-calendar-chart.tsx.
 const MIN_CELL_SIZE = 8;
 const MAX_CELL_SIZE = 18;
+// The narrowest width the horizontal layout fits at MIN_CELL_SIZE (570px).
+// Below it the calendar turns on its side (#450) instead of overflowing:
+// on a phone the horizontal strip ran out around August, and the scroll
+// that was meant to reach the rest hid behind ChartCard's overflow. Keyed
+// off the measured width, not the user agent, so a narrow desktop window
+// gets the same treatment. Any width that already fit keeps the horizontal
+// layout pixel-for-pixel.
+const HORIZONTAL_MIN_WIDTH = LEFT_LABEL_WIDTH + WEEKS_PER_YEAR * (MIN_CELL_SIZE + CELL_GAP);
+
+// Vertical layout (#450): weekdays across the top, weeks running down, so
+// months stack down the page. The user chose this over horizontal scroll
+// or a half-year toggle. Each year is its own block, and blocks tile left
+// to right (most recent first), wrapping onto new rows. At phone width
+// that's two years side by side, which halves the scroll length of a long
+// history. It also lines up the same week of each year across a row, so
+// you can compare years at a glance. Stacking every year in one column
+// left most of the width empty and made a multi-year sleep calendar
+// several thousand pixels tall.
+//
+// Column for the month labels, left of each block: a 3-letter month at
+// 13px is ~24px, plus a gap before the grid.
+const V_MONTH_LABEL_WIDTH = 30;
+const V_YEAR_LABEL_HEIGHT = 20;
+const V_DAY_LABEL_HEIGHT = 16;
+const V_BLOCK_GAP_X = 16;
+const V_BLOCK_GAP_Y = 24;
+// Blocks are packed at this cell size; the cells then grow to fill the
+// leftover width, up to V_MAX_CELL_SIZE. 12 keeps a tap target near
+// MARK_SPECS.hover.minHitTarget (the hit rects are that big anyway) and
+// still fits two blocks on a ~375px phone. The cap stops a lone block
+// from growing to MAX_CELL_SIZE: 53 rows at 18px is a year over 1000px
+// tall, which you'd have to scroll to see a single year.
+const V_MIN_CELL_SIZE = 12;
+const V_MAX_CELL_SIZE = 16;
+
+type CalendarLayout = {
+  orientation: "horizontal" | "vertical";
+  cellSize: number;
+  rowHeight: number;
+  totalHeight: number;
+  /** Width of the drawn content (labels + grid, every block), centred in
+   * `width` by `outerOffset`. */
+  contentWidth: number;
+  outerOffset: number;
+  /** The legend's left edge and width, relative to the container. It spans
+   * only the grid in horizontal mode (see the legend's own comment) and
+   * the whole tiled content in vertical mode. */
+  legendLeft: number;
+  legendWidth: number;
+  /** Translation of year `i`'s grid origin (its first cell's top-left). */
+  gridOrigin: (i: number) => { x: number; y: number };
+};
+
+/**
+ * Where everything goes for a given width and year count. Pure, so the
+ * orientation switch is testable without a DOM.
+ */
+export function calendarLayout(width: number, yearCount: number): CalendarLayout {
+  if (width >= HORIZONTAL_MIN_WIDTH) {
+    // Purely width-driven: floor(available / WEEKS_PER_YEAR) minus the
+    // inter-cell gap, clamped to a legible-but-not-huge range. No
+    // disconnected "guess" constant feeding this (see MIN/MAX_CELL_SIZE's
+    // comment above) — this is the one and only place cellSize is
+    // computed, from the real measured `width`.
+    const cellSize = Math.min(
+      MAX_CELL_SIZE,
+      Math.max(MIN_CELL_SIZE, Math.floor((width - LEFT_LABEL_WIDTH) / WEEKS_PER_YEAR) - CELL_GAP),
+    );
+    const rowHeight = cellSize + CELL_GAP;
+    const yearBlockHeight = 7 * rowHeight;
+    // The day-of-week label column and the day grid are ONE visual unit —
+    // center that whole unit in the available width, rather than centering
+    // the grid alone and leaving the labels pinned to the container's edge
+    // (which is what the previous version did, and what read as the labels
+    // being "detached" from the grid: as the grid shifted to center itself,
+    // the label column stayed put and a gap opened up between them). Both
+    // the label column and the grid live inside the same translated `g`
+    // below, so they now move together by construction.
+    const gridWidth = WEEKS_PER_YEAR * rowHeight;
+    const contentWidth = LEFT_LABEL_WIDTH + gridWidth;
+    const outerOffset = Math.max(0, (width - contentWidth) / 2);
+    const gridLeft = outerOffset + LEFT_LABEL_WIDTH;
+    return {
+      orientation: "horizontal",
+      cellSize,
+      rowHeight,
+      totalHeight: yearCount * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP),
+      contentWidth,
+      outerOffset,
+      legendLeft: gridLeft,
+      // Clamped to the container's own visible width, not `gridWidth`
+      // outright — see the legend's comment below. Above
+      // HORIZONTAL_MIN_WIDTH, `width - LEFT_LABEL_WIDTH >= gridWidth`
+      // always holds, so this is now a no-op kept as a guard.
+      legendWidth: Math.min(gridWidth, Math.max(0, width - LEFT_LABEL_WIDTH)),
+      gridOrigin: (i) => ({
+        x: gridLeft,
+        y: i * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP) + YEAR_LABEL_HEIGHT,
+      }),
+    };
+  }
+
+  const blockWidthAt = (cell: number) => V_MONTH_LABEL_WIDTH + 7 * (cell + CELL_GAP);
+  const columns = Math.max(
+    1,
+    Math.min(
+      yearCount,
+      Math.floor((width + V_BLOCK_GAP_X) / (blockWidthAt(V_MIN_CELL_SIZE) + V_BLOCK_GAP_X)),
+    ),
+  );
+  const perColumn = (width + V_BLOCK_GAP_X) / columns - V_BLOCK_GAP_X;
+  const cellSize = Math.min(
+    V_MAX_CELL_SIZE,
+    Math.max(MIN_CELL_SIZE, Math.floor((perColumn - V_MONTH_LABEL_WIDTH) / 7) - CELL_GAP),
+  );
+  const rowHeight = cellSize + CELL_GAP;
+  const blockWidth = blockWidthAt(cellSize);
+  const headerHeight = V_YEAR_LABEL_HEIGHT + V_DAY_LABEL_HEIGHT;
+  const blockHeight = headerHeight + WEEKS_PER_YEAR * rowHeight;
+  const rows = Math.ceil(yearCount / columns);
+  const contentWidth = columns * blockWidth + (columns - 1) * V_BLOCK_GAP_X;
+  const outerOffset = Math.max(0, (width - contentWidth) / 2);
+  return {
+    orientation: "vertical",
+    cellSize,
+    rowHeight,
+    totalHeight: rows * blockHeight + Math.max(0, rows - 1) * V_BLOCK_GAP_Y,
+    contentWidth,
+    outerOffset,
+    legendLeft: outerOffset,
+    legendWidth: Math.min(contentWidth, width),
+    gridOrigin: (i) => ({
+      x: outerOffset + (i % columns) * (blockWidth + V_BLOCK_GAP_X) + V_MONTH_LABEL_WIDTH,
+      y: Math.floor(i / columns) * (blockHeight + V_BLOCK_GAP_Y) + headerHeight,
+    }),
+  };
+}
 
 /**
  * Converts an `oklch(L C H)` string to a `#rrggbb` hex string d3-color can
@@ -316,31 +453,7 @@ export function InteractiveCalendar({
       .map(([year, days]) => ({ year, days }));
   }, [points]);
 
-  // Purely width-driven: floor(available / WEEKS_PER_YEAR) minus the
-  // inter-cell gap, clamped to a legible-but-not-huge range. No disconnected
-  // "guess" constant feeding this (see MIN/MAX_CELL_SIZE's comment above) —
-  // this is the one and only place cellSize is computed, from the real
-  // measured `width`.
-  const cellSize = Math.min(
-    MAX_CELL_SIZE,
-    Math.max(MIN_CELL_SIZE, Math.floor((width - LEFT_LABEL_WIDTH) / WEEKS_PER_YEAR) - CELL_GAP),
-  );
-  const rowHeight = cellSize + CELL_GAP;
-  const yearBlockHeight = 7 * rowHeight;
-  const totalHeight = years.length * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP);
-
-  // The day-of-week label column and the day grid are ONE visual unit —
-  // center that whole unit in the available width, rather than centering
-  // the grid alone and leaving the labels pinned to the container's edge
-  // (which is what the previous version did, and what read as the labels
-  // being "detached" from the grid: as the grid shifted to center itself,
-  // the label column stayed put and a gap opened up between them). Both
-  // the label column and the grid live inside the same translated `g`
-  // below, so they now move together by construction.
-  const gridWidth = WEEKS_PER_YEAR * rowHeight;
-  const totalContentWidth = LEFT_LABEL_WIDTH + gridWidth;
-  const outerOffset = Math.max(0, (width - totalContentWidth) / 2);
-  const gridLeft = outerOffset + LEFT_LABEL_WIDTH;
+  const layout = useMemo(() => calendarLayout(width, years.length), [width, years.length]);
 
   const domain = useMemo<[number, number]>(() => {
     const [lo, hi] = d3.extent(points, (p) => p.value);
@@ -516,6 +629,31 @@ export function InteractiveCalendar({
   // rule (correctly) warns against.
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
 
+  // Hover → tap on touch (#450). A tap fires pointerenter then, once the
+  // finger lifts, pointerleave, so the plain hover wiring showed the
+  // tooltip only while the finger was down, underneath it. A touch or pen
+  // pointerenter instead *pins* the tooltip: pointerleave leaves it up,
+  // and it clears on the next tap anywhere else (the effect below) or when
+  // the browser takes the gesture over as a scroll (pointercancel). A ref,
+  // not state, because it's only read inside event handlers.
+  const pinnedByTouch = useRef(false);
+  const pinned = hovered !== null;
+  useEffect(() => {
+    if (!pinned) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!pinnedByTouch.current) return;
+      // A tap on another cell re-pins through that cell's own handler.
+      if (event.target instanceof Element && event.target.classList.contains("hit")) return;
+      pinnedByTouch.current = false;
+      setHovered(null);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [pinned]);
+
+  const { orientation, cellSize, rowHeight, totalHeight, gridOrigin } = layout;
+  const vertical = orientation === "vertical";
+
   const ref = useD3<SVGSVGElement>(
     (svg) => {
       svg.attr("width", width).attr("height", totalHeight);
@@ -523,67 +661,112 @@ export function InteractiveCalendar({
       years.forEach((yearGroup, yi) => {
         const yearStart = new Date(yearGroup.year, 0, 1);
         const yearEnd = new Date(yearGroup.year + 1, 0, 1);
-        const g = svg
-          .append("g")
-          .attr(
-            "transform",
-            `translate(${gridLeft},${yi * (yearBlockHeight + YEAR_LABEL_HEIGHT + YEAR_GAP) + YEAR_LABEL_HEIGHT})`,
-          );
+        const origin = gridOrigin(yi);
+        const g = svg.append("g").attr("transform", `translate(${origin.x},${origin.y})`);
 
-        // Year number and day-of-week labels both live inside this same
-        // translated `g`, so they move together with the grid as one
-        // connected unit no matter where `gridLeft` centers it. The year
-        // number is right-anchored a fixed gap before the grid's local
-        // origin (x=0, where January's month label starts) instead of
-        // left-anchored at a fixed x — a left anchor let a 4-digit year
-        // overflow rightward into January's label; right-anchoring
-        // guarantees clearance regardless of how wide the year text is.
-        g.append("text")
-          .attr("x", -6)
-          .attr("y", -6)
-          .attr("text-anchor", "end")
-          .attr("fill", "var(--foreground)")
-          .style("font-size", "15px")
-          .style("font-weight", 500)
-          .text(String(yearGroup.year));
+        // Cell position within the year's grid. Horizontal: weeks run
+        // across, weekdays down. Vertical (#450): transposed.
+        const cellX = (week: number, dow: number) => (vertical ? dow : week) * rowHeight;
+        const cellY = (week: number, dow: number) => (vertical ? week : dow) * rowHeight;
 
-        // Month labels along the top of the strip, aligned to the same
-        // Monday-keyed week columns the day cells use below. Declutters
-        // by simply dropping a label that would land too close to the
-        // previously-placed one (narrow container -> narrow week columns
-        // -> adjacent month labels would otherwise overlap).
         const monthTicks: MonthTick[] = d3.timeMonths(yearStart, yearEnd).map((monthStart) => ({
           label: monthStart.toLocaleDateString(undefined, { month: "short" }),
           week: d3.timeMonday.count(yearStart, monthStart),
         }));
-        // Sized for the 13px labels (#449): a 3-letter month is ~24px wide
-        // at that size, so the old 24px gap left them touching.
-        const MIN_LABEL_GAP = 30;
-        let lastLabelX = -Infinity;
-        for (const tick of monthTicks) {
-          const x = tick.week * rowHeight;
-          if (x - lastLabelX < MIN_LABEL_GAP) continue;
-          lastLabelX = x;
-          g.append("text")
-            .attr("x", x)
-            .attr("y", -6)
-            .attr("fill", "var(--muted-foreground)")
-            .style("font-size", "13px")
-            .text(tick.label);
-        }
 
-        g.selectAll(".daylabel")
-          .data(DAY_LABELS)
-          .join("text")
-          .attr("class", "daylabel")
-          .attr("x", -LEFT_LABEL_WIDTH + 2)
-          .attr("y", (_, i) => i * rowHeight + cellSize - 1)
-          .attr("fill", "var(--muted-foreground)")
-          // 12px (up from 9, #449), but never taller than a row: at the
-          // MIN_CELL_SIZE floor a row is only 10px, and a 12px letter
-          // there would crowd into the next row's.
-          .style("font-size", `${Math.min(12, rowHeight)}px`)
-          .text((d) => d);
+        if (vertical) {
+          // Year above the block, level with the month-label column's
+          // left edge, and the weekday letters in a row between it and the
+          // grid.
+          g.append("text")
+            .attr("x", -V_MONTH_LABEL_WIDTH)
+            .attr("y", -V_DAY_LABEL_HEIGHT - 6)
+            .attr("fill", "var(--foreground)")
+            .style("font-size", "15px")
+            .style("font-weight", 500)
+            .text(String(yearGroup.year));
+
+          g.selectAll(".daylabel")
+            .data(DAY_LABELS)
+            .join("text")
+            .attr("class", "daylabel")
+            .attr("x", (_, i) => i * rowHeight + cellSize / 2)
+            .attr("y", -4)
+            .attr("text-anchor", "middle")
+            .attr("fill", "var(--muted-foreground)")
+            .style("font-size", `${Math.min(12, rowHeight)}px`)
+            .text((d) => d);
+
+          // Month labels down the left, right-anchored against the grid,
+          // on the row holding each month's 1st. Months are ≥4 rows apart
+          // at any cell size here, so the declutter check almost never
+          // drops one; it's kept for the same safety as the horizontal
+          // case.
+          let lastLabelY = -Infinity;
+          for (const tick of monthTicks) {
+            const y = tick.week * rowHeight;
+            if (y - lastLabelY < 14) continue;
+            lastLabelY = y;
+            g.append("text")
+              .attr("x", -4)
+              .attr("y", y + cellSize - 1)
+              .attr("text-anchor", "end")
+              .attr("fill", "var(--muted-foreground)")
+              .style("font-size", "13px")
+              .text(tick.label);
+          }
+        } else {
+          // Year number and day-of-week labels both live inside this same
+          // translated `g`, so they move together with the grid as one
+          // connected unit no matter where the layout centers it. The year
+          // number is right-anchored a fixed gap before the grid's local
+          // origin (x=0, where January's month label starts) instead of
+          // left-anchored at a fixed x — a left anchor let a 4-digit year
+          // overflow rightward into January's label; right-anchoring
+          // guarantees clearance regardless of how wide the year text is.
+          g.append("text")
+            .attr("x", -6)
+            .attr("y", -6)
+            .attr("text-anchor", "end")
+            .attr("fill", "var(--foreground)")
+            .style("font-size", "15px")
+            .style("font-weight", 500)
+            .text(String(yearGroup.year));
+
+          // Month labels along the top of the strip, aligned to the same
+          // Monday-keyed week columns the day cells use below. Declutters
+          // by simply dropping a label that would land too close to the
+          // previously-placed one (narrow container -> narrow week columns
+          // -> adjacent month labels would otherwise overlap).
+          // Sized for the 13px labels (#449): a 3-letter month is ~24px wide
+          // at that size, so the old 24px gap left them touching.
+          const MIN_LABEL_GAP = 30;
+          let lastLabelX = -Infinity;
+          for (const tick of monthTicks) {
+            const x = tick.week * rowHeight;
+            if (x - lastLabelX < MIN_LABEL_GAP) continue;
+            lastLabelX = x;
+            g.append("text")
+              .attr("x", x)
+              .attr("y", -6)
+              .attr("fill", "var(--muted-foreground)")
+              .style("font-size", "13px")
+              .text(tick.label);
+          }
+
+          g.selectAll(".daylabel")
+            .data(DAY_LABELS)
+            .join("text")
+            .attr("class", "daylabel")
+            .attr("x", -LEFT_LABEL_WIDTH + 2)
+            .attr("y", (_, i) => i * rowHeight + cellSize - 1)
+            .attr("fill", "var(--muted-foreground)")
+            // 12px (up from 9, #449), but never taller than a row: at the
+            // MIN_CELL_SIZE floor a row is only 10px, and a 12px letter
+            // there would crowd into the next row's.
+            .style("font-size", `${Math.min(12, rowHeight)}px`)
+            .text((d) => d);
+        }
 
         const cells: CellDatum[] = [...yearGroup.days.entries()].map(([dateStr, day]) => {
           const date = parseDate(dateStr);
@@ -604,8 +787,8 @@ export function InteractiveCalendar({
           .data(cells)
           .join("rect")
           .attr("class", "cell")
-          .attr("x", (d) => d.week * rowHeight)
-          .attr("y", (d) => d.dow * rowHeight)
+          .attr("x", (d) => cellX(d.week, d.dow))
+          .attr("y", (d) => cellY(d.week, d.dow))
           .attr("width", cellSize)
           .attr("height", cellSize)
           .attr("rx", 2)
@@ -617,8 +800,8 @@ export function InteractiveCalendar({
           .data(cells)
           .join("rect")
           .attr("class", "hit")
-          .attr("x", (d) => d.week * rowHeight + cellSize / 2 - hitSize / 2)
-          .attr("y", (d) => d.dow * rowHeight + cellSize / 2 - hitSize / 2)
+          .attr("x", (d) => cellX(d.week, d.dow) + cellSize / 2 - hitSize / 2)
+          .attr("y", (d) => cellY(d.week, d.dow) + cellSize / 2 - hitSize / 2)
           .attr("width", hitSize)
           .attr("height", hitSize)
           .attr("fill", "transparent");
@@ -626,11 +809,25 @@ export function InteractiveCalendar({
         attachMarkHover<CellDatum>(hitTargets, {
           onHover: (d, clientPos) =>
             setHovered({ dateStr: d.dateStr, value: d.value, categories: d.categories, clientPos }),
-          onLeave: () => setHovered(null),
+          // A touch-pinned tooltip outlives the finger lifting — see
+          // `pinnedByTouch`.
+          onLeave: () => {
+            if (!pinnedByTouch.current) setHovered(null);
+          },
         });
+        // Namespaced so they sit alongside attachMarkHover's own
+        // pointerenter/pointerleave rather than replacing them.
+        hitTargets
+          .on("pointerenter.pin", (event: PointerEvent) => {
+            pinnedByTouch.current = event.pointerType !== "mouse";
+          })
+          .on("pointercancel.pin", () => {
+            pinnedByTouch.current = false;
+            setHovered(null);
+          });
       });
     },
-    [years, width, cellSize, rowHeight, yearBlockHeight, totalHeight, gridLeft, cellFill],
+    [years, width, cellSize, rowHeight, totalHeight, vertical, gridOrigin, cellFill],
   );
 
   const containerRect = containerEl?.getBoundingClientRect();
@@ -641,13 +838,11 @@ export function InteractiveCalendar({
   const legendT = hovered !== null ? valueToT(hovered.value) : null;
 
   return (
-    // overflow-x-auto is a safety net, not the primary width fix: at the
-    // MIN_CELL_SIZE floor on a very narrow viewport, WEEKS_PER_YEAR fixed
-    // columns can still add up to more px than the container actually
-    // has. Rather than shrinking cells past legibility to force a fit,
-    // this lets that rare case scroll horizontally (same tradeoff
-    // GitHub's own contribution graph makes on mobile) instead of
-    // visually breaking out of the container.
+    // overflow-x-auto is only a last-resort safety net now. Any width too
+    // narrow for the horizontal grid gets the vertical layout (#450), and
+    // a single vertical block fits in ResponsiveChart's 240px minimum.
+    // Horizontal scrolling on mobile was the original fallback, but it
+    // stopped around August because ChartCard clips its overflow.
     <div style={{ width }} className="overflow-x-auto">
       <div ref={setContainerEl} style={{ position: "relative", width }} role="img" aria-label={ariaLabel}>
         <svg ref={ref} />
@@ -691,10 +886,11 @@ export function InteractiveCalendar({
           the way a normal or sticky sibling would — its `left`/`width`
           are computed explicitly from `containerRect` (the same
           measured-container rect the tooltip above already uses) offset
-          by `gridLeft`/sized to `gridWidth`, so it lines up with the
-          *grid* itself (where the cells are), not the wider outer box
-          that also includes the day-label column and any centering
-          margin. Gated on `containerRect` so it doesn't flash at (0,0)
+          and sized by the layout. Horizontally that lines it up with the
+          *grid* (where the cells are), not the wider outer box that
+          also holds the day-label column and any centering margin.
+          Vertically it spans the whole tiled block of years, since each
+          block's grid is only ~7 cells wide. Gated on `containerRect` so it doesn't flash at (0,0)
           for one frame before the first measurement lands. This only
           needs to be recomputed when the calendar's own box actually
           moves or resizes (ResponsiveChart's ResizeObserver already
@@ -721,18 +917,11 @@ export function InteractiveCalendar({
           ticks={legendTicks}
           tickUnit={legendTickUnit}
           className="fixed bottom-0 z-10 border-t border-border bg-background/95 px-3 py-2 backdrop-blur"
-          // Clamped to the container's own visible width, not `gridWidth`
-          // outright — `position: fixed` escapes the grid's own
-          // `overflow-x-auto` (that's the whole reason it's fixed rather
-          // than sticky, see the comment above), so at the MIN_CELL_SIZE
-          // floor, where `gridWidth` can exceed what's actually on
-          // screen, an unclamped legend rendered its full intended width
-          // regardless — visibly spilling past the card's (and on a
-          // phone, the viewport's) right edge instead of scrolling into
-          // view the way the grid itself does. Below that floor, `width -
-          // LEFT_LABEL_WIDTH >= gridWidth` always holds, so this is a
-          // no-op and matches the previous, un-clamped value exactly.
-          style={{ left: containerRect.left + gridLeft, width: Math.min(gridWidth, Math.max(0, width - LEFT_LABEL_WIDTH)) }}
+          // Width is clamped to the container's visible width (see
+          // `calendarLayout`'s `legendWidth`): `position: fixed` escapes
+          // the grid's own `overflow-x-auto`, so an unclamped legend used
+          // to spill past a phone's right edge.
+          style={{ left: containerRect.left + layout.legendLeft, width: layout.legendWidth }}
         />
       ) : null}
     </div>
