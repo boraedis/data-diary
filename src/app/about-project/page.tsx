@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ProseSection as Section } from "@/components/prose-section";
+import { ProjectVersionTimeline } from "@/components/project-version-timeline";
 import { buttonVariants } from "@/components/ui/button";
+import { PROJECT_VERSIONS } from "@/lib/project-versions";
+import { formatDate } from "@/lib/viz/format";
 
 export const metadata: Metadata = {
   title: "About the project — Data Diary",
@@ -13,7 +16,14 @@ export const metadata: Metadata = {
 // DB. See the DB-vs-repo split locked in on #12: short structured facts
 // like the tagline live in projectSettings for the hero to use, but a
 // full essay like this one is copy, not data, and belongs in the repo
-// where it can be reviewed and versioned like any other change.
+// where it can be reviewed and versioned like any other change. The
+// version timeline (#454) follows the same rule: its data is a typed
+// constant in src/lib/project-versions.ts, not a table.
+
+/** "Feb 2016", or "c. 2019" for a start that's only a best guess. */
+function formatVersionStart(start: string, approximate?: boolean): string {
+  return approximate ? `c. ${start.slice(0, 4)}` : formatDate(start, "monthYear");
+}
 
 export default function AboutProjectPage() {
   return (
@@ -47,12 +57,32 @@ export default function AboutProjectPage() {
 
       <Section title="A rebuild, not a rewrite of the idea">
         <p>
-          This app has existed for years, first as an Express/EJS site backed by
-          Firestore. This version is a from-scratch rebuild on Next.js and
-          Postgres — same daily habit, same categories, a schema and a codebase
-          built to actually hold up as the years of data keep growing rather
-          than one more one-off script bolted onto the last one.
+          This app has existed in one form or another since 2016: a
+          spreadsheet, then a command-line tool, then an Express/EJS site
+          backed by Firestore. This version is a from-scratch rebuild on
+          Next.js and Postgres — same daily habit, same categories, a schema
+          and a codebase built to actually hold up as the years of data keep
+          growing rather than one more one-off script bolted onto the last
+          one.
         </p>
+        <ProjectVersionTimeline />
+        <ol className="flex flex-col gap-3">
+          {PROJECT_VERSIONS.map((version, i) => {
+            const next = PROJECT_VERSIONS[i + 1];
+            return (
+              <li key={version.id} className="flex flex-col gap-0.5">
+                <span className="font-medium text-foreground">
+                  {version.name}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    · {formatVersionStart(version.start, version.approximateStart)} –{" "}
+                    {next ? formatVersionStart(next.start, next.approximateStart) : "now"}
+                  </span>
+                </span>
+                <span>{version.description}</span>
+              </li>
+            );
+          })}
+        </ol>
       </Section>
 
       <Section title="Why any of this is public">
