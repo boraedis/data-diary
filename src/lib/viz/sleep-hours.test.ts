@@ -41,19 +41,19 @@ describe("buildSleepBars", () => {
 });
 
 describe("sleepDates", () => {
-  it("wakes the day after an evening bedtime", () => {
+  it("wakes on the row's own date for an evening bedtime the night before", () => {
     const [bar] = buildSleepBars([{ date: "2026-09-24", bedtimeMinutes: hm(22, 33), durationMinutes: 527 }]);
-    expect(sleepDates(bar)).toEqual({ asleep: "2026-09-24", woke: "2026-09-25" });
+    expect(sleepDates(bar)).toEqual({ asleep: "2026-09-23", woke: "2026-09-24" });
   });
 
-  it("puts an after-midnight bedtime on the next day too", () => {
+  it("keeps an after-midnight bedtime on the row's own date too", () => {
     const [bar] = buildSleepBars([{ date: "2026-09-20", bedtimeMinutes: hm(1, 35), durationMinutes: 150 }]);
-    expect(sleepDates(bar)).toEqual({ asleep: "2026-09-21", woke: "2026-09-21" });
+    expect(sleepDates(bar)).toEqual({ asleep: "2026-09-20", woke: "2026-09-20" });
   });
 
-  it("keeps a bedtime before midnight on the row's date across a month end", () => {
+  it("puts a bedtime before midnight on the day before the row's date across a month end", () => {
     const [bar] = buildSleepBars([{ date: "2026-08-31", bedtimeMinutes: hm(23), durationMinutes: 480 }]);
-    expect(sleepDates(bar)).toEqual({ asleep: "2026-08-31", woke: "2026-09-01" });
+    expect(sleepDates(bar)).toEqual({ asleep: "2026-08-30", woke: "2026-08-31" });
   });
 });
 

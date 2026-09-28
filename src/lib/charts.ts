@@ -444,8 +444,9 @@ export type SleepNight = SleepDay & {
    * night led into: a work-day row's sleep is the night before work. Null
    * before day types were tracked (2020) and on the odd unlogged day.
    *
-   * Sleep Hours (#466) documents this the other way round (the night after
-   * a work day, bars dated by the evening they began) — see #471. */
+   * Sleep Hours (#466) originally documented this the other way round
+   * (the night after a work day, bars dated by the evening they began) —
+   * fixed in #471 to match. */
   dayType: DayType | null;
 };
 
