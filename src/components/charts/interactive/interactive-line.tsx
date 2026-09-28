@@ -147,6 +147,12 @@ export type InteractiveLineProps = {
    * gets its own well-fit range); pass this explicitly for a fixed scale
    * that shouldn't shift under zoom (e.g. happiness's natural 0-100). */
   yDomain?: [number, number];
+  /** Pins the auto domain's low end while its top still fits whatever's
+   * visible — for a measure that can't go negative (a duration), where a
+   * wandering baseline exaggerates small changes. Ignored when `yDomain`
+   * is passed. Bands aren't clipped, so a caller passing this should clamp
+   * its `bandLow`s to it, as `TrendExplorer` does. */
+  yMin?: number;
   zoom?: InteractiveLineZoom;
   /** Shaded background bands for historical context (an occupation,
    * residence, or age bracket) — legacy InteractiveScroller's
@@ -440,6 +446,7 @@ export function InteractiveLine({
   height,
   xDomain,
   yDomain,
+  yMin,
   zoom = "none",
   regions = [],
   referenceLines = NO_REFERENCE_LINES,
@@ -515,9 +522,13 @@ export function InteractiveLine({
     );
     values.push(...referenceLineValues(referenceLines));
     const [lo, hi] = (d3.extent(values.length ? values : [0, 1]) as [number, number]);
+    if (yMin !== undefined) {
+      const top = Math.max(hi, yMin);
+      return [yMin, top + ((top - yMin) * 0.1 || 1)];
+    }
     const pad = (hi - lo) * 0.1 || 1;
     return [lo - pad, hi + pad];
-  }, [yDomain, visibleSeries, effectiveDomain, referenceLines]);
+  }, [yDomain, yMin, visibleSeries, effectiveDomain, referenceLines]);
 
   const y = useMemo(
     () => d3.scaleLinear().domain(resolvedYDomain).range([innerHeight, 0]),

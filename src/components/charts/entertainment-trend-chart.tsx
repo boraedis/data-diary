@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type * as d3 from "d3";
 import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { categoricalColor } from "@/lib/viz/color";
@@ -35,6 +36,11 @@ const GROUP_BY_OPTIONS: GroupByOption<GroupBy>[] = [
   { id: "medium", label: "Medium" },
 ];
 
+const perDay = (hours: number) => `${formatDuration(hours)}/day`;
+/** Module-level, not inline: it's a `useD3` dependency in InteractiveLine,
+ * so a fresh arrow each render would rebuild the SVG every time. */
+const durationTick = (hours: d3.NumberValue) => formatDuration(+hours);
+
 const total = (d: EntertainmentDay) => ENTERTAINMENT_TYPE_ORDER.reduce((sum, type) => sum + d[type], 0);
 
 /** Each type keeps the leaderboard's slot (`entertainmentTypeColor`);
@@ -62,12 +68,18 @@ export function EntertainmentTrendChart({ data }: { data: EntertainmentDay[] }) 
       // Swapping the primary series' id/label is what makes TrendExplorer
       // recompute on a mode change — see its `primaryKey`.
       seriesId={byMedium ? first.id : "total"}
-      label={byMedium ? first.label : "Entertainment"}
+      label={byMedium ? first.label : "Total"}
       color={byMedium ? first.color : categoricalColor(0)}
       getValue={byMedium ? first.getValue : total}
       extraSeries={byMedium ? rest : undefined}
       aggregate="mean"
-      valueFormat={formatDuration}
+      // Time can't be negative, and a floating baseline makes a quiet
+      // month look like it fell off a cliff.
+      yMin={0}
+      // The line is a per-day average, so the hovered value says so — a
+      // bare "1h 56m" next to a month reads as the month's whole total.
+      valueFormat={perDay}
+      yTickFormat={durationTick}
       // Only for the total line: `tooltipLabel` is shared by every series
       // and isn't told which one it's labelling, so a per-medium total
       // can't be given here. Those rows keep the default day count.
