@@ -14,7 +14,15 @@ import { DISTANCE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 const DISTANCE_COLOR = categoricalColor(3);
 const km = (v: number) => `${v.toFixed(1)} km`;
 
-export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
+export function DistanceTrendChart({
+  data,
+  backHref,
+  backLabel,
+}: {
+  data: DailyValue[];
+  backHref?: string;
+  backLabel?: string;
+}) {
   return (
     <TrendExplorer
       data={data}
@@ -29,6 +37,8 @@ export function DistanceTrendChart({ data }: { data: DailyValue[] }) {
       aggregate="mean"
       valueFormat={km}
       ariaLabel="Average distance walked per day over time. Use arrow keys to inspect individual buckets, or hover a point."
+      backHref={backHref}
+      backLabel={backLabel}
     />
   );
 }

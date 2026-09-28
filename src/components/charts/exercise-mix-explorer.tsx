@@ -140,7 +140,15 @@ function titleFormatterFor(period: Period): (x: Date) => string {
   }
 }
 
-export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
+export function ExerciseMixExplorer({
+  rows,
+  backHref,
+  backLabel,
+}: {
+  rows: ExerciseWorkoutRow[];
+  backHref?: string;
+  backLabel?: string;
+}) {
   const [mode, setMode] = useState<InteractiveAreaMode>("stacked");
   const [period, setPeriod] = useState<Period>("month");
   const [groupBy, setGroupBy] = useState<GroupByDimension>("category");
@@ -187,6 +195,8 @@ export function ExerciseMixExplorer({ rows }: { rows: ExerciseWorkoutRow[] }) {
           <GroupByPicker value={mode} onChange={setMode} options={VIEW_OPTIONS} label="View" className="ml-auto" />
         </>
       }
+      backHref={backHref}
+      backLabel={backLabel}
     >
       <ChartCard empty={rows.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={240}>

@@ -61,6 +61,8 @@ export function CompositionExplorer({
   extraFilters,
   initialPeriod = "month",
   ariaLabel,
+  backHref,
+  backLabel,
 }: {
   rows: CompositionRow[];
   categories: InteractiveAreaCategory[];
@@ -80,6 +82,8 @@ export function CompositionExplorer({
    * is week-to-week says so. */
   initialPeriod?: Period;
   ariaLabel: string;
+  backHref?: string;
+  backLabel?: string;
 }) {
   const [mode, setMode] = useState<InteractiveAreaMode>("proportional");
   const [period, setPeriod] = useState<Period>(initialPeriod);
@@ -110,6 +114,8 @@ export function CompositionExplorer({
           <PeriodPicker value={period} onChange={setPeriod} />
         </>
       }
+      backHref={backHref}
+      backLabel={backLabel}
     >
       <ChartCard empty={points.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport>

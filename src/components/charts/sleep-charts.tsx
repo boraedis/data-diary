@@ -59,7 +59,15 @@ function useSleepMetric(data: SleepNight[]) {
 const sleepHours = (night: SleepNight) => asHours(night.durationMinutes);
 const sleepPlusNapsHours = (night: SleepNight) => asHours(night.durationMinutes + (night.napMinutes ?? 0));
 
-export function SleepTrendChart({ data }: { data: SleepNight[] }) {
+export function SleepTrendChart({
+  data,
+  backHref,
+  backLabel,
+}: {
+  data: SleepNight[];
+  backHref?: string;
+  backLabel?: string;
+}) {
   const { hasNaps, metric, setMetric } = useSleepMetric(data);
 
   return (
@@ -88,6 +96,8 @@ export function SleepTrendChart({ data }: { data: SleepNight[] }) {
         ) : undefined
       }
       ariaLabel="Average time asleep per night over time. Use arrow keys to inspect individual buckets, or hover a point."
+      backHref={backHref}
+      backLabel={backLabel}
     />
   );
 }

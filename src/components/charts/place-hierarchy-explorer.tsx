@@ -223,7 +223,15 @@ const TREE_BUILDERS: Record<PlaceGrouping, (rows: PlaceHierarchyRow[]) => Hierar
   metro: buildMetroTree,
 };
 
-export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) {
+export function PlaceHierarchyExplorer({
+  rows,
+  backHref,
+  backLabel,
+}: {
+  rows: PlaceHierarchyRow[];
+  backHref?: string;
+  backLabel?: string;
+}) {
   const [grouping, setGrouping] = useState<PlaceGrouping>("geography");
   const [rings, setRings] = useState<RingCount>("2");
 
@@ -256,6 +264,8 @@ export function PlaceHierarchyExplorer({ rows }: { rows: PlaceHierarchyRow[] }) 
           <GroupByPicker value={rings} onChange={setRings} options={RING_OPTIONS} label="Rings" />
         </>
       }
+      backHref={backHref}
+      backLabel={backLabel}
     >
       <ChartCard empty={tree === null}>
         {/* Not the h-[min(62vh,640px)] every other chart page here uses.
