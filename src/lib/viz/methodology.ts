@@ -47,7 +47,7 @@ export const PLACES_METHODOLOGY =
   "Each day, I pick the two places that had the biggest impact on it — not necessarily where I spent the most time, but usually wherever the day's main activity happened. The first slot counts double toward totals, the second counts once. Every place sits in a hierarchy, typically country, then state or province, then municipality, then neighborhood for larger cities, then a specific location, and sometimes a sub-location for a room or unit within a building — so time can be drilled down from an entire country to a single room.";
 
 export const CITY_HEATMAP_METHODOLOGY =
-  "For the cities I've spent significant time in — Istanbul, Dubai, Atlanta, DC, and NYC — I've mapped out neighborhood boundaries by hand, letting the same daily place logs show which neighborhoods I actually frequented in each one.";
+  "For the cities I've spent significant time in — Istanbul, Dubai, Atlanta, DC, and NYC — I've mapped out neighborhood boundaries by hand, letting the same daily place logs show which neighborhoods I actually frequented in each one. The water around them (sea, rivers, and lakes) is drawn only for orientation, from OpenStreetMap data (© OpenStreetMap contributors, via Overture Maps).";
 
 export const PEOPLE_METHODOLOGY =
   "Each day, I pick up to seven people, in order, who impacted me the most that day — the same ranked-slot idea as places. Every person is also tagged with a label for how I know them (family, a friend group, work, and so on). There are also three rarely-used slots for people who had a notably negative impact on a day, but across the whole history that's only ever been used a handful of times.";

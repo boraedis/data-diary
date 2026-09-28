@@ -219,6 +219,16 @@ helps:
   adding a country is one entry there, one loader line in
   `admin-geometry.ts`, and a rebuild. Legacy's GADM files were
   deliberately not reused — GADM forbids redistribution.
+- **City water overlay** (#286) — sea/rivers/lakes drawn beneath each
+  city heatmap — is the same build-artifact pattern as the admin layers:
+  `npm run geo:build-water` reads OSM water from Overture Maps' public S3
+  GeoParquet (pinned release in `SOURCES.json`, ODbL — the chart's
+  methodology text carries the attribution), clips it to each city's
+  padded bounds, drops water hidden under a single neighborhood, and
+  writes `src/data/geo/water/<city>.topo.json`, lazy-loaded per city.
+  Natural Earth was tried first and rejected: ~1km accuracy didn't line
+  up with the neighborhood shorelines. See that script's header and
+  `InteractiveGeo`'s `contextFeatures` prop.
 - **Binary media** (images, the facelapse video from #15) goes to **Vercel
   Blob** (`@vercel/blob`, `BLOB_READ_WRITE_TOKEN`) instead. A re-encoded
   video or replaced photo produces a wholly new blob every time — no delta
