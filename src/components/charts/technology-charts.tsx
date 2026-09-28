@@ -9,6 +9,7 @@ import {
   type CompositionRow,
 } from "@/components/charts/composition-explorer";
 import { DailyExplorer } from "@/components/charts/daily-explorer";
+import { TrendExplorer } from "@/components/charts/trend-explorer";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import {
   InteractiveScroller,
@@ -184,6 +185,59 @@ const DEVICE_METRIC_COLOR_SLOT: Record<DeviceMetric, number> = {
   laptop: 2,
   total: 3,
 };
+
+// Instagram opens hidden on the trend line: it's a slice of Phone rather
+// than a device of its own, and its tracking only starts in 2025, so by
+// default the chart keeps the Mix chart's two-device framing (plus their
+// total). The legend toggles it in.
+const TREND_INITIAL_HIDDEN = ["instagram"] as const;
+
+/**
+ * Average daily screen time per period (#477) — the long-run-direction view
+ * the Mix/Daily/Calendar trio lacked. Four lines on one `TrendExplorer`:
+ * Total as the primary series, Phone/Laptop/Instagram as `extraSeries`, all
+ * bucketed together.
+ *
+ * A mean per logged day, not a sum per period: a period with fewer logged
+ * days would otherwise read as a period of less screen time. Each line only
+ * averages the days that line was recorded on (`undefined` from its
+ * `getValue`), for the same reason the calendar skips unrecorded days
+ * instead of plotting zeros — Instagram's pre-2025 gap stays a gap. Lines,
+ * not a stack, so Instagram overlapping inside Phone isn't double-counted.
+ *
+ * Total counts a missing device as zero on a day the other one logged,
+ * matching `DeviceCalendarChart`'s own Total measure, and takes that
+ * measure's colour slot (3) for the same reason.
+ */
+export function ScreenTimeTrendChart({ data }: { data: DeviceDay[] }) {
+  const hours = (minutes: number | null) => (minutes === null ? undefined : asHours(minutes));
+  return (
+    <TrendExplorer
+      data={data}
+      title="Screen Time Trend"
+      description="Average daily phone, laptop, and total screen time, aggregated by period. Marker size shows how many days fed each point; the band shows ±1 standard deviation around it."
+      methodology={SCREEN_TIME_METHODOLOGY}
+      trackingSpan={SCREEN_TIME_TRACKING_SPAN}
+      seriesId="total"
+      label="Total"
+      color={categoricalColor(DEVICE_METRIC_COLOR_SLOT.total)}
+      getValue={(d) =>
+        d.phoneMinutes === null && d.laptopMinutes === null
+          ? undefined
+          : asHours((d.phoneMinutes ?? 0) + (d.laptopMinutes ?? 0))
+      }
+      extraSeries={[
+        { id: "phone", label: PHONE, color: DEVICE_COLORS[PHONE], getValue: (d) => hours(d.phoneMinutes) },
+        { id: "laptop", label: LAPTOP, color: DEVICE_COLORS[LAPTOP], getValue: (d) => hours(d.laptopMinutes) },
+        { id: "instagram", label: INSTAGRAM, color: DEVICE_COLORS[INSTAGRAM], getValue: (d) => hours(d.instagramMinutes) },
+      ]}
+      initialHiddenIds={TREND_INITIAL_HIDDEN}
+      aggregate="mean"
+      valueFormat={formatHours}
+      ariaLabel="Average daily screen time over time: total, phone, and laptop as lines, with Instagram available from the legend. Use arrow keys to inspect individual buckets, or hover a point."
+    />
+  );
+}
 
 /**
  * One calendar, switchable between phone, laptop, Instagram, and their
