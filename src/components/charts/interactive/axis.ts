@@ -88,6 +88,7 @@ export function drawStandardAxes({
   yTicks,
   yTickFormat,
   xTickFormat,
+  xTickValues,
 }: {
   g: d3.Selection<SVGGElement, unknown, null, undefined>;
   x: d3.AxisScale<d3.NumberValue> | d3.AxisScale<Date>;
@@ -97,9 +98,15 @@ export function drawStandardAxes({
   xTicks?: number;
   yTicks?: number;
   yTickFormat?: (domainValue: d3.NumberValue, index: number) => string;
-  /** Only meaningful for a numeric x scale (a histogram's value axis, e.g.
-   * "8h" rather than "8"); a time axis keeps d3's own date formatting. */
+  /** A numeric x scale's tick labels (a histogram's value axis, e.g. "8h"
+   * rather than "8"), or a time axis whose dates aren't really dates — a
+   * seasonal fold's reference days, named "Mon"/"Jan" (#451). A plain time
+   * axis omits it and keeps d3's own date formatting. */
   xTickFormat?: (domainValue: d3.NumberValue, index: number) => string;
+  /** Exact tick positions, overriding `xTicks` — for an axis with a small
+   * fixed set of meaningful stops (the seven weekdays, twelve months) that
+   * d3's automatic ticks would skip or subdivide. */
+  xTickValues?: readonly (d3.NumberValue | Date)[];
 }): {
   xAxisG: d3.Selection<SVGGElement, unknown, null, undefined>;
   yAxisG: d3.Selection<SVGGElement, unknown, null, undefined>;
@@ -112,6 +119,7 @@ export function drawStandardAxes({
 
   const xAxisG = g.append("g").attr("transform", `translate(0,${innerHeight})`);
   const xAxis = d3.axisBottom(x as d3.AxisScale<d3.AxisDomain>).ticks(resolvedXTicks);
+  if (xTickValues) xAxis.tickValues(xTickValues as d3.AxisDomain[]);
   if (xTickFormat) xAxis.tickFormat(xTickFormat as (v: d3.AxisDomain, i: number) => string);
   styleAxis(xAxisG, xAxis);
 

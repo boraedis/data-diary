@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { groupByPeriod, summarizePeriods } from "@/lib/viz/bin";
+import {
+  cycleOccurrenceKey,
+  cyclePosition,
+  cycleReferenceDate,
+  foldByCycle,
+  formatCyclePosition,
+  groupByPeriod,
+  poolCircularWindow,
+  summarizePeriods,
+} from "@/lib/viz/bin";
 
 type Item = { date: string; value: number };
 
@@ -67,5 +76,54 @@ describe("summarizePeriods", () => {
       { key: "2026-02", start: "2026-02-01", avg: 15, count: 2 },
       { key: "2026-03", start: "2026-03-01", avg: 30, count: 1 },
     ]);
+  });
+});
+
+describe("cyclical folding", () => {
+  it("places weekdays Monday-first on consecutive reference days", () => {
+    expect(cyclePosition("weekday", "2026-09-28")).toBe(0); // a Monday
+    expect(cyclePosition("weekday", "2026-10-04")).toBe(6); // a Sunday
+    expect(cycleReferenceDate("weekday", 0)).toBe("2000-01-03");
+    expect(cycleReferenceDate("weekday", 6)).toBe("2000-01-09");
+    expect(cyclePosition("weekday", cycleReferenceDate("weekday", 4))).toBe(4);
+  });
+
+  it("keeps March 1st on the same day-of-year slot in leap and common years", () => {
+    expect(cyclePosition("dayOfYear", "2023-03-01")).toBe(60);
+    expect(cyclePosition("dayOfYear", "2024-03-01")).toBe(60);
+    expect(cyclePosition("dayOfYear", "2024-02-29")).toBe(59);
+    expect(cyclePosition("dayOfYear", "2023-12-31")).toBe(365);
+    expect(cycleReferenceDate("dayOfYear", 365)).toBe("2000-12-31");
+  });
+
+  it("folds every year onto one axis, sorted by position", () => {
+    const items = [item("2024-03-05", 1), item("2023-01-10", 2), item("2025-03-20", 3)];
+    const buckets = foldByCycle(items, "monthOfYear", (i) => i.date);
+    expect(buckets.map((b) => [b.position, b.start, b.items.map((i) => i.value)])).toEqual([
+      [0, "2000-01-01", [2]],
+      [2, "2000-03-01", [1, 3]],
+    ]);
+  });
+
+  it("pools a window that wraps around the end of the cycle", () => {
+    const items = [item("2024-12-30", 1), item("2025-01-02", 2), item("2025-06-01", 3)];
+    const pooled = poolCircularWindow(foldByCycle(items, "dayOfYear", (i) => i.date), "dayOfYear", 7);
+    const jan1 = pooled.find((b) => b.start === "2000-01-01");
+    expect(jan1?.items.map((i) => i.value).sort()).toEqual([1, 2]);
+    // Only positions with something in their window come back.
+    expect(pooled.every((b) => b.items.length > 0)).toBe(true);
+    expect(pooled.some((b) => b.start === "2000-04-01")).toBe(false);
+  });
+
+  it("keys a month fold's occurrences by year-month and day folds by date", () => {
+    expect(cycleOccurrenceKey("monthOfYear", "2024-01-15")).toBe("2024-01");
+    expect(cycleOccurrenceKey("weekday", "2024-01-15")).toBe("2024-01-15");
+  });
+
+  it("names positions without the reference year", () => {
+    expect(formatCyclePosition("weekday", "2000-01-07")).toBe("Friday");
+    expect(formatCyclePosition("weekday", "2000-01-07", true)).toBe("Fri");
+    expect(formatCyclePosition("monthOfYear", "2000-02-01", true)).toBe("Feb");
+    expect(formatCyclePosition("dayOfYear", "2000-03-14")).toBe("March 14");
   });
 });
