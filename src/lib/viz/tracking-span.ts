@@ -78,6 +78,17 @@ export const PODCAST_TRACKING_SPAN: TrackingSpan = { start: "2018-09-18" };
  * sports, games and the generic kinds). */
 export const ENTERTAINMENT_TRACKING_SPAN: TrackingSpan = { start: "2016-03-14" };
 
+/** The Entertainment Trend's own start (#479): the first dated TV watch,
+ * from which every month has sessions logged. Before it there are only a few dozen
+ * scattered movie watches across 2016–2020 and nothing at all in 2021 — a
+ * trend drawn from 2016 would read those as years of watching nothing.
+ * `getEntertainmentDailyData` starts here too, so this is the one place
+ * that decides it. */
+export const ENTERTAINMENT_TREND_TRACKING_SPAN: TrackingSpan = {
+  start: "2022-01-05",
+  note: "A handful of earlier movie watches (2016–2020) are left off: nothing else was logged until 2022.",
+};
+
 export const SPORTS_TRACKING_SPAN: TrackingSpan = { start: "2023-05-29" };
 
 /** Phone and laptop usage only — Instagram usage minutes started much

@@ -341,6 +341,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["entertainment"],
   },
   {
+    href: "/charts/entertainment-trend",
+    title: "Entertainment Trend",
+    description: "Trend in time spent on movies, TV, books, sports and games, aggregated by period.",
+    categories: ["entertainment"],
+  },
+  {
     href: "/charts/sports-leaderboard",
     title: "Sports Leaderboard",
     description: "A leaderboard of the sports, leagues, conferences and teams I've watched most.",
