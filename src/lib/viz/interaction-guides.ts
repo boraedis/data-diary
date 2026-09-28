@@ -13,7 +13,7 @@
  */
 
 export const LINE_INTERACTION_GUIDE =
-  "Hover a point for its exact value and date. With more than one line, click a legend entry to hide or show that line. The shaded band is ±1 standard deviation around that period's plotted average, drawn only while a single line is visible; marker size shows how many days fed the point. Where a dotted line is drawn, it marks a fixed target (8 hours, say), labelled at its right end. Where there's a View picker, Weekday, Month and Day of year fold every year in the chosen range onto one Monday–Sunday, January–December or January 1–December 31 axis, averaging each point across all of them; Day of year pools the 7 days either side of each date, so it reads as a smooth curve rather than a day-by-day scatter. Timeline returns to the ordinary calendar view.";
+  "Hover a point for its exact value and date. With more than one line, click a legend entry to hide or show that line. The shaded band is ±1 standard deviation around that period's plotted average, drawn only while a single line is visible; marker size shows how many days fed the point. Where a dotted line is drawn, it marks a fixed target (8 hours, say), labelled at its right end. Where Bucket by offers Day of Week, Month of Year and Day of Year, those fold every year in the chosen range onto one Monday–Sunday, January–December or January 1–December 31 axis, averaging each point across all of them. Day of Year adds a Smoothing picker: None plots each calendar day's own average, while ±1, ±3 or ±7 days pools that many days either side of each date for a smoother curve.";
 
 /** `InteractiveLine` with `hover="series"`, for charts carrying too many
  * lines for the crosshair's every-line readout (the People Impact Trend). */

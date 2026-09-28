@@ -24,26 +24,34 @@ import { parseDate, toDateString } from "@/lib/date";
 import { LINE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import type { TrackingSpan } from "@/lib/viz/tracking-span";
 
-/** "timeline" is the ordinary calendar view; the rest fold every year (or
- * week) onto one axis — see `src/lib/viz/bin.ts`'s cyclical-folding section
- * (#451). A separate picker from `PeriodPicker` rather than extra buttons on
- * it, because a fold isn't a coarser or finer bucket of the same timeline:
- * it replaces the time axis, so the period buttons are hidden while one is
- * on. The range picker stays — it chooses which years get folded. */
-type View = "timeline" | Cycle;
+/** Every choice on the "Bucket by" row: a calendar period, or a seasonal
+ * fold (#451) that stacks every year (or week) in the chosen range onto one
+ * Mon–Sun, Jan–Dec or Jan 1–Dec 31 axis — see `src/lib/viz/bin.ts`'s
+ * cyclical-folding section. The range picker still applies to a fold: it
+ * chooses which years get folded. */
+type Bucketing = Period | Cycle;
 
-const VIEW_OPTIONS: GroupByOption<View>[] = [
-  { id: "timeline", label: "Timeline" },
-  { id: "weekday", label: "Weekday" },
-  { id: "monthOfYear", label: "Month" },
-  { id: "dayOfYear", label: "Day of year" },
+const CYCLES: Cycle[] = ["weekday", "monthOfYear", "dayOfYear"];
+
+function isCycle(bucketing: Bucketing): bucketing is Cycle {
+  return (CYCLES as string[]).includes(bucketing);
+}
+
+/** Day of Year's smoothing radius, in days either side: 0 draws each
+ * calendar day's own mean, otherwise each point pools that many days either
+ * side of it across every year (`poolCircularWindow`). A prototype choice
+ * for #451 — one raw calendar day has only one value per year logged, so
+ * unsmoothed it's noisy, but a wide window blurs exactly the short seasonal
+ * turns (a holiday week) the view exists to show, so which width reads best
+ * is being judged by eye before one is settled on. */
+type Smoothing = 0 | 1 | 3 | 7;
+
+const SMOOTHING_OPTIONS: GroupByOption<`${Smoothing}`>[] = [
+  { id: "0", label: "None" },
+  { id: "1", label: "±1 day" },
+  { id: "3", label: "±3 days" },
+  { id: "7", label: "±7 days" },
 ];
-
-/** ±7 days, so each day-of-year point pools a fortnight of every year logged
- * — wide enough that a handful of years reads as a curve rather than 366
- * jittering single-day means, narrow enough to keep a seasonal turn (the
- * weeks around a holiday) visible. See `poolCircularWindow`. */
-const DAY_OF_YEAR_RADIUS = 7;
 
 /** Below this plot width the month-based folds label every third month
  * (Jan/Apr/Jul/Oct) instead of all twelve, which would overlap. */
@@ -54,10 +62,10 @@ function referenceDates(cycle: Cycle, positions: number[]): Date[] {
 }
 
 /** Axis ticks and tooltip titles for a fold — `InteractiveLine`'s `xLabels`.
- * Built per (cycle, narrow) pair and memoized by the caller, since the
+ * Built per (cycle, narrow, smoothing) and memoized by the caller, since the
  * object is a `useD3` dependency. Day of year ticks at each month's 1st and
  * names only the month there; its tooltip gives the full "March 14". */
-function foldLabels(cycle: Cycle, narrow: boolean) {
+function foldLabels(cycle: Cycle, narrow: boolean, smoothing: Smoothing) {
   const months = Array.from({ length: 12 }, (_, m) => m).filter((m) => !narrow || m % 3 === 0);
   // Day of year's month-1st reference dates are the month fold's own.
   const tickValues =
@@ -65,10 +73,11 @@ function foldLabels(cycle: Cycle, narrow: boolean) {
   return {
     tick: (date: Date) =>
       formatCyclePosition(cycle === "dayOfYear" ? "monthOfYear" : cycle, toDateString(date), true),
-    // Day of year's point is a pooled window, not the one day, so its
-    // heading says so.
+    // A smoothed day-of-year point is a pooled window, not the one day, so
+    // its heading says so.
     title: (date: Date) =>
-      formatCyclePosition(cycle, toDateString(date)) + (cycle === "dayOfYear" ? ` ±${DAY_OF_YEAR_RADIUS} days` : ""),
+      formatCyclePosition(cycle, toDateString(date)) +
+      (cycle === "dayOfYear" && smoothing > 0 ? ` ±${smoothing} day${smoothing === 1 ? "" : "s"}` : ""),
     tickValues,
   };
 }
@@ -180,10 +189,10 @@ export function TrendExplorer<T extends { date: string }>({
   ariaLabel: string;
 }) {
   const showBand = aggregate === "mean" && band !== false;
-  const [period, setPeriod] = useState<Period>("month");
-  const [view, setView] = useState<View>("timeline");
+  const [bucketing, setBucketing] = useState<Bucketing>("month");
+  const [smoothing, setSmoothing] = useState<Smoothing>(0);
   const [range, setRange] = useState<[Date, Date] | null>(null);
-  const cycle = view === "timeline" ? null : view;
+  const cycle = isCycle(bucketing) ? bucketing : null;
 
   const domain = useMemo<[Date, Date] | null>(() => {
     if (data.length === 0) return null;
@@ -201,10 +210,10 @@ export function TrendExplorer<T extends { date: string }>({
             return date >= from && date <= to;
           })
         : data;
-    if (cycle === null) return groupByPeriod(scoped, period, (item) => item.date);
-    const folded = foldByCycle(scoped, cycle, (item) => item.date);
-    return cycle === "dayOfYear" ? poolCircularWindow(folded, cycle, DAY_OF_YEAR_RADIUS) : folded;
-  }, [data, period, cycle, range]);
+    if (!isCycle(bucketing)) return groupByPeriod(scoped, bucketing, (item) => item.date);
+    const folded = foldByCycle(scoped, bucketing, (item) => item.date);
+    return bucketing === "dayOfYear" && smoothing > 0 ? poolCircularWindow(folded, bucketing, smoothing) : folded;
+  }, [data, bucketing, smoothing, range]);
 
   // Shared by the primary series and every `extraSeries` entry — they all
   // bucket the exact same rows, just summarized by different `getValue`s,
@@ -316,8 +325,11 @@ export function TrendExplorer<T extends { date: string }>({
   // can't call hooks itself, and a fresh object per render would rebuild
   // the SVG on every render (`xLabels` is a `useD3` dependency).
   const xLabels = useMemo(
-    () => (cycle === null ? null : { wide: foldLabels(cycle, false), narrow: foldLabels(cycle, true) }),
-    [cycle],
+    () =>
+      cycle === null
+        ? null
+        : { wide: foldLabels(cycle, false, smoothing), narrow: foldLabels(cycle, true, smoothing) },
+    [cycle, smoothing],
   );
 
   return (
@@ -331,8 +343,15 @@ export function TrendExplorer<T extends { date: string }>({
         domain ? (
           <>
             {extraFilters}
-            <GroupByPicker label="View" value={view} onChange={setView} options={VIEW_OPTIONS} />
-            {cycle === null ? <PeriodPicker value={period} onChange={setPeriod} /> : null}
+            <PeriodPicker<Bucketing> value={bucketing} onChange={setBucketing} cycles={CYCLES} />
+            {bucketing === "dayOfYear" ? (
+              <GroupByPicker
+                label="Smoothing"
+                value={`${smoothing}`}
+                onChange={(id) => setSmoothing(Number(id) as Smoothing)}
+                options={SMOOTHING_OPTIONS}
+              />
+            ) : null}
             <TimeRangePicker domain={domain} value={range} onChange={setRange} />
           </>
         ) : null
