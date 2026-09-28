@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, render } from "@testing-library/react";
 import { InteractiveCalendar, calendarLayout, type InteractiveCalendarPoint } from "./interactive-calendar";
 
-// #450: below the horizontal grid's minimum width the calendar turns on its
-// side, and a tap pins the tooltip instead of flashing it. jsdom does no
-// layout, so this checks the geometry math and event wiring, not how it
+// #450: below the horizontal grid's minimum width the calendar switches to
+// a month grid, and a tap pins the tooltip instead of flashing it. jsdom
+// does no layout, so this checks the geometry math and event wiring, not how it
 // looks on a real phone.
 
 // The hover handler branches on `event instanceof PointerEvent`, and the
@@ -22,7 +22,7 @@ if (typeof globalThis.PointerEvent === "undefined") {
   globalThis.PointerEvent = PointerEventPolyfill;
 }
 
-// Two years, so the vertical layout has something to tile.
+// Two years, so the month grid has more than one year to stack.
 const POINTS: InteractiveCalendarPoint[] = [
   { date: "2025-01-06", value: 1 }, // Monday, week 1
   { date: "2025-01-12", value: 2 }, // Sunday, week 1
@@ -41,23 +41,27 @@ describe("calendarLayout", () => {
   it("keeps the horizontal layout wherever it already fit", () => {
     expect(calendarLayout(570, 3).orientation).toBe("horizontal");
     expect(calendarLayout(1200, 3).orientation).toBe("horizontal");
-    expect(calendarLayout(569, 3).orientation).toBe("vertical");
+    expect(calendarLayout(569, 3).orientation).toBe("months");
   });
 
-  it("fits two years side by side on a phone-width card, inside the width", () => {
-    const layout = calendarLayout(320, 5);
-    expect(layout.orientation).toBe("vertical");
-    expect(layout.gridOrigin(0).y).toBe(layout.gridOrigin(1).y);
-    expect(layout.gridOrigin(1).x).toBeGreaterThan(layout.gridOrigin(0).x);
-    expect(layout.gridOrigin(2).y).toBeGreaterThan(layout.gridOrigin(0).y);
-    expect(layout.gridOrigin(2).x).toBe(layout.gridOrigin(0).x);
-    expect(layout.contentWidth).toBeLessThanOrEqual(320);
+  it("puts three months across on a phone-width card, inside the width", () => {
+    const layout = calendarLayout(311, 4);
+    if (layout.orientation !== "months") throw new Error("expected months");
+    expect(layout.columns).toBe(3);
+    expect(layout.monthOrigin(1).y).toBe(layout.monthOrigin(0).y);
+    expect(layout.monthOrigin(1).x).toBeGreaterThan(layout.monthOrigin(0).x);
+    expect(layout.monthOrigin(3).x).toBe(layout.monthOrigin(0).x);
+    expect(layout.monthOrigin(3).y).toBeGreaterThan(layout.monthOrigin(0).y);
+    expect(layout.yearOrigin(1).y).toBeGreaterThan(layout.monthOrigin(11).y);
+    expect(layout.contentWidth).toBeLessThanOrEqual(311);
   });
 
-  it("caps a lone year's cells so one year doesn't run past a screen", () => {
-    const layout = calendarLayout(500, 1);
+  it("uses more months per row, with capped cells, when there's room", () => {
+    const layout = calendarLayout(560, 1);
+    if (layout.orientation !== "months") throw new Error("expected months");
+    expect(layout.columns).toBe(4);
     expect(layout.cellSize).toBeLessThanOrEqual(16);
-    expect(layout.contentWidth).toBeLessThanOrEqual(500);
+    expect(layout.contentWidth).toBeLessThanOrEqual(560);
   });
 
   it("still fits the narrowest ResponsiveChart width", () => {
@@ -65,8 +69,8 @@ describe("calendarLayout", () => {
   });
 });
 
-describe("InteractiveCalendar vertical layout", () => {
-  it("runs weekdays across and weeks down when narrow", () => {
+describe("InteractiveCalendar month grid", () => {
+  it("runs weekdays across and each month's weeks down when narrow", () => {
     const { container } = renderCalendar(360);
     const cells = cellByFill(container);
     expect(cells).toHaveLength(POINTS.length);
@@ -74,9 +78,14 @@ describe("InteractiveCalendar vertical layout", () => {
     // Same week, different weekday: same row, Sunday to the right.
     expect(sun.y).toBe(mon.y);
     expect(sun.x).toBeGreaterThan(mon.x);
-    // Same weekday, later week: same column, further down.
-    expect(lateDec.x).toBe(mon.x);
+    // December sits in the bottom-right month.
+    expect(lateDec.x).toBeGreaterThan(mon.x);
     expect(lateDec.y).toBeGreaterThan(mon.y);
+  });
+
+  it("draws a placeholder for every day of each year", () => {
+    const { container } = renderCalendar(360);
+    expect(container.querySelectorAll("rect.blank")).toHaveLength(365 + 366);
   });
 
   it("runs weeks across and weekdays down when wide (desktop unchanged)", () => {
@@ -86,6 +95,7 @@ describe("InteractiveCalendar vertical layout", () => {
     expect(sun.y).toBeGreaterThan(mon.y);
     expect(lateDec.y).toBe(mon.y);
     expect(lateDec.x).toBeGreaterThan(mon.x);
+    expect(container.querySelectorAll("rect.blank")).toHaveLength(0);
   });
 });
 
