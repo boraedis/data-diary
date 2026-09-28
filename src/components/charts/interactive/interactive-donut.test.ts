@@ -3,6 +3,7 @@ import * as d3 from "d3";
 import {
   LABEL_FONT_TIERS,
   MIN_ARC_ANGLE,
+  defaultColorOf,
   depthFill,
   findByKeyPath,
   isArcInPlay,
@@ -10,8 +11,10 @@ import {
   keyPathOf,
   labelFontSize,
   labelTransform,
+  pathIsExcluded,
   resolveLabel,
   splitIntoTwoLines,
+  transitionArcBoxes,
   type ArcBox,
 } from "./interactive-donut";
 import type { HierarchyDatum } from "@/lib/viz/hierarchy";
@@ -228,6 +231,45 @@ describe("depthFill", () => {
   });
 });
 
+describe("defaultColorOf", () => {
+  function treeWithBranches(count: number): HierarchyDatum {
+    return {
+      key: "root",
+      name: "Root",
+      children: Array.from({ length: count }, (_, i) => ({ key: `b${i}`, name: `Branch ${i}`, value: 1 })),
+    };
+  }
+
+  it("assigns the first five branches distinct slots in rank order", () => {
+    const root = d3.hierarchy(treeWithBranches(5)).sum((d) => d.value ?? 0);
+    const colors = root.children!.map((c) => defaultColorOf(c));
+    expect(colors).toEqual(["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"]);
+  });
+
+  it("wraps the 6th+ branch back to the fixed slots rather than a muted overflow color", () => {
+    const root = d3.hierarchy(treeWithBranches(8)).sum((d) => d.value ?? 0);
+    const colors = root.children!.map((c) => defaultColorOf(c));
+    expect(colors[5]).toBe(colors[0]); // rank 5 -> slot 0 again
+    expect(colors[6]).toBe(colors[1]); // rank 6 -> slot 1 again
+    expect(colors[7]).toBe(colors[2]);
+    expect(colors.every((c) => c !== "var(--muted-foreground)")).toBe(true);
+  });
+
+  it("still prefers a branch's own author-assigned color over any slot", () => {
+    const tree: HierarchyDatum = {
+      key: "root",
+      name: "Root",
+      children: [
+        { key: "a", name: "A", value: 1, color: "#abcdef" },
+        { key: "b", name: "B", value: 1 },
+      ],
+    };
+    const root = d3.hierarchy(tree).sum((d) => d.value ?? 0);
+    expect(defaultColorOf(root.children![0])).toBe("#abcdef");
+    expect(defaultColorOf(root.children![1])).toBe("var(--chart-2)");
+  });
+});
+
 describe("labelTransform", () => {
   it("puts an arc centered at 3 o'clock upright at mid-radius", () => {
     // Mid-angle π/2 (d3 measures clockwise from 12 o'clock) -> rotate(0).
@@ -285,5 +327,116 @@ describe("keyPathOf / findByKeyPath", () => {
 
   it("returns null rather than descending past a leaf", () => {
     expect(findByKeyPath(root, ["fr", "anything"])).toBeNull();
+  });
+});
+
+describe("pathIsExcluded", () => {
+  it("is false for a path with no prefix in the id set", () => {
+    expect(pathIsExcluded(["usa", "ga"], new Set(["fr"]))).toBe(false);
+  });
+
+  it("is true when the exact path is excluded", () => {
+    expect(pathIsExcluded(["usa", "ga"], new Set(["usa\u0000ga"]))).toBe(true);
+  });
+
+  it("is true when an ancestor is excluded, not just the exact node", () => {
+    expect(pathIsExcluded(["usa", "ga", "atl"], new Set(["usa\u0000ga"]))).toBe(true);
+  });
+
+  it("never treats the root (empty path) as excluded", () => {
+    expect(pathIsExcluded([], new Set(["usa\u0000ga"]))).toBe(false);
+  });
+});
+
+describe("transitionArcBoxes", () => {
+  // A before Excl before C in the sorted order `layout` would establish —
+  // biggest first. Excl sits between two siblings whose own values never
+  // change, which is exactly the shape that exercises "does a neighbor on
+  // *either* side organically grow."
+  const TREE: HierarchyDatum = {
+    key: "root",
+    name: "Root",
+    children: [
+      { key: "a", name: "A", value: 20 },
+      {
+        key: "excl",
+        name: "Excl",
+        children: [
+          { key: "e1", name: "E1", value: 6 },
+          { key: "e2", name: "E2", value: 4 },
+        ],
+      },
+      { key: "c", name: "C", value: 8 },
+    ],
+  };
+  const root = d3.hierarchy(TREE);
+  const notExcluded = () => false;
+  const exclExcluded = (path: string[]) => pathIsExcluded(path, new Set(["excl"]));
+
+  it("at t=0 (nothing excluded), matches a plain partition", () => {
+    const boxes = transitionArcBoxes(root, notExcluded, notExcluded, 0);
+    // Full circle split 20:10:8 among the three top-level branches.
+    expect(boxes.get("a")).toEqual({ x0: 0, x1: (20 / 38) * 2 * Math.PI, y0: 1, y1: 2 });
+    const excl = boxes.get("excl")!;
+    expect(excl.x0).toBeCloseTo((20 / 38) * 2 * Math.PI, 10);
+    expect(excl.x1 - excl.x0).toBeCloseTo((10 / 38) * 2 * Math.PI, 10);
+  });
+
+  it("at t=1 with excl excluded, collapses it and its descendants to zero width", () => {
+    const boxes = transitionArcBoxes(root, notExcluded, exclExcluded, 1);
+    const excl = boxes.get("excl")!;
+    expect(excl.x1 - excl.x0).toBeCloseTo(0, 10);
+    // Every descendant collapses too, to the exact same point — not each
+    // to its own separate angle.
+    const e1 = boxes.get("excl\u0000e1")!;
+    const e2 = boxes.get("excl\u0000e2")!;
+    expect(e1.x0).toBeCloseTo(excl.x0, 10);
+    expect(e1.x1).toBeCloseTo(excl.x0, 10);
+    expect(e2.x0).toBeCloseTo(excl.x0, 10);
+  });
+
+  it("lets both neighbors grow to exactly absorb the freed space — gapless", () => {
+    const before = transitionArcBoxes(root, notExcluded, notExcluded, 0);
+    const after = transitionArcBoxes(root, notExcluded, exclExcluded, 1);
+
+    const aBefore = before.get("a")!;
+    const aAfter = after.get("a")!;
+    const cBefore = before.get("c")!;
+    const cAfter = after.get("c")!;
+
+    expect(aAfter.x1).toBeGreaterThan(aBefore.x1);
+    expect(cAfter.x1 - cAfter.x0).toBeGreaterThan(cBefore.x1 - cBefore.x0);
+    // A's new end and C's new start meet exactly where excl collapsed to
+    // — nothing left over, nothing overlapping.
+    expect(cAfter.x0).toBeCloseTo(aAfter.x1, 10);
+    expect(after.get("excl")!.x0).toBeCloseTo(aAfter.x1, 10);
+    // The whole span is still fully accounted for.
+    expect(cAfter.x1).toBeCloseTo(2 * Math.PI, 10);
+  });
+
+  it("interpolates a mid-transition frame strictly between the two endpoints", () => {
+    const start = transitionArcBoxes(root, notExcluded, exclExcluded, 0).get("excl")!;
+    const mid = transitionArcBoxes(root, notExcluded, exclExcluded, 0.5).get("excl")!;
+    const end = transitionArcBoxes(root, notExcluded, exclExcluded, 1).get("excl")!;
+
+    const startWidth = start.x1 - start.x0;
+    const midWidth = mid.x1 - mid.x0;
+    const endWidth = end.x1 - end.x0;
+    expect(midWidth).toBeLessThan(startWidth);
+    expect(midWidth).toBeGreaterThan(endWidth);
+  });
+
+  it("preserves sibling order even as a value shrinks toward zero", () => {
+    // A is always before Excl is always before C, at every t — nothing
+    // reorders mid-transition just because a value crossed another's.
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      const boxes = transitionArcBoxes(root, notExcluded, exclExcluded, t);
+      const a = boxes.get("a")!;
+      const excl = boxes.get("excl")!;
+      const c = boxes.get("c")!;
+      expect(a.x0).toBeLessThanOrEqual(a.x1 + 1e-9);
+      expect(a.x1).toBeCloseTo(excl.x0, 10);
+      expect(excl.x1).toBeCloseTo(c.x0, 10);
+    }
   });
 });

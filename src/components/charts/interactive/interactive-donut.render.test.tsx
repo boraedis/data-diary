@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import * as d3 from "d3";
-import { InteractiveDonut } from "./interactive-donut";
+import { InteractiveDonut, ZOOM_DURATION_MS } from "./interactive-donut";
 import type { HierarchyDatum } from "@/lib/viz/hierarchy";
 
 // A mounted-DOM pass over what the pure-geometry tests in
@@ -48,6 +48,23 @@ function arcFor(container: HTMLElement, key: string): SVGPathElement {
   return match;
 }
 
+/** The focus-relative start angle (`target.x0`) the primitive's own
+ * internal `AnimatedNode` is currently animating toward — reads it
+ * straight off the bound datum rather than parsing the `d` path string,
+ * since that's the value `applyExclusion`'s collapse-anchor logic (#166)
+ * actually sets. Not part of the primitive's public/exported surface — an
+ * internal-shape read, acceptable here since it's the only way to observe
+ * the collapse target without a browser to look at the rendered arc in. */
+function targetX0(container: HTMLElement, key: string): number {
+  const datum = d3.select(arcFor(container, key)).datum() as { target: { x0: number } };
+  return datum.target.x0;
+}
+
+function targetX1(container: HTMLElement, key: string): number {
+  const datum = d3.select(arcFor(container, key)).datum() as { target: { x1: number } };
+  return datum.target.x1;
+}
+
 function visibleArcs(container: HTMLElement): SVGPathElement[] {
   return arcs(container).filter((p) => Number(p.getAttribute("fill-opacity")) > 0);
 }
@@ -69,10 +86,15 @@ function visibleCenterLines(): string[] {
     .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim());
 }
 
+/** Only the drill-down trail's own buttons, not the excluded-slices
+ * chips (#166) sharing the same `<nav>` row — those are scoped under
+ * their own `[role=status]` span. */
 function crumbs(): string[] {
-  return [...screen.getByRole("navigation", { name: /drill-down path/i }).querySelectorAll("button")].map(
-    (b) => b.textContent ?? "",
-  );
+  return [
+    ...screen
+      .getByRole("navigation", { name: /drill-down path/i })
+      .querySelectorAll(':scope > span:not([role="status"]) > button'),
+  ].map((b) => b.textContent ?? "");
 }
 
 function renderDonut(props: Partial<React.ComponentProps<typeof InteractiveDonut>> = {}) {
@@ -219,5 +241,173 @@ describe("InteractiveDonut", () => {
     const { container } = renderDonut({ data: { key: "root", name: "Empty", value: 0 } });
     expect(arcs(container)).toHaveLength(0);
     expect(crumbs()).toEqual(["Empty"]);
+  });
+
+  describe("excluding a slice (#166)", () => {
+    // The re-based total, the excluded chip and the "Showing X%" readout
+    // all commit to React state immediately — `layout` never depends on
+    // `excluded` (see the primitive's header comment), so there's nothing
+    // gating that commit behind the animation the way a filtered-tree
+    // approach would need. Only the *arc actually leaving the DOM* lags
+    // behind, since it's animating to a hairline over the same 750ms
+    // `zoomTo` uses rather than popping out of existence — `settle()`
+    // below waits out that part specifically. Real time, not fake timers:
+    // the d3 transition schedules itself off real timers/rAF, the same
+    // reason `vitest.setup.ts`'s SVG geometry shim has to be permanent
+    // rather than per-test.
+    async function settle() {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, ZOOM_DURATION_MS + 50));
+      });
+    }
+
+    it("right-clicking a slice re-bases the total immediately, then collapses the arc out of the DOM", async () => {
+      const { container } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+
+      // Committed right away: the grand total re-bases to the remaining
+      // 60 (Georgia 30 + NY 10, Atlanta already counted inside Georgia)
+      // and the excluded row shows up — but the arc itself is still
+      // mounted, mid-collapse to a hairline rather than gone yet.
+      expect(centerLines()).toEqual(["All places", "60", "visits"]);
+      expect(screen.getByText(/France \(40\)/)).toBeTruthy();
+      expect(screen.getByText("Showing 60.0% of total")).toBeTruthy();
+      expect(arcs(container).map(keyOf)).toContain("fr");
+
+      await settle();
+
+      // Now the collapse has finished, the arc is pruned from the DOM.
+      expect(arcs(container).map(keyOf)).not.toContain("fr");
+    });
+
+    it("restores an excluded item on click, and grows the total back immediately", async () => {
+      const { container } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      expect(centerLines()).toEqual(["All places", "60", "visits"]);
+
+      act(() => {
+        screen.getByRole("button", { name: /France/i }).click();
+      });
+      expect(centerLines()).toEqual(["All places", "100", "visits"]);
+      expect(screen.queryByText(/France \(40\)/)).toBeNull();
+      // The arc is back in the DOM right away too, animating back in from
+      // its collapsed hairline rather than popping back at full size.
+      expect(arcs(container).map(keyOf)).toContain("fr");
+    });
+
+    it("captures a branch's effective weight, not its raw total, when a descendant was already excluded", async () => {
+      // Atlanta (20) is nested inside Georgia (30 of its own, 50 raw
+      // total including Atlanta). Excluding Atlanta first, then Georgia,
+      // should credit Georgia's chip with 30 — its own weight once
+      // Atlanta's is no longer double-counted — not the raw 50.
+      const { container } = renderDonut({ visibleRings: 3 });
+      act(() => {
+        arcFor(container, "atl").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      act(() => {
+        arcFor(container, "ga").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+
+      expect(screen.getByText(/Georgia \(30\)/)).toBeTruthy();
+      // Georgia's whole subtree (50, Atlanta included) is now gone from
+      // the total — not double-subtracted just because Atlanta had its
+      // own chip first: 100 - 50 = 50.
+      expect(centerLines()).toEqual(["All places", "50", "visits"]);
+    });
+
+    it("excludes a nested branch via keyboard (Delete), leaving its siblings", async () => {
+      const { container } = renderDonut({ visibleRings: 2 });
+      act(() => {
+        arcFor(container, "ga").dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }),
+        );
+      });
+      await settle();
+
+      expect(arcs(container).map(keyOf)).not.toContain("ga");
+      expect(arcs(container).map(keyOf)).toContain("ny");
+    });
+
+    it("lets both neighbors organically grow into an excluded branch's space, gaplessly", async () => {
+      // "excl" sits *between* two siblings (A before it, C after), each
+      // with a fixed value unaffected by the exclusion, so excluding it
+      // has somewhere real to redistribute into on both sides — the
+      // scenario the whole re-partition-per-frame approach
+      // (`transitionArcBoxes`) exists for. Excl's own children (E1, E2)
+      // should collapse together with it, landing exactly where A's
+      // growth pushes them — not at excl's own original start, not at 12
+      // o'clock, and not each at its own separate angle.
+      const tree: HierarchyDatum = {
+        key: "root",
+        name: "Root",
+        children: [
+          { key: "a", name: "A", value: 20 },
+          {
+            key: "excl",
+            name: "Excl",
+            children: [
+              { key: "e1", name: "E1", value: 6 },
+              { key: "e2", name: "E2", value: 4 },
+            ],
+          },
+          { key: "c", name: "C", value: 8 },
+        ],
+      };
+      const { container } = renderDonut({ data: tree, visibleRings: 2 });
+
+      const aX1Before = targetX1(container, "a");
+      const cWidthBefore = targetX1(container, "c") - targetX0(container, "c");
+
+      act(() => {
+        arcFor(container, "excl").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+
+      const aX1After = targetX1(container, "a");
+      const cX0After = targetX0(container, "c");
+      const cWidthAfter = targetX1(container, "c") - cX0After;
+
+      // Both neighbors actually grew...
+      expect(aX1After).toBeGreaterThan(aX1Before + 0.01);
+      expect(cWidthAfter).toBeGreaterThan(cWidthBefore + 0.01);
+      // ...and the whole excluded branch collapsed, gaplessly, to exactly
+      // the point A's growth reached — A and C now meet with nothing
+      // between them.
+      expect(cX0After).toBeCloseTo(aX1After, 6);
+      expect(targetX0(container, "excl")).toBeCloseTo(aX1After, 6);
+      expect(targetX0(container, "e1")).toBeCloseTo(aX1After, 6);
+      expect(targetX0(container, "e2")).toBeCloseTo(aX1After, 6);
+      // C's own far edge is untouched — nothing overshoots past it.
+      expect(targetX1(container, "c")).toBeCloseTo(2 * Math.PI, 6);
+    });
+
+    it("survives a zoom: excluding, then zooming into a different branch, keeps it excluded", async () => {
+      const { container } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      act(() => {
+        arcFor(container, "usa").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(crumbs()).toEqual(["All places", "USA"]);
+      expect(screen.getByText(/France \(40\)/)).toBeTruthy();
+    });
+
+    it("resets exclusions when the data prop changes", async () => {
+      const { container, rerender } = renderDonut();
+      act(() => {
+        arcFor(container, "fr").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+      await settle();
+      expect(screen.getByText(/France \(40\)/)).toBeTruthy();
+
+      rerender(<InteractiveDonut data={{ ...TREE }} width={600} height={600} valueLabel="visits" />);
+      expect(screen.queryByText(/France \(40\)/)).toBeNull();
+      expect(centerLines()).toEqual(["All places", "100", "visits"]);
+    });
   });
 });
