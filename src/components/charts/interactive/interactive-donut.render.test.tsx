@@ -60,6 +60,11 @@ function targetX0(container: HTMLElement, key: string): number {
   return datum.target.x0;
 }
 
+function targetX1(container: HTMLElement, key: string): number {
+  const datum = d3.select(arcFor(container, key)).datum() as { target: { x1: number } };
+  return datum.target.x1;
+}
+
 function visibleArcs(container: HTMLElement): SVGPathElement[] {
   return arcs(container).filter((p) => Number(p.getAttribute("fill-opacity")) > 0);
 }
@@ -327,16 +332,16 @@ describe("InteractiveDonut", () => {
       expect(arcs(container).map(keyOf)).toContain("ny");
     });
 
-    it("collapses a whole excluded branch toward its own start angle, not each descendant's own", async () => {
-      // "excl" is the second top-level branch (A is bigger, so it takes
-      // the first/biggest slot and excl's start angle is non-zero — not
-      // 12 o'clock). Within excl, E2 is the *second* child, so E2's own
-      // start angle sits partway through excl's span — genuinely
-      // different from excl's own start. If descendants collapsed toward
-      // their own angle (the old, wrong behavior) or toward a fixed
-      // origin (12 o'clock, an earlier attempt at this), E2 would land
-      // somewhere other than excl's own start.
-      const anchorTree: HierarchyDatum = {
+    it("lets both neighbors organically grow into an excluded branch's space, gaplessly", async () => {
+      // "excl" sits *between* two siblings (A before it, C after), each
+      // with a fixed value unaffected by the exclusion, so excluding it
+      // has somewhere real to redistribute into on both sides — the
+      // scenario the whole re-partition-per-frame approach
+      // (`transitionArcBoxes`) exists for. Excl's own children (E1, E2)
+      // should collapse together with it, landing exactly where A's
+      // growth pushes them — not at excl's own original start, not at 12
+      // o'clock, and not each at its own separate angle.
+      const tree: HierarchyDatum = {
         key: "root",
         name: "Root",
         children: [
@@ -345,26 +350,38 @@ describe("InteractiveDonut", () => {
             key: "excl",
             name: "Excl",
             children: [
-              { key: "e1", name: "E1", value: 10 },
-              { key: "e2", name: "E2", value: 5 },
+              { key: "e1", name: "E1", value: 6 },
+              { key: "e2", name: "E2", value: 4 },
             ],
           },
+          { key: "c", name: "C", value: 8 },
         ],
       };
-      const { container } = renderDonut({ data: anchorTree, visibleRings: 2 });
+      const { container } = renderDonut({ data: tree, visibleRings: 2 });
 
-      const exclStart = targetX0(container, "excl");
-      const e2StartBefore = targetX0(container, "e2");
-      // Sanity check the fixture actually exercises the distinction.
-      expect(e2StartBefore).toBeGreaterThan(exclStart + 0.01);
+      const aX1Before = targetX1(container, "a");
+      const cWidthBefore = targetX1(container, "c") - targetX0(container, "c");
 
       act(() => {
         arcFor(container, "excl").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       });
 
-      expect(targetX0(container, "excl")).toBeCloseTo(exclStart, 6);
-      expect(targetX0(container, "e1")).toBeCloseTo(exclStart, 6);
-      expect(targetX0(container, "e2")).toBeCloseTo(exclStart, 6);
+      const aX1After = targetX1(container, "a");
+      const cX0After = targetX0(container, "c");
+      const cWidthAfter = targetX1(container, "c") - cX0After;
+
+      // Both neighbors actually grew...
+      expect(aX1After).toBeGreaterThan(aX1Before + 0.01);
+      expect(cWidthAfter).toBeGreaterThan(cWidthBefore + 0.01);
+      // ...and the whole excluded branch collapsed, gaplessly, to exactly
+      // the point A's growth reached — A and C now meet with nothing
+      // between them.
+      expect(cX0After).toBeCloseTo(aX1After, 6);
+      expect(targetX0(container, "excl")).toBeCloseTo(aX1After, 6);
+      expect(targetX0(container, "e1")).toBeCloseTo(aX1After, 6);
+      expect(targetX0(container, "e2")).toBeCloseTo(aX1After, 6);
+      // C's own far edge is untouched — nothing overshoots past it.
+      expect(targetX1(container, "c")).toBeCloseTo(2 * Math.PI, 6);
     });
 
     it("survives a zoom: excluding, then zooming into a different branch, keeps it excluded", async () => {

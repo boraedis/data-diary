@@ -72,12 +72,17 @@ import { cn } from "@/lib/utils";
 // "reload" the instant that dependency changed underneath it. `layout`
 // now stays pinned to the raw, unfiltered `data` forever (same as before
 // #166) — the same reason a *zoom* never rebuilds. Excluding is purely an
-// animation-time concern: `applyExclusion`, defined alongside `zoomTo`
-// inside the d3 render function below, computes what a fresh partition of
-// the post-exclusion tree would look like and retargets the *existing*
-// nodes' angles to it, the same way `zoomTo` retargets them to a new
-// focus, so the same long-lived arcs sweep smoothly into their new shape
-// instead of the whole thing disappearing and reappearing. React state
+// animation-time concern, retargeting the *existing* nodes rather than
+// rebuilding anything — the same idea `zoomTo` already uses for a focus
+// change. It goes a step further than a simple retarget, though: rather
+// than easing each node toward a precomputed end state independently
+// (which a first pass at this did, and which reads as two edges drifting
+// toward where they end up rather than one clean shrink/grow), every
+// frame re-runs the actual partition math — `transitionArcBoxes`, with
+// each node's own value scaled by how far through the transition it is —
+// so the excluded slice reads as genuinely shrinking to nothing while its
+// siblings organically grow to fill the space, gapless at every instant,
+// the same way a real value change would lay out. React state
 // (`excluded`) is still the source of truth for *what's* excluded (the
 // breadcrumb row, the re-based percentages) — it's just no longer
 // anything `layout` depends on.
@@ -102,20 +107,12 @@ type DonutNode = d3.HierarchyRectangularNode<HierarchyDatum>;
  * data on every node in the tree, and it must cost nothing and never reach
  * React state.
  *
- * `anchorX` is the absolute angle an excluded node (or one of its
- * descendants) is currently collapsed toward — the *start* angle the
- * excluded branch had at the moment it was excluded, inherited unchanged
- * by every one of its descendants so the whole subtree collapses into one
- * point rather than each node shrinking into its own separate spot. `null`
- * for anything not currently excluded. See `applyExclusion`.
- *
  * `uid` is a stable identity for the data join below; `data.key` is only
  * unique among siblings, and the join is across the whole tree. */
 type AnimatedNode = DonutNode & {
   current: ArcBox;
   target: ArcBox;
   effective: ArcBox;
-  anchorX: number | null;
   uid: number;
 };
 
@@ -335,6 +332,109 @@ export function findByKeyPath<T extends d3.HierarchyNode<HierarchyDatum>>(root: 
   return node;
 }
 
+// --- Exclude/restore transition geometry (#166) ----------------------------
+//
+// The whole point of this block: a slice being excluded (or restored)
+// should look like a *real, continuous re-partition* — the excluded slice
+// shrinking to nothing while its siblings organically grow to fill the
+// space, gapless at every instant — not two independently-animated edges
+// that happen to start and end in the right place. The only way to
+// guarantee that is to not fake it: literally re-run the partition math at
+// every frame, with each node's own value scaled by how far through the
+// transition it is. A real partition always exactly tiles its parent's
+// span among children, at *any* value distribution, so every intermediate
+// frame is gapless by construction — nothing here has to reason about
+// where an edge "should" go.
+
+/** How much of `node`'s own value counts at transition parameter `t`
+ * (0 = the state it's animating *from*, 1 = the state it's animating
+ * *to*). A node whose excluded-ness doesn't change between the two
+ * endpoints keeps its full value (both true or both false) or drops out
+ * entirely (both true — fully excluded throughout); one that's actually
+ * transitioning eases linearly between the two. */
+function transitionFactor(wasExcluded: boolean, willBeExcluded: boolean, t: number): number {
+  if (wasExcluded === willBeExcluded) return wasExcluded ? 0 : 1;
+  return wasExcluded ? t : 1 - t;
+}
+
+/** Is the node at `path` excluded — itself or any ancestor — under `ids`?
+ * Root-inclusive prefixes only (`i` starts at 1): the root itself (`path`
+ * `[]`) is never excludable, matching `InteractiveDonut`'s own rule that
+ * only a rendered arc (never the root) offers the gesture. */
+export function pathIsExcluded(path: string[], ids: ReadonlySet<string>): boolean {
+  for (let i = 1; i <= path.length; i++) {
+    if (ids.has(pathId(path.slice(0, i)))) return true;
+  }
+  return false;
+}
+
+/**
+ * Absolute (root-relative) arc box for every node in `root`'s tree, at one
+ * frame `t` of an exclude/restore transition between `wasExcluded` and
+ * `willBeExcluded`.
+ *
+ * A hand-rolled, two-pass re-implementation of what `d3.hierarchy().sum()`
+ * + `d3.partition()` do — bottom-up totals, then a top-down proportional
+ * split (`treemapDice`'s own formula: each child's width is its share of
+ * the parent's *current* total, spent in the parent's own child order) —
+ * rather than calling those directly, for two reasons. First, `.sum()`'s
+ * value accessor only ever sees a node's raw `data`, never its position in
+ * the tree, and per-node scaling here depends on *where* a node sits
+ * (which ancestor, if any, is excluded) — that needs the path, which only
+ * a manual walk has to hand. Second, and more important: `root`'s
+ * `children` arrays carry a fixed sort order established once, when the
+ * primitive's own `layout` was first built (see that `useMemo`), and
+ * every frame has to reuse that exact order — a value-based re-sort here
+ * (what a fresh `d3.hierarchy(...).sort(...)` would do) could reorder two
+ * siblings mid-transition as their values cross, which reads as one slice
+ * jumping over another rather than a clean shrink/grow.
+ */
+export function transitionArcBoxes(
+  root: d3.HierarchyNode<HierarchyDatum>,
+  wasExcluded: (path: string[]) => boolean,
+  willBeExcluded: (path: string[]) => boolean,
+  t: number,
+): Map<string, ArcBox> {
+  const totals = new Map<string, number>();
+
+  function computeTotal(node: d3.HierarchyNode<HierarchyDatum>, path: string[]): number {
+    const own = Math.max(0, node.data.value ?? 0) * transitionFactor(wasExcluded(path), willBeExcluded(path), t);
+    let total = own;
+    for (const child of node.children ?? []) {
+      total += computeTotal(child, [...path, child.data.key]);
+    }
+    totals.set(pathId(path), total);
+    return total;
+  }
+  computeTotal(root, []);
+
+  const boxes = new Map<string, ArcBox>();
+  function place(node: d3.HierarchyNode<HierarchyDatum>, path: string[], x0: number, x1: number, depth: number) {
+    boxes.set(pathId(path), { x0, x1, y0: depth, y1: depth + 1 });
+    const children = node.children ?? [];
+    if (children.length === 0) return;
+    // Every descendant still needs a box even when this node (and so its
+    // whole span) has collapsed to zero width — a fully-excluded branch's
+    // children have to resolve too, or a lookup for one of them (`.get`
+    // in `applyExclusion`, or a still-in-flight sibling frame) comes back
+    // empty. `k = 0` here makes every child's own width collapse to zero
+    // too, at the same `x0`, regardless of its own value — exactly the
+    // "whole subtree collapses together" behavior wanted.
+    const total = totals.get(pathId(path)) ?? 0;
+    const k = total > 0 ? (x1 - x0) / total : 0;
+    let cursor = x0;
+    for (const child of children) {
+      const childPath = [...path, child.data.key];
+      const childTotal = totals.get(pathId(childPath)) ?? 0;
+      const childX1 = cursor + childTotal * k;
+      place(child, childPath, cursor, childX1, depth + 1);
+      cursor = childX1;
+    }
+  }
+  place(root, [], 0, 2 * Math.PI, 0);
+  return boxes;
+}
+
 // --- Color ----------------------------------------------------------------
 
 /**
@@ -530,6 +630,12 @@ export function InteractiveDonut({
    * retarget an exclude does, instead of a second, differently-animated
    * code path — same idea as `zoomToPathRef`. */
   const applyExclusionRef = useRef<((nextIds: ReadonlySet<string>) => void) | null>(null);
+  /** The id set the *geometry* currently reflects — separate from
+   * `excludedRef` (the React-committed set) because a transition can
+   * still be animating from an older id set when the next exclude/restore
+   * starts; `applyExclusion` reads this for its own "from", not
+   * `excludedRef`, which by then may already equal the new "to". */
+  const appliedIdsRef = useRef<ReadonlySet<string>>(new Set());
   const restoreItem = useCallback(
     (id: string) => {
       const next = excludedRef.current.filter((item) => item.id !== id);
@@ -594,7 +700,6 @@ export function InteractiveDonut({
       node.current = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
       node.target = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
       node.effective = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
-      node.anchorX = null;
     });
     return partitioned;
   }, [data]);
@@ -631,6 +736,7 @@ export function InteractiveDonut({
   }
   useEffect(() => {
     excludedRef.current = [];
+    appliedIdsRef.current = new Set();
   }, [data]);
 
   const resolveColor = useMemo(() => color ?? defaultColorOf, [color]);
@@ -732,7 +838,16 @@ export function InteractiveDonut({
        * to see, but its geometry still has to be right for the moment a
        * later zoom brings it back on screen.
        */
-      function draw(animate: boolean) {
+      /**
+       * `transitionIds`, when given, is an exclude/restore transition
+       * (see `applyExclusion`): every in-play node's `current` is
+       * recomputed *from scratch* each frame via `transitionArcBoxes`,
+       * rather than lerped independently toward its own `target` the way
+       * a zoom eases. Omitted, this is an ordinary zoom (or the initial,
+       * non-animated mount) and every node eases toward its own
+       * already-computed `target` as before.
+       */
+      function draw(animate: boolean, transitionIds?: { from: ReadonlySet<string>; to: ReadonlySet<string> }) {
         const inPlay: AnimatedNode[] = [];
         for (const node of nodes) {
           if (isArcInPlay(node.current, node.target, visibleRings)) inPlay.push(node);
@@ -879,23 +994,67 @@ export function InteractiveDonut({
           unknown
         >;
 
+        // The per-node "data" tween that eases `current` toward `target`
+        // every frame — two different implementations depending on what
+        // kind of transition this is (see `draw`'s own doc comment).
+        const tweenFactory: (d: AnimatedNode) => (k: number) => void = transitionIds
+          ? (() => {
+              // Exclude/restore: recompute the *whole tree's* arc boxes
+              // fresh at this frame's `k` — see `transitionArcBoxes`'s own
+              // comment for why a real re-partition, not an independent
+              // per-node lerp, is what keeps this gapless. `frameCache`
+              // memoizes that whole-tree computation by `k`: every in-play
+              // node's own tween callback asks for the same frame in the
+              // same tick, so only the first one each tick actually pays
+              // for it.
+              const wasExcludedFn = (p: string[]) => pathIsExcluded(p, transitionIds.from);
+              const willBeExcludedFn = (p: string[]) => pathIsExcluded(p, transitionIds.to);
+              let frameCache: { k: number; boxes: Map<string, ArcBox>; focusBox: ArcBox } | null = null;
+              const boxesAt = (k: number) => {
+                if (!frameCache || frameCache.k !== k) {
+                  const boxes = transitionArcBoxes(root, wasExcludedFn, willBeExcludedFn, k);
+                  const focusBox = boxes.get(pathId(keyPathOf(focus))) ?? { x0: 0, x1: 2 * Math.PI, y0: 0, y1: 0 };
+                  frameCache = { k, boxes, focusBox };
+                }
+                return frameCache;
+              };
+              const focusDepthNow = focus.depth;
+              return (d: AnimatedNode) => {
+                const key = pathId(keyPathOf(d));
+                return (k: number) => {
+                  const { boxes, focusBox } = boxesAt(k);
+                  const abs = boxes.get(key);
+                  const span = focusBox.x1 - focusBox.x0;
+                  if (!abs || span <= 0) {
+                    d.current.x0 = d.current.x1 = 0;
+                    return;
+                  }
+                  d.current.x0 = Math.max(0, Math.min(1, (abs.x0 - focusBox.x0) / span)) * 2 * Math.PI;
+                  d.current.x1 = Math.max(0, Math.min(1, (abs.x1 - focusBox.x0) / span)) * 2 * Math.PI;
+                  d.current.y0 = Math.max(0, abs.y0 - focusDepthNow);
+                  d.current.y1 = Math.max(0, abs.y1 - focusDepthNow);
+                };
+              };
+            })()
+          : (d: AnimatedNode) => {
+              // Zoom: a hand-rolled lerp writing back into the node's
+              // existing `current`, not `d3.interpolate` — the generic
+              // interpolator allocates a fresh object per node per frame,
+              // which at 60fps across a few hundred arcs is pure
+              // garbage-collector pressure for the sake of four numbers.
+              const from = { ...d.current };
+              const to = d.target;
+              return (k: number) => {
+                d.current.x0 = from.x0 + (to.x0 - from.x0) * k;
+                d.current.x1 = from.x1 + (to.x1 - from.x1) * k;
+                d.current.y0 = from.y0 + (to.y0 - from.y0) * k;
+                d.current.y1 = from.y1 + (to.y1 - from.y1) * k;
+              };
+            };
+
         arcs
           .transition(t)
-          // A hand-rolled lerp writing back into the node's existing
-          // `current`, not `d3.interpolate`: the generic interpolator
-          // allocates a fresh object per node per frame, which at 60fps
-          // across a few hundred arcs is pure garbage-collector pressure
-          // for the sake of four numbers.
-          .tween("data", (d) => {
-            const from = { ...d.current };
-            const to = d.target;
-            return (k: number) => {
-              d.current.x0 = from.x0 + (to.x0 - from.x0) * k;
-              d.current.x1 = from.x1 + (to.x1 - from.x1) * k;
-              d.current.y0 = from.y0 + (to.y0 - from.y0) * k;
-              d.current.y1 = from.y1 + (to.y1 - from.y1) * k;
-            };
-          })
+          .tween("data", tweenFactory)
           .attr("fill-opacity", (d) => (isArcVisible(d.target, visibleRings) ? 1 : 0))
           .attrTween("d", (d) => () => arc(d.current) ?? "");
 
@@ -948,85 +1107,53 @@ export function InteractiveDonut({
 
       /**
        * The shared machinery behind exclude *and* restore (#166): given
-       * the full next set of excluded ids, works out what a fresh
-       * partition of that post-exclusion tree would look like and
-       * retargets every existing node's angle to it — the same way
-       * `zoomTo` retargets to a new focus — so the same long-lived arcs
-       * sweep smoothly into their new shape instead of the tree being
-       * rebuilt. See the header comment for why this, and not filtering
-       * the tree `layout` itself is built from, is what keeps the `<svg>`
-       * from tearing down on every exclude/restore.
+       * the full next set of excluded ids, sets every node's `target`/
+       * `effective` to the *end* (t=1) frame of `transitionArcBoxes` — the
+       * same function the frame-by-frame tween in `draw` uses for every
+       * point in between — and hands the (from, to) id sets to `draw` so
+       * it can animate continuously between them instead of lerping each
+       * node toward this end state independently. See `draw`'s and
+       * `transitionArcBoxes`'s own comments for why that continuous
+       * re-partition, not an end-state-only computation eased into, is
+       * what makes the excluded slice read as shrinking to nothing while
+       * its siblings organically grow to fill the space, instead of each
+       * edge drifting toward its target on its own.
        *
-       * `effective` is updated to the fresh *absolute* box for every
-       * surviving node — that's what makes a zoom or a later exclude
-       * started after this one still correct (see `zoomTo`). `target` is
-       * updated too, normalized against the target node's own
-       * freshly-recomputed focus span rather than the live `focus`'s old
-       * one: d3.partition reallocates every ancestor's absolute width
-       * whenever a sibling's value changes, but a node's *local* share of
-       * its own parent is unaffected by that — normalizing against the
-       * fresh span is what cancels the reallocation out and leaves only
-       * the redistribution the animation is actually for.
-       *
-       * Anything with no match — an excluded node, or one of its
-       * descendants — collapses to a hairline at `anchorX`: the *start*
-       * angle the excluded branch itself had at the moment it was
-       * excluded, computed once and inherited unchanged down the whole
-       * subtree (`nodes` is walked parent-before-child, so a descendant's
-       * `n.parent`'s `anchorX` is always already set by the time `n` is
-       * reached). That's what makes a whole excluded branch read as
-       * sweeping into the single point where it began, rather than each
-       * node — including every descendant, at its own, different angle —
-       * shrinking into its own separate spot. A restore runs the same
-       * code with the id removed from `nextIds`; since nothing here
-       * touches `anchorX` for a *matched* node except to clear it back to
-       * `null`, growing back in starts from that same point it vanished
-       * into.
+       * `appliedIdsRef` tracks the id set the geometry currently reflects
+       * (as opposed to `excludedRef`, which is the *React-committed* set —
+       * see that ref's own comment) so the *next* exclude/restore knows
+       * what it's animating from, even if called again before this one's
+       * transition finishes.
        */
       function applyExclusion(nextIds: ReadonlySet<string>) {
-        const nextRoot = d3
-          .hierarchy(nextIds.size > 0 ? excludeByKeyPaths(data, nextIds) : data)
-          .sum((d) => Math.max(0, d.value ?? 0))
-          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0)) as DonutNode;
-        d3.partition<HierarchyDatum>().size([2 * Math.PI, nextRoot.height + 1])(nextRoot);
+        const fromIds = appliedIdsRef.current;
+        appliedIdsRef.current = nextIds;
 
-        const nextBoxByPath = new Map<string, ArcBox>();
-        nextRoot.each((d) => {
-          nextBoxByPath.set(pathId(keyPathOf(d)), { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 });
-        });
-
-        const nextFocusBox = nextBoxByPath.get(pathId(keyPathOf(focus))) ?? { x0: 0, x1: 2 * Math.PI, y0: 0, y1: 0 };
-        const focusSpan = nextFocusBox.x1 - nextFocusBox.x0;
+        const wasExcludedFn = (p: string[]) => pathIsExcluded(p, fromIds);
+        const willBeExcludedFn = (p: string[]) => pathIsExcluded(p, nextIds);
+        const endBoxes = transitionArcBoxes(root, wasExcludedFn, willBeExcludedFn, 1);
+        const endFocusBox = endBoxes.get(pathId(keyPathOf(focus))) ?? { x0: 0, x1: 2 * Math.PI, y0: 0, y1: 0 };
+        const focusSpan = endFocusBox.x1 - endFocusBox.x0;
         const focusDepth = focus.depth;
 
         for (const n of nodes) {
-          const next = focusSpan > 0 ? nextBoxByPath.get(pathId(keyPathOf(n))) : undefined;
-          if (next) {
-            n.anchorX = null;
-            copyBox(next, n.effective);
-            n.target.x0 = Math.max(0, Math.min(1, (next.x0 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
-            n.target.x1 = Math.max(0, Math.min(1, (next.x1 - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI;
-            n.target.y0 = Math.max(0, next.y0 - focusDepth);
-            n.target.y1 = Math.max(0, next.y1 - focusDepth);
+          // Always present: `transitionArcBoxes` walks the whole tree
+          // regardless of exclusion, so unlike the old tree-filtering
+          // approach there's no "not found" case to handle here.
+          const abs = endBoxes.get(pathId(keyPathOf(n)))!;
+          copyBox(abs, n.effective);
+          if (focusSpan > 0) {
+            n.target.x0 = Math.max(0, Math.min(1, (abs.x0 - endFocusBox.x0) / focusSpan)) * 2 * Math.PI;
+            n.target.x1 = Math.max(0, Math.min(1, (abs.x1 - endFocusBox.x0) / focusSpan)) * 2 * Math.PI;
           } else {
-            // First time this node has gone unmatched: inherit the
-            // parent's anchor if it's collapsing too (the whole subtree
-            // sweeps into one shared point), otherwise this *is* the
-            // excluded branch — anchor to its own current start angle,
-            // captured before it's overwritten below.
-            if (n.anchorX === null) {
-              const parent = n.parent as AnimatedNode | null;
-              n.anchorX = parent?.anchorX ?? n.effective.x0;
-            }
-            n.effective.x0 = n.anchorX;
-            n.effective.x1 = n.anchorX;
-            const collapsedX = focusSpan > 0 ? Math.max(0, Math.min(1, (n.anchorX - nextFocusBox.x0) / focusSpan)) * 2 * Math.PI : 0;
-            n.target.x0 = collapsedX;
-            n.target.x1 = collapsedX;
+            n.target.x0 = 0;
+            n.target.x1 = 0;
           }
+          n.target.y0 = Math.max(0, abs.y0 - focusDepth);
+          n.target.y1 = Math.max(0, abs.y1 - focusDepth);
         }
 
-        draw(true);
+        draw(true, { from: fromIds, to: nextIds });
       }
       applyExclusionRef.current = applyExclusion;
 
