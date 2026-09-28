@@ -45,8 +45,8 @@ export function formatAxisClock(axisMinutes: number): string {
 }
 
 export type SleepBar = {
-  /** The row's own date — the evening the night began, since a night that
-   * crosses midnight is logged against the day you went to bed. */
+  /** The row's own date — the morning the night ended, since a row is
+   * logged against the day you woke up (see #471). */
   date: string;
   /** Minutes past the axis origin that sleep began. */
   start: number;
@@ -54,7 +54,9 @@ export type SleepBar = {
    * night's duration, never re-derived from the stored wake time. */
   end: number;
   durationMinutes: number;
-  /** The row's day type — the day the night began on. */
+  /** The row's day type — the day the night led into (#471), same as
+   * `SleepNight.dayType`'s own doc comment in charts.ts: a work-day row is
+   * the night *before* work, not the night after. */
   dayType: DayType | null;
 };
 
@@ -81,8 +83,9 @@ export function buildSleepBars(
 
 /**
  * Minutes past the axis origin → which day that moment falls on, relative
- * to the row's date: the axis starts at noon *of the row's date*, so
- * anything from the following midnight on is the next day.
+ * to the axis origin's own noon (not the row's date directly — see
+ * `sleepDates`, which shifts this back by one day to land on the row's
+ * date instead).
  */
 function dayOffset(axisMinutes: number): number {
   return Math.floor((axisMinutes + CLOCK_ORIGIN_MINUTES) / DAY_MINUTES);
@@ -91,14 +94,19 @@ function dayOffset(axisMinutes: number): number {
 /**
  * The calendar dates a night fell asleep and woke up on.
  *
- * A row is dated by the evening the night began (the latest row is always
- * last night's, logged the morning after), so a 22:30 bedtime is on the
- * row's date and a 01:30 one is already the next day — both wake the day
- * after. Checked against the real history: the rows either side of an
- * after-midnight bedtime only line up read this way.
+ * A row is dated by the morning the night ended, not the evening it began
+ * (#471): the row's date is always the wake side, so a 01:30 bedtime is
+ * already on the row's date (you fell asleep after midnight, on the same
+ * calendar day you're logging), while a 22:30 bedtime is still the evening
+ * *before* — `dayOffset` is 1 for the former and 0 for the latter, so
+ * subtracting 1 from each offset lands `woke` on the row's date in both
+ * cases and pushes `asleep` back a day exactly when the bedtime was before
+ * midnight. Checked against the real history: rows dated Saturday/Sunday
+ * have the latest bedtimes and wake times (Friday/Saturday nights), which
+ * only lines up read this way — see #471's own evidence table.
  */
 export function sleepDates(bar: SleepBar): { asleep: string; woke: string } {
-  return { asleep: addDays(bar.date, dayOffset(bar.start)), woke: addDays(bar.date, dayOffset(bar.end)) };
+  return { asleep: addDays(bar.date, dayOffset(bar.start) - 1), woke: addDays(bar.date, dayOffset(bar.end) - 1) };
 }
 
 /** The span a normal night occupies, used when there's nothing to fit to

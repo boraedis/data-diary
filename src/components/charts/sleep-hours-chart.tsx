@@ -155,7 +155,7 @@ export function SleepHoursChart({ data, regionGroups }: { data: SleepNight[]; re
   return (
     <ChartPage
       title="Sleep Hours"
-      description="One bar per night, from falling asleep at the top to waking at the bottom, coloured by the kind of day it followed. The clock runs noon to noon, so a night that crosses midnight is one unbroken bar."
+      description="One bar per night, from falling asleep at the top to waking at the bottom, coloured by the kind of day it led into. The clock runs noon to noon, so a night that crosses midnight is one unbroken bar."
       info={{
         interactionGuide: SLEEP_HOURS_INTERACTION_GUIDE,
         methodology: SLEEP_HOURS_METHODOLOGY,
