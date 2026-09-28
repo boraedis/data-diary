@@ -209,6 +209,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["technology"],
   },
   {
+    href: "/charts/screen-time-trend",
+    title: "Screen Time Trend",
+    description: "Average daily phone, laptop, and total screen time, by period.",
+    categories: ["technology"],
+  },
+  {
     href: "/charts/screen-time-daily",
     title: "Daily Screen Time",
     description: "A day-by-day look at phone, laptop, and Instagram usage.",
