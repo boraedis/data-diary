@@ -18,7 +18,15 @@ import { COFFEE_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 const cups = (n: number) => `${n.toFixed(1)} cups`;
 
-export function CoffeeTrendChart({ data }: { data: DailyValue[] }) {
+export function CoffeeTrendChart({
+  data,
+  backHref,
+  backLabel,
+}: {
+  data: DailyValue[];
+  backHref?: string;
+  backLabel?: string;
+}) {
   return (
     <TrendExplorer
       data={data}
@@ -33,6 +41,8 @@ export function CoffeeTrendChart({ data }: { data: DailyValue[] }) {
       aggregate="mean"
       valueFormat={cups}
       ariaLabel="Average cups of coffee per day over time. Use arrow keys to inspect individual buckets, or hover a point."
+      backHref={backHref}
+      backLabel={backLabel}
     />
   );
 }

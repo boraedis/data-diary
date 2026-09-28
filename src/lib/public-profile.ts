@@ -177,6 +177,20 @@ async function getPublicResidences(): Promise<PublicResidence[]> {
   return rows.reverse();
 }
 
+/** `profileSettings.diaryStartDate` alone (#453 follow-up) — the World/US
+ * Heatmap pages only need this one field, not the rest of
+ * getPublicLandingData's payload (project settings, stats, occupations,
+ * residences), and calling that just to reach one column would run every
+ * other query in it for nothing on a page that doesn't render any of it. */
+export async function getPublicDiaryStartDate(): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ diaryStartDate: profileSettings.diaryStartDate })
+    .from(profileSettings)
+    .where(eq(profileSettings.id, 1));
+  return row?.diaryStartDate ?? null;
+}
+
 // Wrapped in React's cache() (#87) so the hero page and its
 // generateMetadata both calling this in the same request only hit the DB
 // once — a per-request dedupe, not cross-request caching; force-dynamic

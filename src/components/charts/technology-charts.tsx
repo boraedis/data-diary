@@ -67,7 +67,15 @@ const formatHours = (hours: number) => formatDuration(hours);
  * on the daily scroller below instead, where three independently
  * toggleable lines can overlap without implying a sum.
  */
-export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
+export function DeviceUsageChart({
+  data,
+  backHref,
+  backLabel,
+}: {
+  data: DeviceDay[];
+  backHref?: string;
+  backLabel?: string;
+}) {
   const rows = useMemo<CompositionRow[]>(
     () =>
       data.map((day) => ({
@@ -90,6 +98,8 @@ export function DeviceUsageChart({ data }: { data: DeviceDay[] }) {
       trackingSpan={SCREEN_TIME_TRACKING_SPAN}
       valueFormat={formatHours}
       ariaLabel="Time spent on phone and laptop over time."
+      backHref={backHref}
+      backLabel={backLabel}
     />
   );
 }

@@ -153,6 +153,8 @@ export function LeaderboardExplorer({
   rows,
   columns,
   ariaLabel,
+  backHref,
+  backLabel,
 }: {
   title: string;
   description: string;
@@ -162,6 +164,8 @@ export function LeaderboardExplorer({
   rows: LeaderboardRow[];
   columns: LeaderboardColumns;
   ariaLabel: string;
+  backHref?: string;
+  backLabel?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -202,6 +206,8 @@ export function LeaderboardExplorer({
           </div>
         ) : undefined
       }
+      backHref={backHref}
+      backLabel={backLabel}
     >
       <ChartCard empty={rows.length === 0}>
         <div aria-busy={pending} className={`transition-opacity ${pending ? "opacity-50" : ""}`}>

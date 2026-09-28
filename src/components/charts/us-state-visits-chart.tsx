@@ -109,6 +109,9 @@ export function UsStateVisitsChart({
   travelledCounties = [],
   travelledCountyDetails = [],
   diaryStartDate = null,
+  showManageLink = true,
+  backHref,
+  backLabel,
 }: {
   data: UsStateVisitEntry[];
   counties: UsCountyVisitData;
@@ -132,6 +135,13 @@ export function UsStateVisitsChart({
   /** `profileSettings.diaryStartDate` — see WorldVisitsChart's own prop
    * of the same name. */
   diaryStartDate?: string | null;
+  /** Whether to render the unlogged-travel manage link — private-only
+   * (its target sits behind the session gate), so the public counterpart
+   * of this chart passes `false` rather than showing a link that just
+   * bounces an anonymous visitor to `/login`. */
+  showManageLink?: boolean;
+  backHref?: string;
+  backLabel?: string;
 }) {
   const [mode, setMode] = useState<UsMapMode>("drill");
   const features = useMemo(() => {
@@ -454,9 +464,11 @@ export function UsStateVisitsChart({
       filters={
         <>
           <GroupByPicker value={mode} onChange={setMode} options={MODE_OPTIONS} label="View" />
-          <ManageUnloggedTravelLink />
+          {showManageLink ? <ManageUnloggedTravelLink /> : null}
         </>
       }
+      backHref={backHref}
+      backLabel={backLabel}
     >
       <ChartCard
         // Only the whole-country case is empty here — a state you've never
