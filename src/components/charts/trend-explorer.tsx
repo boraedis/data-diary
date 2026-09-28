@@ -117,6 +117,8 @@ export function TrendExplorer<T extends { date: string }>({
   backLabel,
   initialHiddenIds,
   referenceLines,
+  yMin,
+  yTickFormat,
   ariaLabel,
 }: {
   data: T[];
@@ -186,6 +188,15 @@ export function TrendExplorer<T extends { date: string }>({
    * — Work Trend's and Sleep Trend's 8h lines (#444). In the same units
    * `getValue` returns. Pass a stable (module-level or memoized) array. */
   referenceLines?: readonly ReferenceLine[];
+  /** Pins the y-axis floor, passed straight through to `InteractiveLine` —
+   * 0 for a measure that can't go negative (Entertainment Trend's time).
+   * Bands are clamped to it too, since a mean − 1 std-dev below zero would
+   * otherwise draw under the axis. */
+  yMin?: number;
+  /** Axis tick labels, passed straight through to `InteractiveLine` —
+   * omit for plain numbers. Separate from `valueFormat`, which only labels
+   * the tooltip's value and can carry a unit ("/day") an axis doesn't need. */
+  yTickFormat?: (value: d3.NumberValue) => string;
   ariaLabel: string;
 }) {
   const showBand = aggregate === "mean" && band !== false;
@@ -267,7 +278,9 @@ export function TrendExplorer<T extends { date: string }>({
       points.push({
         x: parseDate(start),
         y: aggregate === "sum" && cycle === null ? total : mean,
-        ...(aggregate === "mean" ? { bandLow: mean - stdDev, bandHigh: mean + stdDev } : {}),
+        ...(aggregate === "mean"
+          ? { bandLow: yMin === undefined ? mean - stdDev : Math.max(yMin, mean - stdDev), bandHigh: mean + stdDev }
+          : {}),
       });
       itemsByPoint.push(included);
     }
@@ -289,7 +302,7 @@ export function TrendExplorer<T extends { date: string }>({
   const primary = useMemo(
     () => computePoints(getValue),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate, cycle, primaryKey],
+    [buckets, aggregate, cycle, yMin, primaryKey],
   );
   const points = primary.points;
 
@@ -297,7 +310,7 @@ export function TrendExplorer<T extends { date: string }>({
     () => (extraSeries ?? []).map((s) => computePoints(s.getValue)),
     // See `extraSeriesKey` above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buckets, aggregate, cycle, extraSeriesKey],
+    [buckets, aggregate, cycle, yMin, extraSeriesKey],
   );
 
   // With more than one line, every tooltip row needs its line's name: the
@@ -390,6 +403,8 @@ export function TrendExplorer<T extends { date: string }>({
               xLabels={xLabels ? (width < NARROW_WIDTH ? xLabels.narrow : xLabels.wide) : undefined}
               initialHiddenIds={initialHiddenIds}
               referenceLines={referenceLines}
+              yMin={yMin}
+              yTickFormat={yTickFormat}
               ariaLabel={ariaLabel}
             />
           )}

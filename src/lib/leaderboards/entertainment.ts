@@ -17,7 +17,13 @@ import {
   tvEpisodeWatches,
   tvShows,
 } from "@/db/schema";
-import { categoricalColor } from "@/lib/viz/color";
+import {
+  ENTERTAINMENT_TYPE_LABELS,
+  ENTERTAINMENT_TYPE_ORDER,
+  entertainmentTypeColor,
+  genericEntryType,
+  type EntertainmentType,
+} from "@/lib/entertainment-types";
 import { rankCreditedSessions, type CreditedSession } from "@/lib/leaderboards/sessions";
 import type { LeaderboardColumns, LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { LeaderboardOption } from "@/lib/leaderboards/options";
@@ -40,27 +46,11 @@ export const ENTERTAINMENT_MODES: LeaderboardOption<EntertainmentMode>[] = [
   { id: "location", label: "By Location" },
 ];
 
-/** The five dedicated domains, in their fixed colour-slot order, then
- * "other" for every user-added kind. The order is the categorical palette
- * assignment, so it never changes with the data (see viz/color.ts). */
-export type EntertainmentType = "movie" | "tv" | "book" | "sports" | "game" | "other";
+const TYPE_LABELS = ENTERTAINMENT_TYPE_LABELS;
+const TYPE_ORDER = ENTERTAINMENT_TYPE_ORDER;
+const typeColor = entertainmentTypeColor;
 
-const TYPE_LABELS: Record<EntertainmentType, string> = {
-  movie: "Movies",
-  tv: "TV",
-  book: "Books",
-  sports: "Sports",
-  game: "Games",
-  other: "Other",
-};
-
-const TYPE_ORDER: EntertainmentType[] = ["movie", "tv", "book", "sports", "game", "other"];
-
-/** Slot colour for a type; "other" gets none rather than a sixth hue. */
-function typeColor(type: EntertainmentType): string | null {
-  const index = TYPE_ORDER.indexOf(type);
-  return index < 5 ? categoricalColor(index) : null;
-}
+export type { EntertainmentType };
 
 export type TypeFilter = "all" | EntertainmentType;
 
@@ -153,16 +143,6 @@ export function entertainmentColumns(mode: EntertainmentMode): LeaderboardColumn
       return { ...base, nameHeader: "Location" };
   }
 }
-
-/** Maps a seeded system kind onto its dedicated type, for any historical
- * generic-catalog entries logged before the dedicated tables existed. */
-const SYSTEM_KIND_TYPES: Record<string, EntertainmentType> = {
-  movie: "movie",
-  "tv show": "tv",
-  book: "book",
-  sport: "sports",
-  game: "game",
-};
 
 export async function getEntertainmentSessions(): Promise<EntertainmentSession[]> {
   const db = getDb();
@@ -286,7 +266,7 @@ export async function getEntertainmentSessions(): Promise<EntertainmentSession[]
     push({ date: r.date, minutes: r.minutes ?? 0, type: "game", titleKey: `game:${r.id}`, title: r.title, titleDetail: r.gameType, location: r.location });
   }
   for (const r of genericRows) {
-    const type = r.isSystem ? (SYSTEM_KIND_TYPES[r.kind.toLowerCase()] ?? "other") : "other";
+    const type = genericEntryType(r.kind, r.isSystem);
     push({
       date: r.date,
       minutes: r.minutes ?? 0,

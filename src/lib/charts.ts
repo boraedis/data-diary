@@ -1,7 +1,27 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
-import { days, exercises, metros, people, places, tags, workoutSets, workouts, type DayType } from "@/db/schema";
+import {
+  bookReadingSessions,
+  days,
+  entertainmentCatalog,
+  entertainmentEntries,
+  entertainmentKinds,
+  exercises,
+  gameSessions,
+  metros,
+  movieWatches,
+  people,
+  places,
+  sportsWatches,
+  tags,
+  tvEpisodeWatches,
+  workoutSets,
+  workouts,
+  type DayType,
+} from "@/db/schema";
+import { genericEntryType, type EntertainmentType } from "@/lib/entertainment-types";
+import { ENTERTAINMENT_TREND_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 import { groupByPeriod } from "@/lib/viz/bin";
 import { normalizeCountryName } from "@/lib/geo/country-names";
 import { resolveUsStateName, US_STATE_FIPS_BY_NAME } from "@/lib/geo/us-state-names";
@@ -1607,6 +1627,82 @@ export async function getTrainingDailyData(): Promise<TrainingDay[]> {
   for (let date = rows[0].date; date <= last; date = addDays(date, 1)) {
     const found = byDate.get(date);
     out.push({ date, minutes: found?.minutes ?? 0, exercises: found?.exercises ?? 0 });
+  }
+  return out;
+}
+
+// --- Entertainment trend (#479) -------------------------------------------
+
+/** A day's entertainment, in hours per type. */
+export type EntertainmentDay = { date: string } & Record<EntertainmentType, number>;
+
+/**
+ * Entertainment per day, in hours per type, zero-filled from
+ * `ENTERTAINMENT_TREND_TRACKING_SPAN.start` to the last logged session.
+ *
+ * Summed per day and table in SQL, so the ~3,000 sessions never leave the
+ * database — only a row per (day, table), or per (day, kind) for the
+ * generic entries, which is what the type mapping needs. Reads all six
+ * session tables, the same set `getEntertainmentSessions` (the leaderboard)
+ * reads, not just `entertainment_entries`: that table only holds the
+ * user-added kinds and a few pre-migration rows, so summing it alone would
+ * miss nearly everything. TV watches with no date (backfilled history) are
+ * skipped, as the leaderboard does.
+ *
+ * Zero-filled for the same reason as `getTrainingDailyData`: entertainment
+ * was being logged throughout, so a day with nothing is a real zero, and
+ * an average over a period has to divide by every day in it. The start is
+ * that span's rather than the first session, because the few sessions
+ * before it predate logging everything (see the span's own comment).
+ */
+export async function getEntertainmentDailyData(): Promise<EntertainmentDay[]> {
+  const db = getDb();
+  const start = ENTERTAINMENT_TREND_TRACKING_SPAN.start;
+  const perDay = <T extends AnyPgColumn>(dateCol: T, minutesCol: AnyPgColumn) =>
+    db
+      .select({ date: sql<string>`${dateCol}`, minutes: sql<number>`coalesce(sum(${minutesCol}), 0)::int` })
+      .from(dateCol.table)
+      .where(sql`${dateCol} >= ${start}`)
+      .groupBy(dateCol);
+  const [movie, tv, book, sport, game, generic] = await Promise.all([
+    perDay(movieWatches.date, movieWatches.durationMinutes),
+    perDay(tvEpisodeWatches.date, tvEpisodeWatches.durationMinutes),
+    perDay(bookReadingSessions.date, bookReadingSessions.durationMinutes),
+    perDay(sportsWatches.date, sportsWatches.durationMinutes),
+    perDay(gameSessions.date, gameSessions.durationMinutes),
+    db
+      .select({
+        date: entertainmentEntries.date,
+        kind: entertainmentKinds.name,
+        isSystem: entertainmentKinds.isSystem,
+        minutes: sql<number>`coalesce(sum(${entertainmentEntries.durationMinutes}), 0)::int`,
+      })
+      .from(entertainmentEntries)
+      .innerJoin(entertainmentCatalog, eq(entertainmentEntries.entertainmentId, entertainmentCatalog.id))
+      .innerJoin(entertainmentKinds, eq(entertainmentCatalog.kindId, entertainmentKinds.id))
+      .where(sql`${entertainmentEntries.date} >= ${start}`)
+      .groupBy(entertainmentEntries.date, entertainmentKinds.name, entertainmentKinds.isSystem),
+  ]);
+
+  const byDate = new Map<string, Record<EntertainmentType, number>>();
+  const add = (date: string | null, type: EntertainmentType, minutes: number) => {
+    if (!date) return; // an undated TV watch — see this function's comment
+    const rec = byDate.get(date) ?? { movie: 0, tv: 0, book: 0, sports: 0, game: 0, other: 0 };
+    rec[type] += minutes / 60;
+    byDate.set(date, rec);
+  };
+  for (const r of movie) add(r.date, "movie", r.minutes);
+  for (const r of tv) add(r.date, "tv", r.minutes);
+  for (const r of book) add(r.date, "book", r.minutes);
+  for (const r of sport) add(r.date, "sports", r.minutes);
+  for (const r of game) add(r.date, "game", r.minutes);
+  for (const r of generic) add(r.date, genericEntryType(r.kind, r.isSystem), r.minutes);
+  if (byDate.size === 0) return [];
+
+  const last = [...byDate.keys()].reduce((a, b) => (a > b ? a : b));
+  const out: EntertainmentDay[] = [];
+  for (let date = start; date <= last; date = addDays(date, 1)) {
+    out.push({ date, ...(byDate.get(date) ?? { movie: 0, tv: 0, book: 0, sports: 0, game: 0, other: 0 }) });
   }
   return out;
 }
