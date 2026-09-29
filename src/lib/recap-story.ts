@@ -110,6 +110,26 @@ type Candidate = { card: RecapStoryCard; weight: number };
 export const MAX_STORY_CARDS = 8;
 
 /**
+ * The monthly story's ceiling (#176). A month has far less to say than a
+ * year, and #176's answer to that is fewer cards rather than the same eight
+ * dealt from thinner data — five is the opener plus one card for each of
+ * the four domains when every one of them has something, which is exactly
+ * what `selectCards`' breadth-first pass fills first anyway.
+ */
+export const MAX_MONTH_STORY_CARDS = 5;
+
+/**
+ * Cards that only mean something over a year and are never dealt for a
+ * month.
+ *
+ * - `subs-most-improved`: a sub's daily average moving between two
+ *   adjacent months is a handful of days either side, and calling that
+ *   "most improved" presents noise as a trend. The report's sub averages
+ *   still show per month; only the mover framing is dropped.
+ */
+const YEAR_ONLY_CARD_IDS = new Set(["subs-most-improved"]);
+
+/**
  * Below this, the story tier is skipped entirely and the full report shows
  * on its own.
  *
@@ -124,6 +144,10 @@ export const MIN_STORY_CARDS = 3;
 
 export type RecapStoryInput = {
   periodLabel: string;
+  /** What the period is, for copy that names it generically ("Your month
+   * in mood") and for which cards and how many are dealt. Null for an
+   * arbitrary window, which is told like a year. */
+  periodUnit: "year" | "month" | null;
   priorLabel: string;
   loggedDays: number;
   priorLoggedDays: number;
@@ -175,6 +199,9 @@ function formatMinutes(minutes: number): string {
 
 function buildCandidates(input: RecapStoryInput): Candidate[] {
   const { periodLabel, priorLabel, health, entertainment, peoplePlaces, subs } = input;
+  // An arbitrary window has no better generic noun than "year" had before
+  // months existed; no route builds one today.
+  const noun = input.periodUnit ?? "year";
   const { happiness, sleep, exercise } = health;
   const candidates: Candidate[] = [];
 
@@ -209,14 +236,14 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
 
   // --- Health -------------------------------------------------------------
   // Averages are gated on MIN_DAYS_FOR_AVERAGE, the same threshold the
-  // report's own cards use — a mean over four logged days isn't a year's
+  // report's own cards use — a mean over four logged days isn't a period's
   // mood, and the story has no "insufficient" state to fall back on because
   // a card that can't say anything simply isn't dealt.
   if (happiness.average !== null && happiness.daysLogged >= MIN_DAYS_FOR_AVERAGE) {
     add({
       id: "happiness-average",
       domain: "health",
-      kicker: "Your year in mood",
+      kicker: `Your ${noun} in mood`,
       value: formatScore(happiness.average),
       unit: "/ 100",
       headline: `Average happiness across ${happiness.daysLogged} scored ${plural(happiness.daysLogged, "day")}.`,
@@ -236,7 +263,7 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
     add({
       id: "sleep-average",
       domain: "health",
-      kicker: "Your year in sleep",
+      kicker: `Your ${noun} in sleep`,
       value: formatMinutes(sleep.averageMinutes),
       unit: null,
       headline: `A typical night, across ${sleep.nightsLogged} logged ${plural(sleep.nightsLogged, "night")}.`,
@@ -256,7 +283,7 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
     add({
       id: "days-trained",
       domain: "health",
-      kicker: "Your year in training",
+      kicker: `Your ${noun} in training`,
       value: exercise.daysTrained.toLocaleString(),
       unit: plural(exercise.daysTrained, "day"),
       headline: "Days you trained.",
@@ -531,7 +558,11 @@ function selectCards(candidates: Candidate[], limit: number): Candidate[] {
  * that predates most of this app's tracking.
  */
 export function buildRecapStory(input: RecapStoryInput): RecapStoryCard[] {
-  const selected = selectCards(buildCandidates(input), MAX_STORY_CARDS);
+  const isMonth = input.periodUnit === "month";
+  const candidates = buildCandidates(input).filter(
+    (candidate) => !isMonth || !YEAR_ONLY_CARD_IDS.has(candidate.card.id)
+  );
+  const selected = selectCards(candidates, isMonth ? MAX_MONTH_STORY_CARDS : MAX_STORY_CARDS);
   if (selected.length < MIN_STORY_CARDS) return [];
 
   const domainRank = new Map(DOMAIN_ORDER.map((domain, index) => [domain, index]));

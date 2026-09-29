@@ -44,10 +44,15 @@ export function RecapPeoplePlacesSection({
   data,
   periodLabel,
   priorLabel,
+  showMap = true,
 }: {
   data: RecapPeoplePlaces;
   periodLabel: string;
   priorLabel: string;
+  /** False for a month (#176): a month's footprint is usually one country,
+   * and a world map with a single tinted shape says less than the
+   * "countries visited" count above it. */
+  showMap?: boolean;
 }) {
   const { topPerson, newPeople, newPlaces, newCountries, placesVisited, countriesVisited } = data;
   const hasAnything =
@@ -98,7 +103,7 @@ export function RecapPeoplePlacesSection({
 
         {/* A year with no travel is a normal year, not a broken card — the
             map is simply omitted rather than rendered as an empty world. */}
-        {data.countryVisits.length > 0 ? (
+        {showMap && data.countryVisits.length > 0 ? (
           <section className="flex flex-col gap-2">
             <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
               Travel footprint
