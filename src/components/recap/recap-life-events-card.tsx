@@ -19,39 +19,48 @@ const KIND_LABELS: Record<RecapLifeEventKind, string> = {
 /** Phrased per kind rather than one generic set of verbs — "Moved in"
  * says what a residence starting actually was, where "Started" reads like
  * boilerplate. `throughout` is the one framing that stays neutral across
- * kinds: nothing happened, it was simply true all period. */
-const FRAMING_LABELS: Record<RecapLifeEventKind, Record<RecapLifeEvent["framing"], string>> = {
-  occupation: {
-    started: "Started",
-    ended: "Left",
-    "started-and-ended": "Started and left",
-    throughout: "All year",
-  },
-  residence: {
-    started: "Moved in",
-    ended: "Moved out",
-    "started-and-ended": "Moved in and out",
-    throughout: "All year",
-  },
-  relationship: {
-    started: "Began",
-    ended: "Ended",
-    "started-and-ended": "Began and ended",
-    throughout: "All year",
-  },
-  role: {
-    started: "New role",
-    ended: "Ended",
-    "started-and-ended": "Held briefly",
-    throughout: "All year",
-  },
+ * kinds: nothing happened, it was simply true all period — so it's worded
+ * from the period's own noun ("All year") in `framingLabel` below rather
+ * than listed here. */
+const FRAMING_LABELS: Record<
+  RecapLifeEventKind,
+  Record<Exclude<RecapLifeEvent["framing"], "throughout">, string>
+> = {
+  occupation: { started: "Started", ended: "Left", "started-and-ended": "Started and left" },
+  residence: { started: "Moved in", ended: "Moved out", "started-and-ended": "Moved in and out" },
+  relationship: { started: "Began", ended: "Ended", "started-and-ended": "Began and ended" },
+  role: { started: "New role", ended: "Ended", "started-and-ended": "Held briefly" },
 };
 
-export function RecapLifeEventsCard({ events, periodLabel }: { events: RecapLifeEvent[]; periodLabel: string }) {
+function framingLabel(event: RecapLifeEvent, periodNoun: string): string {
+  return event.framing === "throughout"
+    ? `All ${periodNoun}`
+    : FRAMING_LABELS[event.kind][event.framing];
+}
+
+export function RecapLifeEventsCard({
+  events,
+  periodLabel,
+  periodNoun = "year",
+  description,
+}: {
+  events: RecapLifeEvent[];
+  periodLabel: string;
+  /** Names the period in the "All year" framing — "month" on a monthly
+   * recap (#176). */
+  periodNoun?: string;
+  /** Overrides the default description, for a caller that filtered the
+   * list (the monthly recap drops entries that ran through the whole
+   * month, so "or ran through" would be untrue). */
+  description?: string;
+}) {
   return (
     <ChartCard
       title="Life events"
-      description={`Jobs, homes and relationships that started, ended, or ran through ${periodLabel}.`}
+      description={
+        description ??
+        `Jobs, homes and relationships that started, ended, or ran through ${periodLabel}.`
+      }
       empty={events.length === 0}
     >
       <ul className="flex flex-col gap-3">
@@ -75,7 +84,7 @@ export function RecapLifeEventsCard({ events, periodLabel }: { events: RecapLife
             </div>
             <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
               <span className="text-xs font-medium">
-                {FRAMING_LABELS[event.kind][event.framing]}
+                {framingLabel(event, periodNoun)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {KIND_LABELS[event.kind]}

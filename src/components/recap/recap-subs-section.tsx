@@ -26,10 +26,15 @@ export function RecapSubsSection({
   subs,
   periodLabel,
   priorLabel,
+  showMovers = true,
 }: {
   subs: RecapSubs;
   periodLabel: string;
   priorLabel: string;
+  /** False for a month (#176): a sub's average moving between two adjacent
+   * months is a few days either side, too thin to call anything "most
+   * improved". The per-sub averages still show. */
+  showMovers?: boolean;
 }) {
   return (
     <ChartCard
@@ -44,11 +49,13 @@ export function RecapSubsSection({
           ))}
         </div>
 
-        <Movers
-          mostImproved={subs.mostImproved}
-          biggestIncrease={subs.biggestIncrease}
-          priorLabel={priorLabel}
-        />
+        {showMovers ? (
+          <Movers
+            mostImproved={subs.mostImproved}
+            biggestIncrease={subs.biggestIncrease}
+            priorLabel={priorLabel}
+          />
+        ) : null}
       </div>
     </ChartCard>
   );

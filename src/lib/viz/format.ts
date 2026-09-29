@@ -65,12 +65,14 @@ export function formatTitleCase(value: string): string {
 
 // --- Date ---------------------------------------------------------------
 
-export type DateFormatPreset = "short" | "month" | "monthYear" | "dayYear" | "weekday" | "weekdayYear" | "dayName";
+export type DateFormatPreset = "short" | "month" | "monthShort" | "monthYear" | "monthNameYear" | "dayYear" | "weekday" | "weekdayYear" | "dayName";
 
 const DATE_FORMAT_OPTIONS: Record<DateFormatPreset, Intl.DateTimeFormatOptions> = {
   short: { month: "short", day: "numeric" }, // "Feb 14" — axis ticks, day-level tooltips
   month: { month: "long" }, // "February" — calendar-view headers
+  monthShort: { month: "short" }, // "Feb" — a month in a row that already names its year (the recap's month nav, #176)
   monthYear: { month: "short", year: "numeric" }, // "Feb 2026" — monthly-bucketed axis ticks
+  monthNameYear: { month: "long", year: "numeric" }, // "February 2026" — naming a month in prose (the monthly recap's period label, #176), where "Feb 2026" reads like an axis tick
   dayYear: { month: "short", day: "numeric", year: "numeric" }, // "Feb 14, 2026" — a specific date on a chart spanning years (InteractiveTimeline's interval tooltips), where "short" is ambiguous about the year and "weekdayYear" spends a word on a weekday nobody asked about
   weekday: { weekday: "short", month: "short", day: "numeric" }, // "Sat, Feb 14" — tooltip headline
   weekdayYear: { weekday: "short", month: "short", day: "numeric", year: "numeric" }, // "Sat, Feb 14, 2026" — tooltip headline for a multi-year view (calendar heatmap), where the bare "weekday" preset is ambiguous about which year a cell belongs to

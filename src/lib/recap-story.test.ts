@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_MONTH_STORY_CARDS,
   MAX_STORY_CARDS,
   MIN_STORY_CARDS,
   buildRecapStory,
@@ -17,6 +18,7 @@ import {
 function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
   return {
     periodLabel: "2025",
+    periodUnit: "year",
     priorLabel: "2024",
     loggedDays: 0,
     priorLoggedDays: 0,
@@ -285,5 +287,43 @@ describe("buildRecapStory", () => {
       }),
     );
     for (const card of cards) expect(card.items.length).toBeLessThanOrEqual(3);
+  });
+});
+
+// #176: a month reuses the same selection rules with a smaller ceiling and
+// without the cards that only mean something over a year.
+describe("buildRecapStory for a month", () => {
+  const month = (overrides: Partial<RecapStoryInput> = {}) =>
+    fullInput({ periodLabel: "March 2025", priorLabel: "February 2025", periodUnit: "month", ...overrides });
+
+  it("deals fewer cards than a year from the same data", () => {
+    expect(buildRecapStory(month()).length).toBe(MAX_MONTH_STORY_CARDS);
+    expect(MAX_MONTH_STORY_CARDS).toBeLessThan(MAX_STORY_CARDS);
+  });
+
+  it("still covers every domain with data inside the smaller ceiling", () => {
+    const domains = buildRecapStory(month()).map((card) => card.domain);
+    expect(new Set(domains)).toEqual(
+      new Set(["overview", "health", "entertainment", "people-places", "life"]),
+    );
+  });
+
+  it("never deals the year-only sub mover", () => {
+    // Make the mover the only health card so it would be dealt if allowed.
+    const onlyMover = month({ health: emptyInput().health });
+    expect(idsOf(onlyMover)).not.toContain("subs-most-improved");
+    expect(idsOf({ ...onlyMover, periodUnit: "year" })).toContain("subs-most-improved");
+  });
+
+  it("names the period as a month in its generic copy", () => {
+    const card = buildRecapStory(month()).find((c) => c.id === "happiness-average");
+    expect(card?.kicker).toBe("Your month in mood");
+  });
+
+  it("compares month over month by the prior label it is given", () => {
+    const flat = month({ loggedDays: 28, priorLoggedDays: 28 });
+    expect(buildRecapStory(flat).find((card) => card.id === "days-logged")?.detail).toBe(
+      "Same as February 2025.",
+    );
   });
 });

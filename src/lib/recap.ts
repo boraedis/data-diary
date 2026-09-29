@@ -35,18 +35,50 @@ export type RecapPeriod = {
   label: string;
 };
 
-/** The calendar year as a period. The only period constructor v1 needs;
- * a monthly equivalent belongs to the deferred monthly sub-issue (#176),
- * which should be able to add it without touching anything downstream. */
+/** The calendar year as a period. */
 export function yearPeriod(year: number): RecapPeriod {
   return { start: `${year}-01-01`, end: `${year}-12-31`, label: String(year) };
 }
 
-/** True when a period covers exactly one whole calendar year. */
-function isCalendarYear(period: RecapPeriod): boolean {
+/**
+ * One calendar month as a period (#176), `month` 1-12.
+ *
+ * The monthly recap's whole claim on the foundation is this constructor
+ * plus the month branch in `previousPeriod` — every fetcher below and in
+ * the domain modules already took a `RecapPeriod`, so none of their
+ * signatures changed to support it. That was #130's test of whether the
+ * annual build stayed period-agnostic.
+ *
+ * The label spells the month out ("March 2025") because it's interpolated
+ * into prose all over the report ("Same as February 2025", "Who you spent
+ * March 2025 with"), where "Mar 2025" reads like an axis tick.
+ */
+export function monthPeriod(year: number, month: number): RecapPeriod {
+  const mm = String(month).padStart(2, "0");
+  // Day 0 of the following month is the last day of this one — lets the
+  // runtime own month lengths and leap Februaries rather than a table here.
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const start = `${year}-${mm}-01`;
+  return {
+    start,
+    end: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+    label: formatDate(start, "monthNameYear"),
+  };
+}
+
+/** Which whole calendar unit a period is, or null for an arbitrary window.
+ *
+ * Derived from the bounds rather than carried as a field on `RecapPeriod`,
+ * so adding the month cadence didn't widen the type every fetcher takes.
+ * Copy that needs to say "year" or "month" asks this instead. */
+export function periodUnit(period: RecapPeriod): "year" | "month" | null {
   const year = Number(period.start.slice(0, 4));
-  const candidate = yearPeriod(year);
-  return period.start === candidate.start && period.end === candidate.end;
+  const month = Number(period.start.slice(5, 7));
+  const asYear = yearPeriod(year);
+  if (period.start === asYear.start && period.end === asYear.end) return "year";
+  const asMonth = monthPeriod(year, month);
+  if (period.start === asMonth.start && period.end === asMonth.end) return "month";
+  return null;
 }
 
 /** Inclusive day count. */
@@ -74,8 +106,19 @@ export function periodLengthDays(period: RecapPeriod): number {
  * shown at all.
  */
 export function previousPeriod(period: RecapPeriod): RecapPeriod {
-  if (isCalendarYear(period)) {
-    return yearPeriod(Number(period.start.slice(0, 4)) - 1);
+  const unit = periodUnit(period);
+  const year = Number(period.start.slice(0, 4));
+  if (unit === "year") return yearPeriod(year - 1);
+  // Same reasoning one level down, and more acute: months run 28-31 days,
+  // so an equal-length shift from March would compare against a window
+  // starting February 1 in a leap year and January 29 otherwise. A month
+  // compares against the whole calendar month before it — month over
+  // month, which is the comparison #176 asked for. (Same-month-last-year
+  // is the other candidate it floated; it's a different window, not a
+  // different rule, and can be added beside this without changing it.)
+  if (unit === "month") {
+    const month = Number(period.start.slice(5, 7));
+    return month === 1 ? monthPeriod(year - 1, 12) : monthPeriod(year, month - 1);
   }
   const length = periodLengthDays(period);
   const end = addDays(period.start, -1);
@@ -209,6 +252,60 @@ export async function listRecapYears(): Promise<RecapYearSummary[]> {
   return summaries;
 }
 
+export type RecapMonthSummary = { month: number; period: RecapPeriod; loggedDays: number };
+
+/**
+ * The months of one year that fall inside the logged history, oldest first,
+ * each with its day count — the month index on a year's recap page (#176).
+ *
+ * The same derive-from-the-data rule `listRecapYears` follows, one level
+ * down: months before the first logged day or after the last aren't
+ * listed at all (a January 2015 entry for a diary that began in June is a
+ * dead link), while a fallow month *inside* the range still is, with a
+ * zero, so the index reads as a continuous history.
+ */
+export async function listRecapMonths(year: number): Promise<RecapMonthSummary[]> {
+  const db = getDb();
+  const period = yearPeriod(year);
+  const [range, rows] = await Promise.all([
+    getRecapDataRange(),
+    db
+      .select({
+        month: sql<number>`extract(month from ${days.date})::int`,
+        loggedDays: count(),
+      })
+      .from(days)
+      .where(and(gte(days.date, period.start), lte(days.date, period.end)))
+      .groupBy(sql`extract(month from ${days.date})`),
+  ]);
+  if (range === null) return [];
+  return monthsInRange(
+    year,
+    range,
+    new Map(rows.map((row) => [row.month, row.loggedDays]))
+  );
+}
+
+/** The pure half of `listRecapMonths`: which of a year's twelve months
+ * overlap the logged range, with their counts (zero when absent). */
+export function monthsInRange(
+  year: number,
+  range: { first: string; last: string },
+  counts: Map<number, number>
+): RecapMonthSummary[] {
+  const firstMonth = range.first.slice(0, 7);
+  const lastMonth = range.last.slice(0, 7);
+  const summaries: RecapMonthSummary[] = [];
+  for (let month = 1; month <= 12; month += 1) {
+    const period = monthPeriod(year, month);
+    const key = period.start.slice(0, 7);
+    // "YYYY-MM" strings compare correctly as text, so no date math needed.
+    if (key < firstMonth || key > lastMonth) continue;
+    summaries.push({ month, period, loggedDays: counts.get(month) ?? 0 });
+  }
+  return summaries;
+}
+
 /**
  * How many days in the period have a `days` row.
  *
@@ -279,4 +376,19 @@ export function parseYearSegment(segment: string): number | null {
   if (!/^\d{4}$/.test(segment)) return null;
   const year = Number(segment);
   return isValidDateString(`${year}-01-01`) ? year : null;
+}
+
+/** Parses a `/recap/[year]/[month]` segment: exactly two digits, 01-12.
+ * Two digits rather than a name so the URL sorts and stays stable
+ * regardless of locale, and exactly two so `/recap/2025/3` 404s instead of
+ * silently aliasing `/recap/2025/03`. */
+export function parseMonthSegment(segment: string): number | null {
+  if (!/^\d{2}$/.test(segment)) return null;
+  const month = Number(segment);
+  return month >= 1 && month <= 12 ? month : null;
+}
+
+/** The route segment for a month — the inverse of `parseMonthSegment`. */
+export function monthSegment(month: number): string {
+  return String(month).padStart(2, "0");
 }

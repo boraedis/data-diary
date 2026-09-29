@@ -3,7 +3,12 @@ import {
   MIN_DAYS_FOR_AVERAGE,
   firstSeenInPeriod,
   MIN_DAYS_FOR_TOTAL,
+  monthPeriod,
+  monthSegment,
+  monthsInRange,
+  parseMonthSegment,
   parseYearSegment,
+  periodUnit,
   periodLengthDays,
   previousPeriod,
   toRecapStat,
@@ -45,11 +50,75 @@ describe("previousPeriod", () => {
   });
 
   it("shifts an arbitrary window back by its own length, ending the day before it starts", () => {
-    const period = { start: "2025-06-01", end: "2025-06-30", label: "June" };
+    // Not a whole calendar month — those step back a calendar month (below).
+    const period = { start: "2025-06-10", end: "2025-07-09", label: "a window" };
     const previous = previousPeriod(period);
-    expect(previous.end).toBe("2025-05-31");
-    expect(previous.start).toBe("2025-05-02");
+    expect(previous.end).toBe("2025-06-09");
+    expect(previous.start).toBe("2025-05-11");
     expect(periodLengthDays(previous)).toBe(periodLengthDays(period));
+  });
+
+  it("steps a calendar month back to the whole previous calendar month", () => {
+    // Equal-length shifting would compare March against Jan 29 - Feb 28.
+    expect(previousPeriod(monthPeriod(2025, 3))).toEqual(monthPeriod(2025, 2));
+    expect(previousPeriod(monthPeriod(2024, 3)).start).toBe("2024-02-01");
+  });
+
+  it("steps January back across the year boundary", () => {
+    expect(previousPeriod(monthPeriod(2025, 1))).toEqual(monthPeriod(2024, 12));
+  });
+});
+
+describe("monthPeriod / periodUnit", () => {
+  it("spans the whole month, inclusive, with the right length", () => {
+    const march = monthPeriod(2025, 3);
+    expect(march.start).toBe("2025-03-01");
+    expect(march.end).toBe("2025-03-31");
+    expect(periodLengthDays(monthPeriod(2025, 4))).toBe(30);
+  });
+
+  it("knows February's length in leap and common years", () => {
+    expect(monthPeriod(2024, 2).end).toBe("2024-02-29");
+    expect(monthPeriod(2025, 2).end).toBe("2025-02-28");
+  });
+
+  it("classifies periods by their bounds", () => {
+    expect(periodUnit(yearPeriod(2025))).toBe("year");
+    expect(periodUnit(monthPeriod(2025, 12))).toBe("month");
+    expect(periodUnit({ start: "2025-03-02", end: "2025-03-31", label: "x" })).toBeNull();
+  });
+});
+
+describe("monthsInRange", () => {
+  const counts = new Map([
+    [6, 20],
+    [8, 31],
+  ]);
+
+  it("lists only months inside the logged range, with zeros for fallow ones", () => {
+    const months = monthsInRange(2015, { first: "2015-06-12", last: "2025-01-01" }, counts);
+    expect(months.map((m) => m.month)).toEqual([6, 7, 8, 9, 10, 11, 12]);
+    expect(months.find((m) => m.month === 7)?.loggedDays).toBe(0);
+    expect(months.find((m) => m.month === 8)?.loggedDays).toBe(31);
+  });
+
+  it("stops at the last logged month", () => {
+    const months = monthsInRange(2026, { first: "2015-06-12", last: "2026-09-03" }, new Map());
+    expect(months.map((m) => m.month)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+});
+
+describe("parseMonthSegment / monthSegment", () => {
+  it("round-trips every month", () => {
+    for (let month = 1; month <= 12; month += 1) {
+      expect(parseMonthSegment(monthSegment(month))).toBe(month);
+    }
+  });
+
+  it("rejects anything else, including unpadded months", () => {
+    for (const segment of ["3", "00", "13", "003", "ab", "", "-1"]) {
+      expect(parseMonthSegment(segment)).toBeNull();
+    }
   });
 });
 
