@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addCityNeighborhoodOverride, removeCityNeighborhoodOverride } from "@/lib/city-heatmap-qa";
+import { addCityNeighborhoodOverride, describeQaFailure, removeCityNeighborhoodOverride } from "@/lib/city-heatmap-qa";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 
 export const dynamic = "force-dynamic";
@@ -29,14 +29,26 @@ export async function POST(request: Request) {
   const parsed = await parseBody(request);
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
   if (!parsed.geometryName) return NextResponse.json({ error: "geometryName is required" }, { status: 400 });
-  const result = await addCityNeighborhoodOverride({ ...parsed, geometryName: parsed.geometryName });
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
-  return NextResponse.json({ ok: true });
+  try {
+    const result = await addCityNeighborhoodOverride({ ...parsed, geometryName: parsed.geometryName });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("city-heatmap-qa add override failed", err);
+    const failure = describeQaFailure(err);
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
 }
 
 export async function DELETE(request: Request) {
   const parsed = await parseBody(request);
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  await removeCityNeighborhoodOverride(parsed);
-  return NextResponse.json({ ok: true });
+  try {
+    await removeCityNeighborhoodOverride(parsed);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("city-heatmap-qa remove override failed", err);
+    const failure = describeQaFailure(err);
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
 }

@@ -92,6 +92,27 @@ export async function listCityNeighborhoodOverridesIfAvailable(cityKey: CityKey)
   }
 }
 
+/**
+ * What the QA routes should tell the client when a handler throws. A route
+ * handler that throws gives the browser an *empty* 500 in production, which
+ * the modal then reports as "Unexpected end of JSON input" and nothing
+ * else, so the routes catch and answer with a reason instead. The one
+ * failure worth naming is the unmigrated database: the two QA tables ship
+ * with a schema push that lags the code (see
+ * listCityNeighborhoodOverridesIfAvailable), and "run the migration" is a
+ * very different fix from anything else that can go wrong here.
+ */
+export function describeQaFailure(err: unknown): { status: number; error: string } {
+  if (isUndefinedTableError(err)) {
+    return {
+      status: 503,
+      error:
+        "The place-check tables don't exist in this database yet (city_place_qa_dismissals, city_neighborhood_overrides). Run the schema push against it (npx drizzle-kit push, or npm run dev:pr for a PR database).",
+    };
+  }
+  return { status: 500, error: err instanceof Error && err.message ? err.message : "Unexpected server error" };
+}
+
 export type CityPlaceQaReport = {
   cityKey: CityKey;
   open: CityPlaceQaFinding[];

@@ -62,6 +62,24 @@ export function CityHeatmapQaModal({
   );
 }
 
+// A failing route can answer with an empty or non-JSON body (a platform 500
+// page, a proxy), and `res.json()` on that throws "Unexpected end of JSON
+// input", which says nothing about what went wrong. Read text and parse it
+// ourselves so the caller can fall back to the status code.
+async function readJson(res: Response): Promise<{ error?: unknown } | null> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function failureMessage(res: Response, body: { error?: unknown } | null): string {
+  return typeof body?.error === "string" ? body.error : `Request failed (${res.status})`;
+}
+
 function QaBody({ cityKey, onChanged }: { cityKey: CityKey; onChanged: () => void }) {
   const [report, setReport] = useState<CityPlaceQaReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,10 +93,10 @@ function QaBody({ cityKey, onChanged }: { cityKey: CityKey; onChanged: () => voi
     let cancelled = false;
     fetch(`/api/city-heatmap-qa?city=${encodeURIComponent(cityKey)}`)
       .then(async (res) => {
-        const body = await res.json();
-        if (!res.ok) throw new Error(typeof body?.error === "string" ? body.error : "Failed to load");
+        const body = await readJson(res);
+        if (!res.ok || !body) throw new Error(failureMessage(res, body));
         if (!cancelled) {
-          setReport(body as CityPlaceQaReport);
+          setReport(body as unknown as CityPlaceQaReport);
           setError(null);
         }
       })
@@ -95,8 +113,7 @@ function QaBody({ cityKey, onChanged }: { cityKey: CityKey; onChanged: () => voi
     try {
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(typeof body?.error === "string" ? body.error : "Request failed");
+        setError(failureMessage(res, await readJson(res)));
         return;
       }
       setVersion((v) => v + 1);

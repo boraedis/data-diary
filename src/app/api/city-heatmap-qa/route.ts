@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCityPlaceQaReport } from "@/lib/city-heatmap-qa";
+import { describeQaFailure, getCityPlaceQaReport } from "@/lib/city-heatmap-qa";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
 
 export const dynamic = "force-dynamic";
@@ -12,5 +12,11 @@ export async function GET(request: Request) {
   if (!city || !(city in CITIES)) {
     return NextResponse.json({ error: "Unknown or missing city" }, { status: 400 });
   }
-  return NextResponse.json(await getCityPlaceQaReport(city as CityKey));
+  try {
+    return NextResponse.json(await getCityPlaceQaReport(city as CityKey));
+  } catch (err) {
+    console.error("city-heatmap-qa GET failed", err);
+    const failure = describeQaFailure(err);
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
 }

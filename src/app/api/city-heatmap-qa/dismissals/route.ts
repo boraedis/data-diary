@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { dismissCityPlaceQaFinding, undismissCityPlaceQaFinding } from "@/lib/city-heatmap-qa";
+import { describeQaFailure, dismissCityPlaceQaFinding, undismissCityPlaceQaFinding } from "@/lib/city-heatmap-qa";
 import { parseCityPlaceQaKind } from "@/lib/geo/city-place-qa";
 
 export const dynamic = "force-dynamic";
@@ -23,13 +23,25 @@ async function parseBody(request: Request) {
 export async function POST(request: Request) {
   const parsed = await parseBody(request);
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  await dismissCityPlaceQaFinding(parsed.placeId, parsed.kind);
-  return NextResponse.json({ ok: true });
+  try {
+    await dismissCityPlaceQaFinding(parsed.placeId, parsed.kind);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("city-heatmap-qa dismiss failed", err);
+    const failure = describeQaFailure(err);
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
 }
 
 export async function DELETE(request: Request) {
   const parsed = await parseBody(request);
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  await undismissCityPlaceQaFinding(parsed.placeId, parsed.kind);
-  return NextResponse.json({ ok: true });
+  try {
+    await undismissCityPlaceQaFinding(parsed.placeId, parsed.kind);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("city-heatmap-qa undismiss failed", err);
+    const failure = describeQaFailure(err);
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
 }
