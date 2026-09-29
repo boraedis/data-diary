@@ -60,6 +60,38 @@ export async function listCityNeighborhoodOverrides(cityKey: CityKey): Promise<C
     .where(eq(cityNeighborhoodOverrides.cityKey, cityKey));
 }
 
+// Postgres "undefined_table". Drizzle wraps driver errors, so the code sits
+// on `cause` (possibly more than one level down), not on the error itself.
+export function isUndefinedTableError(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && typeof e === "object" && depth < 5; depth++) {
+    if ((e as { code?: unknown }).code === "42P01") return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * The override lookup for the heatmap chart itself, which, unlike the QA
+ * modal, treats mappings as optional enrichment: with none available it
+ * just colours by the static alias tables, exactly as it did before the
+ * overrides existed. Tolerates the table not existing yet, because a
+ * production schema change waits on a manual migration approval and the
+ * code that reads it can deploy first; without this, that window would
+ * take the whole heatmap page down over a feature it doesn't need to
+ * render. Only that one error is swallowed; anything else still throws.
+ * The QA modal deliberately keeps using `listCityNeighborhoodOverrides`,
+ * so an unmigrated database surfaces there as an error rather than an
+ * empty list.
+ */
+export async function listCityNeighborhoodOverridesIfAvailable(cityKey: CityKey): Promise<CityNeighborhoodOverride[]> {
+  try {
+    return await listCityNeighborhoodOverrides(cityKey);
+  } catch (err) {
+    if (isUndefinedTableError(err)) return [];
+    throw err;
+  }
+}
+
 export type CityPlaceQaReport = {
   cityKey: CityKey;
   open: CityPlaceQaFinding[];

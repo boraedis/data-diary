@@ -30,7 +30,7 @@ import { hasAdminRegions, loadAdminRegionFeatures } from "@/lib/geo/admin-geomet
 import { resolveAdminRegion } from "@/lib/geo/admin-lookup";
 import { resolveCountryCode } from "@/lib/geo/country-lookup";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
-import { listCityNeighborhoodOverrides } from "@/lib/city-heatmap-qa";
+import { listCityNeighborhoodOverridesIfAvailable } from "@/lib/city-heatmap-qa";
 import { withCityNeighborhoodOverrides } from "@/lib/geo/city-place-qa";
 import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
@@ -1385,7 +1385,7 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
   // DB-backed overrides (#293's QA modal) layered over the static
   // <city>-names.ts alias table, so a mapping added there fixes this
   // chart's own colouring too — see withCityNeighborhoodOverrides.
-  const normalize = withCityNeighborhoodOverrides(city.normalize, await listCityNeighborhoodOverrides(cityKey));
+  const normalize = withCityNeighborhoodOverrides(city.normalize, await listCityNeighborhoodOverridesIfAvailable(cityKey));
   // Keyed by "root\0featureName", not featureName alone — two different
   // roots (e.g. Washington and Arlington) could share a neighborhood
   // name; see CityHeatmapNeighborhood's own comment.
