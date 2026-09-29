@@ -1,0 +1,181 @@
+import * as d3 from "d3";
+import { feature } from "topojson-client";
+import type { Topology, GeometryCollection } from "topojson-specification";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { getDb } from "@/lib/db";
+import { cityNeighborhoodOverrides, cityPlaceQaDismissals, places } from "@/db/schema";
+import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import {
+  findCityPlaceQaFindings,
+  withCityNeighborhoodOverrides,
+  type CityGeometryFeature,
+  type CityNeighborhoodOverride,
+  type CityGeometryProperties,
+  type CityPlaceQaFinding,
+  type CityPlaceQaFindingKind,
+  type CityPlaceQaPlace,
+} from "@/lib/geo/city-place-qa";
+import atlantaTopo from "@/data/geo/atlanta.topo.json";
+import dcMetroTopo from "@/data/geo/dc-metro.topo.json";
+import dubaiTopo from "@/data/geo/dubai.topo.json";
+import nycTopo from "@/data/geo/nyc.topo.json";
+import istanbulTopo from "@/data/geo/istanbul.topo.json";
+
+// Data layer for the city-heatmap QA modal (#293) — the DB-touching half
+// of src/lib/geo/city-place-qa.ts's pure check, same pure/fetch split as
+// everywhere else in this app.
+
+const CITY_TOPOLOGIES: Record<CityKey, unknown> = {
+  atlanta: atlantaTopo,
+  "dc-metro": dcMetroTopo,
+  dubai: dubaiTopo,
+  nyc: nycTopo,
+  istanbul: istanbulTopo,
+};
+
+// Decoded once per process per city (topojson -> GeoJSON is the
+// expensive step, and the committed files never change at runtime).
+const featureCache = new Map<CityKey, CityGeometryFeature[]>();
+
+export function loadCityGeometryFeatures(cityKey: CityKey): CityGeometryFeature[] {
+  const cached = featureCache.get(cityKey);
+  if (cached) return cached;
+  const topo = CITY_TOPOLOGIES[cityKey] as Topology<{ [key: string]: GeometryCollection<CityGeometryProperties> }>;
+  const collection = feature(topo, topo.objects[cityKey]);
+  const features = collection.features as unknown as CityGeometryFeature[];
+  featureCache.set(cityKey, features);
+  return features;
+}
+
+/** Override rows for one city, as the flat list the modal shows. */
+export async function listCityNeighborhoodOverrides(cityKey: CityKey): Promise<CityNeighborhoodOverride[]> {
+  const db = getDb();
+  return db
+    .select({
+      root: cityNeighborhoodOverrides.root,
+      rawName: cityNeighborhoodOverrides.rawName,
+      geometryName: cityNeighborhoodOverrides.geometryName,
+    })
+    .from(cityNeighborhoodOverrides)
+    .where(eq(cityNeighborhoodOverrides.cityKey, cityKey));
+}
+
+export type CityPlaceQaReport = {
+  cityKey: CityKey;
+  open: CityPlaceQaFinding[];
+  /** Findings marked "intended" — kept visible (collapsed in the modal)
+   * so a dismissal can be undone rather than being a one-way door. */
+  dismissed: CityPlaceQaFinding[];
+  overrides: CityNeighborhoodOverride[];
+  /** Every polygon name per root, for the modal's "map to polygon"
+   * picker. */
+  geometryNames: { root: string; names: string[] }[];
+};
+
+export async function getCityPlaceQaReport(cityKey: CityKey): Promise<CityPlaceQaReport> {
+  const db = getDb();
+  const city = CITIES[cityKey];
+  const geometryFeatures = loadCityGeometryFeatures(cityKey);
+
+  const [placeRows, overrides, dismissalRows] = await Promise.all([
+    db
+      .select({ id: places.id, name: places.name, idPath: places.idPath, namePath: places.namePath, lat: places.lat, lng: places.lng })
+      .from(places)
+      .where(and(isNotNull(places.lat), isNotNull(places.lng), isNotNull(places.idPath), isNotNull(places.namePath))),
+    listCityNeighborhoodOverrides(cityKey),
+    db.select({ placeId: cityPlaceQaDismissals.placeId, kind: cityPlaceQaDismissals.kind }).from(cityPlaceQaDismissals),
+  ]);
+
+  const qaPlaces: CityPlaceQaPlace[] = placeRows.flatMap((p) =>
+    p.idPath !== null && p.namePath !== null && p.lat !== null && p.lng !== null
+      ? [{ id: p.id, name: p.name, idPath: p.idPath, namePath: p.namePath, lat: p.lat, lng: p.lng }]
+      : [],
+  );
+
+  const findings = findCityPlaceQaFindings(
+    qaPlaces,
+    city.sources,
+    geometryFeatures,
+    (f, point) => d3.geoContains(f, point),
+    withCityNeighborhoodOverrides(city.normalize, overrides),
+  );
+
+  const dismissedKeys = new Set(dismissalRows.map((d) => `${d.placeId}:${d.kind}`));
+  const open: CityPlaceQaFinding[] = [];
+  const dismissed: CityPlaceQaFinding[] = [];
+  for (const finding of findings) {
+    (dismissedKeys.has(`${finding.placeId}:${finding.kind}`) ? dismissed : open).push(finding);
+  }
+
+  const namesByRoot = new Map<string, string[]>();
+  for (const f of geometryFeatures) {
+    const list = namesByRoot.get(f.properties.root) ?? [];
+    list.push(f.properties.name);
+    namesByRoot.set(f.properties.root, list);
+  }
+  const geometryNames = [...namesByRoot.entries()].map(([root, names]) => ({ root, names: names.sort((a, b) => a.localeCompare(b)) }));
+
+  return { cityKey, open, dismissed, overrides, geometryNames };
+}
+
+export async function dismissCityPlaceQaFinding(placeId: number, kind: CityPlaceQaFindingKind): Promise<void> {
+  const db = getDb();
+  await db.insert(cityPlaceQaDismissals).values({ placeId, kind }).onConflictDoNothing();
+}
+
+export async function undismissCityPlaceQaFinding(placeId: number, kind: CityPlaceQaFindingKind): Promise<void> {
+  const db = getDb();
+  await db
+    .delete(cityPlaceQaDismissals)
+    .where(and(eq(cityPlaceQaDismissals.placeId, placeId), eq(cityPlaceQaDismissals.kind, kind)));
+}
+
+export type AddOverrideResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Upserts an override, after checking the target polygon really exists
+ * under that root in the city's committed geometry — the one place a
+ * typo'd or stale `geometryName` could otherwise be saved silently (see
+ * `cityNeighborhoodOverrides`' own comment on why it isn't a foreign
+ * key). Stored lowercased and trimmed, matching the static alias
+ * tables' own key shape.
+ */
+export async function addCityNeighborhoodOverride(input: {
+  cityKey: CityKey;
+  root: string;
+  rawName: string;
+  geometryName: string;
+}): Promise<AddOverrideResult> {
+  const rawName = input.rawName.trim().toLowerCase();
+  if (!rawName) return { ok: false, error: "Catalog name is required" };
+  if (!CITIES[input.cityKey].sources.some((s) => s.root === input.root)) {
+    return { ok: false, error: `Unknown root "${input.root}" for ${CITIES[input.cityKey].label}` };
+  }
+  const exists = loadCityGeometryFeatures(input.cityKey).some(
+    (f) => f.properties.root === input.root && f.properties.name === input.geometryName,
+  );
+  if (!exists) return { ok: false, error: `No polygon named "${input.geometryName}" under ${input.root}` };
+
+  const db = getDb();
+  await db
+    .insert(cityNeighborhoodOverrides)
+    .values({ cityKey: input.cityKey, root: input.root, rawName, geometryName: input.geometryName })
+    .onConflictDoUpdate({
+      target: [cityNeighborhoodOverrides.cityKey, cityNeighborhoodOverrides.root, cityNeighborhoodOverrides.rawName],
+      set: { geometryName: input.geometryName },
+    });
+  return { ok: true };
+}
+
+export async function removeCityNeighborhoodOverride(input: { cityKey: CityKey; root: string; rawName: string }): Promise<void> {
+  const db = getDb();
+  await db
+    .delete(cityNeighborhoodOverrides)
+    .where(
+      and(
+        eq(cityNeighborhoodOverrides.cityKey, input.cityKey),
+        eq(cityNeighborhoodOverrides.root, input.root),
+        eq(cityNeighborhoodOverrides.rawName, input.rawName.trim().toLowerCase()),
+      ),
+    );
+}

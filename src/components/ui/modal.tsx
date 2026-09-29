@@ -12,11 +12,16 @@ export function Modal({
   onClose,
   title,
   children,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** For content that's a list or table rather than a short form — the
+   * default max-w-md is sized for the "+ New" forms this shell was built
+   * for. */
+  wide?: boolean;
 }) {
   if (!open) return null;
 
@@ -26,7 +31,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30"
+        className={`w-full ${wide ? "max-h-[85vh] max-w-3xl overflow-y-auto" : "max-w-md"} rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">

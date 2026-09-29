@@ -15,7 +15,7 @@
  * check the issue asks for, run once per city rather than eyeballed off
  * the map.
  *
- * Three kinds of finding, most to least actionable:
+ * Four kinds of finding, most to least actionable:
  *
  *   MISMATCH  — the place resolves to neighborhood X by name, but its
  *               point actually falls inside a *different* neighborhood Y.
@@ -23,13 +23,38 @@
  *   OUTSIDE   — resolves to X by name, but the point falls inside none of
  *               this city's neighborhoods at all (badly off, a different
  *               city, or a real geometry gap wider than expected).
- *   UNMAPPED  — the name_path doesn't resolve to any neighborhood at all
- *               (an alias/geometry gap — see isPlaceInCity's own comment,
- *               e.g. Atlanta's Briarcliff Woods), but the point *does*
- *               land inside a real neighborhood polygon anyway. Lower
- *               priority: this can mean the coordinate is fine and it's
- *               just an alias-table gap, not a coordinate bug — worth a
- *               look, not necessarily a fix.
+ *   SPELLING  — the name_path doesn't resolve, but one of its own segments
+ *               is the *same name* as the neighborhood the point actually
+ *               lands in, once case/whitespace/punctuation is ignored
+ *               (e.g. catalog "Morningside-Lenox Park" vs. GIS
+ *               "Morningside/Lenox Park" — same words, different
+ *               separator). Deliberately strict: a real typo or
+ *               abbreviation (catalog "Marrieta St Artery" vs. GIS
+ *               "Marietta Street Artery") canonicalizes to two different
+ *               strings and is reported as UNMAPPED instead, since this
+ *               script has no way to tell "obviously the same place,
+ *               misspelled" apart from "coincidentally similar name,
+ *               actually different" without risking the latter. Not a
+ *               coordinate problem at all — the
+ *               coordinate is fine, the city's own <city>-names.ts alias
+ *               table (see atlanta-names.ts etc.) just doesn't know this
+ *               spelling yet. Reported with a ready-to-paste alias-table
+ *               line rather than left mixed into UNMAPPED below, since
+ *               resolveCityFeatureName is deliberately strict (exact,
+ *               alias-table-mediated matching only — see city-config.ts's
+ *               own comment on why two neighborhoods sharing a name
+ *               across roots can't be resolved by fuzzy matching), so
+ *               this case needs a human to add the alias, not a looser
+ *               match at resolution time.
+ *   UNMAPPED  — the name_path doesn't resolve to any neighborhood at all,
+ *               and isn't a same-spelling case either (a genuine alias/
+ *               geometry gap — see isPlaceInCity's own comment, e.g.
+ *               Atlanta's Briarcliff Woods), but the point *does* land
+ *               inside a real neighborhood polygon anyway. Lower
+ *               priority: this can mean the coordinate is fine and the
+ *               catalog names a genuinely different neighborhood (a real
+ *               remap, not a spelling gap) — worth a look, not
+ *               necessarily a fix.
  *
  * A place whose name_path resolves to a neighborhood AND whose point
  * lands in that same neighborhood is not reported. Neither is a place
@@ -56,7 +81,7 @@ import pg from "pg";
 import * as d3 from "d3";
 import { feature } from "topojson-client";
 import { CITIES } from "../src/lib/geo/city-config.ts";
-import { resolveCityFeatureName, isPlaceInCity } from "../src/lib/geo/resolve-city-place.ts";
+import { findCityPlaceQaFindings } from "../src/lib/geo/city-place-qa.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,14 +97,27 @@ if (cityArg && !CITIES[cityArg]) {
 }
 const cityKeys = cityArg ? [cityArg] : Object.keys(CITIES);
 
-// Same file naming convention loadCityGeometryNames (charts.ts) relies
-// on: src/data/geo/<cityKey>.topo.json, object key === the city's Record
-// key.
 function loadCityFeatures(cityKey) {
   const filePath = path.join(__dirname, "..", "src", "data", "geo", `${cityKey}.topo.json`);
   const topo = JSON.parse(readFileSync(filePath, "utf8"));
-  const collection = feature(topo, topo.objects[cityKey]);
-  return collection.features; // each carries properties.{root,name}
+  return feature(topo, topo.objects[cityKey]).features;
+}
+
+const HEADINGS = {
+  mismatch: "MISMATCH",
+  outside: "OUTSIDE",
+  spelling: "SPELLING (not a coordinate bug — add the suggested line to this city's <city>-names.ts, or map it in the app's \"Check places\" modal)",
+  unmapped: "UNMAPPED (lower priority — likely a genuine alias/geometry gap, not a coordinate bug)",
+};
+
+function describe(f) {
+  const declared = f.declared ? `${f.declared.root}/${f.declared.featureName}` : "no declared neighborhood";
+  const actual = f.actual ? `${f.actual.root}/${f.actual.name}` : "none of this city's neighborhoods";
+  let out = `  #${f.placeId} ${f.placeName} — ${f.namePath}\n    declared: ${declared} — point falls in: ${actual}`;
+  if (f.suggestedAlias) {
+    out += `\n    suggested alias-table line: ${JSON.stringify(f.suggestedAlias.aliasKey)}: ${JSON.stringify(f.suggestedAlias.aliasValue)},`;
+  }
+  return out;
 }
 
 async function main() {
@@ -92,67 +130,22 @@ async function main() {
   await pool.end();
 
   let totalFlagged = 0;
-
   for (const cityKey of cityKeys) {
     const city = CITIES[cityKey];
-    const geometryFeatures = loadCityFeatures(cityKey);
-    const geometryNamesByRoot = new Map();
-    for (const f of geometryFeatures) {
-      const { root, name } = f.properties;
-      if (!geometryNamesByRoot.has(root)) geometryNamesByRoot.set(root, new Set());
-      geometryNamesByRoot.get(root).add(name);
+    // Static alias tables only: this script deliberately ignores the
+    // app's DB-backed overrides and dismissals so it stays a full,
+    // unfiltered audit — the in-app modal is the place to act on findings.
+    const findings = findCityPlaceQaFindings(rows, city.sources, loadCityFeatures(cityKey), (f, p) => d3.geoContains(f, p), city.normalize);
+    totalFlagged += findings.length;
+    console.log(`\n=== ${city.label} (${findings.length} flagged) ===`);
+    for (const kind of Object.keys(HEADINGS)) {
+      const ofKind = findings.filter((f) => f.kind === kind);
+      if (ofKind.length === 0) continue;
+      console.log(`\n${HEADINGS[kind]} (${ofKind.length}):`);
+      ofKind.forEach((f) => console.log(describe(f)));
     }
-
-    // Point-in-polygon against every one of this city's neighborhoods,
-    // regardless of root — a DC-metro place could plausibly be
-    // mis-geocoded across the Washington/Arlington/Alexandria line, and
-    // that's exactly the kind of mismatch worth surfacing.
-    function actualFeatureFor(point) {
-      for (const f of geometryFeatures) {
-        if (d3.geoContains(f, point)) return f.properties;
-      }
-      return null;
-    }
-
-    const cityPlaces = rows.filter((p) => isPlaceInCity(p.idPath, city.sources));
-    const findings = { mismatch: [], outside: [], unmapped: [] };
-
-    for (const place of cityPlaces) {
-      const declared = resolveCityFeatureName(place, city.sources, geometryNamesByRoot, city.normalize);
-      const point = [place.lng, place.lat];
-      const actual = actualFeatureFor(point);
-
-      if (declared === null && actual === null) continue; // nothing to say
-      if (declared && actual && declared.root === actual.root && declared.featureName === actual.name) continue; // agrees
-
-      const line = `  #${place.id} ${place.name} — ${place.namePath}`;
-      if (declared && !actual) {
-        findings.outside.push(`${line}\n    declared: ${declared.root}/${declared.featureName} — point falls in none of ${city.label}'s neighborhoods`);
-      } else if (declared && actual) {
-        findings.mismatch.push(`${line}\n    declared: ${declared.root}/${declared.featureName} — point actually falls in: ${actual.root}/${actual.name}`);
-      } else if (!declared && actual) {
-        findings.unmapped.push(`${line}\n    no declared neighborhood (name_path didn't resolve) — point falls in: ${actual.root}/${actual.name}`);
-      }
-    }
-
-    const cityTotal = findings.mismatch.length + findings.outside.length + findings.unmapped.length;
-    totalFlagged += cityTotal;
-    console.log(`\n=== ${city.label} (${cityPlaces.length} places checked, ${cityTotal} flagged) ===`);
-    if (findings.mismatch.length) {
-      console.log(`\nMISMATCH (${findings.mismatch.length}):`);
-      findings.mismatch.forEach((l) => console.log(l));
-    }
-    if (findings.outside.length) {
-      console.log(`\nOUTSIDE (${findings.outside.length}):`);
-      findings.outside.forEach((l) => console.log(l));
-    }
-    if (findings.unmapped.length) {
-      console.log(`\nUNMAPPED (${findings.unmapped.length}, lower priority — likely an alias/geometry gap, not necessarily a bad coordinate):`);
-      findings.unmapped.forEach((l) => console.log(l));
-    }
-    if (cityTotal === 0) console.log("  Nothing flagged.");
+    if (findings.length === 0) console.log("  Nothing flagged.");
   }
-
   console.log(`\n${totalFlagged} place(s) flagged across ${cityKeys.length} cit${cityKeys.length === 1 ? "y" : "ies"}.`);
 }
 

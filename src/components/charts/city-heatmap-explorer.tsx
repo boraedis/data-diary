@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import * as d3 from "d3";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
@@ -10,7 +11,9 @@ import dcMetroTopoRaw from "@/data/geo/dc-metro.topo.json";
 import dubaiTopoRaw from "@/data/geo/dubai.topo.json";
 import nycTopoRaw from "@/data/geo/nyc.topo.json";
 import istanbulTopoRaw from "@/data/geo/istanbul.topo.json";
+import { Button } from "@/components/ui/button";
 import { ChartPage } from "@/components/charts/chart-page";
+import { CityHeatmapQaModal } from "@/components/charts/city-heatmap-qa-modal";
 import { ChartCard } from "@/components/charts/chart-card";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/interactive-geo";
@@ -81,6 +84,8 @@ export function CityHeatmapExplorer({
 }) {
   const [city, setCity] = useState<CityKey>("atlanta");
   const [destinations, setDestinations] = useState<"shown" | "hidden">("shown");
+  const [qaOpen, setQaOpen] = useState(false);
+  const router = useRouter();
   const cityData = data[city];
 
   const features = useMemo(() => {
@@ -173,9 +178,16 @@ export function CityHeatmapExplorer({
             label="Destinations"
             className="ml-auto"
           />
+          <Button type="button" variant="outline" size="sm" onClick={() => setQaOpen(true)}>
+            Check places
+          </Button>
         </>
       }
     >
+      {/* #293's coordinate check. onChanged refetches the server data,
+          since adding or removing a neighborhood mapping changes which
+          polygon a place colours. */}
+      <CityHeatmapQaModal open={qaOpen} onClose={() => setQaOpen(false)} cityKey={city} onChanged={() => router.refresh()} />
       <ChartCard empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
           {({ width, height }) => (
