@@ -12,11 +12,15 @@ export function Modal({
   onClose,
   title,
   children,
+  panelClassName = "max-w-md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** Width of the card. The catalog forms fit max-w-md; a video (the
+   * landing page's facelapse full view) needs more room. */
+  panelClassName?: string;
 }) {
   if (!open) return null;
 
@@ -26,7 +30,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30"
+        className={`w-full ${panelClassName} rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
