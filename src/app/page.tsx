@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { FacelapseHero } from "@/components/facelapse-hero";
 import { buttonVariants } from "@/components/ui/button";
 import { getPublicLandingData } from "@/lib/public-profile";
 import { parseDate } from "@/lib/date";
@@ -78,17 +79,16 @@ export default async function LandingPage() {
 
   return (
     <main className="relative flex min-h-svh flex-col items-center overflow-hidden px-4 py-16 md:py-24">
-      {/* Facelapse (see #12): a rotating self-portrait timelapse was floated
-          for this hero but has no photo pipeline yet, so it's explicitly
-          out of scope here (#83). This gradient band is left as the visual
-          slot it would eventually sit in — not empty space, but nothing
-          that assumes a specific future layout either. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10 bg-linear-to-br from-primary/10 via-transparent to-chart-3/10"
       />
 
-      <div className="flex w-full max-w-3xl flex-col items-center gap-5 text-center">
+      {/* The facelapse (#15, #458) leads the hero: public by decision 3 on
+          #15, with the trade-off on record there. */}
+      <FacelapseHero />
+
+      <div className="mt-6 flex w-full max-w-3xl flex-col items-center gap-5 text-center">
         <h1 className="font-heading text-5xl font-medium tracking-tight text-primary italic md:text-6xl">
           {projectName}
         </h1>

@@ -13,6 +13,7 @@ export function Modal({
   title,
   children,
   wide = false,
+  panelClassName = "max-w-md",
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,6 +23,9 @@ export function Modal({
    * default max-w-md is sized for the "+ New" forms this shell was built
    * for. */
   wide?: boolean;
+  /** Width of the card. The catalog forms fit max-w-md; a video (the
+   * landing page's facelapse full view) needs more room. */
+  panelClassName?: string;
 }) {
   if (!open) return null;
 
