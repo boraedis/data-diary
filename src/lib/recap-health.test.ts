@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { summarizeExercise, summarizeHappiness, summarizeSleep } from "@/lib/recap-health";
+import {
+  GOOD_DAY_THRESHOLD,
+  longestGoodStreak,
+  summarizeExercise,
+  summarizeHappiness,
+  summarizeSleep,
+} from "@/lib/recap-health";
 import { previousPeriod, yearPeriod } from "@/lib/recap";
 
 // Covers the folds behind the health & wellness section (issue #201): the
@@ -127,5 +133,64 @@ describe("summarizeExercise", () => {
   it("reports zero for a period with no workouts", () => {
     const result = summarizeExercise([{ date: "2019-01-01" }], period, prior);
     expect(result).toMatchObject({ daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0 });
+  });
+});
+
+describe("longestGoodStreak", () => {
+  const good = (date: string) => ({ date, happiness: GOOD_DAY_THRESHOLD });
+
+  it("finds the longest run of consecutive good days", () => {
+    const result = longestGoodStreak(
+      [
+        good("2025-03-01"),
+        good("2025-03-02"),
+        { date: "2025-03-03", happiness: GOOD_DAY_THRESHOLD - 1 },
+        good("2025-03-04"),
+        good("2025-03-05"),
+        good("2025-03-06"),
+      ],
+      period
+    );
+    expect(result).toEqual({ length: 3, start: "2025-03-04", end: "2025-03-06" });
+  });
+
+  it("breaks a run on an unlogged day", () => {
+    const result = longestGoodStreak(
+      [good("2025-03-01"), good("2025-03-02"), good("2025-03-04"), good("2025-03-05")],
+      period
+    );
+    expect(result).toEqual({ length: 2, start: "2025-03-01", end: "2025-03-02" });
+  });
+
+  it("breaks ties toward the earlier run", () => {
+    const result = longestGoodStreak(
+      [good("2025-03-01"), good("2025-03-02"), good("2025-05-01"), good("2025-05-02")],
+      period
+    );
+    expect(result?.start).toBe("2025-03-01");
+  });
+
+  it("ignores days outside the period, including across its edge", () => {
+    const result = longestGoodStreak(
+      [good("2024-12-30"), good("2024-12-31"), good("2025-01-01")],
+      period
+    );
+    expect(result).toEqual({ length: 1, start: "2025-01-01", end: "2025-01-01" });
+  });
+
+  it("is null when no day reached the bar", () => {
+    expect(longestGoodStreak([{ date: "2025-03-01", happiness: 10 }], period)).toBeNull();
+    expect(longestGoodStreak([], period)).toBeNull();
+  });
+
+  it("is carried on the happiness summary for both periods, with the scored series", () => {
+    const result = summarizeHappiness(
+      [good("2024-06-01"), good("2024-06-02"), good("2025-06-01")],
+      period,
+      prior
+    );
+    expect(result.priorStreak?.length).toBe(2);
+    expect(result.streak?.length).toBe(1);
+    expect(result.series).toEqual([good("2025-06-01")]);
   });
 });

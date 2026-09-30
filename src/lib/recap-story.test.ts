@@ -30,6 +30,9 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         priorDaysLogged: 0,
         best: null,
         worst: null,
+        streak: null,
+        priorStreak: null,
+        series: [],
       },
       sleep: {
         averageMinutes: null,
@@ -39,7 +42,7 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         longest: null,
         shortest: null,
       },
-      exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0 },
+      exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [] },
     },
     entertainment: {
       totals: [],
@@ -81,6 +84,9 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         priorDaysLogged: 280,
         best: { date: "2025-06-14", happiness: 96 },
         worst: { date: "2025-02-03", happiness: 12 },
+        streak: null,
+        priorStreak: null,
+        series: [],
       },
       sleep: {
         averageMinutes: 432,
@@ -90,7 +96,7 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         longest: null,
         shortest: null,
       },
-      exercise: { daysTrained: 120, priorDaysTrained: 90, exercisesLogged: 400 },
+      exercise: { daysTrained: 120, priorDaysTrained: 90, exercisesLogged: 400, mix: [] },
     },
     entertainment: {
       totals: [
@@ -185,6 +191,9 @@ describe("buildRecapStory", () => {
           priorDaysLogged: 0,
           best: { date: "2011-08-02", happiness: 91 },
           worst: null,
+          streak: null,
+          priorStreak: null,
+          series: [],
         },
       },
     });
@@ -211,14 +220,41 @@ describe("buildRecapStory", () => {
           priorDaysLogged: 0,
           best: { date: "2011-08-02", happiness: 91 },
           worst: null,
+          streak: null,
+          priorStreak: null,
+          series: [],
         },
         // ...but four days trained is still four days trained.
-        exercise: { daysTrained: 4, priorDaysTrained: 0, exercisesLogged: 10 },
+        exercise: { daysTrained: 4, priorDaysTrained: 0, exercisesLogged: 10, mix: [] },
       },
     });
     const ids = idsOf(thin);
     expect(ids).not.toContain("happiness-average");
     expect(ids).toContain("days-trained");
+  });
+
+  it("only deals the good-day streak when it is a real run over enough logged days", () => {
+    const withStreak = (length: number, daysLogged: number) => {
+      const base = emptyInput({ loggedDays: daysLogged });
+      return emptyInput({
+        loggedDays: daysLogged,
+        health: {
+          ...base.health,
+          happiness: {
+            ...base.health.happiness,
+            // Enough other cards that the story isn't withheld outright;
+            // the streak's own gates are what's under test.
+            average: 70,
+            best: { date: "2025-03-05", happiness: 95 },
+            daysLogged,
+            streak: { length, start: "2025-03-01", end: "2025-03-09" },
+          },
+        },
+      });
+    };
+    expect(idsOf(withStreak(9, 200))).toContain("good-day-streak");
+    expect(idsOf(withStreak(1, 200))).not.toContain("good-day-streak");
+    expect(idsOf(withStreak(9, 4))).not.toContain("good-day-streak");
   });
 
   it("leads entertainment with whichever medium was actually consumed most", () => {
