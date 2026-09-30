@@ -148,6 +148,16 @@ describe("rollingTrail", () => {
     expect(greatCircleKm(runs[1][runs[1].length - 1].position, AWAY)).toBeLessThan(0.01);
   });
 
+  it("keeps moving near the start of the record instead of freezing on one window", () => {
+    // A move a year in, under a 5-year window: a window slid to stay full
+    // would give every point in the first 2½ years the same position.
+    const daily = [...stay("2016-01-01", 365, HOME), ...stay("2017-01-01", 2000, AWAY)];
+    const [run] = rollingTrail(daily, 1826, 42);
+    const first = run[0].position;
+    const later = run.find((p) => p.date >= "2017-06-01")!.position;
+    expect(greatCircleKm(first, later)).toBeGreaterThan(500);
+  });
+
   it("returns nothing for no days", () => {
     expect(rollingTrail([], 30, 2)).toEqual([]);
   });

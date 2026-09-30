@@ -26,10 +26,10 @@ import {
 // feedback (2026-09-30) was that it should *track* location and travel —
 // so the centre is now a **rolling centre of mass**: the average position
 // of the days in a moving window, sampled densely enough to draw as one
-// continuous trail. A trip pulls the trail out towards the destination and
-// it drifts back afterwards; a move makes it glide to the new city. The
-// window length is the reader's choice — a week follows nearly every
-// trip, a year gives the slow drift the inspiration chart shows.
+// continuous trail. A move makes it glide to the new city, and a long
+// stretch away bends it. The window length is the reader's choice, from
+// one to five years — shorter windows were tried and dropped, see
+// location-centre-chart.tsx.
 //
 // The rules that survived from the reviewed proposal:
 //
@@ -366,10 +366,13 @@ export function rollingTrail(daily: DailyVector[], windowDays: number, stepDays:
   const runs: TrailPoint[][] = [];
   let run: TrailPoint[] = [];
   for (let i = 0; i < span; i += stepDays) {
-    // Clamped at the ends of the record, so the first and last points use
-    // a half-window rather than being dropped.
+    // Cut short at the ends of the record rather than slid inwards. A
+    // window slid to stay full would be the *same* window for every point
+    // in the first half-window, freezing the trail for 2½ years at the
+    // 5-year setting; a cut-short one keeps moving, just with less
+    // smoothing near the ends.
     const lo = Math.max(0, i - half);
-    const hi = Math.min(span, lo + windowDays);
+    const hi = Math.min(span, i - half + windowDays);
     const n = pn[hi] - pn[lo];
     const position =
       n >= minDays ? fromUnitVector([px[hi] - px[lo], py[hi] - py[lo], pz[hi] - pz[lo]]) : null;

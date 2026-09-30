@@ -50,17 +50,21 @@ const WORLD = feature(worldTopology, worldTopology.objects.countries);
 
 const ALL = "all";
 
-type WindowDays = "7" | "30" | "90" | "365";
+// Years, not days. Windows of a week to a quarter shipped first and read
+// as noise (owner, 2026-09-30): at that scale every holiday throws the
+// line across an ocean and back, and a decade of them buries the moves.
+// A year or more averages trips into a nudge, which is the story here.
+type WindowDays = "365" | "730" | "1095" | "1826";
 const WINDOW_OPTIONS: GroupByOption<WindowDays>[] = [
-  { id: "7", label: "7 days" },
-  { id: "30", label: "30 days" },
-  { id: "90", label: "90 days" },
   { id: "365", label: "1 year" },
+  { id: "730", label: "2 years" },
+  { id: "1095", label: "3 years" },
+  { id: "1826", label: "5 years" },
 ];
-/** Days between samples, per window. Roughly a tenth of the window: dense
- * enough that the trail reads as a curve, and no denser — a 1-year window
- * barely moves day to day, so sampling it daily would only add points. */
-const STEP: Record<WindowDays, number> = { "7": 1, "30": 2, "90": 5, "365": 14 };
+/** Days between samples, per window: a couple of weeks is already far
+ * finer than a year-long average can move, and a longer window moves
+ * slower still. */
+const STEP: Record<WindowDays, number> = { "365": 14, "730": 21, "1095": 28, "1826": 42 };
 
 /** Aim for about this many coloured pieces per trail. Each piece is one
  * SVG path in one colour, so this is the ramp's resolution along the
@@ -87,7 +91,7 @@ const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
 
 export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const [view, setView] = useState<string>(ALL);
-  const [windowDays, setWindowDays] = useState<WindowDays>("30");
+  const [windowDays, setWindowDays] = useState<WindowDays>("365");
 
   const current: CentrePeriod = useMemo(
     () => (view === ALL ? data.all : (data.years.find((y) => y.period === view) ?? data.all)),
@@ -193,14 +197,14 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
   const getMarkerSecondary = useCallback((m: GeoMarker) => secondaryById.get(String(m.id)) ?? null, [secondaryById]);
 
-  // Framed once, on the places that matter and a 90-day trail, so neither
+  // Framed once, on the places that matter and the 1-year trail, so neither
   // picker ever moves the map. A MultiPoint of corners rather than a
   // bounding polygon: d3-geo treats polygons as spherical, and a box wound
   // the wrong way round means "everything *except* this box".
   const fitTo = useMemo<Feature<MultiPoint>>(() => {
     const points: LngLat[] = [
       ...data.all.bases.filter((b) => b.share >= FRAME_MIN_SHARE).map((b) => b.position),
-      ...rollingTrail(data.daily, 90, 5).flat().map((p) => p.position),
+      ...rollingTrail(data.daily, 365, 14).flat().map((p) => p.position),
     ];
     const lngs = points.map((p) => p[0]);
     const lats = points.map((p) => p[1]);
