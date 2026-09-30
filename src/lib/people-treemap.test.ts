@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { PeopleDay, PersonOnDay } from "@/lib/charts";
-import { buildPeopleTree, initialsOf, tagColors, UNTAGGED_COLOR, UNTAGGED_NAME } from "./people-treemap";
+import {
+  buildPeopleTree,
+  dayCounts,
+  fadedImpactAt,
+  initialsOf,
+  lifetimeImpact,
+  scoreDays,
+  tagColors,
+  UNTAGGED_COLOR,
+  UNTAGGED_NAME,
+} from "./people-treemap";
+import { personImpact, recencyWeight } from "@/lib/impact";
 import { sumValues } from "@/lib/viz/hierarchy";
 
 function person(name: string, tagName: string | null, tagColor: string | null = null): PersonOnDay {
@@ -45,7 +56,7 @@ describe("buildPeopleTree", () => {
   const colors = tagColors(DAYS);
 
   it("groups people under their tag, sized by days logged", () => {
-    const tree = buildPeopleTree(DAYS, "tag", colors)!;
+    const tree = buildPeopleTree(DAYS, dayCounts(DAYS), "tag", colors)!;
     const family = tree.children!.find((c) => c.name === "Family")!;
     expect(family.color).toBe("#aa0000");
     expect(family.children!.map((c) => [c.name, c.value])).toEqual([
@@ -57,14 +68,14 @@ describe("buildPeopleTree", () => {
   });
 
   it("puts untagged people in a neutral group", () => {
-    const tree = buildPeopleTree(DAYS, "tag", colors)!;
+    const tree = buildPeopleTree(DAYS, dayCounts(DAYS), "tag", colors)!;
     const untagged = tree.children!.find((c) => c.name === UNTAGGED_NAME)!;
     expect(untagged.color).toBe(UNTAGGED_COLOR);
     expect(untagged.children!.map((c) => c.name)).toEqual(["Kim Diaz"]);
   });
 
   it("flat mode lists people directly, still coloured by tag", () => {
-    const tree = buildPeopleTree(DAYS, "none", colors)!;
+    const tree = buildPeopleTree(DAYS, dayCounts(DAYS), "none", colors)!;
     expect(tree.children!.map((c) => [c.name, c.color])).toEqual([
       ["Alex Morgan", "#aa0000"],
       ["Sam Lee", "#aa0000"],
@@ -75,8 +86,8 @@ describe("buildPeopleTree", () => {
 
   it("keeps the roster's shape, with zeros for anyone not yet logged", () => {
     const firstDay = DAYS.slice(0, 1);
-    const frame = buildPeopleTree(firstDay, "tag", colors, DAYS)!;
-    const full = buildPeopleTree(DAYS, "tag", colors)!;
+    const frame = buildPeopleTree(DAYS, dayCounts(firstDay), "tag", colors)!;
+    const full = buildPeopleTree(DAYS, dayCounts(DAYS), "tag", colors)!;
     const paths = (tree: typeof full) =>
       tree.children!.flatMap((group) => group.children!.map((person) => `${group.key}/${person.key}`)).sort();
     expect(paths(frame)).toEqual(paths(full));
@@ -86,6 +97,47 @@ describe("buildPeopleTree", () => {
   });
 
   it("returns null when the roster is empty", () => {
-    expect(buildPeopleTree([], "tag", colors)).toBeNull();
+    expect(buildPeopleTree([], new Map(), "tag", colors)).toBeNull();
+  });
+});
+
+describe("impact values", () => {
+  const WITH_UNSCORED: PeopleDay[] = [
+    ...DAYS,
+    // No happiness score: counts as a day, contributes no impact.
+    { date: "2024-01-04", happiness: null, people: [SAM] },
+  ];
+
+  it("scores each appearance by the day's happiness and slot, skipping unscored days", () => {
+    const scored = scoreDays(WITH_UNSCORED);
+    expect(scored.map((d) => d.date)).toEqual(["2024-01-01", "2024-01-02", "2024-01-03"]);
+    expect(scored[0].people[0]).toEqual({ name: "Alex Morgan", impact: personImpact(7, 1) });
+  });
+
+  it("dayCounts still counts the unscored day", () => {
+    expect(dayCounts(WITH_UNSCORED).get("Sam Lee")).toBe(2);
+  });
+
+  it("fades each appearance by its age at the date asked about", () => {
+    const scored = scoreDays(DAYS);
+    const at = "2025-01-03";
+    const expected =
+      personImpact(7, 1) * recencyWeight(368) +
+      personImpact(6, 1) * recencyWeight(367) +
+      personImpact(8, 1) * recencyWeight(366);
+    expect(fadedImpactAt(scored, at).get("Alex Morgan")).toBeCloseTo(expected, 10);
+  });
+
+  it("ignores days after the date asked about", () => {
+    const faded = fadedImpactAt(scoreDays(DAYS), "2024-01-01");
+    expect(faded.get("Alex Morgan")).toBeCloseTo(personImpact(7, 1), 10);
+    expect(faded.has("Jo Park")).toBe(false);
+  });
+
+  it("lifetime impact is the plain, unfaded sum", () => {
+    expect(lifetimeImpact(scoreDays(DAYS)).get("Alex Morgan")).toBeCloseTo(
+      personImpact(7, 1) + personImpact(6, 1) + personImpact(8, 1),
+      10,
+    );
   });
 });

@@ -151,4 +151,20 @@ describe("InteractiveTreemap", () => {
     const jo = d3.select(tileFor(seeded.container, "jo")).datum() as d3.HierarchyNode<HierarchyDatum>;
     expect(jo.value).toBe(100);
   });
+
+  it("re-arranges when the seed changes, even with the same shape", () => {
+    // Same tree both times; only the seed differs. Whichever branch the
+    // seed makes biggest is laid out first, at the origin.
+    const joFirst: HierarchyDatum = { ...TREE, children: [TREE.children![0], { key: "jo", name: "Jo Park", value: 900 }] };
+    const origin = (container: HTMLElement, key: string) =>
+      tileFor(container, key).parentElement!.getAttribute("transform") === "translate(0,0)";
+
+    const { container, rerender } = render(
+      <InteractiveTreemap data={TREE} layoutSeed={TREE} width={600} height={400} transitionMs={0} />,
+    );
+    expect(origin(container, "family")).toBe(true);
+
+    rerender(<InteractiveTreemap data={TREE} layoutSeed={joFirst} width={600} height={400} transitionMs={0} />);
+    expect(origin(container, "jo")).toBe(true);
+  });
 });

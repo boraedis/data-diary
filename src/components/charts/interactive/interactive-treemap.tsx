@@ -62,9 +62,10 @@ import { cn } from "@/lib/utils";
 // `layoutSeed` exists because resquarify's rows are only as good as the
 // values they were first computed from: seeded from a time-lapse's first,
 // nearly-empty month, every later month is squeezed into rows shaped for
-// three people. The caller hands the end state as the seed, so the
-// arrangement is the one that reads best where the animation stops, and
-// earlier frames are that same arrangement, smaller.
+// three people. The caller hands a seed that gives every tile room — the
+// end state, for a running count — so the arrangement reads well where
+// the animation stops, and earlier frames are that same arrangement,
+// smaller.
 //
 // Not carried over from the donut: #166's right-click exclusion. It's a
 // real feature there because a sunburst's small slices are otherwise
@@ -102,6 +103,11 @@ type LayoutCache = {
    * it, and the depth cap. Values aren't part of it; a change of values
    * alone re-tiles these same nodes. */
   shape: string;
+  /** The seed the arrangement was built from. A new seed (the caller
+   * switched what the tiles measure) re-arranges from scratch, even when
+   * the shape is unchanged — otherwise the tiles would stay in rows
+   * decided by a metric no longer on screen. */
+  seed: HierarchyDatum | undefined;
   root: TreemapNode;
   width: number;
   height: number;
@@ -170,10 +176,11 @@ export type InteractiveTreemapProps = {
    * A tree with the same key paths as `data` whose values decide the
    * tiles' *arrangement* — which rows they sit in, and in what order —
    * while `data` decides their sizes. For a time-lapse, pass the last
-   * frame. It also fixes the palette rank of any branch without its own
-   * colour, so an uncoloured branch can't change colour as frames play.
-   * Ignored where its shape doesn't match `data`'s. See the header
-   * comment.
+   * frame, or whatever gives every tile room in proportion to its peak.
+   * It also fixes the palette rank of any branch without its own colour,
+   * so an uncoloured branch can't change colour as frames play. Pass a
+   * stable (memoised) object: a new seed re-arranges the tiles. Ignored
+   * where its shape doesn't match `data`'s. See the header comment.
    */
   layoutSeed?: HierarchyDatum;
   /** Tween length in ms for a change of data or zoom; 0 snaps. A caller
@@ -320,7 +327,7 @@ export function InteractiveTreemap({
         .round(true)(root) as TreemapNode;
     };
 
-    const inPlace = cache !== null && cache.shape === shape;
+    const inPlace = cache !== null && cache.shape === shape && cache.seed === layoutSeed;
     let root: TreemapNode;
     if (inPlace) {
       // Same shape: swap the new data onto the existing nodes and re-tile
@@ -363,7 +370,7 @@ export function InteractiveTreemap({
     // Snap rather than tween on the first draw and on a resize — a resize
     // tween reads as the chart wobbling, not as anything happening.
     const animate = transitionMs > 0 && cache !== null && cache.width === width && cache.height === chartHeight;
-    cacheRef.current = { shape, root, width, height: chartHeight };
+    cacheRef.current = { shape, seed: layoutSeed, root, width, height: chartHeight };
 
     const fullPathOf = (node: d3.HierarchyNode<HierarchyDatum>) => [...effectiveFocusPath, ...keyPathOf(node)];
     const keyOf = (d: TreemapNode) => pathId(fullPathOf(d));
