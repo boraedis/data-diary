@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   MIN_DAYS_FOR_AVERAGE,
+  PUBLISH_GRACE_DAYS,
   firstSeenInPeriod,
+  isPeriodPublished,
+  periodPublishDate,
+  summarizeYears,
   MIN_DAYS_FOR_TOTAL,
   monthPeriod,
   monthSegment,
@@ -231,5 +235,104 @@ describe("firstSeenInPeriod", () => {
         { key: "Shuffled", date: "2025-01-02" },
       ])
     ).toEqual([]);
+  });
+});
+
+describe("isPeriodPublished", () => {
+  const march = monthPeriod(2026, 3);
+
+  it("is published on the day after the grace window, not before", () => {
+    expect(PUBLISH_GRACE_DAYS).toBe(3);
+    expect(periodPublishDate(march)).toBe("2026-04-04");
+    expect(isPeriodPublished(march, "2026-03-31")).toBe(false); // last day
+    expect(isPeriodPublished(march, "2026-04-03")).toBe(false); // end + grace
+    expect(isPeriodPublished(march, "2026-04-04")).toBe(true); // end + grace + 1
+    expect(isPeriodPublished(march, "2027-01-01")).toBe(true);
+  });
+
+  it("holds a period that is still running, and one that hasn't started", () => {
+    expect(isPeriodPublished(march, "2026-03-15")).toBe(false);
+    expect(isPeriodPublished(march, "2026-02-01")).toBe(false);
+  });
+
+  it("handles a leap February", () => {
+    expect(periodPublishDate(monthPeriod(2024, 2))).toBe("2024-03-04");
+    expect(periodPublishDate(monthPeriod(2025, 2))).toBe("2025-03-04");
+  });
+
+  it("rolls December into January for a year", () => {
+    const year = yearPeriod(2025);
+    expect(periodPublishDate(year)).toBe("2026-01-04");
+    expect(isPeriodPublished(year, "2026-01-03")).toBe(false);
+    expect(isPeriodPublished(year, "2026-01-04")).toBe(true);
+  });
+
+  it("works on an arbitrary window, not just a calendar unit", () => {
+    const window = { start: "2025-06-10", end: "2025-07-09", label: "a window" };
+    expect(isPeriodPublished(window, "2025-07-12")).toBe(false);
+    expect(isPeriodPublished(window, "2025-07-13")).toBe(true);
+  });
+
+  it("publishes a year independently of its months", () => {
+    // In September 2026 eight months are out and the year is not.
+    const today = "2026-09-30";
+    expect(isPeriodPublished(monthPeriod(2026, 8), today)).toBe(true);
+    expect(isPeriodPublished(monthPeriod(2026, 9), today)).toBe(false);
+    expect(isPeriodPublished(yearPeriod(2026), today)).toBe(false);
+  });
+});
+
+describe("summarizeYears", () => {
+  const counts = new Map([
+    [2016, 300],
+    [2018, 10],
+    [2026, 240],
+  ]);
+
+  it("drops an unpublished year with nothing published in it, but keeps a fallow year in the middle", () => {
+    const years = summarizeYears(counts, "2026-09-30");
+    expect(years.map((y) => y.year)).toEqual([2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016]);
+    expect(years.find((y) => y.year === 2017)?.loggedDays).toBe(0);
+  });
+
+  it("includes the year once its grace window has passed", () => {
+    expect(summarizeYears(counts, "2027-01-03")[0].year).toBe(2025);
+    expect(summarizeYears(counts, "2027-01-04")[0]).toMatchObject({ year: 2026, published: true });
+  });
+
+  it("lists the in-progress year once a month of it is out, flagged unpublished", () => {
+    const monthCounts = new Map([
+      ["2026-08", 20],
+      ["2026-09", 30],
+    ]);
+    const [newest] = summarizeYears(counts, "2026-09-30", monthCounts);
+    expect(newest).toEqual({ year: 2026, loggedDays: 240, published: false });
+  });
+
+  it("ignores a published month with nothing logged", () => {
+    const years = summarizeYears(counts, "2026-09-30", new Map([["2026-03", 0]]));
+    expect(years[0].year).toBe(2025);
+  });
+
+  it("is empty when nothing is logged, or nothing is published yet", () => {
+    expect(summarizeYears(new Map(), "2026-09-30")).toEqual([]);
+    expect(summarizeYears(new Map([[2026, 5]]), "2026-09-30")).toEqual([]);
+  });
+});
+
+describe("monthsInRange with a publish date", () => {
+  it("lists only published months", () => {
+    const months = monthsInRange(
+      2026,
+      { first: "2015-06-12", last: "2026-09-30" },
+      new Map(),
+      "2026-09-30"
+    );
+    expect(months.map((m) => m.month)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("adds September once its grace window has passed", () => {
+    const months = monthsInRange(2026, { first: "2015-06-12", last: "2026-10-04" }, new Map(), "2026-10-04");
+    expect(months.map((m) => m.month)).toContain(9);
   });
 });
