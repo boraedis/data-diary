@@ -1,6 +1,7 @@
 import { and, asc, gte, isNotNull, lte } from "drizzle-orm";
 import { days, workouts } from "@/db/schema";
-import { getSleepCalendarData, type SleepDay } from "@/lib/charts";
+import { getExerciseWorkoutRows, getSleepCalendarData, type ExerciseWorkoutRow, type SleepDay } from "@/lib/charts";
+import { addDays } from "@/lib/date";
 import { getDb } from "@/lib/db";
 import type { RecapPeriod } from "@/lib/recap";
 
@@ -19,6 +20,22 @@ import type { RecapPeriod } from "@/lib/recap";
 /** A day's happiness score (0-100, `days.happiness`). */
 export type HappinessDay = { date: string; happiness: number };
 
+/**
+ * A day scoring at or above this counts as a "good day" for the streak card.
+ *
+ * A fixed score rather than a percentile of the period (the moments engine's
+ * approach): scores sit against a ceiling of 100 — a typical year averages
+ * ~88 — so a per-period percentile would hand a bad year its own "good"
+ * days and make the streak mean "your best days, relative to themselves".
+ * A fixed bar means the same thing every period, so the streak is
+ * comparable to the prior one. 80 is deliberately unambitious given that
+ * average; it's an editorial constant, exported so it can be argued with.
+ */
+export const GOOD_DAY_THRESHOLD = 80;
+
+/** A run of consecutive good days. `end` is the last good day, inclusive. */
+export type GoodDayStreak = { length: number; start: string; end: string };
+
 export type RecapHappiness = {
   average: number | null;
   priorAverage: number | null;
@@ -29,6 +46,13 @@ export type RecapHappiness = {
    * deliberately not read here even though it sits in the same row. */
   best: HappinessDay | null;
   worst: HappinessDay | null;
+  /** Longest run of consecutive good days inside the period, null when none
+   * scored at or above `GOOD_DAY_THRESHOLD`. See `longestGoodStreak`. */
+  streak: GoodDayStreak | null;
+  priorStreak: GoodDayStreak | null;
+  /** The period's scored days, oldest first, for the trend chart. Date and
+   * score only, like `best`/`worst`. */
+  series: HappinessDay[];
 };
 
 export type RecapSleep = {
@@ -48,6 +72,9 @@ export type RecapExercise = {
   /** Individual exercises performed. Shown as supporting detail, never as
    * the headline, because it's the number that flatters. */
   exercisesLogged: number;
+  /** The period's workouts in the exact shape the Exercise Mix chart takes
+   * (hours per exercise, oldest first). */
+  mix: ExerciseWorkoutRow[];
 };
 
 export type RecapHealth = {
@@ -63,6 +90,36 @@ function mean(values: number[]): number | null {
 
 function inPeriod(date: string, period: RecapPeriod): boolean {
   return date >= period.start && date <= period.end;
+}
+
+/**
+ * The longest run of consecutive calendar days scoring at or above
+ * `GOOD_DAY_THRESHOLD`, counting only days inside `period`.
+ *
+ * **An unlogged day breaks a run.** A missing day isn't known to be good, and
+ * bridging gaps would let a sparsely-logged year show a long streak it never
+ * verified — so the streak is also a statement about logging consistency.
+ * Consequently a period with few logged days can't produce a long one, which
+ * is correct, and callers gate the card on `MIN_DAYS_FOR_AVERAGE`.
+ *
+ * Ties go to the earliest run (strict comparison, ascending input).
+ */
+export function longestGoodStreak(scored: HappinessDay[], period: RecapPeriod): GoodDayStreak | null {
+  let best: GoodDayStreak | null = null;
+  let run: GoodDayStreak | null = null;
+  for (const day of scored) {
+    if (!inPeriod(day.date, period)) continue;
+    if (day.happiness < GOOD_DAY_THRESHOLD) {
+      run = null;
+      continue;
+    }
+    run =
+      run !== null && addDays(run.end, 1) === day.date
+        ? { length: run.length + 1, start: run.start, end: day.date }
+        : { length: 1, start: day.date, end: day.date };
+    if (best === null || run.length > best.length) best = run;
+  }
+  return best;
 }
 
 /** Happiness for both periods, plus the period's high and low day. */
@@ -114,6 +171,9 @@ export function summarizeHappiness(
     priorDaysLogged: previous.length,
     best,
     worst,
+    streak: longestGoodStreak(current, period),
+    priorStreak: longestGoodStreak(previous, prior),
+    series: current,
   };
 }
 
@@ -172,18 +232,30 @@ export function summarizeSleep(
  */
 async function getExercise(period: RecapPeriod, prior: RecapPeriod): Promise<RecapExercise> {
   const db = getDb();
-  const rows = await db
-    .select({ date: workouts.date })
-    .from(workouts)
-    .where(and(gte(workouts.date, prior.start), lte(workouts.date, period.end)));
+  const [rows, mixRows] = await Promise.all([
+    db
+      .select({ date: workouts.date })
+      .from(workouts)
+      .where(and(gte(workouts.date, prior.start), lte(workouts.date, period.end))),
+    // Filtered in memory, like sleep above: the hours-per-workout fallback
+    // (set durations when a workout has no duration of its own) lives in
+    // `getExerciseWorkoutRows` and shouldn't be re-derived here.
+    getExerciseWorkoutRows(),
+  ]);
 
-  return summarizeExercise(rows, period, prior);
+  return summarizeExercise(
+    rows,
+    period,
+    prior,
+    mixRows.filter((row) => inPeriod(row.date, period))
+  );
 }
 
 export function summarizeExercise(
   rows: { date: string }[],
   period: RecapPeriod,
-  prior: RecapPeriod
+  prior: RecapPeriod,
+  mix: ExerciseWorkoutRow[] = []
 ): RecapExercise {
   const current = rows.filter((row) => inPeriod(row.date, period));
   const previous = rows.filter((row) => inPeriod(row.date, prior));
@@ -192,6 +264,7 @@ export function summarizeExercise(
     daysTrained: new Set(current.map((row) => row.date)).size,
     priorDaysTrained: new Set(previous.map((row) => row.date)).size,
     exercisesLogged: current.length,
+    mix,
   };
 }
 

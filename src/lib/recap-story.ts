@@ -1,7 +1,7 @@
 import { formatDate, formatDuration } from "@/lib/viz/format";
 import { MIN_DAYS_FOR_AVERAGE } from "@/lib/recap";
 import type { RecapEntertainment } from "@/lib/recap-entertainment";
-import type { RecapHealth } from "@/lib/recap-health";
+import { GOOD_DAY_THRESHOLD, type RecapHealth } from "@/lib/recap-health";
 import type { RecapLifeEvent } from "@/lib/recap-life-events";
 import type { RecapMoment } from "@/lib/recap-moments";
 import type { RecapPeoplePlaces } from "@/lib/recap-people-places";
@@ -307,6 +307,28 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
       headline: `The highest you scored a day all ${periodLabel}.`,
       detail: `${formatScore(happiness.best.happiness)} / 100.`,
       weight: 70,
+    });
+  }
+
+  // Gated like the averages: a run is only meaningful against enough logged
+  // days, and a day-long "streak" isn't a story. Two days is the floor for
+  // calling it a streak at all. Weight sits below best-day so it is first
+  // out in a crowded health domain.
+  if (
+    happiness.streak !== null &&
+    happiness.streak.length >= 2 &&
+    happiness.daysLogged >= MIN_DAYS_FOR_AVERAGE
+  ) {
+    const { streak } = happiness;
+    add({
+      id: "good-day-streak",
+      domain: "health",
+      kicker: "Your longest streak",
+      value: streak.length.toLocaleString(),
+      unit: plural(streak.length, "day"),
+      headline: `Good days in a row, every one logged and scoring ${GOOD_DAY_THRESHOLD}+.`,
+      detail: `${formatDate(streak.start, "dayYear")} to ${formatDate(streak.end, "dayYear")}.`,
+      weight: 66,
     });
   }
 

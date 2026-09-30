@@ -2,7 +2,8 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { formatDate, formatDuration } from "@/lib/viz/format";
 import { MIN_DAYS_FOR_AVERAGE, MIN_DAYS_FOR_TOTAL, toRecapStat } from "@/lib/recap";
-import type { RecapHealth } from "@/lib/recap-health";
+import { GOOD_DAY_THRESHOLD, type RecapHealth } from "@/lib/recap-health";
+import { RecapExerciseMix, RecapHappinessTrend } from "@/components/recap/recap-health-charts";
 
 // The health & wellness section of the recap report (issue #201, epic
 // #130): happiness, sleep and exercise.
@@ -33,6 +34,11 @@ export function RecapHealthSection({
   priorLabel: string;
 }) {
   const { happiness, sleep, exercise } = health;
+  // Same gates as the cards above: a trend over a handful of days isn't a
+  // trend, and a mix with no timed workouts is an empty chart.
+  const showTrend = happiness.daysLogged >= MIN_DAYS_FOR_AVERAGE;
+  const showMix = exercise.mix.some((row) => row.hours > 0);
+  const streak = happiness.streak;
   const hasAnything =
     happiness.daysLogged > 0 || sleep.nightsLogged > 0 || exercise.daysTrained > 0;
 
@@ -86,9 +92,46 @@ export function RecapHealthSection({
               priorLoggedDays: exercise.priorDaysTrained,
             })}
           />
+          <RecapStatCard
+            label="Longest good-day streak"
+            unit="days"
+            priorLabel={priorLabel}
+            detail={
+              streak
+                ? `${formatDate(streak.start, "short")} – ${formatDate(streak.end, "short")} · days scoring ${GOOD_DAY_THRESHOLD}+, every day logged`
+                : `No run of days scoring ${GOOD_DAY_THRESHOLD}+`
+            }
+            stat={toRecapStat({
+              value: streak?.length ?? 0,
+              // A streak is a statement about consecutive *logged* days, so
+              // it needs the average's coverage floor, not the total's.
+              loggedDays: happiness.daysLogged,
+              requiredDays: MIN_DAYS_FOR_AVERAGE,
+              prior: happiness.priorStreak?.length ?? 0,
+              priorLoggedDays: happiness.priorDaysLogged,
+            })}
+          />
         </div>
 
         <Highlights health={health} />
+
+        {showTrend ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+              Happiness trend
+            </h3>
+            <RecapHappinessTrend series={happiness.series} periodLabel={periodLabel} />
+          </section>
+        ) : null}
+
+        {showMix ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+              Exercise mix
+            </h3>
+            <RecapExerciseMix rows={exercise.mix} periodLabel={periodLabel} />
+          </section>
+        ) : null}
       </div>
     </ChartCard>
   );
