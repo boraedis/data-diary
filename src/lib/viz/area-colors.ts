@@ -1,7 +1,11 @@
 /**
- * Colours for the Centre of Gravity chart's top ten areas (#215), by
- * all-time rank — rank 0 is the area with the most days. Areas ranked
- * eleventh and below share `AREA_OVERFLOW_COLOR`.
+ * Colours for the top ten "areas" (a metro, else a municipality) by
+ * all-time rank — rank 0 is the area with the most days; eleventh and
+ * below share `AREA_OVERFLOW_COLOR`. Made for the Centre of Gravity map
+ * (#215) and shared with every chart that colours by metro (the Place
+ * Sunburst's Metro mode, the Place Leaderboard's Top Metros), so an area
+ * is one colour everywhere. Ranks all come from one function,
+ * `rankAreas` in src/lib/location-centre.ts.
  *
  * **A chart-specific exception to `categoricalColor`'s five slots**, the
  * same kind the Subs palette is (src/lib/viz/subs.ts). The owner asked for
@@ -54,4 +58,26 @@ export const AREA_OVERFLOW_COLOR = "var(--muted-foreground)";
 /** An area's colour from its all-time rank (0-based). */
 export function areaColorForRank(rank: number): string {
   return AREA_COLORS[rank] ?? AREA_OVERFLOW_COLOR;
+}
+
+/**
+ * The top-ten area colours, keyed the way other charts name areas: a
+ * metro by its name (unique in `metros`), a municipality outside any
+ * metro by its place id. Built server-side by `getAreaColors` from the
+ * same ranking the Centre of Gravity chart uses, so an area is one colour
+ * on every chart. Anything absent is outside the top ten: colour it
+ * `AREA_OVERFLOW_COLOR`.
+ */
+export type AreaColors = { metros: Record<string, string>; places: Record<string, string> };
+
+export function areaColorsFromRanks(ranked: { key: string; label: string; rank: number }[]): AreaColors {
+  const out: AreaColors = { metros: {}, places: {} };
+  for (const area of ranked) {
+    if (area.rank >= AREA_COLORS.length) continue;
+    const color = areaColorForRank(area.rank);
+    const [kind, id] = area.key.split(":");
+    if (kind === "metro") out.metros[area.label] = color;
+    else out.places[id] = color;
+  }
+  return out;
 }

@@ -42,7 +42,8 @@ import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
-import { buildLocationCentreData, type LocationCentreData } from "@/lib/location-centre";
+import { buildLocationCentreData, rankAreas, type LocationCentreData } from "@/lib/location-centre";
+import { areaColorsFromRanks, type AreaColors } from "@/lib/viz/area-colors";
 import type { WorkDay } from "@/lib/work";
 import type { PeopleNetworkDay, PeopleNetworkInput } from "@/lib/people-network";
 export type { LifeTimelineEntry } from "@/lib/life-timeline";
@@ -2101,8 +2102,26 @@ export async function getCountryHistoryData(): Promise<CountryDay[]> {
  * would count a gym day twice.
  */
 export async function getLocationCentreData(): Promise<LocationCentreData> {
+  const [dayRows, catalog, metroRows] = await getAreaInputs();
+  return buildLocationCentreData(dayRows, catalog, metroRows);
+}
+
+/**
+ * Colours for the ten biggest areas (metro, else municipality), for any
+ * chart that colours by metro — the Place Sunburst's Metro mode and the
+ * Place Leaderboard's Top Metros. Same inputs and ranking as
+ * getLocationCentreData, so every chart agrees with the Centre of Gravity
+ * map. Only the colour map leaves here, never coordinates.
+ */
+export async function getAreaColors(): Promise<AreaColors> {
+  const [dayRows, catalog, metroRows] = await getAreaInputs();
+  return areaColorsFromRanks(rankAreas(dayRows, catalog, metroRows));
+}
+
+/** The three queries both of the above need. */
+function getAreaInputs() {
   const db = getDb();
-  const [dayRows, catalog, metroRows] = await Promise.all([
+  return Promise.all([
     db
       .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
       .from(days)
@@ -2122,5 +2141,4 @@ export async function getLocationCentreData(): Promise<LocationCentreData> {
       .from(places),
     db.select({ id: metros.id, name: metros.name, country: metros.country }).from(metros),
   ]);
-  return buildLocationCentreData(dayRows, catalog, metroRows);
 }

@@ -139,11 +139,14 @@ export type LocationCentreData = {
 /** One located vote: part of a day, at a position, in an area. */
 type Vote = { date: string; position: LngLat; weight: number; area: number };
 
-export function buildLocationCentreData(
-  dayRows: CentreDay[],
-  catalog: CentrePlace[],
-  metroRows: CentreMetro[],
-): LocationCentreData {
+/**
+ * The shared first half of `buildLocationCentreData` and `rankAreas`:
+ * every located vote, every area, and each area's all-time rank. One
+ * function so the Centre of Gravity chart and every other chart coloured
+ * by area (via `rankAreas`) can never disagree about which area is
+ * "third" — and so about which colour it gets.
+ */
+function collectVotes(dayRows: CentreDay[], catalog: CentrePlace[], metroRows: CentreMetro[]) {
   const byId = new Map(catalog.map((p) => [p.id, p]));
   const metroById = new Map(metroRows.map((m) => [m.id, m]));
 
@@ -238,7 +241,7 @@ export function buildLocationCentreData(
     daily.push([day.date, round(x), round(y), round(z), ...located.map((l) => l.area)]);
   }
 
-  // --- 2. Areas' fixed position and rank --------------------------------
+  // --- 2. Rank: all-time days per area -----------------------------------
   const votesByArea = new Map<number, Vote[]>();
   for (const v of votes) {
     const list = votesByArea.get(v.area);
@@ -250,6 +253,34 @@ export function buildLocationCentreData(
     .map((_, i) => i)
     .sort((a, b) => totalDays(b) - totalDays(a) || areas[a].key.localeCompare(areas[b].key));
   const rankOf = new Map(rankOrder.map((area, rank) => [area, rank]));
+  return { areas, votes, placedDates, daily, votesByArea, rankOf };
+}
+
+/**
+ * Every area (metro, else municipality — see `areaOf`) with its all-time
+ * rank by located days, most first. What `areaColorForRank` colours by:
+ * the Centre of Gravity chart gets the same ranks from
+ * `buildLocationCentreData`, and the Place Sunburst's and Place
+ * Leaderboard's metro views read them through `getAreaColors`, so an area
+ * is one colour on every chart.
+ */
+export function rankAreas(
+  dayRows: CentreDay[],
+  catalog: CentrePlace[],
+  metroRows: CentreMetro[],
+): (CentreArea & { rank: number })[] {
+  const { areas, rankOf } = collectVotes(dayRows, catalog, metroRows);
+  return areas.map((area, i) => ({ ...area, rank: rankOf.get(i)! })).sort((a, b) => a.rank - b.rank);
+}
+
+export function buildLocationCentreData(
+  dayRows: CentreDay[],
+  catalog: CentrePlace[],
+  metroRows: CentreMetro[],
+): LocationCentreData {
+  const { areas, votes, placedDates, daily, votesByArea, rankOf } = collectVotes(dayRows, catalog, metroRows);
+
+  // --- Areas' fixed position -------------------------------------------------
   const summaries: CentreAreaSummary[] = areas.map((area, i) => ({
     ...area,
     // Every area here has at least one vote (it was only created for a
@@ -258,7 +289,7 @@ export function buildLocationCentreData(
     rank: rankOf.get(i)!,
   }));
 
-  // --- 3. Per-year coverage and area days --------------------------------
+  // --- Per-year coverage and area days ---------------------------------------
   // From the first day with a place to the last, not just the located
   // ones, so a year whose places all lack coordinates still counts in the
   // coverage readout instead of vanishing from it.

@@ -17,8 +17,10 @@ import { asc, isNotNull, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { days } from "@/db/schema";
+import type { AreaColors } from "@/lib/viz/area-colors";
 import {
   getAdminRegionVisitData,
+  getAreaColors,
   getCountryVisitData,
   getExerciseWorkoutRows,
   getPlaceHierarchyData,
@@ -278,6 +280,14 @@ export async function getPublicUnloggedTravelDetails(
 
 export function getPublicPlaceHierarchyData(): Promise<PlaceHierarchyRow[]> {
   return getPlaceHierarchyData();
+}
+
+/** The public sunburst's Metro-mode colours, so it matches the private
+ * one. Reused whole: it's a map from metro name / place id (both already
+ * in the public hierarchy rows above) to a colour. The ranking behind it
+ * reads coordinates, but none of them leave the server. */
+export function getPublicAreaColors(): Promise<AreaColors> {
+  return getAreaColors();
 }
 
 export function getPublicExerciseWorkoutRows(): Promise<ExerciseWorkoutRow[]> {

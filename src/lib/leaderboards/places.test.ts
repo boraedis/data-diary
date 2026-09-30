@@ -56,6 +56,22 @@ describe("buildPlaceLeaderboard", () => {
     expect(names(hood)).toEqual([["Midtown", 1]]);
   });
 
+  it("colours a metro by its shared area colour, with the country under its name", () => {
+    const rows = buildPlaceLeaderboard(days, catalog, metros, { mode: "metro" }, {
+      metros: { "Metro Atlanta": "#ed4b7c" },
+      places: {},
+    });
+    expect(rows[0].name).toBe("Metro Atlanta");
+    expect(rows[0].color).toBe("#ed4b7c");
+    expect(rows[0].detail).toBe("USA");
+    expect(rows[0].context).toBeNull();
+  });
+
+  it("leaves a metro outside the top ten uncoloured", () => {
+    const rows = buildPlaceLeaderboard(days, catalog, metros, { mode: "metro" }, { metros: {}, places: {} });
+    expect(rows[0].color).toBeNull();
+  });
+
   it("rolls everything beneath a city into its metro", () => {
     const rows = buildPlaceLeaderboard(days, catalog, metros, { mode: "metro" });
     expect(names(rows)).toEqual([["Metro Atlanta", 1.67]]);

@@ -5,6 +5,8 @@ import { days, metros, places } from "@/db/schema";
 import { computeRankings, STANDARD_RANK_WINDOWS, type RankAppearance } from "@/lib/ranking";
 import { toLeaderboardRows, type LeaderboardColumns, type LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { LeaderboardOption } from "@/lib/leaderboards/options";
+import { rankAreas } from "@/lib/location-centre";
+import { areaColorsFromRanks, type AreaColors } from "@/lib/viz/area-colors";
 
 // The places leaderboard (#115): slot-weighted days at each place, ranked
 // four ways — by place, by the region it sits in, by metro, and by
@@ -116,6 +118,10 @@ export function buildPlaceLeaderboard(
   catalog: PlaceCatalogRow[],
   metroRows: MetroRow[],
   options: PlaceLeaderboardOptions,
+  /** Metro mode's colours — the shared area colours (#215), so a metro is
+   * the colour here that it is on the Centre of Gravity map and the Place
+   * Sunburst. Omitted: metros are coloured by their country, as before. */
+  areaColors?: AreaColors,
 ): LeaderboardRow[] {
   const byId = new Map(catalog.map((p) => [p.id, p]));
   const metroById = new Map(metroRows.map((m) => [m.id, m]));
@@ -166,12 +172,13 @@ export function buildPlaceLeaderboard(
         const withMetro = [...chainOf(place)].reverse().find((p) => p.metroId !== null);
         const metro = withMetro?.metroId != null ? metroById.get(withMetro.metroId) : undefined;
         if (!metro || !withMetro) return null;
-        return {
-          key: String(metro.id),
-          name: metro.name,
-          context: metro.country ?? chainOf(withMetro)[0].name,
-          color: withMetro.rootColor,
-        };
+        const country = metro.country ?? chainOf(withMetro)[0].name;
+        return areaColors
+          ? // The country moves to the name's secondary line and the metro's
+            // own colour tints the name — tinting a "Country" column with a
+            // metro's colour would read as a colour for the country.
+            { key: String(metro.id), name: metro.name, detail: country, color: areaColors.metros[metro.name] ?? null }
+          : { key: String(metro.id), name: metro.name, context: country, color: withMetro.rootColor };
       }
       case "category": {
         if (!place.category) return null;
@@ -236,12 +243,9 @@ export function placeColumns(options: PlaceLeaderboardOptions): LeaderboardColum
         contextDescription: `Every day at a place inside this ${options.level.toLowerCase()} counts toward it.`,
       };
     case "metro":
-      return {
-        ...base,
-        nameHeader: "Metro",
-        contextHeader: "Country",
-        contextDescription: "Every day at a place inside the metro counts toward it.",
-      };
+      // No context column: the country sits under the name, which carries
+      // the metro's own colour (see buildPlaceLeaderboard's metro case).
+      return { ...base, nameHeader: "Metro" };
     case "category":
       return { ...base, nameHeader: options.level === "category" ? "Category" : "Subcategory" };
   }
@@ -273,10 +277,19 @@ export async function getPlaceLeaderboardData(options: PlaceLeaderboardOptions):
         category: places.category,
         subcategory: places.subcategory,
         metroId: places.metroId,
+        lat: places.lat,
+        lng: places.lng,
       })
       .from(places)
       .leftJoin(rootPlaces, sql`${rootPlaces.id} = nullif(split_part(${places.idPath}, '/', 1), '')::int`),
     db.select({ id: metros.id, name: metros.name, country: metros.country }).from(metros),
   ]);
-  return buildPlaceLeaderboard(dayRows, catalog, metroRows, options);
+  // Metro mode ranks areas the Centre of Gravity way (rankAreas), from the
+  // rows already fetched, so the colours match that chart's without a
+  // second round trip.
+  const areaColors =
+    options.mode === "metro"
+      ? areaColorsFromRanks(rankAreas(dayRows, catalog, metroRows))
+      : undefined;
+  return buildPlaceLeaderboard(dayRows, catalog, metroRows, options, areaColors);
 }

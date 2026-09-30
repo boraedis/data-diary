@@ -13,6 +13,7 @@ import {
   type HierarchyDatum,
 } from "@/lib/viz/hierarchy";
 import type { PlaceHierarchyRow } from "@/lib/charts";
+import { AREA_OVERFLOW_COLOR, type AreaColors } from "@/lib/viz/area-colors";
 import { DONUT_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { PLACES_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
@@ -164,7 +165,7 @@ function extractMunicipalities(
   };
 }
 
-function buildMetroTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
+export function buildMetroTree(rows: PlaceHierarchyRow[], areaColors?: AreaColors): HierarchyDatum | null {
   // Unpruned, like buildGeographyTree — a Country/State node with no value
   // of its own is still the required link that gets a Municipality's real
   // subtree attached to it before extraction.
@@ -202,22 +203,35 @@ function buildMetroTree(rows: PlaceHierarchyRow[]): HierarchyDatum | null {
     else metroGroups.set(metroName, [municipality]);
   }
 
+  // Each top-level branch is an "area" in the Centre of Gravity chart's
+  // sense (a metro, else a municipality), so it takes that chart's colour
+  // for it (owner's ask): an area is one colour wherever it's drawn. The
+  // ten biggest have their own; everything else is the shared muted grey,
+  // set explicitly — left uncoloured, the donut would hand it a
+  // categorical slot that could match one of the ten.
+  const colorOf = (color: string | undefined) => (areaColors ? { color: color ?? AREA_OVERFLOW_COLOR } : {});
   const topLevel: HierarchyDatum[] = [
     ...[...metroGroups.entries()].map(([metroName, children]) => ({
       key: `__metro_${metroName}__`,
       name: metroName,
       children,
+      ...colorOf(areaColors?.metros[metroName]),
     })),
-    ...standaloneMunicipalities,
+    ...standaloneMunicipalities.map((m) => ({ ...m, ...colorOf(areaColors?.places[m.key]) })),
   ];
   if (remainder.children && remainder.children.length > 0) {
-    topLevel.push({ key: "__unspecified__", name: "Unspecified", children: remainder.children });
+    topLevel.push({
+      key: "__unspecified__",
+      name: "Unspecified",
+      children: remainder.children,
+      ...(areaColors ? { color: AREA_OVERFLOW_COLOR } : {}),
+    });
   }
 
   return pruneEmptyBranches({ key: "__root__", name: "All places", children: topLevel });
 }
 
-const TREE_BUILDERS: Record<PlaceGrouping, (rows: PlaceHierarchyRow[]) => HierarchyDatum | null> = {
+const TREE_BUILDERS: Record<PlaceGrouping, (rows: PlaceHierarchyRow[], areaColors?: AreaColors) => HierarchyDatum | null> = {
   geography: buildGeographyTree,
   category: buildCategoryTree,
   metro: buildMetroTree,
@@ -225,17 +239,21 @@ const TREE_BUILDERS: Record<PlaceGrouping, (rows: PlaceHierarchyRow[]) => Hierar
 
 export function PlaceHierarchyExplorer({
   rows,
+  areaColors,
   backHref,
   backLabel,
 }: {
   rows: PlaceHierarchyRow[];
+  /** Colours for Metro mode's top-level areas (`getAreaColors`). Omit to
+   * let the donut colour them by its own palette. */
+  areaColors?: AreaColors;
   backHref?: string;
   backLabel?: string;
 }) {
   const [grouping, setGrouping] = useState<PlaceGrouping>("geography");
   const [rings, setRings] = useState<RingCount>("2");
 
-  const tree = useMemo(() => TREE_BUILDERS[grouping](rows), [rows, grouping]);
+  const tree = useMemo(() => TREE_BUILDERS[grouping](rows, areaColors), [rows, grouping, areaColors]);
 
   /** Depth of the deepest branch, so "All" draws exactly as many rings as
    * the tree actually has rather than a guessed ceiling. Measured from the

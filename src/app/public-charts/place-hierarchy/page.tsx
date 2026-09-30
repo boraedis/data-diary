@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { PlaceHierarchyExplorer } from "@/components/charts/place-hierarchy-explorer";
-import { getPublicPlaceHierarchyData } from "@/lib/public-charts";
+import { getPublicAreaColors, getPublicPlaceHierarchyData } from "@/lib/public-charts";
 
 export const metadata: Metadata = {
   title: "Place Sunburst — Data Diary",
@@ -14,6 +14,6 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function PublicPlaceHierarchyChartPage() {
-  const rows = await getPublicPlaceHierarchyData();
-  return <PlaceHierarchyExplorer rows={rows} backHref="/public-charts" backLabel="Charts" />;
+  const [rows, areaColors] = await Promise.all([getPublicPlaceHierarchyData(), getPublicAreaColors()]);
+  return <PlaceHierarchyExplorer rows={rows} areaColors={areaColors} backHref="/public-charts" backLabel="Charts" />;
 }

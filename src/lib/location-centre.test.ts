@@ -4,6 +4,7 @@ import {
   indexDaily,
   mergeNearbyLabels,
   rangeSummary,
+  rankAreas,
   rollingTrail,
   windowDetail,
   windowMix,
@@ -299,5 +300,24 @@ describe("rangeSummary", () => {
     expect(dcLate.position).toEqual(dcAll.position);
     expect(dcAll.rank).toBe(0);
     expect(dcLate.rank).toBe(0);
+  });
+});
+
+describe("rankAreas", () => {
+  const days = [...daysAt("2020-01", 20, 4), ...daysAt("2020-02", 25, 11), ...daysAt("2020-03", 5, 22)];
+
+  it("ranks areas by located days, most first", () => {
+    expect(rankAreas(days, CATALOG, METROS).map((a) => [a.label, a.rank])).toEqual([
+      ["Dubai", 0],
+      ["Washington DC", 1],
+      ["Bursa", 2],
+    ]);
+  });
+
+  it("agrees with the Centre of Gravity chart's own ranks", () => {
+    const data = buildLocationCentreData(days, CATALOG, METROS);
+    for (const area of rankAreas(days, CATALOG, METROS)) {
+      expect(data.areas.find((a) => a.key === area.key)!.rank).toBe(area.rank);
+    }
   });
 });
