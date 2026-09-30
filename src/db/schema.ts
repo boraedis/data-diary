@@ -1246,6 +1246,29 @@ export const profileSettings = pgTable("profile_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Which recaps the owner has already opened (#518) — drives the "new recap
+// ready" badge. Same single-row pattern as profileSettings: one identity, so
+// `id` is pinned to 1.
+//
+// Stored here rather than in `localStorage` because this app is used from
+// more than one device, and a per-browser marker would badge a recap again
+// on the phone after it was read on the laptop.
+//
+// `seenKeys` is a set of period keys ("2026" for a year, "2026-03" for a
+// month), not a high-water mark: a high-water mark would clear every older
+// unseen recap the moment a newer one was opened, and each recap should be
+// badged until *it* is read.
+//
+// `baselineDate` is the day this row was first created. A recap whose
+// publish date is on or before it counts as already seen, so the first run
+// after deploy doesn't badge every historical year and month as new.
+export const recapSeen = pgTable("recap_seen", {
+  id: smallint("id").primaryKey().default(1),
+  baselineDate: date("baseline_date", { mode: "string" }).notNull(),
+  seenKeys: text("seen_keys").array().notNull().default([]),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Project-level settings for the public landing page (#12/#82) — the
 // project's own identity (name, tagline, goal blurb), not the diary
 // owner's personal identity above. Kept as a separate table rather than

@@ -3,6 +3,7 @@ import { ChartPage } from "@/components/charts/chart-page";
 import { RecapMonthNav } from "@/components/recap/recap-month-nav";
 import { RecapGate } from "@/components/recap/recap-gate";
 import { listRecapMonths, parseYearSegment, yearPeriod } from "@/lib/recap";
+import { getUnseenRecaps } from "@/lib/recap-seen";
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +29,14 @@ export default async function RecapYearPage({
   if (year === null) notFound();
 
   const period = yearPeriod(year);
-  const months = await listRecapMonths(year);
+  const [months, unseen] = await Promise.all([listRecapMonths(year), getUnseenRecaps()]);
 
   return (
     <ChartPage
       title={`Recap ${period.label}`}
       backHref="/recap"
       backLabel="Recap"
-      filters={months.length > 0 ? <RecapMonthNav year={year} months={months} current={null} /> : null}
+      filters={months.length > 0 ? <RecapMonthNav year={year} months={months} current={null} unseenMonths={unseen.months} /> : null}
     >
       <RecapGate period={period} preview={preview === "1"} />
     </ChartPage>

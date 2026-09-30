@@ -16,11 +16,14 @@ export function RecapMonthNav({
   year,
   months,
   current,
+  unseenMonths = [],
 }: {
   year: number;
   months: RecapMonthSummary[];
   /** The month on screen, or null on the whole-year page. */
   current: number | null;
+  /** "YYYY-MM" keys of published months not yet opened (#518). */
+  unseenMonths?: string[];
 }) {
   if (months.length === 0) return null;
 
@@ -39,6 +42,8 @@ export function RecapMonthNav({
         </Link>
         {months.map((summary) => {
           const active = summary.month === current;
+          // The month on screen is being read right now, so it isn't "new".
+          const unseen = !active && unseenMonths.includes(`${year}-${monthSegment(summary.month)}`);
           return (
             <Link
               key={summary.month}
@@ -55,6 +60,12 @@ export function RecapMonthNav({
               })}
             >
               {formatDate(summary.period.start, "monthShort")}
+              {unseen ? (
+                <>
+                  <span aria-hidden className="ml-1 size-1.5 rounded-full bg-primary" />
+                  <span className="sr-only">(new)</span>
+                </>
+              ) : null}
             </Link>
           );
         })}

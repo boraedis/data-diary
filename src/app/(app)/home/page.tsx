@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GoToDate } from "@/components/go-to-date";
 import { RecentDaysScroller } from "@/components/recent-days-scroller";
 import { getHomeDashboardData, type BirthdayEntry } from "@/lib/home";
+import { countUnseen, getUnseenRecaps } from "@/lib/recap-seen";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,8 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 export default async function HomePage() {
-  const data = await getHomeDashboardData();
+  const [data, unseenRecaps] = await Promise.all([getHomeDashboardData(), getUnseenRecaps()]);
+  const newRecaps = countUnseen(unseenRecaps);
   const todayDate = data.recentDays[data.recentDays.length - 1]?.date ?? "";
 
   return (
@@ -110,7 +112,14 @@ export default async function HomePage() {
             {SECTION_LINKS.map(({ href, label }) => (
               <Link key={href} href={href}>
                 <Card className="h-full transition-colors hover:bg-accent">
-                  <CardContent className="py-3 text-sm font-medium">{label}</CardContent>
+                  <CardContent className="flex items-center gap-2 py-3 text-sm font-medium">
+                    {label}
+                    {href === "/recap" && newRecaps > 0 ? (
+                      <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+                        {newRecaps} new
+                      </span>
+                    ) : null}
+                  </CardContent>
                 </Card>
               </Link>
             ))}
