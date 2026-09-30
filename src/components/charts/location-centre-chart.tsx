@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { Feature, MultiPoint } from "geojson";
@@ -19,11 +20,14 @@ import {
   indexDaily,
   mergeNearbyLabels,
   rollingTrail,
+  windowDetail,
   windowMix,
   type CentreArea,
   type CentrePeriod,
   type LocationCentreData,
+  type AreaShare,
   type TrailPoint,
+  type WindowDetail,
 } from "@/lib/location-centre";
 import { daysBetween } from "@/lib/date";
 import type { LngLat } from "@/lib/viz/geo-centre";
@@ -97,6 +101,13 @@ const POINT_HIT_RADIUS = 7;
  * area; the names stop at three so the tooltip stays compact. */
 const MIX_NAMED = 3;
 const MIX_BAR_WIDTH = 176;
+
+/** The detail panel's lists stop here, with a "+N more" line after. */
+const DETAIL_AREAS = 12;
+const DETAIL_COUNTRIES = 6;
+const DETAIL_FIRST_VISITS = 8;
+/** A clicked dot is drawn at this radius until the panel closes. */
+const SELECTED_RADIUS = 6;
 const BRIDGE_COLOR = "var(--muted-foreground)";
 
 const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
@@ -104,6 +115,12 @@ const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
 export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const [view, setView] = useState<string>(ALL);
   const [windowDays, setWindowDays] = useState<WindowDays>("365");
+  // The trail point whose detail panel is open, by marker id. Deliberately
+  // not reset when the pickers change: an id that no longer exists simply
+  // resolves to no panel below, and one that still does (the same point
+  // under a different window) keeps its panel, now describing the new
+  // window.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const current: CentrePeriod = useMemo(
     () => (view === ALL ? data.all : (data.years.find((y) => y.period === view) ?? data.all)),
@@ -158,10 +175,11 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     return out;
   }, [runs, colorOf]);
 
-  const { markers, valueById, secondaryById, mixById } = useMemo(() => {
+  const { markers, valueById, secondaryById, mixById, dateById } = useMemo(() => {
+    const dateById = new Map<string, string>();
     const valueById = new Map<string, number>();
     const secondaryById = new Map<string, GeoSecondaryRow>();
-    const mixById = new Map<string, { area: number; share: number }[]>();
+    const mixById = new Map<string, AreaShare[]>();
 
     // Places first, so the trail's dots draw on top of them.
     const baseMarkers: GeoMarker[] = current.bases.map((b) => {
@@ -195,6 +213,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
      * are this one window's. */
     const describe = (id: string, p: TrailPoint) => {
       valueById.set(id, p.days);
+      dateById.set(id, p.date);
       mixById.set(id, windowMix(index, p.date, Number(windowDays)));
       return formatDate(p.date, "monthYear");
     };
@@ -208,7 +227,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         label: describe(id, first),
         color: colorOf(first.date),
         opacity: 1,
-        radius: ANCHOR_RADIUS,
+        radius: id === selectedId ? SELECTED_RADIUS : ANCHOR_RADIUS,
         annotation: group.label,
       };
     });
@@ -232,8 +251,8 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
           position: p.position,
           label: describe(id, p),
           color: colorOf(p.date),
-          opacity: 0.9,
-          radius: POINT_RADIUS,
+          opacity: id === selectedId ? 1 : 0.9,
+          radius: id === selectedId ? SELECTED_RADIUS : POINT_RADIUS,
           hitRadius: POINT_HIT_RADIUS,
         });
       }
@@ -241,8 +260,38 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
 
     // Bi-monthly points before the year dots, so a year dot wins where
     // their hover targets overlap.
-    return { markers: [...baseMarkers, ...pointMarkers, ...anchorMarkers], valueById, secondaryById, mixById };
-  }, [current, runs, view, colorOf, index, windowDays]);
+    return {
+      markers: [...baseMarkers, ...pointMarkers, ...anchorMarkers],
+      valueById,
+      secondaryById,
+      mixById,
+      dateById,
+    };
+    // selectedId rebuilds the map on a click, to enlarge the clicked dot.
+    // A click, unlike a hover, is rare enough for that to cost nothing.
+  }, [current, runs, view, colorOf, index, windowDays, selectedId]);
+
+  // Only trail points open a panel; an area circle's click does nothing.
+  const onMarkerClick = useCallback(
+    (m: GeoMarker) => {
+      const id = String(m.id);
+      if (dateById.has(id)) setSelectedId((prev) => (prev === id ? null : id));
+    },
+    [dateById],
+  );
+  const selectedDate = selectedId ? dateById.get(selectedId) : undefined;
+  const detail = useMemo(
+    () => (selectedDate ? windowDetail(index, data.areas, selectedDate, Number(windowDays)) : null),
+    [selectedDate, index, data, windowDays],
+  );
+  useEffect(() => {
+    if (!detail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detail]);
 
   // Stable accessors — both are useD3 dependencies inside InteractiveGeo.
   const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
@@ -353,23 +402,37 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         ) : null}
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={320}>
           {({ width, height }) => (
-            <InteractiveGeo<CountryProperties>
-              features={WORLD}
-              width={width}
-              height={height}
-              getValue={() => null}
-              getLabel={(f) => f.properties.name}
-              regionsAsBasemap
-              fitTo={fitTo}
-              markers={markers}
-              routes={routes}
-              getMarkerValue={getMarkerValue}
-              formatMarkerValue={formatDays}
-              markerValueLabel="located days"
-              getMarkerSecondaryValue={getMarkerSecondary}
-              getMarkerDetail={getMarkerDetail}
-              ariaLabel={`World map. A line traces the centre of mass of where I spent my days${view === ALL ? "" : ` in ${view}`}, averaged over a ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} window and coloured from earliest to latest, with a labelled dot where each ${view === ALL ? "year" : "month"} begins. Shaded circles are the places I spent time, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details.`}
-            />
+            <div className="relative" style={{ width, height }}>
+              <InteractiveGeo<CountryProperties>
+                features={WORLD}
+                width={width}
+                height={height}
+                getValue={() => null}
+                getLabel={(f) => f.properties.name}
+                regionsAsBasemap
+                fitTo={fitTo}
+                markers={markers}
+                routes={routes}
+                getMarkerValue={getMarkerValue}
+                formatMarkerValue={formatDays}
+                markerValueLabel="located days"
+                getMarkerSecondaryValue={getMarkerSecondary}
+                getMarkerDetail={getMarkerDetail}
+                onMarkerClick={onMarkerClick}
+                ariaLabel={`World map. A line traces the centre of mass of where I spent my days${view === ALL ? "" : ` in ${view}`}, averaged over a ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} window and coloured from earliest to latest, with a labelled dot where each ${view === ALL ? "year" : "month"} begins. Shaded circles are the places I spent time, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
+              />
+              {detail && selectedDate ? (
+                <DetailPanel
+                  detail={detail}
+                  title={formatDate(selectedDate, "monthYear")}
+                  windowLabel={WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label}
+                  areas={data.areas}
+                  colorOf={areaColor}
+                  onClose={() => setSelectedId(null)}
+                  maxHeight={height - 16}
+                />
+              ) : null}
+            </div>
           )}
         </ResponsiveChart>
       </ChartCard>
@@ -389,7 +452,7 @@ function MixDetail({
   areas,
   colorOf,
 }: {
-  mix: { area: number; share: number }[];
+  mix: AreaShare[];
   areas: CentreArea[];
   colorOf: (area: number) => string;
 }) {
@@ -413,5 +476,130 @@ function MixDetail({
         {rest > 0 ? <span className="text-muted-foreground tabular-nums">+{formatPercent(rest)} elsewhere</span> : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The click-to-open breakdown for one trail point (owner's ask: the hover
+ * tooltip is deliberately small, so the full picture lives one click
+ * away). Pinned over the map's top-right corner, full-width on a phone,
+ * scrolling within the map's height. Stays open while the reader pans
+ * and zooms; closes from its button, Escape, or clicking the same dot.
+ */
+function DetailPanel({
+  detail,
+  title,
+  windowLabel,
+  areas,
+  colorOf,
+  onClose,
+  maxHeight,
+}: {
+  detail: WindowDetail;
+  title: string;
+  windowLabel: string;
+  areas: CentreArea[];
+  colorOf: (area: number) => string;
+  onClose: () => void;
+  maxHeight: number;
+}) {
+  const shownAreas = detail.areas.slice(0, DETAIL_AREAS);
+  const hiddenAreas = detail.areas.slice(DETAIL_AREAS);
+  const hiddenShare = hiddenAreas.reduce((sum, a) => sum + a.share, 0);
+  const topShare = detail.areas[0]?.share ?? 1;
+  const shownVisits = detail.firstVisits.slice(0, DETAIL_FIRST_VISITS);
+  const extraVisits = detail.firstVisits.length - shownVisits.length;
+  const extraCountries = detail.countries.length - DETAIL_COUNTRIES;
+
+  return (
+    <section
+      aria-label={`${title} breakdown`}
+      className="absolute top-2 right-2 left-2 z-20 flex flex-col gap-3 overflow-y-auto rounded-lg border border-border bg-popover p-3 text-xs shadow-lg sm:left-auto sm:w-80"
+      style={{ maxHeight }}
+    >
+      <header className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-sm font-semibold text-popover-foreground">{title}</h2>
+          <p className="text-muted-foreground">
+            {windowLabel} window, {formatDate(detail.from, "dayYear")} – {formatDate(detail.to, "dayYear")}
+          </p>
+          <p className="text-muted-foreground">
+            {formatThousandsNumber(detail.locatedDays)} of {formatThousandsNumber(detail.spanDays)} days located
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close breakdown"
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <X aria-hidden className="size-4" />
+        </button>
+      </header>
+
+      <div className="flex flex-col gap-1.5">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Areas</h3>
+        <ol className="flex flex-col gap-1">
+          {shownAreas.map((a) => (
+            <li key={a.area} className="grid grid-cols-[minmax(0,1fr)_4rem_2.5rem] items-center gap-2">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span aria-hidden className="inline-block size-2 shrink-0 rounded-full" style={{ background: colorOf(a.area) }} />
+                <span className="truncate text-popover-foreground">{areas[a.area].label}</span>
+                {areas[a.area].context ? (
+                  <span className="shrink-0 truncate text-muted-foreground">{areas[a.area].context}</span>
+                ) : null}
+              </span>
+              {/* Bars scale to the largest area, not to 100%, so a window
+                  with no majority still shows the difference between its
+                  top few. */}
+              <span aria-hidden className="h-1.5 rounded-full bg-muted">
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: `${(a.share / topShare) * 100}%`, background: colorOf(a.area) }}
+                />
+              </span>
+              <span className="text-right tabular-nums text-popover-foreground" title={`${formatDays(a.days)} days`}>
+                {formatPercent(a.share)}
+              </span>
+            </li>
+          ))}
+        </ol>
+        {hiddenAreas.length > 0 ? (
+          <p className="text-muted-foreground">
+            +{hiddenAreas.length} more area{hiddenAreas.length === 1 ? "" : "s"}, {formatPercent(hiddenShare)} of days
+          </p>
+        ) : null}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Countries</h3>
+        <p className="leading-relaxed text-popover-foreground">
+          {detail.countries.slice(0, DETAIL_COUNTRIES).map((c, i) => (
+            <span key={c.name}>
+              {i > 0 ? <span className="text-muted-foreground"> · </span> : null}
+              {c.name} <span className="tabular-nums text-muted-foreground">{formatPercent(c.share)}</span>
+            </span>
+          ))}
+          {extraCountries > 0 ? <span className="text-muted-foreground"> · +{extraCountries} more</span> : null}
+        </p>
+      </div>
+
+      {shownVisits.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            First visited in this window
+          </h3>
+          <ul className="flex flex-col gap-0.5">
+            {shownVisits.map((v) => (
+              <li key={v.area} className="flex justify-between gap-2">
+                <span className="truncate text-popover-foreground">{areas[v.area].label}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">{formatDate(v.date, "dayYear")}</span>
+              </li>
+            ))}
+          </ul>
+          {extraVisits > 0 ? <p className="text-muted-foreground">+{extraVisits} more</p> : null}
+        </div>
+      ) : null}
+    </section>
   );
 }

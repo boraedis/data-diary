@@ -471,6 +471,10 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * label/value pair (#215's bar of a window's place mix). Return null for
    * nothing. */
   getMarkerDetail?: (marker: GeoMarker) => React.ReactNode;
+  /** Called when a marker is clicked, or activated with Enter/Space while
+   * focused. Omit and a marker click does nothing (beyond not resetting
+   * the view). Pass a stable reference — it's a useD3 dependency. */
+  onMarkerClick?: (marker: GeoMarker) => void;
   ariaLabel?: string;
   /** The subdivisions to draw in place of a clicked region, or null to
    * fall back to zoom-to-bounds for it (#107) — which is the right answer
@@ -583,6 +587,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   getMarkerSecondaryValue,
   markerSecondaryLabel = "detail",
   getMarkerDetail,
+  onMarkerClick,
   ariaLabel = "Choropleth map. Scroll or pinch to zoom, drag to pan. Click a region to zoom into it, click the background to reset. Hover a region or marker to see its value.",
   resolveExpansion,
   fitTo,
@@ -1166,10 +1171,21 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         // Stops a marker click from also reaching the background reset
         // handler above — same reasoning as the region click handler; a
         // marker isn't zoomable to bounds the way a region is, so this
-        // only suppresses the reset, it doesn't zoom anywhere.
-        markerNodes.style("cursor", "pointer").on("click", (event) => {
-          event.stopPropagation();
-        });
+        // only suppresses the reset, it doesn't zoom anywhere. Then hands
+        // the marker to `onMarkerClick`, if the chart wants clicks (#215
+        // opens a detail panel). Enter/Space do the same from the keyboard,
+        // since attachMarkHover already makes every marker focusable.
+        markerNodes
+          .style("cursor", "pointer")
+          .on("click", (event, d) => {
+            event.stopPropagation();
+            onMarkerClick?.(d.marker);
+          })
+          .on("keydown", (event: KeyboardEvent, d) => {
+            if (!onMarkerClick || (event.key !== "Enter" && event.key !== " ")) return;
+            event.preventDefault();
+            onMarkerClick(d.marker);
+          });
 
         attachMarkHover<{ marker: GeoMarker; xy: [number, number] }>(
           markerNodes as unknown as d3.Selection<d3.BaseType, { marker: GeoMarker; xy: [number, number] }, d3.BaseType, unknown>,
@@ -1231,6 +1247,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       routes,
       regionsAsBasemap,
       noDataColor,
+      onMarkerClick,
     ],
   );
 

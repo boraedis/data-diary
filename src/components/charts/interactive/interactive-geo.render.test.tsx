@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import * as d3 from "d3";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
@@ -314,5 +314,22 @@ describe("InteractiveGeo hit radius and marker detail", () => {
     fireEvent.focus(container.querySelector("circle.geo-marker")!);
     expect(tooltip().getByText("Mar 2019")).toBeTruthy();
     expect(tooltip().getByText("Istanbul 64%")).toBeTruthy();
+  });
+});
+
+describe("InteractiveGeo marker clicks", () => {
+  it("hands a clicked or keyboard-activated marker to onMarkerClick", () => {
+    const onMarkerClick = vi.fn();
+    const { container } = renderMap({
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019" }],
+      onMarkerClick,
+    });
+    const dot = container.querySelector("circle.geo-marker")!;
+    fireEvent.click(dot);
+    expect(onMarkerClick).toHaveBeenCalledTimes(1);
+    expect(onMarkerClick.mock.calls[0][0].id).toBe("p");
+    fireEvent.keyDown(dot, { key: "Enter" });
+    fireEvent.keyDown(dot, { key: "a" });
+    expect(onMarkerClick).toHaveBeenCalledTimes(2);
   });
 });

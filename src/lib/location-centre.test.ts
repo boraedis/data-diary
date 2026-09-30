@@ -4,6 +4,7 @@ import {
   indexDaily,
   mergeNearbyLabels,
   rollingTrail,
+  windowDetail,
   windowMix,
   type CentreDay,
   type CentreMetro,
@@ -202,5 +203,50 @@ describe("mergeNearbyLabels", () => {
     const groups = mergeNearbyLabels(pts, 25);
     expect(groups.map((g) => g.label)).toEqual(["2016–2018, 2020", "2019"]);
     expect(groups[0].members).toHaveLength(4);
+  });
+});
+
+describe("windowDetail", () => {
+  // DC all of January; Dubai (first ever visit) Feb 1–10; Bursa and DC
+  // split Mar 1–10.
+  const data = buildLocationCentreData(
+    [...daysAt("2020-01", 25, 4), ...daysAt("2020-02", 10, 11), ...daysAt("2020-03", 10, 22, 4)],
+    CATALOG,
+    METROS,
+  );
+  const index = indexDaily(data.daily);
+  const label = (area: number) => data.areas[area].label;
+
+  it("covers the window's calendar days and counts the located ones", () => {
+    const d = windowDetail(index, data.areas, "2020-02-05", 30)!;
+    expect(d.from).toBe("2020-01-21");
+    expect(d.to).toBe("2020-02-19");
+    expect(d.spanDays).toBe(30);
+    // Jan 21–25 and Feb 1–10 are logged; Jan 26–31 and Feb 11–19 aren't.
+    expect(d.locatedDays).toBe(15);
+    expect(d.areas.map((a) => label(a.area))).toEqual(["Dubai", "Washington DC"]);
+    expect(d.areas[0].days).toBeCloseTo(10);
+  });
+
+  it("rolls areas up by country", () => {
+    const d = windowDetail(index, data.areas, "2020-03-05", 10)!;
+    // Mar 1–10 split DC/Bursa: half USA, half Turkey.
+    expect(d.countries.map((c) => c.name).sort()).toEqual(["Turkey", "USA"]);
+    expect(d.countries[0].share).toBeCloseTo(0.5);
+  });
+
+  it("lists only areas first visited inside the window, in order", () => {
+    const wide = windowDetail(index, data.areas, "2020-02-20", 60)!;
+    expect(wide.firstVisits.map((v) => [label(v.area), v.date])).toEqual([
+      ["Dubai", "2020-02-01"],
+      ["Bursa", "2020-03-01"],
+    ]);
+    // DC was first visited in January, before this window opens.
+    expect(wide.firstVisits.some((v) => label(v.area) === "Washington DC")).toBe(false);
+  });
+
+  it("returns null for a window with nothing located", () => {
+    expect(windowDetail(index, data.areas, "2020-01-30", 3)).toBeNull();
+    expect(windowDetail(indexDaily([]), [], "2020-01-01", 30)).toBeNull();
   });
 });

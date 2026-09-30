@@ -366,20 +366,8 @@ export function rollingTrail(index: DailyIndex | null, windowDays: number, stepD
   return runs;
 }
 
-/**
- * Every area's share of the located days in the window centred on `date`,
- * largest first — what a trail point's tooltip reports. Walks the window
- * day by day (O(window)), which is fine for the hundred-odd points that
- * have tooltips; the line itself never needs it. Empty for a window with
- * no located days.
- */
-export function windowMix(
-  index: DailyIndex | null,
-  date: string,
-  windowDays: number,
-): { area: number; share: number }[] {
-  if (!index) return [];
-  const [lo, hi] = windowBounds(index, daysBetween(index.first, date), windowDays);
+/** Per-area day totals within [lo, hi), and how many days were located. */
+function windowTotals(index: DailyIndex, lo: number, hi: number): { totals: Map<number, number>; located: number } {
   const totals = new Map<number, number>();
   let located = 0;
   for (let i = lo; i < hi; i++) {
@@ -389,9 +377,91 @@ export function windowMix(
     const areasOfDay = d.slice(4) as number[];
     for (const area of areasOfDay) totals.set(area, (totals.get(area) ?? 0) + 1 / areasOfDay.length);
   }
+  return { totals, located };
+}
+
+export type AreaShare = { area: number; share: number; days: number };
+
+function sortedShares(totals: Map<number, number>, located: number): AreaShare[] {
   return [...totals.entries()]
-    .map(([area, days]) => ({ area, share: days / located }))
+    .map(([area, days]) => ({ area, days, share: days / located }))
     .sort((a, b) => b.share - a.share || a.area - b.area);
+}
+
+/**
+ * Every area's share of the located days in the window centred on `date`,
+ * largest first — what a trail point's tooltip reports. Walks the window
+ * day by day (O(window)), which is fine for the hundred-odd points that
+ * have tooltips; the line itself never needs it. Empty for a window with
+ * no located days.
+ */
+export function windowMix(index: DailyIndex | null, date: string, windowDays: number): AreaShare[] {
+  if (!index) return [];
+  const [lo, hi] = windowBounds(index, daysBetween(index.first, date), windowDays);
+  const { totals, located } = windowTotals(index, lo, hi);
+  return sortedShares(totals, located);
+}
+
+export type WindowDetail = {
+  /** First and last calendar day the window covers — shorter than the
+   * window setting near the ends of the record (see windowBounds). */
+  from: string;
+  to: string;
+  /** Calendar days covered, and how many of them are located. */
+  spanDays: number;
+  locatedDays: number;
+  areas: AreaShare[];
+  /** The same days rolled up by each area's country, largest first. */
+  countries: { name: string; share: number }[];
+  /** Areas whose first located day anywhere in the record falls inside
+   * this window, in the order they were first visited. */
+  firstVisits: { area: number; date: string }[];
+};
+
+/**
+ * Everything the click-to-open detail panel shows for one trail point
+ * (#215). Heavier than windowMix — the first-visit list scans the record
+ * from its start up to the window's end — so it's computed for the one
+ * point that's open, not for every point up front.
+ */
+export function windowDetail(
+  index: DailyIndex | null,
+  areas: CentreArea[],
+  date: string,
+  windowDays: number,
+): WindowDetail | null {
+  if (!index) return null;
+  const [lo, hi] = windowBounds(index, daysBetween(index.first, date), windowDays);
+  const { totals, located } = windowTotals(index, lo, hi);
+  if (located === 0) return null;
+
+  const byCountry = new Map<string, number>();
+  for (const [area, days] of totals) {
+    const name = areas[area].context ?? areas[area].label;
+    byCountry.set(name, (byCountry.get(name) ?? 0) + days);
+  }
+
+  const firstSeen = new Map<number, number>();
+  for (let i = 0; i < hi; i++) {
+    const d = index.byOffset[i];
+    if (!d) continue;
+    for (const area of d.slice(4) as number[]) if (!firstSeen.has(area)) firstSeen.set(area, i);
+  }
+
+  return {
+    from: addDays(index.first, lo),
+    to: addDays(index.first, hi - 1),
+    spanDays: hi - lo,
+    locatedDays: located,
+    areas: sortedShares(totals, located),
+    countries: [...byCountry.entries()]
+      .map(([name, days]) => ({ name, share: days / located }))
+      .sort((a, b) => b.share - a.share || a.name.localeCompare(b.name)),
+    firstVisits: [...firstSeen.entries()]
+      .filter(([, offset]) => offset >= lo)
+      .sort((a, b) => a[1] - b[1])
+      .map(([area, offset]) => ({ area, date: addDays(index.first, offset) })),
+  };
 }
 
 /**
