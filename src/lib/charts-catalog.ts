@@ -299,6 +299,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["people"],
   },
   {
+    href: "/charts/people-treemap",
+    title: "People Treemap",
+    description: "Everyone I've logged, sized by the days they were in, and grouped by how I know them.",
+    categories: ["people"],
+  },
+  {
     href: "/charts/people-race",
     title: "People Race",
     description: "An animated ranking of who impacted me the most.",

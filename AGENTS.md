@@ -89,14 +89,26 @@ Current shape:
   | `InteractiveDonut` (zoomable sunburst) | shipped | #118 | place hierarchy |
   | `InteractiveTimeline` | shipped | #119 | life timeline |
   | `InteractiveStrip` (group means ± 95% CI, n per row) | shipped | #444 | work vs. happiness |
+  | `InteractiveTreemap` (nested, zoom-into-group, animated) | shipped | #213 | people treemap |
 
-  `InteractiveDonut` is the only primitive here that takes a *tree* rather
-  than a series — its input shape and the pure builders for it live in
+  `InteractiveDonut` and `InteractiveTreemap` are the two primitives here
+  that take a *tree* rather than a series — the same tree, so a page can
+  hand either one what it built. The input shape and the pure builders for
+  it live in
   **`src/lib/viz/hierarchy.ts`** (`buildTreeFromParents` for a
   self-referencing table like `places.parentId`, `buildTreeFromLevels` for
   a fixed category/subcategory ladder, plus `pruneEmptyBranches` and
   `foldTailIntoOther`). Same boundary as `bin.ts`: re-shaping rows a page
-  already fetched, never bulk aggregation.
+  already fetched, never bulk aggregation. The d3-aware helpers both primitives
+  share — key-path identity and branch colour (`defaultColorOf`,
+  `depthFill`) — live in `src/lib/viz/hierarchy-layout.ts`, so a sunburst
+  and a treemap of the same tree can't disagree. `InteractiveTreemap` is
+  also the one primitive that deliberately doesn't use `useD3`: its
+  time-lapse needs the same d3 nodes to survive between renders
+  (resquarify keeps its arrangement on them) and a keyed join to tween
+  tiles, and `useD3` clears the `<svg>` on every dependency change. The
+  play/scrub/speed row it shares with the people network lives in
+  `interactive/playback-controls.tsx`.
 
   **`reference-lines.ts`** (#444) is shared chrome, not a primitive: a
   `referenceLines` prop on `InteractiveLine` and `InteractiveScroller`
