@@ -24,6 +24,11 @@
  * actually needs deeper/larger coverage of one domain, extend that section
  * here rather than reaching for real data.
  *
+ * One exception to "a handful of rows": a set of made-up Atlanta places
+ * (scripts/lib/atlanta-qa-fixture.mjs) chosen so every case #293's
+ * "Check places" modal distinguishes is present on /charts/city-heatmap,
+ * along with a pre-seeded custom mapping and a pre-dismissed finding.
+ *
  * Safety: this TRUNCATEs every table in the `public` schema before
  * inserting, so it must never run anywhere but a disposable PR branch.
  * Dry-run by default (prints what it would wipe/insert); `--commit` to
@@ -35,6 +40,7 @@
  *   DATABASE_URL=postgres://... node scripts/seed-pr-fixture.mjs --commit
  */
 import pg from "pg";
+import { ATLANTA_QA_DISMISSED_VENUE, ATLANTA_QA_OVERRIDES, buildAtlantaQaFixture } from "./lib/atlanta-qa-fixture.mjs";
 
 const COMMIT = process.argv.includes("--commit");
 
@@ -338,6 +344,80 @@ async function seedFixture(client) {
       const placeholders = dayColumns.map((_, idx) => `$${idx + 1}`).join(", ");
       await client.query(`INSERT INTO days (${dayColumns.join(", ")}) VALUES (${placeholders})`, values);
     }
+  }
+
+  // --- Atlanta place-QA cases (#293) ---
+  console.log("  atlanta place-QA cases...");
+  const atlanta = buildAtlantaQaFixture();
+
+  // Its own inserter because these rows need coordinates, and the root needs
+  // an explicit id: city-config.ts finds a city's places by the root's real
+  // id (701), not by name. Auto ids for everything else stay far below that.
+  const insertAtlantaPlace = async ({ id = null, name, parent, lng = null, lat = null }) => {
+    let placeId = null;
+    if (COMMIT) {
+      const params = [name, parent.id, lat, lng];
+      const { rows } =
+        id != null
+          ? await client.query(
+              `INSERT INTO places (name, parent_id, lat, lng, id) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+              [...params, id]
+            )
+          : await client.query(`INSERT INTO places (name, parent_id, lat, lng) VALUES ($1, $2, $3, $4) RETURNING id`, params);
+      placeId = rows[0].id;
+    }
+    const idPath = `${parent.idPath}${placeId}/`;
+    const namePath = `${parent.namePath}${name}/`;
+    if (COMMIT) {
+      await client.query(`UPDATE places SET id_path = $1, name_path = $2 WHERE id = $3`, [idPath, namePath, placeId]);
+    }
+    return { id: placeId, idPath, namePath };
+  };
+
+  const atlantaRoot = await insertAtlantaPlace({ id: atlanta.rootId, name: atlanta.rootName, parent: country });
+  // One node per distinct chain of neighborhood names, shared by the venues
+  // under it (two venues under "West Midtown Warehouse District" are two
+  // rows in one place, so a single mapping fixes both).
+  const atlantaNodes = new Map();
+  const atlantaVenueIds = new Map();
+  for (const [index, c] of atlanta.cases.entries()) {
+    let parent = atlantaRoot;
+    let key = "";
+    for (const name of c.chain) {
+      key += `/${name}`;
+      if (!atlantaNodes.has(key)) atlantaNodes.set(key, await insertAtlantaPlace({ name, parent }));
+      parent = atlantaNodes.get(key);
+    }
+    const venue = await insertAtlantaPlace({ name: c.venue, parent, lng: c.lng, lat: c.lat });
+    atlantaVenueIds.set(c.venue, venue.id);
+    // Log a day at each venue so the heatmap has something to draw: a
+    // neighborhood fill where the name resolves, a destination dot where it
+    // was geocoded. Spread out and away from the ends of the 90 days.
+    if (COMMIT) {
+      await client.query(`UPDATE days SET place_1_id = $1 WHERE date = $2`, [venue.id, dates[5 + index * 3]]);
+    }
+  }
+
+  const hasQaTables = COMMIT
+    ? (
+        await client.query(
+          `SELECT to_regclass('public.city_neighborhood_overrides') IS NOT NULL AND to_regclass('public.city_place_qa_dismissals') IS NOT NULL AS ok`
+        )
+      ).rows[0].ok
+    : true;
+  if (!hasQaTables) {
+    console.log("    (city place-QA tables don't exist in this schema; skipping the seeded mapping and dismissal)");
+  } else {
+    for (const o of ATLANTA_QA_OVERRIDES) {
+      await insert(
+        `INSERT INTO city_neighborhood_overrides (city_key, root, raw_name, geometry_name) VALUES ($1, $2, $3, $4)`,
+        [o.cityKey, o.root, o.rawName, o.geometryName]
+      );
+    }
+    await insert(`INSERT INTO city_place_qa_dismissals (place_id, kind) VALUES ($1, $2)`, [
+      atlantaVenueIds.get(ATLANTA_QA_DISMISSED_VENUE) ?? null,
+      "mismatch",
+    ]);
   }
 
   // --- Exercises / workouts ---

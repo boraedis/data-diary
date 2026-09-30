@@ -12,12 +12,17 @@ export function Modal({
   onClose,
   title,
   children,
+  wide = false,
   panelClassName = "max-w-md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** For content that's a list or table rather than a short form — the
+   * default max-w-md is sized for the "+ New" forms this shell was built
+   * for. */
+  wide?: boolean;
   /** Width of the card. The catalog forms fit max-w-md; a video (the
    * landing page's facelapse full view) needs more room. */
   panelClassName?: string;
@@ -30,7 +35,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={`w-full ${panelClassName} rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30`}
+        className={`w-full ${wide ? "max-h-[85vh] max-w-3xl overflow-y-auto" : panelClassName} rounded-xl border border-border bg-card p-6 shadow-xl shadow-black/30`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">

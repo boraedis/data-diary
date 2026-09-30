@@ -1413,6 +1413,83 @@ export const unloggedTravel = pgTable(
   (table) => [primaryKey({ columns: [table.kind, table.code] })]
 );
 
+// --- City-heatmap place QA (#293) ------------------------------------------
+//
+// Two small tables backing the QA modal on /charts/city-heatmap, which
+// flags places whose lat/lng doesn't land in the neighborhood their own
+// catalog hierarchy declares (see src/lib/geo/city-place-qa.ts for what
+// each finding kind means).
+
+export const cityPlaceQaFindingKindEnum = pgEnum("city_place_qa_finding_kind", [
+  "mismatch",
+  "outside",
+  "spelling",
+  "unmapped",
+]);
+
+/**
+ * "This finding is intended — stop showing it." Keyed by (place, kind)
+ * rather than a surrogate id for the same reason `unloggedTravel` is
+ * keyed by (kind, code): that pair *is* the identity, and making it the
+ * primary key is what makes dismissing twice a no-op rather than a
+ * duplicate row.
+ *
+ * Keyed on kind as well as place, deliberately: a place's finding can
+ * legitimately change kind over time (a bad coordinate gets edited and
+ * turns from MISMATCH into a clean match, or a different problem
+ * surfaces), and a dismissal of one kind shouldn't silently swallow a
+ * genuinely different problem that shows up later for the same place.
+ *
+ * Cascades on place delete: a dismissal of a deleted place's finding is
+ * meaningless clutter, unlike `places.parentId`'s own `restrict`, which
+ * protects real data.
+ */
+export const cityPlaceQaDismissals = pgTable(
+  "city_place_qa_dismissals",
+  {
+    placeId: integer("place_id")
+      .notNull()
+      .references(() => places.id, { onDelete: "cascade" }),
+    kind: cityPlaceQaFindingKindEnum("kind").notNull(),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.placeId, table.kind] })]
+);
+
+/**
+ * A DB-backed layer on top of the code-level <city>-names.ts alias tables
+ * (src/lib/geo/atlanta-names.ts etc.): "this catalog spelling means that
+ * GIS polygon," added from the QA modal without a code change or deploy.
+ * Checked *first* at resolution time, then the static table — see
+ * city-heatmap-qa.ts's `withCityNeighborhoodOverrides` for exactly how
+ * it composes, and why the pure resolveCityFeatureName itself stays
+ * untouched.
+ *
+ * Same key shape as the static tables it sits alongside: the catalog
+ * spelling lowercased and trimmed (`rawName`), scoped to a root because a
+ * name can legitimately recur across two roots in one city — see
+ * dc-metro-names.ts's own header on why a flat table would risk two
+ * same-named neighborhoods colliding.
+ *
+ * `geometryName` is the exact `properties.name` of a polygon in that
+ * city's committed topojson. It isn't a foreign key to anything (the
+ * geometry lives in a file, not a table), so a polygon renamed by a
+ * future GIS rebuild would leave a dangling override; the QA modal
+ * validates against the live geometry when adding one, and a stale one
+ * just fails to match (the place falls back to "unmapped" and reappears
+ * in the modal), never silently mis-colours.
+ */
+export const cityNeighborhoodOverrides = pgTable(
+  "city_neighborhood_overrides",
+  {
+    cityKey: text("city_key").notNull(),
+    root: text("root").notNull(),
+    rawName: text("raw_name").notNull(),
+    geometryName: text("geometry_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.cityKey, table.root, table.rawName] })]
+);
 
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];

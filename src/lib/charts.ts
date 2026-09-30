@@ -30,6 +30,8 @@ import { hasAdminRegions, loadAdminRegionFeatures } from "@/lib/geo/admin-geomet
 import { resolveAdminRegion } from "@/lib/geo/admin-lookup";
 import { resolveCountryCode } from "@/lib/geo/country-lookup";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import { listCityNeighborhoodOverridesIfAvailable } from "@/lib/city-heatmap-qa";
+import { withCityNeighborhoodOverrides } from "@/lib/geo/city-place-qa";
 import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
 import dcMetroTopo from "@/data/geo/dc-metro.topo.json";
@@ -1380,13 +1382,17 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
   }
 
   const geometryNamesByRoot = loadCityGeometryNames(cityKey);
+  // DB-backed overrides (#293's QA modal) layered over the static
+  // <city>-names.ts alias table, so a mapping added there fixes this
+  // chart's own colouring too — see withCityNeighborhoodOverrides.
+  const normalize = withCityNeighborhoodOverrides(city.normalize, await listCityNeighborhoodOverridesIfAvailable(cityKey));
   // Keyed by "root\0featureName", not featureName alone — two different
   // roots (e.g. Washington and Arlington) could share a neighborhood
   // name; see CityHeatmapNeighborhood's own comment.
   const resolvedByPlaceId = new Map<number, string>();
   for (const p of placeRows) {
     if (!p.idPath || !p.namePath) continue;
-    const resolved = resolveCityFeatureName({ idPath: p.idPath, namePath: p.namePath }, city.sources, geometryNamesByRoot, city.normalize);
+    const resolved = resolveCityFeatureName({ idPath: p.idPath, namePath: p.namePath }, city.sources, geometryNamesByRoot, normalize);
     if (resolved) resolvedByPlaceId.set(p.id, `${resolved.root}\0${resolved.featureName}`);
   }
 
