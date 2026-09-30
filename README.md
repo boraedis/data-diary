@@ -134,7 +134,9 @@ If you're working on a PR that changes the schema, prefer `npm run dev:pr`
 instead of pointing `.env.local` at a shared database by hand — it looks up
 the disposable Neon branch CI already created for your current branch's PR
 (see [Database & environments](#database--environments)) and rewrites
-`DATABASE_URL` in `.env.local` to match before starting `next dev`.
+`DATABASE_URL` in `.env.local` to match before starting `next dev`. It reads
+`NEON_API_KEY` and `NEON_PROJECT_ID` from your environment, `.env.local` or
+`.env`, so `.env.local` can hold just that per-PR `DATABASE_URL`.
 
 ### Environment variables
 
