@@ -314,6 +314,12 @@ export type GeoMarker = {
    * "2016–2018". Same constant screen size under zoom as the dot. Keep it
    * to a handful of markers; nothing here stops labels colliding. */
   annotation?: string;
+  /** Invisible until hovered or focused: no fill, no ring, but still a
+   * hover/focus target with a tooltip — for detail a reader can find
+   * along a line without it cluttering the line (#215's bi-monthly trail
+   * points). Hovering lifts it into view, since attachMarkHover's hover
+   * style overrides the zero fill-opacity drawn here. */
+  hoverOnly?: boolean;
 };
 
 /** A line drawn between markers (#215's path of centres). Drawn as a
@@ -1141,8 +1147,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           // zoom event corrected them.
           .attr("r", (d) => markerRadius(d) / carriedTransform.k)
           .attr("fill", (d) => d.marker.color ?? resolvedMarkerColor)
-          .attr("fill-opacity", (d) => d.marker.opacity ?? 0.85)
-          .attr("stroke", "var(--card)")
+          .attr("fill-opacity", (d) => (d.marker.hoverOnly ? 0 : (d.marker.opacity ?? 0.85)))
+          .attr("stroke", (d) => (d.marker.hoverOnly ? "none" : "var(--card)"))
           .attr("stroke-width", MARK_SPECS.marker.ringWidth / carriedTransform.k);
 
         // Stops a marker click from also reaching the background reset

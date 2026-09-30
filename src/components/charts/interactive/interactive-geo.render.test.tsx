@@ -292,3 +292,18 @@ describe("InteractiveGeo base map, routes and marker annotations", () => {
     expect(tooltip().getByText("detail")).toBeTruthy();
   });
 });
+
+describe("InteractiveGeo hover-only markers", () => {
+  it("draws nothing visible but still shows a tooltip on focus", () => {
+    const { container } = renderMap({
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019", hoverOnly: true }],
+      getMarkerSecondaryValue: () => ({ label: "most visited", value: "Istanbul, 64%" }),
+    });
+    const dot = container.querySelector("circle.geo-marker")!;
+    expect(dot.getAttribute("fill-opacity")).toBe("0");
+    expect(dot.getAttribute("stroke")).toBe("none");
+    fireEvent.focus(dot);
+    expect(tooltip().getByText("Mar 2019")).toBeTruthy();
+    expect(tooltip().getByText("Istanbul, 64%")).toBeTruthy();
+  });
+});

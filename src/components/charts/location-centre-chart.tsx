@@ -16,16 +16,16 @@ import {
 } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import {
-  BASE_RADIUS_KM,
+  indexDaily,
   mergeNearbyLabels,
   rollingTrail,
-  type CentreBase,
+  windowMix,
   type CentrePeriod,
   type LocationCentreData,
   type TrailPoint,
 } from "@/lib/location-centre";
 import { daysBetween } from "@/lib/date";
-import { greatCircleKm, type LngLat } from "@/lib/viz/geo-centre";
+import type { LngLat } from "@/lib/viz/geo-centre";
 import { sequentialScale } from "@/lib/viz/color";
 import { formatDate, formatPercent, formatThousandsNumber } from "@/lib/viz/format";
 import { LOCATION_CENTRE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -85,6 +85,9 @@ const BASE_MAX_RADIUS = 22;
 const BASE_MIN_RADIUS = 3;
 const BASE_COLOR = "var(--muted-foreground)";
 const ANCHOR_RADIUS = 4;
+/** Hit radius of the hidden bi-monthly points. A little bigger than a
+ * visible dot, since there's nothing on screen to aim at. */
+const HIDDEN_POINT_RADIUS = 5;
 const BRIDGE_COLOR = "var(--muted-foreground)";
 
 const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
@@ -98,11 +101,13 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     [data, view],
   );
 
+  const index = useMemo(() => indexDaily(data.daily), [data]);
+
   const runs = useMemo(() => {
-    const all = rollingTrail(data.daily, Number(windowDays), STEP[windowDays]);
+    const all = rollingTrail(index, Number(windowDays), STEP[windowDays]);
     if (view === ALL) return all;
     return all.map((run) => run.filter((p) => p.date.startsWith(`${view}-`))).filter((run) => run.length > 0);
-  }, [data, windowDays, view]);
+  }, [index, windowDays, view]);
 
   // Colour encodes time along the trail. The domain is whatever's on
   // screen, so a single year still spans the full ramp month by month.
@@ -174,15 +179,27 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       lastKey = key;
       anchors.push({ ...p, label: view === ALL ? key : formatDate(`${key}-01`, "monthShort") });
     }
+    /** Tooltip rows for a point on the trail: the days behind it, and the
+     * area that held the most of them. The title is the point's own
+     * month, not a merged label like "2016–2018": the figures are this
+     * one window's. */
+    const describe = (id: string, p: TrailPoint) => {
+      valueById.set(id, p.days);
+      const mix = windowMix(index, p.date, Number(windowDays));
+      if (mix) {
+        const area = data.areas[mix.area];
+        secondaryById.set(id, { label: "most visited", value: `${area.label}, ${formatPercent(mix.share)}` });
+      }
+      return formatDate(p.date, "monthYear");
+    };
+
     const anchorMarkers: GeoMarker[] = mergeNearbyLabels(anchors, LABEL_MERGE_KM).map((group) => {
       const first = group.members[0];
       const id = `anchor:${first.date}`;
-      valueById.set(id, first.days);
-      secondaryById.set(id, nearestArea(first.position, data.all.bases));
       return {
         id,
         position: group.position,
-        label: view === ALL ? group.label : `${group.label} ${view}`,
+        label: describe(id, first),
         color: colorOf(first.date),
         opacity: 1,
         radius: ANCHOR_RADIUS,
@@ -190,8 +207,35 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       };
     });
 
-    return { markers: [...baseMarkers, ...anchorMarkers], valueById, secondaryById };
-  }, [current, runs, view, colorOf, data]);
+    // Every two months between the year dots, a point you can hover but
+    // can't see (owner's ask): the detail's there when you look for it,
+    // and the line stays a line. All-years view only — within one year
+    // every month already has its own labelled dot.
+    const hiddenMarkers: GeoMarker[] = [];
+    if (view === ALL) {
+      const anchorDates = new Set(anchors.map((a) => a.date));
+      let lastBucket = "";
+      for (const p of runs.flat()) {
+        const bucket = `${p.date.slice(0, 4)}:${Math.floor((Number(p.date.slice(5, 7)) - 1) / 2)}`;
+        if (bucket === lastBucket) continue;
+        lastBucket = bucket;
+        if (anchorDates.has(p.date)) continue;
+        const id = `point:${p.date}`;
+        hiddenMarkers.push({
+          id,
+          position: p.position,
+          label: describe(id, p),
+          color: colorOf(p.date),
+          radius: HIDDEN_POINT_RADIUS,
+          hoverOnly: true,
+        });
+      }
+    }
+
+    // Hidden points before the year dots, so a year dot wins where they
+    // overlap.
+    return { markers: [...baseMarkers, ...hiddenMarkers, ...anchorMarkers], valueById, secondaryById };
+  }, [current, runs, view, colorOf, data, index, windowDays]);
 
   // Stable accessors — both are useD3 dependencies inside InteractiveGeo.
   const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
@@ -204,7 +248,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const fitTo = useMemo<Feature<MultiPoint>>(() => {
     const points: LngLat[] = [
       ...data.all.bases.filter((b) => b.share >= FRAME_MIN_SHARE).map((b) => b.position),
-      ...rollingTrail(data.daily, 365, 14).flat().map((p) => p.position),
+      ...rollingTrail(index, 365, 14).flat().map((p) => p.position),
     ];
     const lngs = points.map((p) => p[0]);
     const lats = points.map((p) => p[1]);
@@ -221,7 +265,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         ],
       },
     };
-  }, [data]);
+  }, [data, index]);
 
   const coverage = current.placedDays > 0 ? current.locatedDays / current.placedDays : 0;
   const yearOptions = data.years.filter((y) => y.placedDays > 0).map((y) => y.period);
@@ -307,23 +351,4 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       </ChartCard>
     </ChartPage>
   );
-}
-
-/** The tooltip's "nearest area" row for a point on the trail: the area's
- * name when the trail is inside it, or how far away it is when the
- * average has put the trail between places. */
-function nearestArea(position: LngLat, bases: CentreBase[]): GeoSecondaryRow {
-  let best: { base: CentreBase; km: number } | null = null;
-  for (const base of bases) {
-    const km = greatCircleKm(position, base.position);
-    if (!best || km < best.km) best = { base, km };
-  }
-  if (!best) return { label: "nearest area", value: "none" };
-  return {
-    label: "nearest area",
-    value:
-      best.km <= BASE_RADIUS_KM
-        ? best.base.label
-        : `${best.base.label}, ${formatThousandsNumber(Math.round(best.km))} km away`,
-  };
 }
