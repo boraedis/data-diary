@@ -327,6 +327,10 @@ export type GeoRoute = {
   /** For a hop that isn't a measured move — e.g. the line bridging a
    * period with too little data to plot. */
   dashed?: boolean;
+  /** Stroke colour, default `var(--foreground)`. Per route, so a long
+   * line split into pieces can carry a colour ramp along its length
+   * (#215 colours its trail by time). */
+  color?: string;
 };
 
 export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties> = {
@@ -1095,8 +1099,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .join("path")
           .attr("d", (r) => path({ type: "LineString", coordinates: r.coordinates }))
           .attr("fill", "none")
-          .attr("stroke", "var(--foreground)")
-          .attr("stroke-opacity", 0.7)
+          .attr("stroke", (r) => r.color ?? "var(--foreground)")
+          .attr("stroke-opacity", (r) => (r.dashed ? 0.6 : 0.9))
           .attr("stroke-width", 2)
           .attr("stroke-linecap", "round")
           .attr("stroke-linejoin", "round")

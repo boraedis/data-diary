@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLocationCentreData,
-  buildPath,
-  formatPeriodRuns,
+  mergeNearbyLabels,
+  rollingTrail,
   type CentreDay,
   type CentreMetro,
   type CentrePlace,
-  type CentrePeriod,
+  type DailyVector,
 } from "@/lib/location-centre";
-import { greatCircleKm } from "@/lib/viz/geo-centre";
+import { addDays } from "@/lib/date";
+import { fromUnitVector, greatCircleKm, toUnitVector } from "@/lib/viz/geo-centre";
 
 // A small catalog: USA > DC (metro 1) > two spots; UAE > Dubai (metro 2);
 // Turkey (geocoded, i.e. a country centroid) > Bursa (no metro, no coords)
@@ -28,7 +29,6 @@ const CATALOG: CentrePlace[] = [
   place({ id: 21, name: "Bursa", idPath: "20/21/", category: "Region", subcategory: "Municipality" }),
   place({ id: 22, name: "Cafe", idPath: "20/21/22/", lat: 40.19, lng: 29.06 }),
   place({ id: 23, name: "Market", idPath: "20/21/23/", lat: 40.21, lng: 29.1 }),
-  place({ id: 40, name: "Cape Town", idPath: "40/", lat: -33.92, lng: 18.42 }),
   place({ id: 30, name: "Izmir", idPath: "20/30/", category: "Region", subcategory: "Municipality", lat: 38.42, lng: 27.14 }),
 ];
 const METROS: CentreMetro[] = [
@@ -88,88 +88,82 @@ describe("buildLocationCentreData", () => {
     expect(data.all.bases.find((b) => b.label === "Bursa")!.days).toBeCloseTo(4);
   });
 
-  it("centres a bimodal year on its majority city, not between the two", () => {
-    const data = buildLocationCentreData(
-      [
-        ...["2021-01", "2021-02", "2021-03", "2021-04"].flatMap((m) => daysAt(m, 25, 4)),
-        ...["2021-05", "2021-06", "2021-07"].flatMap((m) => daysAt(m, 25, 11)),
-      ],
-      CATALOG,
-      METROS,
-    );
-    const y = year(data, "2021");
-    expect(y.sparse).toBe(false);
-    expect(y.nearestBase?.label).toBe("Washington DC");
-    expect(y.nearestBase!.km).toBeLessThan(1);
-  });
-
-  it("reports how far the centre is from every base when no area has a majority", () => {
-    // A wide triangle. (Bursa would be a bad third corner: it sits almost
-    // on the line from DC to Dubai, and a triangle with an angle of 120°+
-    // has its median exactly on that corner — so the centre would
-    // correctly land *in* Bursa.)
-    const data = buildLocationCentreData(
-      [...daysAt("2022-01", 20, 4), ...daysAt("2022-02", 20, 11), ...daysAt("2022-03", 20, 40)],
-      CATALOG,
-      METROS,
-    );
-    const y = year(data, "2022");
-    expect(y.centre).not.toBeNull();
-    expect(y.nearestBase!.km).toBeGreaterThan(50);
-  });
-
-  it("gives a sparse year no centre, and lists every year in between", () => {
-    const data = buildLocationCentreData([...daysAt("2018-01", 5, 4), ...daysAt("2020-01", 25, 4), ...daysAt("2020-02", 10, 4)], CATALOG, METROS);
+  it("lists every year between the first and last located day, with each year's own coverage", () => {
+    const data = buildLocationCentreData([...daysAt("2018-01", 5, 4), ...daysAt("2020-01", 3, 20), ...daysAt("2020-02", 2, 4)], CATALOG, METROS);
     expect(data.years.map((y) => y.period)).toEqual(["2018", "2019", "2020"]);
-    expect(year(data, "2018").sparse).toBe(true);
-    expect(year(data, "2018").centre).toBeNull();
-    expect(year(data, "2020").centre).not.toBeNull();
-    expect(data.months).toHaveLength(36);
-    // January 2020 has 25 located days (>= 10), February 10.
-    expect(data.months.find((m) => m.period === "2020-01")!.sparse).toBe(false);
-    expect(data.months.find((m) => m.period === "2020-02")!.sparse).toBe(false);
+    expect(year(data, "2019").placedDays).toBe(0);
+    expect(year(data, "2020").placedDays).toBe(5);
+    expect(year(data, "2020").locatedDays).toBe(2);
   });
 
-  it("keeps a base's colour slot the same in every period", () => {
-    const data = buildLocationCentreData(
-      [...daysAt("2020-01", 25, 11), ...daysAt("2021-01", 25, 4), ...daysAt("2021-02", 25, 4)],
-      CATALOG,
-      METROS,
-    );
-    const dcAll = data.all.bases.find((b) => b.label === "Washington DC")!.colorIndex;
-    const dc2021 = year(data, "2021").bases.find((b) => b.label === "Washington DC")!.colorIndex;
-    expect(dcAll).toBe(0);
-    expect(dc2021).toBe(dcAll);
-    expect(year(data, "2020").bases[0].colorIndex).toBe(1);
+  it("sends one unit-length vector per located day, pointing at where it was", () => {
+    const data = buildLocationCentreData([...daysAt("2020-01", 2, 4), ...daysAt("2020-02", 1, 4, 11)], CATALOG, METROS);
+    expect(data.daily.map((d) => d[0])).toEqual(["2020-01-01", "2020-01-02", "2020-02-01"]);
+    const [, x, y, z] = data.daily[0];
+    expect(Math.hypot(x, y, z)).toBeCloseTo(1, 4);
+    expect(greatCircleKm(fromUnitVector([x, y, z])!, [-77.05, 38.92])).toBeLessThan(0.1);
+    // A split day is the sum of two half-votes, so it's shorter than 1.
+    const [, sx, sy, sz] = data.daily[2];
+    expect(Math.hypot(sx, sy, sz)).toBeLessThan(0.9);
   });
 });
 
-function period(p: string, centre: [number, number] | null): CentrePeriod {
-  return { period: p, placedDays: 40, locatedDays: centre ? 40 : 3, sparse: !centre, centre, nearestBase: null, bases: [] };
+const HOME: [number, number] = [-77.05, 38.92];
+const AWAY: [number, number] = [55.27, 25.2];
+function vec(date: string, at: [number, number]): DailyVector {
+  const [x, y, z] = toUnitVector(at);
+  return [date, x, y, z];
+}
+/** `n` consecutive days from `start` at one position. */
+function stay(start: string, n: number, at: [number, number]): DailyVector[] {
+  return Array.from({ length: n }, (_, i) => vec(addDays(start, i), at));
 }
 
-describe("buildPath", () => {
-  it("merges periods at the same spot and dashes across sparse gaps", () => {
-    const periods = [
-      period("2016", [-77.05, 38.92]),
-      period("2017", [-77.06, 38.93]), // ~1 km away: same stop
-      period("2018", null),
-      period("2019", [55.27, 25.2]),
-      period("2020", [-77.05, 38.92]), // back where 2016 was
-    ];
-    const { stops, segments } = buildPath(periods);
-    expect(stops.map((s) => s.periods.map((p) => p.period))).toEqual([["2016", "2017", "2020"], ["2019"]]);
-    expect(segments).toHaveLength(2);
-    expect(segments[0].dashed).toBe(true);
-    expect(segments[1].dashed).toBe(false);
-    expect(greatCircleKm(segments[1].to, [-77.05, 38.92])).toBeLessThan(0.01);
+describe("rollingTrail", () => {
+  it("stays put while every day is in one place", () => {
+    const runs = rollingTrail(stay("2020-01-01", 60, HOME), 30, 2);
+    expect(runs).toHaveLength(1);
+    for (const p of runs[0]) expect(greatCircleKm(p.position, HOME)).toBeLessThan(0.01);
+  });
+
+  it("is pulled part of the way out by a trip, peaking at the trip, and comes back", () => {
+    const daily = [...stay("2020-01-01", 45, HOME), ...stay("2020-02-15", 10, AWAY), ...stay("2020-02-25", 45, HOME)];
+    const [run] = rollingTrail(daily, 30, 1);
+    const distance = (date: string) => greatCircleKm(run.find((p) => p.date === date)!.position, HOME);
+    // A third of the window away: well off home, nowhere near Dubai.
+    const peak = distance("2020-02-19");
+    expect(peak).toBeGreaterThan(1_000);
+    expect(greatCircleKm(run.find((p) => p.date === "2020-02-19")!.position, AWAY)).toBeGreaterThan(5_000);
+    expect(distance("2020-01-10")).toBeLessThan(0.01);
+    expect(distance("2020-04-01")).toBeLessThan(0.01);
+    // A longer window dilutes the same trip.
+    const [yearRun] = rollingTrail(daily, 90, 1);
+    expect(greatCircleKm(yearRun.find((p) => p.date === "2020-02-19")!.position, HOME)).toBeLessThan(peak);
+  });
+
+  it("breaks the trail where too few of a window's days are located", () => {
+    const daily = [...stay("2020-01-01", 30, HOME), ...stay("2020-04-01", 30, AWAY)];
+    const runs = rollingTrail(daily, 7, 1);
+    expect(runs).toHaveLength(2);
+    expect(greatCircleKm(runs[1][runs[1].length - 1].position, AWAY)).toBeLessThan(0.01);
+  });
+
+  it("returns nothing for no days", () => {
+    expect(rollingTrail([], 30, 2)).toEqual([]);
   });
 });
 
-describe("formatPeriodRuns", () => {
-  it("joins adjacent periods into ranges", () => {
-    const ordered = ["2016", "2017", "2018", "2019", "2020", "2021"].map((p) => period(p, [0, 0]));
-    const members = [ordered[0], ordered[1], ordered[2], ordered[5]];
-    expect(formatPeriodRuns(members, ordered, (p) => p)).toBe("2016–2018, 2021");
+describe("mergeNearbyLabels", () => {
+  it("gives nearby points one label, joining adjacent ones into ranges", () => {
+    const pts = [
+      { label: "2016", position: HOME },
+      { label: "2017", position: [-77.06, 38.93] as [number, number] },
+      { label: "2018", position: [-77.05, 38.92] as [number, number] },
+      { label: "2019", position: AWAY },
+      { label: "2020", position: HOME },
+    ];
+    const groups = mergeNearbyLabels(pts, 25);
+    expect(groups.map((g) => g.label)).toEqual(["2016–2018, 2020", "2019"]);
+    expect(groups[0].members).toHaveLength(4);
   });
 });

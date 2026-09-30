@@ -1,18 +1,37 @@
-import { greatCircleKm, sphericalGeometricMedian, type LngLat, type WeightedPoint } from "@/lib/viz/geo-centre";
+import { addDays, daysBetween } from "@/lib/date";
+import {
+  fromUnitVector,
+  greatCircleKm,
+  sphericalGeometricMedian,
+  toUnitVector,
+  type LngLat,
+  type WeightedPoint,
+} from "@/lib/viz/geo-centre";
 
 // "Where was my life centred, and how did that move?" (#215) — the pure
 // half of /charts/location-centre, split from the DB fetch in charts.ts
 // the way life-timeline.ts is, so the method is testable without a
 // database.
 //
-// Legacy's `location_center_of_mass` took a plain mean of lat/lng, which
-// the owner called "useless": a year split between two cities averaged to
-// a point in the sea, one trip dragged it hundreds of kilometres, and
-// averaging degrees is wrong near the antimeridian anyway. The method here
-// was proposed and reviewed on #215 before being built, with one later
-// change from the owner (2026-09-30): the centre is the **median of all of
-// a period's days**, plotted as a path over time like The Economist's
-// "Catholic centre of gravity", rather than only ever the biggest base.
+// Legacy's `location_center_of_mass` took one plain mean of lat/lng per
+// period, which the owner called "useless": a year split between two
+// cities averaged to a single point in the sea, and averaging degrees is
+// wrong near the antimeridian anyway.
+//
+// How this got here: #215's reviewed proposal plotted each period's
+// biggest "base"; the owner then asked for The Economist's "Catholic
+// centre of gravity" feel, which shipped first as a per-year geometric
+// median. That snapped to whichever city held most of a year's days, so
+// the line only ever hopped between moves and holidays. The owner's
+// feedback (2026-09-30) was that it should *track* location and travel —
+// so the centre is now a **rolling centre of mass**: the average position
+// of the days in a moving window, sampled densely enough to draw as one
+// continuous trail. A trip pulls the trail out towards the destination and
+// it drifts back afterwards; a move makes it glide to the new city. The
+// window length is the reader's choice — a week follows nearly every
+// trip, a year gives the slow drift the inspiration chart shows.
+//
+// The rules that survived from the reviewed proposal:
 //
 // 1. **One vote per day.** A day's place slots share one vote between the
 //    places that can be located — ½ each when both can, the whole vote
@@ -20,39 +39,25 @@ import { greatCircleKm, sphericalGeometricMedian, type LngLat, type WeightedPoin
 //    day is never worth more than a one-place day.
 // 2. **Coordinates** are the place's own geocode, else the nearest
 //    ancestor's, but never a country's or a state's: their geocode is a
-//    centroid (the middle of Anatolia for "Turkey"), which is precisely
-//    the invented location this chart exists to avoid. A day that can only
-//    be placed that coarsely is counted as not located.
-// 3. **Centre** = the weighted geometric median of every located day in
-//    the period (see sphericalGeometricMedian). With a majority in one area
-//    it sits in that area; only a period with no majority can put it
-//    between places, and the chart then says how far it is from the
-//    nearest one rather than pretending it's somewhere lived in.
-// 4. **Bases** — the places the median is weighing up — are drawn beneath
-//    the path so it's visible what pulled it where. A base is a metro
-//    (`places.metroId`, hand-curated "same area") or, for places in no
-//    metro, a greedy 50 km cluster.
-// 5. **Sparse periods** are flagged rather than plotted confidently: fewer
-//    than 30 located days for a year or 10 for a month, following the
-//    recap's "not enough data" convention (#169).
-//
-// A different centre definition — The Economist's own, the separate
-// median latitude and median longitude ("equal numbers north, south, east
-// and west") — is kept open as a follow-up rather than built alongside.
+//    centroid (the middle of Anatolia for "Turkey"), a place nobody has
+//    stood. A day that can only be placed that coarsely isn't located.
+// 3. **Spherical maths throughout.** Each vote is a 3D unit vector; a
+//    window's centre is the direction of their weighted sum — the true
+//    centre of mass on the globe, correct across the antimeridian.
+// 4. **Bases** — metros (`places.metroId`), else greedy 50 km clusters —
+//    are drawn beneath the trail as the places it's being pulled between,
+//    each at its own geometric median.
+// 5. **Thin windows break the line** instead of being plotted
+//    confidently: a window needs a quarter of its days located.
 
-/** Radius of a fallback (non-metro) base, and how far the centre may sit
- * from every base before it's reported as "between places". A first
- * guess, per #215 — metros are the primary grouping and this only
- * catches what they don't. */
+/** Radius of a fallback (non-metro) base, and how close the trail must be
+ * to a base for a tooltip to say it's *in* it. A first guess, per #215 —
+ * metros are the primary grouping and this only catches what they don't. */
 export const BASE_RADIUS_KM = 50;
 
-/** Minimum located days before a period gets a centre at all (#215 §5). */
-export const MIN_LOCATED_DAYS = { year: 30, month: 10 } as const;
-
-/** Path stops closer than this are drawn as one dot with a combined
- * label. Consecutive years at home land a few km apart; drawing each as
- * its own dot would stack their labels on top of each other. */
-export const STOP_MERGE_KM = 25;
+/** Share of a window's days that must be located for it to get a point;
+ * below that the trail breaks (bridged by a dashed line). */
+export const MIN_WINDOW_COVERAGE = 0.25;
 
 // Region subcategories whose geocode is an area's centroid rather than a
 // place anyone has stood — see point 2 above.
@@ -79,10 +84,6 @@ export type CentreBase = {
   label: string;
   /** Country, for a tooltip's second line. */
   context: string | null;
-  /** Rank by all-time days, so a base keeps one colour in every period —
-   * never re-ranked per period (categorical colours are fixed by index in
-   * this app; see categoricalColor). */
-  colorIndex: number;
   position: LngLat;
   /** Located-day votes that fell in this base during the period. */
   days: number;
@@ -91,30 +92,27 @@ export type CentreBase = {
 };
 
 export type CentrePeriod = {
-  /** "all", "YYYY", or "YYYY-MM". */
+  /** "all" or "YYYY". */
   period: string;
   /** Days in the period with at least one place logged. */
   placedDays: number;
   /** Of those, days with at least one place that could be located. */
   locatedDays: number;
-  /** Below MIN_LOCATED_DAYS: bases are still listed, but there's no centre. */
-  sparse: boolean;
-  centre: LngLat | null;
-  /** The base closest to the centre, and how far away it is. More than
-   * BASE_RADIUS_KM means the centre sits between places. */
-  nearestBase: { key: string; label: string; km: number } | null;
   /** Largest first. */
   bases: CentreBase[];
 };
 
+/** One located day as the weighted sum of its votes' unit vectors — a
+ * vector of length ≤ 1 (exactly 1 when its places coincide). A tuple, not
+ * an object: this is the one per-day payload that crosses to the client,
+ * and ~4,000 of them are sent. Rounded to 5 decimals (~60 m). */
+export type DailyVector = [date: string, x: number, y: number, z: number];
+
 export type LocationCentreData = {
+  daily: DailyVector[];
   all: CentrePeriod;
-  /** Every calendar year from the first located day to the last, in
-   * order — including empty ones, so adjacency in this list is adjacency
-   * in time. */
+  /** Every calendar year from the first located day to the last. */
   years: CentrePeriod[];
-  /** Every month of every year in `years`, in order. */
-  months: CentrePeriod[];
 };
 
 /** One located vote: part of a day, at a position, in a base. */
@@ -185,8 +183,8 @@ export function buildLocationCentreData(
   }
 
   // --- 2. Bases ---------------------------------------------------------
-  // Global, not per period, so a base is the same base (same key, label
-  // and colour) in every year it appears in.
+  // Global, not per period, so a base is the same base (same key and
+  // label) in every year it appears in.
   const totalByPlace = new Map<number, { position: LngLat; weight: number }>();
   for (const v of rawVotes) {
     const entry = totalByPlace.get(v.placeId);
@@ -250,14 +248,8 @@ export function buildLocationCentreData(
     baseKey: baseKeyByPlace.get(v.placeId)!,
   }));
 
-  const baseTotals = new Map<string, number>();
-  for (const v of votes) baseTotals.set(v.baseKey, (baseTotals.get(v.baseKey) ?? 0) + v.weight);
-  const colorIndexByBase = new Map(
-    [...baseTotals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([key], i) => [key, i]),
-  );
-
-  // --- 3. Periods -------------------------------------------------------
-  const summarise = (period: string, periodVotes: Vote[], placedDays: number, minDays: number): CentrePeriod => {
+  // --- 3. Per-period bases and coverage --------------------------------
+  const summarise = (period: string, periodVotes: Vote[], placedDays: number): CentrePeriod => {
     const locatedDays = new Set(periodVotes.map((v) => v.date)).size;
     const byBase = new Map<string, Vote[]>();
     for (const v of periodVotes) {
@@ -274,51 +266,49 @@ export function buildLocationCentreData(
         key,
         label: baseMeta.get(key)!.label,
         context: baseMeta.get(key)!.context,
-        colorIndex: colorIndexByBase.get(key)!,
         position,
         days,
         share: locatedDays > 0 ? days / locatedDays : 0,
       });
     }
-    bases.sort((a, b) => b.days - a.days || a.colorIndex - b.colorIndex);
-
-    const sparse = locatedDays < minDays;
-    const centre = sparse ? null : sphericalGeometricMedian(collapse(periodVotes));
-    let nearestBase: CentrePeriod["nearestBase"] = null;
-    if (centre) {
-      for (const b of bases) {
-        const km = greatCircleKm(centre, b.position);
-        if (!nearestBase || km < nearestBase.km) nearestBase = { key: b.key, label: b.label, km };
-      }
-    }
-    return { period, placedDays, locatedDays, sparse, centre, nearestBase, bases };
+    bases.sort((a, b) => b.days - a.days || a.key.localeCompare(b.key));
+    return { period, placedDays, locatedDays, bases };
   };
 
-  const votesByPrefix = (prefix: string) => votes.filter((v) => v.date.startsWith(prefix));
-  const placedByPrefix = (prefix: string) => placedDates.filter((d) => d.startsWith(prefix)).length;
-
-  const all = summarise("all", votes, placedDates.length, 0);
+  const all = summarise("all", votes, placedDates.length);
   const years: CentrePeriod[] = [];
-  const months: CentrePeriod[] = [];
   if (votes.length > 0) {
     const locatedYears = votes.map((v) => Number(v.date.slice(0, 4)));
-    const first = Math.min(...locatedYears);
-    const last = Math.max(...locatedYears);
-    for (let y = first; y <= last; y++) {
-      const year = String(y);
-      years.push(summarise(year, votesByPrefix(`${year}-`), placedByPrefix(`${year}-`), MIN_LOCATED_DAYS.year));
-      for (let m = 1; m <= 12; m++) {
-        const month = `${year}-${String(m).padStart(2, "0")}`;
-        months.push(summarise(month, votesByPrefix(`${month}-`), placedByPrefix(`${month}-`), MIN_LOCATED_DAYS.month));
-      }
+    for (let y = Math.min(...locatedYears); y <= Math.max(...locatedYears); y++) {
+      const prefix = `${y}-`;
+      years.push(
+        summarise(
+          String(y),
+          votes.filter((v) => v.date.startsWith(prefix)),
+          placedDates.filter((d) => d.startsWith(prefix)).length,
+        ),
+      );
     }
   }
-  return { all, years, months };
+
+  // --- 4. Daily vectors for the trail ------------------------------------
+  const dailySum = new Map<string, [number, number, number]>();
+  for (const v of votes) {
+    const [x, y, z] = toUnitVector(v.position);
+    const sum = dailySum.get(v.date) ?? [0, 0, 0];
+    dailySum.set(v.date, [sum[0] + x * v.weight, sum[1] + y * v.weight, sum[2] + z * v.weight]);
+  }
+  const round = (n: number) => Math.round(n * 1e5) / 1e5;
+  const daily: DailyVector[] = [...dailySum.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([date, [x, y, z]]) => [date, round(x), round(y), round(z)]);
+
+  return { daily, all, years };
 }
 
 /** Sums votes at the same position into one weighted point — thousands
  * of days at a handful of places become a handful of points, which is
- * what keeps the median cheap to recompute for every period. */
+ * what keeps each base's median cheap. */
 function collapse(votes: Vote[]): WeightedPoint[] {
   const byPos = new Map<string, WeightedPoint>();
   for (const v of votes) {
@@ -330,80 +320,96 @@ function collapse(votes: Vote[]): WeightedPoint[] {
   return [...byPos.values()];
 }
 
-// --- Path ------------------------------------------------------------------
+// --- Trail ------------------------------------------------------------------
 
-export type PathStop = {
-  id: string;
+export type TrailPoint = {
+  /** The window's middle day. */
+  date: string;
   position: LngLat;
-  /** Member periods in time order, e.g. ["2019", "2020", "2023"]. */
-  periods: CentrePeriod[];
-};
-
-export type PathSegment = {
-  id: string;
-  from: LngLat;
-  to: LngLat;
-  /** True when sparse periods were skipped between the two ends, so the
-   * line is a gap in the data rather than a real move. */
-  dashed: boolean;
+  /** Located days inside the window. */
+  days: number;
 };
 
 /**
- * Turns an ordered, contiguous list of periods into dots and the lines
- * between them.
+ * The rolling centre of mass: for a sample every `stepDays`, the direction
+ * of the summed day vectors within `windowDays` centred on it.
  *
- * Periods whose centres are within STOP_MERGE_KM of an existing stop join
- * it, so five years at home are one dot labelled "2016–2020" instead of
- * five dots stacked on one spot. The line still follows every period in
- * order; it just has nothing to draw while the centre stays put.
+ * Centred rather than trailing, so the trail's excursion towards a trip
+ * peaks on the trip's own dates instead of a half-window after them.
+ * Prefix sums make every window O(1), so switching window length on the
+ * client is instant even at a 7-day window over a decade of days.
+ *
+ * Returns runs of consecutive points. A new run starts wherever a window
+ * has less than MIN_WINDOW_COVERAGE of its days located — a stretch with
+ * too little logged to say where the centre was.
  */
-export function buildPath(periods: CentrePeriod[]): { stops: PathStop[]; segments: PathSegment[] } {
-  const stops: PathStop[] = [];
-  const segments: PathSegment[] = [];
-  let prev: PathStop | null = null;
-  let skipped = false;
-  for (const period of periods) {
-    if (!period.centre) {
-      if (prev) skipped = true;
+export function rollingTrail(daily: DailyVector[], windowDays: number, stepDays: number): TrailPoint[][] {
+  if (daily.length === 0) return [];
+  const first = daily[0][0];
+  const span = daysBetween(first, daily[daily.length - 1][0]) + 1;
+  // prefix[i] = sums over days [0, i)
+  const px = new Float64Array(span + 1);
+  const py = new Float64Array(span + 1);
+  const pz = new Float64Array(span + 1);
+  const pn = new Float64Array(span + 1);
+  const at = new Map(daily.map((d) => [d[0], d]));
+  for (let i = 0; i < span; i++) {
+    const d = at.get(addDays(first, i));
+    px[i + 1] = px[i] + (d?.[1] ?? 0);
+    py[i + 1] = py[i] + (d?.[2] ?? 0);
+    pz[i + 1] = pz[i] + (d?.[3] ?? 0);
+    pn[i + 1] = pn[i] + (d ? 1 : 0);
+  }
+
+  const half = Math.floor(windowDays / 2);
+  const minDays = Math.max(1, Math.ceil(windowDays * MIN_WINDOW_COVERAGE));
+  const runs: TrailPoint[][] = [];
+  let run: TrailPoint[] = [];
+  for (let i = 0; i < span; i += stepDays) {
+    // Clamped at the ends of the record, so the first and last points use
+    // a half-window rather than being dropped.
+    const lo = Math.max(0, i - half);
+    const hi = Math.min(span, lo + windowDays);
+    const n = pn[hi] - pn[lo];
+    const position =
+      n >= minDays ? fromUnitVector([px[hi] - px[lo], py[hi] - py[lo], pz[hi] - pz[lo]]) : null;
+    if (!position) {
+      if (run.length > 0) runs.push(run);
+      run = [];
       continue;
     }
-    let stop = stops.find((s) => greatCircleKm(s.position, period.centre!) <= STOP_MERGE_KM);
-    if (stop) {
-      stop.periods.push(period);
-    } else {
-      stop = { id: period.period, position: period.centre, periods: [period] };
-      stops.push(stop);
-    }
-    if (prev && prev !== stop) {
-      segments.push({ id: `${prev.id}>${stop.id}#${segments.length}`, from: prev.position, to: stop.position, dashed: skipped });
-    }
-    prev = stop;
-    skipped = false;
+    run.push({ date: addDays(first, i), position, days: n });
   }
-  return { stops, segments };
+  if (run.length > 0) runs.push(run);
+  return runs;
 }
 
 /**
- * Compresses a stop's periods into a label, joining runs of adjacent
- * periods: ["2016", "2017", "2018", "2021"] -> "2016–2018, 2021".
- * Adjacency is by position in `ordered` (the contiguous list the path was
- * built from), which is why `years`/`months` include empty periods.
+ * Groups labelled points that sit within `mergeKm` of each other, so one
+ * spot visited in several periods gets one dot and one label ("2016–2018,
+ * 2021") instead of labels stacked on top of each other. Points are in
+ * time order; runs of consecutive indices are joined with an en dash.
  */
-export function formatPeriodRuns(
-  members: CentrePeriod[],
-  ordered: CentrePeriod[],
-  format: (period: string) => string,
-): string {
-  const index = new Map(ordered.map((p, i) => [p.period, i]));
-  const idx = members.map((p) => index.get(p.period)!).sort((a, b) => a - b);
-  const runs: string[] = [];
-  let start = 0;
-  for (let i = 1; i <= idx.length; i++) {
-    if (i < idx.length && idx[i] === idx[i - 1] + 1) continue;
-    const from = format(ordered[idx[start]].period);
-    const to = format(ordered[idx[i - 1]].period);
-    runs.push(start === i - 1 ? from : `${from}–${to}`);
-    start = i;
-  }
-  return runs.join(", ");
+export function mergeNearbyLabels<T extends { position: LngLat; label: string }>(
+  points: T[],
+  mergeKm: number,
+): { position: LngLat; label: string; members: T[] }[] {
+  const groups: { position: LngLat; indices: number[] }[] = [];
+  points.forEach((p, i) => {
+    const group = groups.find((g) => greatCircleKm(g.position, p.position) <= mergeKm);
+    if (group) group.indices.push(i);
+    else groups.push({ position: p.position, indices: [i] });
+  });
+  return groups.map((g) => {
+    const runs: string[] = [];
+    let start = 0;
+    for (let k = 1; k <= g.indices.length; k++) {
+      if (k < g.indices.length && g.indices[k] === g.indices[k - 1] + 1) continue;
+      const from = points[g.indices[start]].label;
+      const to = points[g.indices[k - 1]].label;
+      runs.push(start === k - 1 ? from : `${from}–${to}`);
+      start = k;
+    }
+    return { position: g.position, label: runs.join(", "), members: g.indices.map((i) => points[i]) };
+  });
 }

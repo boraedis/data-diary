@@ -14,32 +14,35 @@ import {
   type GeoRoute,
   type GeoSecondaryRow,
 } from "@/components/charts/interactive/interactive-geo";
-import { Legend } from "@/components/charts/interactive/legend";
+import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import {
   BASE_RADIUS_KM,
-  buildPath,
-  formatPeriodRuns,
-  MIN_LOCATED_DAYS,
+  mergeNearbyLabels,
+  rollingTrail,
   type CentreBase,
   type CentrePeriod,
   type LocationCentreData,
+  type TrailPoint,
 } from "@/lib/location-centre";
-import { categoricalColor, CATEGORICAL_SLOT_COUNT } from "@/lib/viz/color";
+import { daysBetween } from "@/lib/date";
+import { greatCircleKm, type LngLat } from "@/lib/viz/geo-centre";
+import { sequentialScale } from "@/lib/viz/color";
 import { formatDate, formatPercent, formatThousandsNumber } from "@/lib/viz/format";
 import { LOCATION_CENTRE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { LOCATION_CENTRE_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
 // The page body is one client component, the same as
-// city-heatmap-explorer.tsx: the period picker in ChartPage's filters row
-// and the map share one piece of state.
+// city-heatmap-explorer.tsx: the pickers in ChartPage's filters row and
+// the map share state. The trail itself is computed here, from the
+// per-day vectors the server sends, so changing the window is instant.
 
 type CountryProperties = { name: string };
 
 // countries-110m, not the 50m file the World Heatmap needs. There, a
 // country missing from 110m (Singapore, Malta) couldn't be coloured or
 // recorded — see world-visits-chart.tsx. Here the countries are only a
-// base map under the markers, and a marker is positioned from its own
+// base map under the trail, and the trail is positioned from its own
 // coordinates whether or not the country beneath it is drawn, so the
 // ~190KB saving costs nothing.
 const worldTopology = worldTopologyRaw as unknown as Topology<{ countries: GeometryCollection<CountryProperties> }>;
@@ -47,46 +50,101 @@ const WORLD = feature(worldTopology, worldTopology.objects.countries);
 
 const ALL = "all";
 
-/** Bases this small are left out of the map's framing, so one long-haul
+type WindowDays = "7" | "30" | "90" | "365";
+const WINDOW_OPTIONS: GroupByOption<WindowDays>[] = [
+  { id: "7", label: "7 days" },
+  { id: "30", label: "30 days" },
+  { id: "90", label: "90 days" },
+  { id: "365", label: "1 year" },
+];
+/** Days between samples, per window. Roughly a tenth of the window: dense
+ * enough that the trail reads as a curve, and no denser — a 1-year window
+ * barely moves day to day, so sampling it daily would only add points. */
+const STEP: Record<WindowDays, number> = { "7": 1, "30": 2, "90": 5, "365": 14 };
+
+/** Aim for about this many coloured pieces per trail. Each piece is one
+ * SVG path in one colour, so this is the ramp's resolution along the
+ * line; more buys nothing visible and costs DOM. */
+const TARGET_PIECES = 300;
+
+/** Anchor dots closer than this share one dot and one label — years at
+ * home otherwise stack their labels on one spot. */
+const LABEL_MERGE_KM = 25;
+
+/** Places this small are left out of the map's framing, so one long-haul
  * trip doesn't zoom the whole map out to fit it. They're still drawn. */
 const FRAME_MIN_SHARE = 0.01;
-/** Degrees of padding around the framed points. */
 const FRAME_PAD = 4;
 
-/** Largest base circle, px. Area ∝ share, so a base with all of a
- * period's days is this size and one with a quarter is half as wide. */
+/** Largest place circle, px. Area ∝ share of the period's days. */
 const BASE_MAX_RADIUS = 22;
 const BASE_MIN_RADIUS = 3;
-const STOP_RADIUS = 4.5;
-
-const PATH_COLOR = "var(--foreground)";
+const BASE_COLOR = "var(--muted-foreground)";
+const ANCHOR_RADIUS = 4;
+const BRIDGE_COLOR = "var(--muted-foreground)";
 
 const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
 
 export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const [view, setView] = useState<string>(ALL);
+  const [windowDays, setWindowDays] = useState<WindowDays>("30");
 
   const current: CentrePeriod = useMemo(
     () => (view === ALL ? data.all : (data.years.find((y) => y.period === view) ?? data.all)),
     [data, view],
   );
 
-  // The path under the current view: one stop per year across all time,
-  // or one per month within a picked year.
-  const { pathPeriods, formatPeriod } = useMemo(() => {
-    if (view === ALL) return { pathPeriods: data.years, formatPeriod: (p: string) => p };
-    return {
-      pathPeriods: data.months.filter((m) => m.period.startsWith(`${view}-`)),
-      formatPeriod: (p: string) => formatDate(`${p}-01`, "monthShort"),
-    };
-  }, [data, view]);
+  const runs = useMemo(() => {
+    const all = rollingTrail(data.daily, Number(windowDays), STEP[windowDays]);
+    if (view === ALL) return all;
+    return all.map((run) => run.filter((p) => p.date.startsWith(`${view}-`))).filter((run) => run.length > 0);
+  }, [data, windowDays, view]);
 
-  const { markers, routes, valueById, secondaryById } = useMemo(() => {
-    const { stops, segments } = buildPath(pathPeriods);
+  // Colour encodes time along the trail. The domain is whatever's on
+  // screen, so a single year still spans the full ramp month by month.
+  const { colorOf, firstDate, lastDate } = useMemo(() => {
+    const firstDate = runs[0]?.[0]?.date ?? null;
+    const lastRun = runs[runs.length - 1];
+    const lastDate = lastRun?.[lastRun.length - 1]?.date ?? null;
+    const span = firstDate && lastDate ? Math.max(1, daysBetween(firstDate, lastDate)) : 1;
+    const scale = sequentialScale([0, span]);
+    return { colorOf: (date: string) => (firstDate ? scale(daysBetween(firstDate, date)) : scale(0)), firstDate, lastDate };
+  }, [runs]);
+
+  const routes = useMemo<GeoRoute[]>(() => {
+    const total = runs.reduce((n, r) => n + r.length, 0);
+    const pieceSize = Math.max(2, Math.ceil(total / TARGET_PIECES));
+    const out: GeoRoute[] = [];
+    runs.forEach((run, r) => {
+      // Consecutive pieces share their boundary point, so the line has no
+      // seams where the colour steps.
+      for (let i = 0; i < run.length - 1; i += pieceSize - 1) {
+        const piece = run.slice(i, i + pieceSize);
+        out.push({
+          id: `${r}:${i}`,
+          coordinates: piece.map((p) => p.position),
+          color: colorOf(piece[Math.floor(piece.length / 2)].date),
+        });
+      }
+      // A dashed bridge over a stretch with too little logged to place.
+      const next = runs[r + 1];
+      if (next) {
+        out.push({
+          id: `gap:${r}`,
+          coordinates: [run[run.length - 1].position, next[0].position],
+          dashed: true,
+          color: BRIDGE_COLOR,
+        });
+      }
+    });
+    return out;
+  }, [runs, colorOf]);
+
+  const { markers, valueById, secondaryById } = useMemo(() => {
     const valueById = new Map<string, number>();
     const secondaryById = new Map<string, GeoSecondaryRow>();
 
-    // Bases first, so the path's dots draw on top of them.
+    // Places first, so the trail's dots draw on top of them.
     const baseMarkers: GeoMarker[] = current.bases.map((b) => {
       const id = `base:${b.key}`;
       valueById.set(id, b.days);
@@ -95,54 +153,54 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         id,
         position: b.position,
         label: b.context ? `${b.label}, ${b.context}` : b.label,
-        color: baseColor(b),
-        opacity: 0.35,
+        color: BASE_COLOR,
+        opacity: 0.3,
         radius: Math.max(BASE_MIN_RADIUS, Math.sqrt(b.share) * BASE_MAX_RADIUS),
       };
     });
 
-    const stopMarkers: GeoMarker[] = stops.map((s) => {
-      const id = `stop:${s.id}`;
-      const label = formatPeriodRuns(s.periods, pathPeriods, formatPeriod);
-      valueById.set(id, s.periods.reduce((sum, p) => sum + p.locatedDays, 0));
-      const near = s.periods[0].nearestBase;
-      if (near) {
-        secondaryById.set(
-          id,
-          near.km <= BASE_RADIUS_KM
-            ? { label: "centred in", value: near.label }
-            : { label: "between places", value: `${formatThousandsNumber(Math.round(near.km))} km from ${near.label}` },
-        );
-      }
+    // Labelled dots where each year begins (or each month, within a year),
+    // like the inspiration chart's "1900", "1950" — they're what makes the
+    // trail readable as a timeline rather than a scribble.
+    const anchors: (TrailPoint & { label: string })[] = [];
+    let lastKey = "";
+    for (const p of runs.flat()) {
+      const key = view === ALL ? p.date.slice(0, 4) : p.date.slice(0, 7);
+      if (key === lastKey) continue;
+      lastKey = key;
+      anchors.push({ ...p, label: view === ALL ? key : formatDate(`${key}-01`, "monthShort") });
+    }
+    const anchorMarkers: GeoMarker[] = mergeNearbyLabels(anchors, LABEL_MERGE_KM).map((group) => {
+      const first = group.members[0];
+      const id = `anchor:${first.date}`;
+      valueById.set(id, first.days);
+      secondaryById.set(id, nearestArea(first.position, data.all.bases));
       return {
         id,
-        position: s.position,
-        label: view === ALL ? label : `${label} ${view}`,
-        color: PATH_COLOR,
+        position: group.position,
+        label: view === ALL ? group.label : `${group.label} ${view}`,
+        color: colorOf(first.date),
         opacity: 1,
-        radius: STOP_RADIUS,
-        annotation: label,
+        radius: ANCHOR_RADIUS,
+        annotation: group.label,
       };
     });
 
-    const routes: GeoRoute[] = segments.map((seg) => ({
-      id: seg.id,
-      coordinates: [seg.from, seg.to],
-      dashed: seg.dashed,
-    }));
+    return { markers: [...baseMarkers, ...anchorMarkers], valueById, secondaryById };
+  }, [current, runs, view, colorOf, data]);
 
-    return { markers: [...baseMarkers, ...stopMarkers], routes, valueById, secondaryById };
-  }, [current, pathPeriods, formatPeriod, view]);
+  // Stable accessors — both are useD3 dependencies inside InteractiveGeo.
+  const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
+  const getMarkerSecondary = useCallback((m: GeoMarker) => secondaryById.get(String(m.id)) ?? null, [secondaryById]);
 
-  // Framed once, on every centre and every base that matters all-time, so
-  // switching period never moves the map — comparing years relies on the
-  // frame holding still. A MultiPoint of corners rather than a bounding
-  // polygon: d3-geo treats polygons as spherical, and a box wound the
-  // wrong way round means "everything *except* this box".
+  // Framed once, on the places that matter and a 90-day trail, so neither
+  // picker ever moves the map. A MultiPoint of corners rather than a
+  // bounding polygon: d3-geo treats polygons as spherical, and a box wound
+  // the wrong way round means "everything *except* this box".
   const fitTo = useMemo<Feature<MultiPoint>>(() => {
-    const points = [
+    const points: LngLat[] = [
       ...data.all.bases.filter((b) => b.share >= FRAME_MIN_SHARE).map((b) => b.position),
-      ...[...data.years, ...data.months].flatMap((p) => (p.centre ? [p.centre] : [])),
+      ...rollingTrail(data.daily, 90, 5).flat().map((p) => p.position),
     ];
     const lngs = points.map((p) => p[0]);
     const lats = points.map((p) => p[1]);
@@ -161,30 +219,15 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     };
   }, [data]);
 
-  // Keyed on all-time rank, so the legend names the same five bases
-  // whichever period is on screen — the colours never move either.
-  const legendSeries = useMemo(() => {
-    const top = data.all.bases
-      .filter((b) => b.colorIndex < CATEGORICAL_SLOT_COUNT)
-      .sort((a, b) => a.colorIndex - b.colorIndex)
-      .map((b) => ({ id: b.key, label: b.label, color: baseColor(b) }));
-    if (data.all.bases.length > top.length) top.push({ id: "other", label: "Elsewhere", color: categoricalColor(CATEGORICAL_SLOT_COUNT) });
-    return top;
-  }, [data]);
-
-  // Stable accessors — both are useD3 dependencies inside InteractiveGeo.
-  const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
-  const getMarkerSecondary = useCallback((m: GeoMarker) => secondaryById.get(String(m.id)) ?? null, [secondaryById]);
-
-  const sparse = pathPeriods.filter((p) => p.sparse && p.placedDays > 0);
-  const minDays = view === ALL ? MIN_LOCATED_DAYS.year : MIN_LOCATED_DAYS.month;
   const coverage = current.placedDays > 0 ? current.locatedDays / current.placedDays : 0;
   const yearOptions = data.years.filter((y) => y.placedDays > 0).map((y) => y.period);
+  const rampFormat = (date: string) => formatDate(date, view === ALL ? "monthYear" : "short");
+  const [rampLow, rampHigh] = [colorOf(firstDate ?? ""), colorOf(lastDate ?? "")];
 
   return (
     <ChartPage
       title="Centre of Gravity"
-      description="Where my days were centred each year, and how that moved. Pick a year to follow it month by month."
+      description="The centre of mass of where I spent my days, tracked over time: trips pull the line out and it drifts back, moves carry it to a new city."
       info={{
         interactionGuide: LOCATION_CENTRE_INTERACTION_GUIDE,
         methodology: LOCATION_CENTRE_METHODOLOGY,
@@ -209,6 +252,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
               ))}
             </select>
           </label>
+          <GroupByPicker value={windowDays} onChange={setWindowDays} options={WINDOW_OPTIONS} label="Window" />
           {current.placedDays > 0 ? (
             <p className="ml-auto text-xs text-muted-foreground">
               {formatThousandsNumber(current.locatedDays)} of {formatThousandsNumber(current.placedDays)} days with a
@@ -218,16 +262,24 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         </>
       }
     >
-      <ChartCard empty={data.all.locatedDays === 0}>
-        <div className="flex flex-col gap-2 pb-3">
-          <Legend series={legendSeries} className="text-xs" />
-          {sparse.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Too few located days to place ({`<${minDays}`}):{" "}
-              {sparse.map((p) => `${formatPeriod(p.period)} (${p.locatedDays})`).join(", ")}. Dashed lines bridge them.
-            </p>
-          ) : null}
-        </div>
+      <ChartCard empty={data.daily.length === 0}>
+        {firstDate && lastDate ? (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-2">
+              {rampFormat(firstDate)}
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-24 rounded-full"
+                style={{ background: `linear-gradient(to right, ${rampLow}, ${rampHigh})` }}
+              />
+              {rampFormat(lastDate)}
+            </span>
+            <span className="flex items-center gap-2">
+              <span aria-hidden className="inline-block size-3 rounded-full opacity-40" style={{ background: BASE_COLOR }} />
+              Places, sized by share of days
+            </span>
+          </div>
+        ) : null}
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={320}>
           {({ width, height }) => (
             <InteractiveGeo<CountryProperties>
@@ -244,11 +296,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
               formatMarkerValue={formatDays}
               markerValueLabel="located days"
               getMarkerSecondaryValue={getMarkerSecondary}
-              ariaLabel={
-                view === ALL
-                  ? "World map. A line joins where my days were centred in each year, in order, each dot labelled with its years; shaded circles behind it are the places I spent time, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details."
-                  : `World map. A line joins where my days were centred in each month of ${view}, each dot labelled with its months; shaded circles behind it are the places I spent time that year, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details.`
-              }
+              ariaLabel={`World map. A line traces the centre of mass of where I spent my days${view === ALL ? "" : ` in ${view}`}, averaged over a ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} window and coloured from earliest to latest, with a labelled dot where each ${view === ALL ? "year" : "month"} begins. Shaded circles are the places I spent time, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details.`}
             />
           )}
         </ResponsiveChart>
@@ -257,8 +305,21 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   );
 }
 
-/** Fixed slot by all-time rank; everything past the fifth shares the
- * muted overflow colour (categoricalColor's own rule). */
-function baseColor(base: CentreBase): string {
-  return categoricalColor(Math.min(base.colorIndex, CATEGORICAL_SLOT_COUNT));
+/** The tooltip's "nearest area" row for a point on the trail: the area's
+ * name when the trail is inside it, or how far away it is when the
+ * average has put the trail between places. */
+function nearestArea(position: LngLat, bases: CentreBase[]): GeoSecondaryRow {
+  let best: { base: CentreBase; km: number } | null = null;
+  for (const base of bases) {
+    const km = greatCircleKm(position, base.position);
+    if (!best || km < best.km) best = { base, km };
+  }
+  if (!best) return { label: "nearest area", value: "none" };
+  return {
+    label: "nearest area",
+    value:
+      best.km <= BASE_RADIUS_KM
+        ? best.base.label
+        : `${best.base.label}, ${formatThousandsNumber(Math.round(best.km))} km away`,
+  };
 }
