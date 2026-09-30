@@ -84,24 +84,37 @@ export type CentreArea = {
   context: string | null;
 };
 
-export type CentreBase = CentreArea & {
-  /** The area's own geometric median over the period's days. */
+/** An area as the chart draws it: where it sits and how it ranks, both
+ * over the whole record. Fixed rather than per range, so a circle never
+ * moves or changes colour when the year range does — only its size
+ * (share of the range's days) changes. */
+export type CentreAreaSummary = CentreArea & {
+  /** The area's geometric median over all its days. */
   position: LngLat;
-  /** Located-day votes that fell in this area during the period. */
+  /** 0 = the area with the most days across the whole record. Drives
+   * colour (src/lib/viz/area-colors.ts). */
+  rank: number;
+};
+
+export type CentreBase = CentreAreaSummary & {
+  /** Index into `LocationCentreData.areas`. */
+  area: number;
+  /** Located-day votes that fell in this area during the range. */
   days: number;
-  /** days / the period's located days. */
+  /** days / the range's located days. */
   share: number;
 };
 
-export type CentrePeriod = {
-  /** "all" or "YYYY". */
-  period: string;
-  /** Days in the period with at least one place logged. */
+/** One calendar year's coverage and per-area days — summed by
+ * `rangeSummary` for whatever year range is picked. */
+export type CentreYear = {
+  year: number;
+  /** Days in the year with at least one place logged. */
   placedDays: number;
   /** Of those, days with at least one place that could be located. */
   locatedDays: number;
-  /** Largest first. */
-  bases: CentreBase[];
+  /** [area index, days] for every area with days this year. */
+  areaDays: [number, number][];
 };
 
 /**
@@ -117,10 +130,10 @@ export type DailyVector = [date: string, x: number, y: number, z: number, ...are
 
 export type LocationCentreData = {
   daily: DailyVector[];
-  areas: CentreArea[];
-  all: CentrePeriod;
-  /** Every calendar year from the first located day to the last. */
-  years: CentrePeriod[];
+  areas: CentreAreaSummary[];
+  /** Every calendar year from the first day with a place to the last, in
+   * order, including empty ones. */
+  years: CentreYear[];
 };
 
 /** One located vote: part of a day, at a position, in an area. */
@@ -225,44 +238,74 @@ export function buildLocationCentreData(
     daily.push([day.date, round(x), round(y), round(z), ...located.map((l) => l.area)]);
   }
 
-  // --- 2. Per-period areas and coverage --------------------------------
-  const summarise = (period: string, periodVotes: Vote[], placedDays: number): CentrePeriod => {
-    const locatedDays = new Set(periodVotes.map((v) => v.date)).size;
-    const byArea = new Map<number, Vote[]>();
-    for (const v of periodVotes) {
-      const list = byArea.get(v.area);
-      if (list) list.push(v);
-      else byArea.set(v.area, [v]);
-    }
-    const bases: CentreBase[] = [];
-    for (const [area, list] of byArea) {
-      const days = list.reduce((sum, v) => sum + v.weight, 0);
-      const position = sphericalGeometricMedian(collapse(list));
-      if (!position) continue;
-      bases.push({ ...areas[area], position, days, share: locatedDays > 0 ? days / locatedDays : 0 });
-    }
-    bases.sort((a, b) => b.days - a.days || a.key.localeCompare(b.key));
-    return { period, placedDays, locatedDays, bases };
-  };
+  // --- 2. Areas' fixed position and rank --------------------------------
+  const votesByArea = new Map<number, Vote[]>();
+  for (const v of votes) {
+    const list = votesByArea.get(v.area);
+    if (list) list.push(v);
+    else votesByArea.set(v.area, [v]);
+  }
+  const totalDays = (area: number) => (votesByArea.get(area) ?? []).reduce((sum, v) => sum + v.weight, 0);
+  const rankOrder = areas
+    .map((_, i) => i)
+    .sort((a, b) => totalDays(b) - totalDays(a) || areas[a].key.localeCompare(areas[b].key));
+  const rankOf = new Map(rankOrder.map((area, rank) => [area, rank]));
+  const summaries: CentreAreaSummary[] = areas.map((area, i) => ({
+    ...area,
+    // Every area here has at least one vote (it was only created for a
+    // located place), so the median always exists.
+    position: sphericalGeometricMedian(collapse(votesByArea.get(i) ?? []))!,
+    rank: rankOf.get(i)!,
+  }));
 
-  const all = summarise("all", votes, placedDates.length);
-  const years: CentrePeriod[] = [];
-  if (votes.length > 0) {
-    const first = Number(votes[0].date.slice(0, 4));
-    const last = Number(votes[votes.length - 1].date.slice(0, 4));
+  // --- 3. Per-year coverage and area days --------------------------------
+  // From the first day with a place to the last, not just the located
+  // ones, so a year whose places all lack coordinates still counts in the
+  // coverage readout instead of vanishing from it.
+  const years: CentreYear[] = [];
+  if (placedDates.length > 0) {
+    const first = Number(placedDates[0].slice(0, 4));
+    const last = Number(placedDates[placedDates.length - 1].slice(0, 4));
     for (let y = first; y <= last; y++) {
       const prefix = `${y}-`;
-      years.push(
-        summarise(
-          String(y),
-          votes.filter((v) => v.date.startsWith(prefix)),
-          placedDates.filter((d) => d.startsWith(prefix)).length,
-        ),
-      );
+      const yearVotes = votes.filter((v) => v.date.startsWith(prefix));
+      const areaDays = new Map<number, number>();
+      for (const v of yearVotes) areaDays.set(v.area, (areaDays.get(v.area) ?? 0) + v.weight);
+      years.push({
+        year: y,
+        placedDays: placedDates.filter((d) => d.startsWith(prefix)).length,
+        locatedDays: new Set(yearVotes.map((v) => v.date)).size,
+        areaDays: [...areaDays.entries()],
+      });
     }
   }
 
-  return { daily, areas, all, years };
+  return { daily, areas: summaries, years };
+}
+
+/**
+ * Coverage and per-area days for the years `from`–`to` inclusive, largest
+ * area first — what the circles and the coverage readout show for a picked
+ * year range.
+ */
+export function rangeSummary(
+  data: LocationCentreData,
+  from: number,
+  to: number,
+): { placedDays: number; locatedDays: number; bases: CentreBase[] } {
+  let placedDays = 0;
+  let locatedDays = 0;
+  const days = new Map<number, number>();
+  for (const y of data.years) {
+    if (y.year < from || y.year > to) continue;
+    placedDays += y.placedDays;
+    locatedDays += y.locatedDays;
+    for (const [area, d] of y.areaDays) days.set(area, (days.get(area) ?? 0) + d);
+  }
+  const bases: CentreBase[] = [...days.entries()]
+    .map(([area, d]) => ({ ...data.areas[area], area, days: d, share: locatedDays > 0 ? d / locatedDays : 0 }))
+    .sort((a, b) => b.days - a.days || a.rank - b.rank);
+  return { placedDays, locatedDays, bases };
 }
 
 /** Sums votes at the same position into one weighted point — thousands
@@ -316,18 +359,27 @@ export function indexDaily(daily: DailyVector[]): DailyIndex | null {
   return { first, span, byOffset, px, py, pz, pn };
 }
 
-/** The offsets [lo, hi) a window centred on offset `i` covers. Cut short
- * at the ends of the record rather than slid inwards: a window slid to
- * stay full would be the *same* window for every point in the first
- * half-window, freezing the trail for 2½ years at the 5-year setting; a
- * cut-short one keeps moving, just with less smoothing near the ends. */
-function windowBounds(index: DailyIndex, i: number, windowDays: number): [number, number] {
-  const half = Math.floor(windowDays / 2);
-  return [Math.max(0, i - half), Math.min(index.span, i - half + windowDays)];
+/** The offsets [lo, hi) of the window *ending* on offset `i` — the
+ * `windowDays` up to and including that day.
+ *
+ * Look-back, not centred (owner's call, 2026-09-30). A centred window
+ * reacts to a move while it's happening, but near the present it has no
+ * future to look into and was silently cut to half its length: the
+ * latest point of a "5-year" trail averaged barely 2½ years, while the
+ * breakdown still said five. Looking back, a point at Aug 2026 is Aug 2021
+ * to Aug 2026 and the chart's "Now" is simply "my last five years" — every
+ * window is full length except in the record's first `windowDays`, where
+ * there isn't yet that much history behind a point. There it's cut short
+ * rather than extended forward, so it never counts days from after the
+ * point it describes; the breakdown panel says when that's happened. The
+ * cost is lag: a move bends the line gradually, over the window after it.
+ */
+function windowBounds(_index: DailyIndex, i: number, windowDays: number): [number, number] {
+  return [Math.max(0, i - windowDays + 1), i + 1];
 }
 
 export type TrailPoint = {
-  /** The window's middle day. */
+  /** The window's last day — the point describes the window ending here. */
   date: string;
   position: LngLat;
   /** Located days inside the window. */
@@ -336,10 +388,8 @@ export type TrailPoint = {
 
 /**
  * The rolling centre of mass: for a sample every `stepDays`, the direction
- * of the summed day vectors within `windowDays` centred on it.
- *
- * Centred rather than trailing, so the trail bends towards a long stay
- * while it's happening rather than half a window afterwards.
+ * of the summed day vectors in the `windowDays` ending on it (see
+ * windowBounds for why the window looks back rather than being centred).
  *
  * Returns runs of consecutive points. A new run starts wherever a window
  * has less than MIN_WINDOW_COVERAGE of its days located — a stretch with
@@ -351,7 +401,14 @@ export function rollingTrail(index: DailyIndex | null, windowDays: number, stepD
   const minDays = Math.max(1, Math.ceil(windowDays * MIN_WINDOW_COVERAGE));
   const runs: TrailPoint[][] = [];
   let run: TrailPoint[] = [];
-  for (let i = 0; i < index.span; i += stepDays) {
+  // Every stepDays from the first day, plus the last day itself, so the
+  // trail always ends on the latest logged day — the chart's "Now" dot
+  // sits there, and a step of up to six weeks would otherwise stop the
+  // line short of it.
+  const offsets: number[] = [];
+  for (let i = 0; i < index.span; i += stepDays) offsets.push(i);
+  if (offsets[offsets.length - 1] !== index.span - 1) offsets.push(index.span - 1);
+  for (const i of offsets) {
     const [lo, hi] = windowBounds(index, i, windowDays);
     const n = pn[hi] - pn[lo];
     const position = n >= minDays ? fromUnitVector([px[hi] - px[lo], py[hi] - py[lo], pz[hi] - pz[lo]]) : null;
@@ -389,7 +446,7 @@ function sortedShares(totals: Map<number, number>, located: number): AreaShare[]
 }
 
 /**
- * Every area's share of the located days in the window centred on `date`,
+ * Every area's share of the located days in the window ending on `date`,
  * largest first — what a trail point's tooltip reports. Walks the window
  * day by day (O(window)), which is fine for the hundred-odd points that
  * have tooltips; the line itself never needs it. Empty for a window with
@@ -404,7 +461,7 @@ export function windowMix(index: DailyIndex | null, date: string, windowDays: nu
 
 export type WindowDetail = {
   /** First and last calendar day the window covers — shorter than the
-   * window setting near the ends of the record (see windowBounds). */
+   * window setting in the record's first `windowDays` (see windowBounds). */
   from: string;
   to: string;
   /** Calendar days covered, and how many of them are located. */

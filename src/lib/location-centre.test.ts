@@ -3,6 +3,7 @@ import {
   buildLocationCentreData,
   indexDaily,
   mergeNearbyLabels,
+  rangeSummary,
   rollingTrail,
   windowDetail,
   windowMix,
@@ -49,7 +50,9 @@ function daysAt(month: string, n: number, place1Id: number | null, place2Id: num
   }));
 }
 
-const year = (data: ReturnType<typeof buildLocationCentreData>, y: string) => data.years.find((p) => p.period === y)!;
+const year = (data: ReturnType<typeof buildLocationCentreData>, y: string) => data.years.find((p) => p.year === Number(y))!;
+/** The whole record's summary — what the chart shows with no range picked. */
+const all = (data: ReturnType<typeof buildLocationCentreData>) => rangeSummary(data, 0, 9999);
 
 describe("buildLocationCentreData", () => {
   it("gives each day one vote, shared between its located places", () => {
@@ -58,24 +61,24 @@ describe("buildLocationCentreData", () => {
       CATALOG,
       METROS,
     );
-    const dc = data.all.bases.find((b) => b.label === "Washington DC")!;
-    const dubai = data.all.bases.find((b) => b.label === "Dubai")!;
+    const dc = all(data).bases.find((b) => b.label === "Washington DC")!;
+    const dubai = all(data).bases.find((b) => b.label === "Dubai")!;
     // Day 1: ½ DC + ½ Dubai. Day 2: the same place twice is one whole vote.
     expect(dc.days).toBeCloseTo(1.5);
     expect(dubai.days).toBeCloseTo(0.5);
-    expect(data.all.locatedDays).toBe(2);
+    expect(all(data).locatedDays).toBe(2);
   });
 
   it("never locates a day by a country's centroid", () => {
     const data = buildLocationCentreData(daysAt("2020-01", 3, 20), CATALOG, METROS);
-    expect(data.all.placedDays).toBe(3);
-    expect(data.all.locatedDays).toBe(0);
+    expect(all(data).placedDays).toBe(3);
+    expect(all(data).locatedDays).toBe(0);
   });
 
   it("hands the whole vote to the one place that can be located", () => {
     const data = buildLocationCentreData(daysAt("2020-01", 1, 20, 11), CATALOG, METROS);
-    expect(data.all.bases).toHaveLength(1);
-    expect(data.all.bases[0].days).toBeCloseTo(1);
+    expect(all(data).bases).toHaveLength(1);
+    expect(all(data).bases[0].days).toBeCloseTo(1);
   });
 
   it("groups places by an ancestor's metro, else by their municipality", () => {
@@ -84,16 +87,16 @@ describe("buildLocationCentreData", () => {
       CATALOG,
       METROS,
     );
-    const labels = data.all.bases.map((b) => b.label).sort();
+    const labels = all(data).bases.map((b) => b.label).sort();
     // Office + Home -> their metro; Cafe + Market -> their municipality,
     // Bursa; Izmir is itself a municipality.
     expect(labels).toEqual(["Bursa", "Izmir", "Washington DC"]);
-    expect(data.all.bases.find((b) => b.label === "Bursa")!.days).toBeCloseTo(4);
+    expect(all(data).bases.find((b) => b.label === "Bursa")!.days).toBeCloseTo(4);
   });
 
   it("lists every year between the first and last located day, with each year's own coverage", () => {
     const data = buildLocationCentreData([...daysAt("2018-01", 5, 4), ...daysAt("2020-01", 3, 20), ...daysAt("2020-02", 2, 4)], CATALOG, METROS);
-    expect(data.years.map((y) => y.period)).toEqual(["2018", "2019", "2020"]);
+    expect(data.years.map((y) => y.year)).toEqual([2018, 2019, 2020]);
     expect(year(data, "2019").placedDays).toBe(0);
     expect(year(data, "2020").placedDays).toBe(5);
     expect(year(data, "2020").locatedDays).toBe(2);
@@ -129,19 +132,30 @@ describe("rollingTrail", () => {
     for (const p of runs[0]) expect(greatCircleKm(p.position, HOME)).toBeLessThan(0.01);
   });
 
-  it("is pulled part of the way out by a trip, peaking at the trip, and comes back", () => {
+  it("is pulled part of the way out by a trip, peaking as it ends, and comes back", () => {
     const daily = [...stay("2020-01-01", 45, HOME), ...stay("2020-02-15", 10, AWAY), ...stay("2020-02-25", 45, HOME)];
     const [run] = rollingTrail(indexDaily(daily), 30, 1);
-    const distance = (date: string) => greatCircleKm(run.find((p) => p.date === date)!.position, HOME);
-    // A third of the window away: well off home, nowhere near Dubai.
-    const peak = distance("2020-02-19");
+    const at = (date: string) => run.find((p) => p.date === date)!.position;
+    const distance = (date: string) => greatCircleKm(at(date), HOME);
+    // Looking back, the pull is strongest on the trip's last day, with a
+    // third of the window away: well off home, nowhere near Dubai.
+    const peak = distance("2020-02-24");
+    expect(peak).toBeGreaterThan(distance("2020-02-18"));
+    expect(peak).toBeGreaterThan(distance("2020-03-05"));
     expect(peak).toBeGreaterThan(1_000);
-    expect(greatCircleKm(run.find((p) => p.date === "2020-02-19")!.position, AWAY)).toBeGreaterThan(5_000);
-    expect(distance("2020-01-10")).toBeLessThan(0.01);
+    expect(greatCircleKm(at("2020-02-24"), AWAY)).toBeGreaterThan(5_000);
+    // Nothing before the trip moves: a window never looks forward.
+    expect(distance("2020-02-14")).toBeLessThan(0.01);
     expect(distance("2020-04-01")).toBeLessThan(0.01);
     // A longer window dilutes the same trip.
-    const [yearRun] = rollingTrail(indexDaily(daily), 90, 1);
-    expect(greatCircleKm(yearRun.find((p) => p.date === "2020-02-19")!.position, HOME)).toBeLessThan(peak);
+    const [longRun] = rollingTrail(indexDaily(daily), 90, 1);
+    expect(greatCircleKm(longRun.find((p) => p.date === "2020-02-24")!.position, HOME)).toBeLessThan(peak);
+  });
+
+  it("always ends on the last logged day, whatever the step", () => {
+    const runs = rollingTrail(indexDaily(stay("2020-01-01", 100, HOME)), 30, 42);
+    const last = runs[runs.length - 1];
+    expect(last[last.length - 1].date).toBe(addDays("2020-01-01", 99));
   });
 
   it("breaks the trail where too few of a window's days are located", () => {
@@ -152,8 +166,8 @@ describe("rollingTrail", () => {
   });
 
   it("keeps moving near the start of the record instead of freezing on one window", () => {
-    // A move a year in, under a 5-year window: a window slid to stay full
-    // would give every point in the first 2½ years the same position.
+    // A move a year in, under a 5-year window: the first points' windows
+    // are cut short rather than all being the same first five years.
     const daily = [...stay("2016-01-01", 365, HOME), ...stay("2017-01-01", 2000, AWAY)];
     const [run] = rollingTrail(indexDaily(daily), 1826, 42);
     const first = run[0].position;
@@ -174,12 +188,13 @@ describe("windowMix", () => {
       METROS,
     );
     const index = indexDaily(data.daily);
-    // A window wide enough to hold every day: DC 20 + 5, Dubai 10 + 5.
-    const mix = windowMix(index, "2020-02-05", 400);
+    // A window ending after every day: DC 20 + 5, Dubai 10 + 5.
+    const mix = windowMix(index, "2020-03-31", 400);
     expect(mix.map((m) => data.areas[m.area].label)).toEqual(["Washington DC", "Dubai"]);
     expect(mix[0].share).toBeCloseTo(25 / 40);
     expect(mix[1].share).toBeCloseTo(15 / 40);
-    // A narrow window around the Dubai stretch.
+    // A week ending in the Dubai stretch (Jan 30–Feb 5; January's logging
+    // stopped on the 20th).
     const feb = windowMix(index, "2020-02-05", 7);
     expect(feb).toHaveLength(1);
     expect(data.areas[feb[0].area].label).toBe("Dubai");
@@ -217,15 +232,22 @@ describe("windowDetail", () => {
   const index = indexDaily(data.daily);
   const label = (area: number) => data.areas[area].label;
 
-  it("covers the window's calendar days and counts the located ones", () => {
+  it("covers the days up to and including the point, and counts the located ones", () => {
     const d = windowDetail(index, data.areas, "2020-02-05", 30)!;
-    expect(d.from).toBe("2020-01-21");
-    expect(d.to).toBe("2020-02-19");
+    expect(d.from).toBe("2020-01-07");
+    expect(d.to).toBe("2020-02-05");
     expect(d.spanDays).toBe(30);
-    // Jan 21–25 and Feb 1–10 are logged; Jan 26–31 and Feb 11–19 aren't.
-    expect(d.locatedDays).toBe(15);
-    expect(d.areas.map((a) => label(a.area))).toEqual(["Dubai", "Washington DC"]);
-    expect(d.areas[0].days).toBeCloseTo(10);
+    // Jan 7–25 and Feb 1–5 are logged; Jan 26–31 isn't.
+    expect(d.locatedDays).toBe(24);
+    expect(d.areas.map((a) => label(a.area))).toEqual(["Washington DC", "Dubai"]);
+    expect(d.areas[0].days).toBeCloseTo(19);
+  });
+
+  it("is cut short, never extended forward, in the record's first window", () => {
+    const d = windowDetail(index, data.areas, "2020-01-10", 30)!;
+    expect(d.from).toBe("2020-01-01");
+    expect(d.to).toBe("2020-01-10");
+    expect(d.spanDays).toBe(10);
   });
 
   it("rolls areas up by country", () => {
@@ -236,7 +258,8 @@ describe("windowDetail", () => {
   });
 
   it("lists only areas first visited inside the window, in order", () => {
-    const wide = windowDetail(index, data.areas, "2020-02-20", 60)!;
+    // Jan 11 – Mar 10.
+    const wide = windowDetail(index, data.areas, "2020-03-10", 60)!;
     expect(wide.firstVisits.map((v) => [label(v.area), v.date])).toEqual([
       ["Dubai", "2020-02-01"],
       ["Bursa", "2020-03-01"],
@@ -248,5 +271,33 @@ describe("windowDetail", () => {
   it("returns null for a window with nothing located", () => {
     expect(windowDetail(index, data.areas, "2020-01-30", 3)).toBeNull();
     expect(windowDetail(indexDaily([]), [], "2020-01-01", 30)).toBeNull();
+  });
+});
+
+describe("rangeSummary", () => {
+  const data = buildLocationCentreData(
+    [...daysAt("2019-01", 20, 4), ...daysAt("2020-01", 10, 11), ...daysAt("2021-01", 10, 4), ...daysAt("2021-02", 2, 20)],
+    CATALOG,
+    METROS,
+  );
+
+  it("sums coverage and area days over the picked years only", () => {
+    const r = rangeSummary(data, 2020, 2021);
+    expect(r.placedDays).toBe(22);
+    expect(r.locatedDays).toBe(20);
+    // A tie on days breaks by all-time rank: DC has more days overall.
+    expect(r.bases.map((b) => [b.label, b.days])).toEqual([
+      ["Washington DC", 10],
+      ["Dubai", 10],
+    ]);
+    expect(r.bases[0].share).toBeCloseTo(0.5);
+  });
+
+  it("keeps each area's all-time position and rank, whatever the range", () => {
+    const dcAll = rangeSummary(data, 2019, 2021).bases.find((b) => b.label === "Washington DC")!;
+    const dcLate = rangeSummary(data, 2021, 2021).bases.find((b) => b.label === "Washington DC")!;
+    expect(dcLate.position).toEqual(dcAll.position);
+    expect(dcAll.rank).toBe(0);
+    expect(dcLate.rank).toBe(0);
   });
 });

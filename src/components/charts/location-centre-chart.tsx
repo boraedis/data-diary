@@ -16,14 +16,16 @@ import {
   type GeoSecondaryRow,
 } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
+import { Legend } from "@/components/charts/interactive/legend";
+import { YearRangePicker } from "@/components/charts/interactive/year-range-picker";
 import {
   indexDaily,
   mergeNearbyLabels,
+  rangeSummary,
   rollingTrail,
   windowDetail,
   windowMix,
   type CentreArea,
-  type CentrePeriod,
   type LocationCentreData,
   type AreaShare,
   type TrailPoint,
@@ -31,7 +33,8 @@ import {
 } from "@/lib/location-centre";
 import { daysBetween } from "@/lib/date";
 import type { LngLat } from "@/lib/viz/geo-centre";
-import { CATEGORICAL_SLOT_COUNT, categoricalColor, sequentialScale } from "@/lib/viz/color";
+import { AREA_COLORS, AREA_OVERFLOW_COLOR, areaColorForRank } from "@/lib/viz/area-colors";
+import { sequentialScale } from "@/lib/viz/color";
 import { formatDate, formatPercent, formatThousandsNumber } from "@/lib/viz/format";
 import { LOCATION_CENTRE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { LOCATION_CENTRE_METHODOLOGY } from "@/lib/viz/methodology";
@@ -52,8 +55,6 @@ type CountryProperties = { name: string };
 // ~190KB saving costs nothing.
 const worldTopology = worldTopologyRaw as unknown as Topology<{ countries: GeometryCollection<CountryProperties> }>;
 const WORLD = feature(worldTopology, worldTopology.objects.countries);
-
-const ALL = "all";
 
 // Years, not days. Windows of a week to a quarter shipped first and read
 // as noise (owner, 2026-09-30): at that scale every holiday throws the
@@ -85,10 +86,16 @@ const LABEL_MERGE_KM = 25;
 const FRAME_MIN_SHARE = 0.01;
 const FRAME_PAD = 4;
 
-/** Largest place circle, px. Area ∝ share of the period's days. */
+/** Largest area circle, px. Area ∝ share of the range's days. */
 const BASE_MAX_RADIUS = 22;
 const BASE_MIN_RADIUS = 3;
-const BASE_COLOR = "var(--muted-foreground)";
+/** Circles sit on top of the trail, so they stay translucent enough for
+ * the line to show through, but opaque enough for their colour to read —
+ * the ten area colours were validated as solid marks. */
+const BASE_OPACITY = 0.45;
+/** How many areas get their own colour and a name on the map — one per
+ * AREA_COLORS entry (owner's ask: the top ten, 2026-09-30). */
+const NAMED_AREAS = AREA_COLORS.length;
 const ANCHOR_RADIUS = 4;
 /** The bi-monthly points: a dot small enough to read as texture along the
  * line rather than a second set of year dots, with a hover target a good
@@ -113,7 +120,15 @@ const BRIDGE_COLOR = "var(--muted-foreground)";
 const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
 
 export function LocationCentreChart({ data }: { data: LocationCentreData }) {
-  const [view, setView] = useState<string>(ALL);
+  const firstYear = data.years[0]?.year ?? 0;
+  const lastYear = data.years[data.years.length - 1]?.year ?? 0;
+  const yearDomain = useMemo<[number, number]>(() => [firstYear, lastYear], [firstYear, lastYear]);
+  // null = every year, so the picker always opens on the whole record.
+  const [pickedRange, setPickedRange] = useState<[number, number] | null>(null);
+  const [fromYear, toYear] = pickedRange ?? yearDomain;
+  const wholeRecord = fromYear === yearDomain[0] && toYear === yearDomain[1];
+  // One year reads month by month; more than one, year by year.
+  const singleYear = fromYear === toYear;
   const [windowDays, setWindowDays] = useState<WindowDays>("365");
   // The trail point whose detail panel is open, by marker id. Deliberately
   // not reset when the pickers change: an id that no longer exists simply
@@ -122,18 +137,22 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   // window.
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const current: CentrePeriod = useMemo(
-    () => (view === ALL ? data.all : (data.years.find((y) => y.period === view) ?? data.all)),
-    [data, view],
-  );
+  const current = useMemo(() => rangeSummary(data, fromYear, toYear), [data, fromYear, toYear]);
 
   const index = useMemo(() => indexDaily(data.daily), [data]);
 
-  const runs = useMemo(() => {
+  const { runs, endDate } = useMemo(() => {
     const all = rollingTrail(index, Number(windowDays), STEP[windowDays]);
-    if (view === ALL) return all;
-    return all.map((run) => run.filter((p) => p.date.startsWith(`${view}-`))).filter((run) => run.length > 0);
-  }, [index, windowDays, view]);
+    // The whole trail's last point, before any year filter — the only one
+    // that gets the "Now" dot, so a range ending in the past never claims it.
+    const endDate = all[all.length - 1]?.[all[all.length - 1].length - 1]?.date ?? null;
+    if (wholeRecord) return { runs: all, endDate };
+    const [from, to] = [`${fromYear}-01-01`, `${toYear}-12-31`];
+    return {
+      runs: all.map((run) => run.filter((p) => p.date >= from && p.date <= to)).filter((run) => run.length > 0),
+      endDate,
+    };
+  }, [index, windowDays, wholeRecord, fromYear, toYear]);
 
   // Colour encodes time along the trail. The domain is whatever's on
   // screen, so a single year still spans the full ramp month by month.
@@ -181,7 +200,10 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     const secondaryById = new Map<string, GeoSecondaryRow>();
     const mixById = new Map<string, AreaShare[]>();
 
-    // Places first, so the trail's dots draw on top of them.
+    // Areas first, so the trail's dots draw on top of them. The top ten
+    // by all-time days carry their own colour and their name on the map:
+    // ten colours can't all be told apart by colour alone (see
+    // area-colors.ts), so the names are what identify them.
     const baseMarkers: GeoMarker[] = current.bases.map((b) => {
       const id = `base:${b.key}`;
       valueById.set(id, b.days);
@@ -190,9 +212,10 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         id,
         position: b.position,
         label: b.context ? `${b.label}, ${b.context}` : b.label,
-        color: BASE_COLOR,
-        opacity: 0.3,
+        color: areaColorForRank(b.rank),
+        opacity: BASE_OPACITY,
         radius: Math.max(BASE_MIN_RADIUS, Math.sqrt(b.share) * BASE_MAX_RADIUS),
+        annotation: b.rank < NAMED_AREAS ? b.label : undefined,
       };
     });
 
@@ -202,10 +225,18 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     const anchors: (TrailPoint & { label: string })[] = [];
     let lastKey = "";
     for (const p of runs.flat()) {
-      const key = view === ALL ? p.date.slice(0, 4) : p.date.slice(0, 7);
+      const key = singleYear ? p.date.slice(0, 7) : p.date.slice(0, 4);
       if (key === lastKey) continue;
       lastKey = key;
-      anchors.push({ ...p, label: view === ALL ? key : formatDate(`${key}-01`, "monthShort") });
+      anchors.push({ ...p, label: singleYear ? formatDate(`${key}-01`, "monthShort") : key });
+    }
+    // The present gets a labelled dot like a year's (owner's ask), so the
+    // line visibly ends somewhere rather than trailing off. Only when the
+    // view actually reaches the end of the record; a point sitting where a
+    // recent year's dot already is merges into it as "2024–Now".
+    const lastShown = runs[runs.length - 1]?.[runs[runs.length - 1].length - 1];
+    if (lastShown && lastShown.date === endDate && anchors[anchors.length - 1]?.date !== lastShown.date) {
+      anchors.push({ ...lastShown, label: "Now" });
     }
     /** Tooltip content for a point on the trail: the days behind it, and
      * how they split between areas (drawn by MixDetail). The title is the
@@ -234,10 +265,10 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
 
     // Every two months between the year dots, a small unlabelled point
     // with its own tooltip (owner's ask), so the detail's there along the
-    // whole line without a label every inch. All-years view only — within
-    // one year every month already has its own labelled dot.
+    // whole line without a label every inch. Multi-year ranges only — in a
+    // single year every month already has its own labelled dot.
     const pointMarkers: GeoMarker[] = [];
-    if (view === ALL) {
+    if (!singleYear) {
       const anchorDates = new Set(anchors.map((a) => a.date));
       let lastBucket = "";
       for (const p of runs.flat()) {
@@ -269,7 +300,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     };
     // selectedId rebuilds the map on a click, to enlarge the clicked dot.
     // A click, unlike a hover, is rare enough for that to cost nothing.
-  }, [current, runs, view, colorOf, index, windowDays, selectedId]);
+  }, [current, runs, endDate, singleYear, colorOf, index, windowDays, selectedId]);
 
   // Only trail points open a panel; an area circle's click does nothing.
   const onMarkerClick = useCallback(
@@ -297,14 +328,11 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
   const getMarkerSecondary = useCallback((m: GeoMarker) => secondaryById.get(String(m.id)) ?? null, [secondaryById]);
 
-  // Each area's colour in a mix bar is its all-time rank's fixed slot, so
-  // an area is the same colour in every tooltip; beyond the fifth, areas
-  // share the muted overflow colour (categoricalColor's own rule).
-  const areaColor = useMemo(() => {
-    const rank = new Map(data.all.bases.map((b, i) => [b.key, i]));
-    return (area: number) =>
-      categoricalColor(Math.min(rank.get(data.areas[area].key) ?? CATEGORICAL_SLOT_COUNT, CATEGORICAL_SLOT_COUNT));
-  }, [data]);
+  // An area's colour comes from its all-time rank, so it's the same on
+  // the map, in every tooltip's mix bar and in the breakdown panel,
+  // whatever range is picked.
+  const areaColor = useCallback((area: number) => areaColorForRank(data.areas[area].rank), [data]);
+  const allTime = useMemo(() => rangeSummary(data, firstYear, lastYear), [data, firstYear, lastYear]);
   const getMarkerDetail = useCallback(
     (m: GeoMarker) => {
       const mix = mixById.get(String(m.id));
@@ -319,7 +347,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   // the wrong way round means "everything *except* this box".
   const fitTo = useMemo<Feature<MultiPoint>>(() => {
     const points: LngLat[] = [
-      ...data.all.bases.filter((b) => b.share >= FRAME_MIN_SHARE).map((b) => b.position),
+      ...allTime.bases.filter((b) => b.share >= FRAME_MIN_SHARE).map((b) => b.position),
       ...rollingTrail(index, 365, 14).flat().map((p) => p.position),
     ];
     const lngs = points.map((p) => p[0]);
@@ -337,11 +365,22 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         ],
       },
     };
-  }, [data, index]);
+  }, [allTime, index]);
+
+  // Names every coloured area, in rank order, so colour is never the only
+  // way to tell which is which; the map labels them too.
+  const legendSeries = useMemo(() => {
+    const named = [...data.areas]
+      .filter((a) => a.rank < NAMED_AREAS)
+      .sort((a, b) => a.rank - b.rank)
+      .map((a) => ({ id: a.key, label: a.label, color: areaColorForRank(a.rank) }));
+    if (data.areas.length > named.length) named.push({ id: "other", label: "Elsewhere", color: AREA_OVERFLOW_COLOR });
+    return named;
+  }, [data]);
 
   const coverage = current.placedDays > 0 ? current.locatedDays / current.placedDays : 0;
-  const yearOptions = data.years.filter((y) => y.placedDays > 0).map((y) => y.period);
-  const rampFormat = (date: string) => formatDate(date, view === ALL ? "monthYear" : "short");
+  const rampFormat = (date: string) => formatDate(date, singleYear ? "short" : "monthYear");
+  const rangeText = singleYear ? `in ${fromYear}` : wholeRecord ? "" : `from ${fromYear} to ${toYear}`;
   const [rampLow, rampHigh] = [colorOf(firstDate ?? ""), colorOf(lastDate ?? "")];
 
   return (
@@ -355,23 +394,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       }}
       filters={
         <>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Period</span>
-            {/* A native select rather than GroupByPicker's button row: a
-                decade of years is too many buttons for a phone's width. */}
-            <select
-              value={view}
-              onChange={(e) => setView(e.target.value)}
-              className="h-7 rounded-md border border-input bg-transparent px-2 text-sm dark:bg-input/30"
-            >
-              <option value={ALL}>All years</option>
-              {yearOptions.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </label>
+          <YearRangePicker domain={yearDomain} value={[fromYear, toYear]} onChange={setPickedRange} />
           <GroupByPicker value={windowDays} onChange={setWindowDays} options={WINDOW_OPTIONS} label="Window" />
           {current.placedDays > 0 ? (
             <p className="ml-auto text-xs text-muted-foreground">
@@ -394,10 +417,8 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
               />
               {rampFormat(lastDate)}
             </span>
-            <span className="flex items-center gap-2">
-              <span aria-hidden className="inline-block size-3 rounded-full opacity-40" style={{ background: BASE_COLOR }} />
-              Places, sized by share of days
-            </span>
+            <span>Circles: areas, sized by share of days</span>
+            <Legend series={legendSeries} className="w-full text-xs" />
           </div>
         ) : null}
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={320}>
@@ -419,13 +440,14 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
                 getMarkerSecondaryValue={getMarkerSecondary}
                 getMarkerDetail={getMarkerDetail}
                 onMarkerClick={onMarkerClick}
-                ariaLabel={`World map. A line traces the centre of mass of where I spent my days${view === ALL ? "" : ` in ${view}`}, averaged over a ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} window and coloured from earliest to latest, with a labelled dot where each ${view === ALL ? "year" : "month"} begins. Shaded circles are the places I spent time, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
+                ariaLabel={`World map. A line traces the centre of mass of where I spent my days${rangeText ? ` ${rangeText}` : ""}, each point averaging the ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} before it, coloured from earliest to latest, with a labelled dot where each ${singleYear ? "month" : "year"} begins and one marking now. Shaded circles are the areas I spent time in, sized by their share of days, the ten largest coloured and named. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
               />
               {detail && selectedDate ? (
                 <DetailPanel
                   detail={detail}
                   title={formatDate(selectedDate, "monthYear")}
                   windowLabel={WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label}
+                  windowDays={Number(windowDays)}
                   areas={data.areas}
                   colorOf={areaColor}
                   onClose={() => setSelectedId(null)}
@@ -490,6 +512,7 @@ function DetailPanel({
   detail,
   title,
   windowLabel,
+  windowDays,
   areas,
   colorOf,
   onClose,
@@ -498,6 +521,8 @@ function DetailPanel({
   detail: WindowDetail;
   title: string;
   windowLabel: string;
+  /** The window as picked, to tell when this one was cut short. */
+  windowDays: number;
   areas: CentreArea[];
   colorOf: (area: number) => string;
   onClose: () => void;
@@ -523,6 +548,14 @@ function DetailPanel({
           <p className="text-muted-foreground">
             {windowLabel} window, {formatDate(detail.from, "dayYear")} – {formatDate(detail.to, "dayYear")}
           </p>
+          {/* Only in the record's first windowDays: there isn't yet that
+              much history behind the point (see windowBounds). Said
+              outright, since the header above names the full window. */}
+          {detail.spanDays < windowDays ? (
+            <p className="text-muted-foreground">
+              Cut to {formatSpan(detail.spanDays)}: the record starts {formatDate(detail.from, "dayYear")}
+            </p>
+          ) : null}
           <p className="text-muted-foreground">
             {formatThousandsNumber(detail.locatedDays)} of {formatThousandsNumber(detail.spanDays)} days located
           </p>
@@ -602,4 +635,11 @@ function DetailPanel({
       ) : null}
     </section>
   );
+}
+
+/** A day count as years and months, e.g. 967 -> "2 yr 8 mo". */
+function formatSpan(days: number): string {
+  const months = Math.round(days / 30.44);
+  const [y, m] = [Math.floor(months / 12), months % 12];
+  return [y > 0 ? `${y} yr` : null, m > 0 || y === 0 ? `${m} mo` : null].filter(Boolean).join(" ");
 }
