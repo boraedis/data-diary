@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { MarkRecapSeen } from "@/components/recap/mark-recap-seen";
 import { RecapReport } from "@/components/recap/recap-report";
 import { Card, CardContent } from "@/components/ui/card";
 import { todayDateString } from "@/lib/date";
 import { isPeriodPublished, periodPublishDate, type RecapPeriod } from "@/lib/recap";
+import { recapPeriodKey } from "@/lib/recap-seen";
 import { formatDate } from "@/lib/viz/format";
 
 // The publish gate's single point of application for a period's own page
@@ -24,7 +26,17 @@ import { formatDate } from "@/lib/viz/format";
 
 export function RecapGate({ period, preview }: { period: RecapPeriod; preview: boolean }) {
   const today = todayDateString();
-  if (isPeriodPublished(period, today)) return <RecapReport period={period} />;
+  if (isPeriodPublished(period, today)) {
+    // Opening a published recap is what clears its "new" badge (#518). Not
+    // done for a preview, which isn't the real recap.
+    const key = recapPeriodKey(period);
+    return (
+      <>
+        {key !== null ? <MarkRecapSeen periodKey={key} /> : null}
+        <RecapReport period={period} />
+      </>
+    );
+  }
 
   if (preview) {
     return (
