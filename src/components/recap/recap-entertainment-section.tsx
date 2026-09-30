@@ -1,6 +1,11 @@
 import { ChartCard } from "@/components/charts/chart-card";
+import { LeaderboardTable } from "@/components/charts/leaderboard";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { MIN_DAYS_FOR_TOTAL, toRecapStat } from "@/lib/recap";
+import { entertainmentColumns } from "@/lib/leaderboards/entertainment";
+import { musicColumns, podcastColumns } from "@/lib/leaderboards/listens";
+import type { LeaderboardColumns, LeaderboardRow } from "@/lib/leaderboards/rows";
+import { sportsColumns } from "@/lib/leaderboards/sports";
 import type { RecapEntertainment } from "@/lib/recap-entertainment";
 
 // The entertainment section of the recap report (issue #171, epic #130).
@@ -17,6 +22,18 @@ import type { RecapEntertainment } from "@/lib/recap-entertainment";
  * named ones and count the rest. */
 const MAX_LISTED_GENRES = 4;
 
+// The recap's top-pick tables reuse each medium's own `*Columns(mode)`
+// config (#528) so headers and value descriptions can't drift from the
+// leaderboard pages. Games drop the Type column: every row is a game.
+const SONG_COLUMNS = musicColumns("song");
+const PODCAST_COLUMNS = podcastColumns("show");
+const GAME_COLUMNS: LeaderboardColumns = {
+  ...entertainmentColumns("title"),
+  nameHeader: "Game",
+  contextHeader: undefined,
+  contextDescription: undefined,
+};
+
 export function RecapEntertainmentSection({
   entertainment,
   periodLabel,
@@ -26,7 +43,13 @@ export function RecapEntertainmentSection({
   periodLabel: string;
   priorLabel: string;
 }) {
-  const { totals, topMovie, topBook, topArtist, topGenre, firsts } = entertainment;
+  const { totals, topMovie, topBook, topArtist, topGenre, firsts, picks } = entertainment;
+  const pickTables = [
+    { title: "Top songs", rows: picks.songs, columns: SONG_COLUMNS },
+    { title: "Top podcasts", rows: picks.podcasts, columns: PODCAST_COLUMNS },
+    { title: "Top games", rows: picks.games, columns: GAME_COLUMNS },
+    { title: picks.sportsMode === "team" ? "Top teams" : "Top leagues", rows: picks.sports, columns: sportsColumns(picks.sportsMode) },
+  ].filter((table) => table.rows.length > 0);
   // A medium with nothing in either period isn't a gap worth a tile — it's
   // something this diary has never tracked. Dropping it keeps the section
   // about the year rather than about the schema.
@@ -83,6 +106,20 @@ export function RecapEntertainmentSection({
           </dl>
         ) : null}
 
+        {pickTables.length > 0 ? (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {pickTables.map((table) => (
+              <PickTable
+                key={table.title}
+                title={table.title}
+                rows={table.rows}
+                columns={table.columns}
+                periodLabel={periodLabel}
+              />
+            ))}
+          </div>
+        ) : null}
+
         {hasFirsts ? (
           <div className="flex flex-col gap-1 border-t border-border/60 pt-4">
             <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
@@ -108,6 +145,25 @@ export function RecapEntertainmentSection({
         ) : null}
       </div>
     </ChartCard>
+  );
+}
+
+function PickTable({
+  title,
+  rows,
+  columns,
+  periodLabel,
+}: {
+  title: string;
+  rows: LeaderboardRow[];
+  columns: LeaderboardColumns;
+  periodLabel: string;
+}) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2">
+      <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">{title}</h3>
+      <LeaderboardTable rows={rows} columns={columns} ariaLabel={`${title} in ${periodLabel}, ranked.`} />
+    </section>
   );
 }
 

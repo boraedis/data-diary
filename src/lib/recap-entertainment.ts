@@ -18,7 +18,15 @@ import {
 import { addDays, parseDate, toDateString } from "@/lib/date";
 import { getDb } from "@/lib/db";
 import { MIN_LISTEN_MS } from "@/lib/music";
-import { firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
+import { MIN_DAYS_FOR_TOTAL, firstSeenInPeriod, type RecapPeriod } from "@/lib/recap";
+import {
+  buildEntertainmentLeaderboard,
+  getEntertainmentSessions,
+  type EntertainmentSession,
+} from "@/lib/leaderboards/entertainment";
+import { getPeriodMusicLeaderboard, getPeriodPodcastLeaderboard } from "@/lib/leaderboards/listens";
+import type { LeaderboardRow } from "@/lib/leaderboards/rows";
+import { buildSportsLeaderboard, getSportsWatches, type SportsWatch } from "@/lib/leaderboards/sports";
 
 // The recap's entertainment section (issue #171, epic #130).
 //
@@ -266,6 +274,87 @@ async function topGenre(period: RecapPeriod): Promise<RecapListenPick | null> {
   return row ? { name: row.name, minutes: Math.round((row.totalMs ?? 0) / 60_000) } : null;
 }
 
+// --- Top picks (#528) ------------------------------------------------------
+
+/** Rows per list. Five, where the people & places leaderboard shows ten:
+ * there are four of these in a row inside one section, and the full tables
+ * live on each medium's own leaderboard page. */
+const PICKS_SIZE = 5;
+
+export type RecapTopPicks = {
+  songs: LeaderboardRow[];
+  podcasts: LeaderboardRow[];
+  games: LeaderboardRow[];
+  sports: LeaderboardRow[];
+  /** What `sports` ranks, so the table's headers match its rows. */
+  sportsMode: "team" | "league";
+};
+
+/**
+ * The rules, per medium — each the same metric that medium's own
+ * leaderboard page ranks by, so the recap and the page can't disagree:
+ *
+ * - **Songs** and **podcast shows**: listening *time*, not play count (see
+ *   `topArtist`). A song is a title + artist, as on the music page.
+ * - **Games**: hours played per title. A *session* is one `gameSessions`
+ *   row — one logged sitting — and a title's count is how many of those
+ *   there were.
+ * - **Sports**: hours watched per *team*; a game credits both teams in
+ *   full. A watch logged without teams can't be credited to one, so if
+ *   no team was logged at all in the period the list falls back to leagues
+ *   rather than vanishing.
+ *
+ * A list with fewer than `MIN_DAYS_FOR_TOTAL` rows is empty, and the
+ * section simply omits it — same "nothing logged" state as the totals.
+ */
+export function toRecapPicks(rows: LeaderboardRow[]): LeaderboardRow[] {
+  if (rows.length < MIN_DAYS_FOR_TOTAL) return [];
+  // Drop movement: a recap period is a fixed window, so "rank a week
+  // ago" (computed against the latest session, not the period) would be
+  // noise. The table hides those columns when no row carries them.
+  return rows
+    .filter((row) => row.rank <= PICKS_SIZE)
+    .map((row) => ({ ...row, previousRanks: null, gained: null }));
+}
+
+const inPeriod = (date: string, period: RecapPeriod) => date >= period.start && date <= period.end;
+
+export function buildGamePicks(sessions: EntertainmentSession[], period: RecapPeriod): LeaderboardRow[] {
+  const inWindow = sessions.filter((s) => inPeriod(s.date, period));
+  return toRecapPicks(buildEntertainmentLeaderboard(inWindow, "title", "game"));
+}
+
+export function buildSportsPicks(
+  watches: SportsWatch[],
+  period: RecapPeriod,
+): { rows: LeaderboardRow[]; mode: "team" | "league" } {
+  const inWindow = watches.filter((w) => inPeriod(w.date, period));
+  const teams = toRecapPicks(buildSportsLeaderboard(inWindow, "team"));
+  if (teams.length > 0) return { rows: teams, mode: "team" };
+  return { rows: toRecapPicks(buildSportsLeaderboard(inWindow, "league")), mode: "league" };
+}
+
+async function topPicks(period: RecapPeriod): Promise<RecapTopPicks> {
+  const from = parseDate(period.start);
+  const to = parseDate(addDays(period.end, 1));
+  const [songs, podcasts, sessions, watches] = await Promise.all([
+    // Fetch a little past the cut so ties at the boundary share a rank
+    // instead of being arbitrarily split; `toRecapPicks` trims by rank.
+    getPeriodMusicLeaderboard("song", from, to, PICKS_SIZE * 4),
+    getPeriodPodcastLeaderboard("show", from, to, PICKS_SIZE * 4),
+    getEntertainmentSessions(),
+    getSportsWatches(),
+  ]);
+  const sportsPicks = buildSportsPicks(watches, period);
+  return {
+    songs: toRecapPicks(songs),
+    podcasts: toRecapPicks(podcasts),
+    games: buildGamePicks(sessions, period),
+    sports: sportsPicks.rows,
+    sportsMode: sportsPicks.mode,
+  };
+}
+
 // --- Firsts ----------------------------------------------------------------
 
 export type RecapFirsts = {
@@ -340,13 +429,14 @@ export type RecapEntertainment = {
   topArtist: RecapListenPick | null;
   topGenre: RecapListenPick | null;
   firsts: RecapFirsts;
+  picks: RecapTopPicks;
 };
 
 export async function getRecapEntertainment(
   period: RecapPeriod,
   prior: RecapPeriod
 ): Promise<RecapEntertainment> {
-  const [current, previous, movie, book, artist, genre, firstTimes] = await Promise.all([
+  const [current, previous, movie, book, artist, genre, firstTimes, picks] = await Promise.all([
     countsFor(period),
     countsFor(prior),
     topRankedMovie(period),
@@ -354,6 +444,7 @@ export async function getRecapEntertainment(
     topArtist(period),
     topGenre(period),
     firsts(period),
+    topPicks(period),
   ]);
 
   const totals = (Object.keys(MEDIUM_LABELS) as RecapMediumKey[]).map((key) => ({
@@ -370,5 +461,6 @@ export async function getRecapEntertainment(
     topArtist: artist,
     topGenre: genre,
     firsts: firstTimes,
+    picks,
   };
 }

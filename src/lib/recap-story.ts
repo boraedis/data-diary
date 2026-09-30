@@ -385,6 +385,63 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
     });
   }
 
+  // Top picks (#528): one card each, the #1 row of the section's tables.
+  // Low weights on purpose — these sit below the artist/movie cards and
+  // only survive a crowded year if the entertainment domain gets seconds.
+  const { picks } = entertainment;
+  const topSong = picks.songs[0];
+  if (topSong) {
+    add({
+      id: "top-song",
+      domain: "entertainment",
+      kicker: "Your top song",
+      value: topSong.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topSong.value * 60))} of listening${topSong.detail ? `, by ${topSong.detail}` : ""}.`,
+      detail: null,
+      weight: 74,
+    });
+  }
+  const topPodcast = picks.podcasts[0];
+  if (topPodcast) {
+    add({
+      id: "top-podcast",
+      domain: "entertainment",
+      kicker: "Your top podcast",
+      value: topPodcast.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topPodcast.value * 60))} of listening.`,
+      detail: null,
+      weight: 66,
+    });
+  }
+  const topGame = picks.games[0];
+  if (topGame) {
+    add({
+      id: "top-game",
+      domain: "entertainment",
+      kicker: "Your top game",
+      value: topGame.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topGame.value * 60))} played over ${topGame.count} ${plural(topGame.count, "session")}.`,
+      detail: null,
+      weight: 62,
+    });
+  }
+  const topSports = picks.sports[0];
+  if (topSports) {
+    add({
+      id: "top-team",
+      domain: "entertainment",
+      kicker: picks.sportsMode === "team" ? "Your top team" : "Your top league",
+      value: topSports.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topSports.value * 60))} watched across ${topSports.count} ${plural(topSports.count, "game")}.`,
+      detail: null,
+      weight: 60,
+    });
+  }
+
   if (entertainment.topMovie !== null) {
     add({
       id: "top-movie",
