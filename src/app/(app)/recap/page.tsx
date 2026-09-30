@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 // /charts, and deliberately not a curated list: the years come from the
 // data itself, so every historical year is reachable the moment this ships
 // rather than only years that happen to fall after it (#130's backfill
-// requirement).
+// requirement) — minus any year whose recap isn't published yet (#517), so
+// the current year appears only once its period is complete.
 
 export default async function RecapIndexPage() {
   const years = await listRecapYears();
@@ -24,7 +25,8 @@ export default async function RecapIndexPage() {
 
       {years.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nothing logged yet — a recap appears here once there are days to summarize.
+          No recap is ready yet — each one appears a few days after its year ends, once there are
+          days to summarize.
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">

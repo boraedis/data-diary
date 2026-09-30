@@ -1,6 +1,6 @@
 import { and, count, gte, lte, max, min, sql } from "drizzle-orm";
 import { days } from "@/db/schema";
-import { addDays, isValidDateString, parseDate } from "@/lib/date";
+import { addDays, isValidDateString, parseDate, todayDateString } from "@/lib/date";
 import { getDb } from "@/lib/db";
 import { formatDate } from "@/lib/viz/format";
 
@@ -126,6 +126,54 @@ export function previousPeriod(period: RecapPeriod): RecapPeriod {
   return { start, end, label: `${formatDate(start)} – ${formatDate(end)}` };
 }
 
+// --- Publishing: when a period's recap exists at all ------------------------
+
+/**
+ * Days after a period ends before its recap is published (#517).
+ *
+ * A recap is a reveal, so it shouldn't exist while its period is still
+ * running — and it shouldn't appear the instant the period ends either,
+ * because this diary is backfilled: a recap generated at midnight would
+ * read days that haven't been logged yet, and the moments engine would
+ * score the period against a thinner history than it ends up with. The
+ * grace window is the time to fill those days in. Three days covers a
+ * long weekend away from the app.
+ *
+ * It also absorbs the timezone skew described on `isPeriodPublished`, which
+ * is why it isn't smaller.
+ */
+export const PUBLISH_GRACE_DAYS = 3;
+
+/** The first date on which a period is published: the day after the grace
+ * window closes. Also what the "ready on …" state shows. */
+export function periodPublishDate(period: RecapPeriod): string {
+  return addDays(period.end, PUBLISH_GRACE_DAYS + 1);
+}
+
+/**
+ * Whether a period's recap is out yet, given today's calendar date.
+ *
+ * Takes `today` rather than reading the clock so the boundary days are
+ * testable and so every caller on one request agrees about what day it is.
+ * It works on any `RecapPeriod` — a year, a month, or a custom window —
+ * because the rule is about the period's end, not its unit. A year is
+ * therefore published on its own clock, independent of its months: March's
+ * recap can be live while 2026's isn't.
+ *
+ * **Timezone.** The app has no fixed timezone (`src/lib/date.ts`: a day is
+ * whatever date you say you're journaling for), and the pages that call
+ * this render on the server, where "today" is the server's local date —
+ * UTC on Vercel. That can disagree with the owner's own calendar by up to
+ * a day in either direction. That's acceptable *because* of the grace
+ * window: a recap flipping to published a few hours early or late relative
+ * to local midnight is invisible next to a three-day wait. Don't shrink
+ * `PUBLISH_GRACE_DAYS` to zero without replacing this with an explicit
+ * timezone.
+ */
+export function isPeriodPublished(period: RecapPeriod, today: string): boolean {
+  return today >= periodPublishDate(period);
+}
+
 // --- Coverage: when a card has enough to say ------------------------------
 
 /**
@@ -220,6 +268,11 @@ export type RecapYearSummary = { year: number; loggedDays: number };
  * count) so the index reads as a continuous history rather than skipping
  * over a fallow year as if it never happened.
  *
+ * Only *published* years are listed (#517, `isPeriodPublished`): the
+ * current year stays off the index until its grace window has passed. The
+ * list is still derived from the data, just filtered — a year whose recap
+ * isn't out yet is reachable only through its own URL, which says when.
+ *
  * The `days` table is the spine: every entertainment table's `date` column
  * is a foreign key into it, so anything logged has a day row. The one
  * exception is `musicListens`, which is keyed on a `playedAt` timestamp
@@ -228,7 +281,7 @@ export type RecapYearSummary = { year: number; loggedDays: number };
  * an imported listen outside every logged day is an import artifact, not a
  * year worth generating a recap for.
  */
-export async function listRecapYears(): Promise<RecapYearSummary[]> {
+export async function listRecapYears(today: string = todayDateString()): Promise<RecapYearSummary[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -238,15 +291,22 @@ export async function listRecapYears(): Promise<RecapYearSummary[]> {
     .from(days)
     .groupBy(sql`extract(year from ${days.date})`);
 
-  if (rows.length === 0) return [];
+  return summarizeYears(new Map(rows.map((r) => [r.year, r.loggedDays])), today);
+}
 
-  const counts = new Map(rows.map((r) => [r.year, r.loggedDays]));
+/** The pure half of `listRecapYears`: the continuous first-to-last run of
+ * years, newest first, minus any year not yet published (#517). The gate
+ * trims the newest end only — a fallow year in the middle is in the past,
+ * so it stays. */
+export function summarizeYears(counts: Map<number, number>, today: string): RecapYearSummary[] {
+  if (counts.size === 0) return [];
   const years = [...counts.keys()];
   const first = Math.min(...years);
   const last = Math.max(...years);
 
   const summaries: RecapYearSummary[] = [];
   for (let year = last; year >= first; year -= 1) {
+    if (!isPeriodPublished(yearPeriod(year), today)) continue;
     summaries.push({ year, loggedDays: counts.get(year) ?? 0 });
   }
   return summaries;
@@ -264,7 +324,10 @@ export type RecapMonthSummary = { month: number; period: RecapPeriod; loggedDays
  * dead link), while a fallow month *inside* the range still is, with a
  * zero, so the index reads as a continuous history.
  */
-export async function listRecapMonths(year: number): Promise<RecapMonthSummary[]> {
+export async function listRecapMonths(
+  year: number,
+  today: string = todayDateString()
+): Promise<RecapMonthSummary[]> {
   const db = getDb();
   const period = yearPeriod(year);
   const [range, rows] = await Promise.all([
@@ -282,16 +345,20 @@ export async function listRecapMonths(year: number): Promise<RecapMonthSummary[]
   return monthsInRange(
     year,
     range,
-    new Map(rows.map((row) => [row.month, row.loggedDays]))
+    new Map(rows.map((row) => [row.month, row.loggedDays])),
+    today
   );
 }
 
 /** The pure half of `listRecapMonths`: which of a year's twelve months
- * overlap the logged range, with their counts (zero when absent). */
+ * overlap the logged range and are published (#517), with their counts
+ * (zero when absent). `today` is optional so the range logic can be
+ * exercised on its own; omitted, nothing is filtered out. */
 export function monthsInRange(
   year: number,
   range: { first: string; last: string },
-  counts: Map<number, number>
+  counts: Map<number, number>,
+  today?: string
 ): RecapMonthSummary[] {
   const firstMonth = range.first.slice(0, 7);
   const lastMonth = range.last.slice(0, 7);
@@ -301,6 +368,7 @@ export function monthsInRange(
     const key = period.start.slice(0, 7);
     // "YYYY-MM" strings compare correctly as text, so no date math needed.
     if (key < firstMonth || key > lastMonth) continue;
+    if (today !== undefined && !isPeriodPublished(period, today)) continue;
     summaries.push({ month, period, loggedDays: counts.get(month) ?? 0 });
   }
   return summaries;
