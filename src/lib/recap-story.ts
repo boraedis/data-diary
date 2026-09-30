@@ -1,5 +1,6 @@
 import { formatDate, formatDuration } from "@/lib/viz/format";
 import { MIN_DAYS_FOR_AVERAGE } from "@/lib/recap";
+import type { RecapBody } from "@/lib/recap-body";
 import type { RecapEntertainment } from "@/lib/recap-entertainment";
 import { GOOD_DAY_THRESHOLD, type RecapHealth } from "@/lib/recap-health";
 import type { RecapLifeEvent } from "@/lib/recap-life-events";
@@ -152,6 +153,7 @@ export type RecapStoryInput = {
   loggedDays: number;
   priorLoggedDays: number;
   health: RecapHealth;
+  body: RecapBody;
   entertainment: RecapEntertainment;
   peoplePlaces: RecapPeoplePlaces;
   subs: RecapSubs;
@@ -198,7 +200,7 @@ function formatMinutes(minutes: number): string {
 }
 
 function buildCandidates(input: RecapStoryInput): Candidate[] {
-  const { periodLabel, priorLabel, health, entertainment, peoplePlaces, subs } = input;
+  const { periodLabel, priorLabel, health, body, entertainment, peoplePlaces, subs } = input;
   // An arbitrary window has no better generic noun than "year" had before
   // months existed; no route builds one today.
   const noun = input.periodUnit ?? "year";
@@ -294,6 +296,35 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
         (value) => `${value} ${plural(value, "day")}`,
       ),
       weight: 74,
+    });
+  }
+
+  // Body & habits (#529). Per-day averages, not totals, lead — a total over
+  // a sparsely-logged period understates it (see recap-body.ts) — and they
+  // clear the same coverage floor as every other average. Weight and
+  // training hours stay report-only: neither has a number that reads as a
+  // reveal without implying a direction.
+  for (const [metric, id, kicker, unit, weight] of [
+    [body.coffee, "coffee", "Your daily coffee", "cups", 58],
+    [body.distance, "distance", "Your daily walk", "km", 56],
+  ] as const) {
+    if (metric.average === null || metric.daysLogged < MIN_DAYS_FOR_AVERAGE) continue;
+    add({
+      id,
+      domain: "health",
+      kicker,
+      value: metric.average.toFixed(1),
+      unit,
+      headline: `A typical day, across ${metric.daysLogged} logged ${plural(metric.daysLogged, "day")}.`,
+      detail: comparisonLine(
+        metric.average,
+        metric.priorAverage !== null && metric.priorDaysLogged >= MIN_DAYS_FOR_AVERAGE
+          ? metric.priorAverage
+          : null,
+        priorLabel,
+        (value) => `${value.toFixed(1)} ${unit}`,
+      ),
+      weight,
     });
   }
 

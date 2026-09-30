@@ -12,6 +12,17 @@ import {
 // data gets represented before any domain gets seconds, and that a sparse
 // historical year comes out shorter instead of padded with empties.
 
+const noMetric = () => ({
+  average: null,
+  priorAverage: null,
+  daysLogged: 0,
+  priorDaysLogged: 0,
+  total: 0,
+  first: null,
+  last: null,
+  series: [],
+});
+
 /** A year with nothing in it. Every test starts here and switches on only
  * the data it's actually about, which is also the fixture that proves the
  * "no data, no card" rule — anything that shows up unasked is a bug. */
@@ -44,6 +55,7 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       },
       exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [] },
     },
+    body: { weight: noMetric(), coffee: noMetric(), distance: noMetric(), training: { hours: 0, priorHours: 0, daysTrained: 0, priorDaysTrained: 0 } },
     entertainment: {
       totals: [],
       topMovie: null,
@@ -233,6 +245,19 @@ describe("buildRecapStory", () => {
     const ids = idsOf(thin);
     expect(ids).not.toContain("happiness-average");
     expect(ids).toContain("days-trained");
+  });
+
+  it("deals body cards only over enough logged days, and never weight", () => {
+    const metric = (daysLogged: number) => ({ ...noMetric(), average: 2.4, daysLogged });
+    const base = emptyInput({ loggedDays: 300 });
+    const thin = idsOf({ ...base, body: { ...base.body, coffee: metric(5), distance: metric(5) } });
+    expect(thin).not.toContain("coffee");
+    const rich = idsOf({
+      ...base,
+      body: { ...base.body, coffee: metric(200), distance: metric(200), weight: metric(200) },
+    });
+    expect(rich).toEqual(expect.arrayContaining(["coffee", "distance"]));
+    expect(rich).not.toContain("weight");
   });
 
   it("only deals the good-day streak when it is a real run over enough logged days", () => {

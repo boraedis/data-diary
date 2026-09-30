@@ -22,7 +22,7 @@ import type { HappinessDay } from "@/lib/recap-health";
 // chart page for that.
 //
 // The chart height class is the one every chart page uses (AGENTS.md).
-const HEIGHT_CLASS = `h-[min(62vh,640px)] ${CHART_HEIGHT_CLASS}`;
+export const HEIGHT_CLASS = `h-[min(62vh,640px)] ${CHART_HEIGHT_CLASS}`;
 
 /** A month of daily points is readable, a year of them is noise — weekly
  * buckets up to ~2 months, monthly beyond. Derived from the data's own
@@ -30,7 +30,7 @@ const HEIGHT_CLASS = `h-[min(62vh,640px)] ${CHART_HEIGHT_CLASS}`;
  * arbitrary window working the way `RecapPeriod` promises. */
 const WEEKLY_MAX_SPAN_DAYS = 62;
 
-function bucketFor(dates: string[]): Period {
+export function bucketFor(dates: string[]): Period {
   if (dates.length === 0) return "month";
   return daysBetween(dates[0], dates[dates.length - 1]) <= WEEKLY_MAX_SPAN_DAYS ? "week" : "month";
 }
