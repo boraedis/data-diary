@@ -1,3 +1,4 @@
+import { RecapBodySection } from "@/components/recap/recap-body-section";
 import { RecapEntertainmentSection } from "@/components/recap/recap-entertainment-section";
 import { RecapHealthSection } from "@/components/recap/recap-health-section";
 import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
@@ -7,6 +8,7 @@ import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { RecapStoryView } from "@/components/recap/recap-story";
 import { RecapSubsSection } from "@/components/recap/recap-subs-section";
 import { buildRecapStory } from "@/lib/recap-story";
+import { getRecapBody } from "@/lib/recap-body";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
 import { getRecapHealth } from "@/lib/recap-health";
@@ -76,6 +78,7 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
     peoplePlaces,
     subs,
     health,
+    body,
     moments,
     allLifeEvents,
   ] = await Promise.all([
@@ -85,6 +88,7 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
     getRecapPeoplePlaces(period, prior),
     getRecapSubs(period, prior),
     getRecapHealth(period, prior),
+    getRecapBody(period, prior),
     getRecapMoments(period),
     listRecapLifeEvents(period),
   ]);
@@ -108,6 +112,7 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
     loggedDays,
     priorLoggedDays,
     health,
+    body,
     entertainment,
     peoplePlaces,
     subs,
@@ -122,6 +127,8 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
       </div>
 
       <RecapHealthSection health={health} periodLabel={period.label} priorLabel={prior.label} />
+
+      <RecapBodySection body={body} periodLabel={period.label} priorLabel={prior.label} />
 
       <RecapSubsSection
         subs={subs}
