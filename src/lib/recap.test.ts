@@ -289,7 +289,7 @@ describe("summarizeYears", () => {
     [2026, 240],
   ]);
 
-  it("drops the unpublished current year but keeps a fallow year in the middle", () => {
+  it("drops an unpublished year with nothing published in it, but keeps a fallow year in the middle", () => {
     const years = summarizeYears(counts, "2026-09-30");
     expect(years.map((y) => y.year)).toEqual([2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016]);
     expect(years.find((y) => y.year === 2017)?.loggedDays).toBe(0);
@@ -297,7 +297,21 @@ describe("summarizeYears", () => {
 
   it("includes the year once its grace window has passed", () => {
     expect(summarizeYears(counts, "2027-01-03")[0].year).toBe(2025);
-    expect(summarizeYears(counts, "2027-01-04")[0].year).toBe(2026);
+    expect(summarizeYears(counts, "2027-01-04")[0]).toMatchObject({ year: 2026, published: true });
+  });
+
+  it("lists the in-progress year once a month of it is out, flagged unpublished", () => {
+    const monthCounts = new Map([
+      ["2026-08", 20],
+      ["2026-09", 30],
+    ]);
+    const [newest] = summarizeYears(counts, "2026-09-30", monthCounts);
+    expect(newest).toEqual({ year: 2026, loggedDays: 240, published: false });
+  });
+
+  it("ignores a published month with nothing logged", () => {
+    const years = summarizeYears(counts, "2026-09-30", new Map([["2026-03", 0]]));
+    expect(years[0].year).toBe(2025);
   });
 
   it("is empty when nothing is logged, or nothing is published yet", () => {

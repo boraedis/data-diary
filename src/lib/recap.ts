@@ -256,7 +256,14 @@ export async function getRecapDataRange(): Promise<{ first: string; last: string
   return { first: row.first, last: row.last };
 }
 
-export type RecapYearSummary = { year: number; loggedDays: number };
+export type RecapYearSummary = {
+  year: number;
+  loggedDays: number;
+  /** Whether the year's own recap is out. False for a year listed only
+   * because some of its months are (#517) — its page then shows "ready on
+   * …" above the month nav. */
+  published: boolean;
+};
 
 /**
  * Every year that has logged days, newest first, with its day count.
@@ -268,10 +275,10 @@ export type RecapYearSummary = { year: number; loggedDays: number };
  * count) so the index reads as a continuous history rather than skipping
  * over a fallow year as if it never happened.
  *
- * Only *published* years are listed (#517, `isPeriodPublished`): the
- * current year stays off the index until its grace window has passed. The
- * list is still derived from the data, just filtered — a year whose recap
- * isn't out yet is reachable only through its own URL, which says when.
+ * Only years with something *published* are listed (#517,
+ * `isPeriodPublished`): the current year is listed once its first month is
+ * out, marked `published: false` until the year itself is. The list is
+ * still derived from the data, just filtered.
  *
  * The `days` table is the spine: every entertainment table's `date` column
  * is a foreign key into it, so anything logged has a day row. The one
@@ -286,28 +293,54 @@ export async function listRecapYears(today: string = todayDateString()): Promise
   const rows = await db
     .select({
       year: sql<number>`extract(year from ${days.date})::int`,
+      month: sql<number>`extract(month from ${days.date})::int`,
       loggedDays: count(),
     })
     .from(days)
-    .groupBy(sql`extract(year from ${days.date})`);
+    .groupBy(sql`extract(year from ${days.date})`, sql`extract(month from ${days.date})`);
 
-  return summarizeYears(new Map(rows.map((r) => [r.year, r.loggedDays])), today);
+  const yearCounts = new Map<number, number>();
+  const monthCounts = new Map<string, number>();
+  for (const { year, month, loggedDays } of rows) {
+    yearCounts.set(year, (yearCounts.get(year) ?? 0) + loggedDays);
+    monthCounts.set(`${year}-${String(month).padStart(2, "0")}`, loggedDays);
+  }
+  return summarizeYears(yearCounts, today, monthCounts);
 }
 
 /** The pure half of `listRecapYears`: the continuous first-to-last run of
- * years, newest first, minus any year not yet published (#517). The gate
- * trims the newest end only — a fallow year in the middle is in the past,
- * so it stays. */
-export function summarizeYears(counts: Map<number, number>, today: string): RecapYearSummary[] {
+ * years, newest first (#517).
+ *
+ * A year is listed when its own recap is published, *or* when any of its
+ * months with logged days is — otherwise the in-progress year vanishes from
+ * the index and its finished months (January–August, say) become
+ * unreachable except by typing a URL. Such a year is listed as
+ * `published: false` and links to its page, which says when it's ready and
+ * carries the month nav. A fallow year in the middle is in the past, so it
+ * stays. */
+export function summarizeYears(
+  counts: Map<number, number>,
+  today: string,
+  monthCounts: Map<string, number> = new Map()
+): RecapYearSummary[] {
   if (counts.size === 0) return [];
   const years = [...counts.keys()];
   const first = Math.min(...years);
   const last = Math.max(...years);
 
+  const hasPublishedMonth = (year: number) => {
+    for (const [key, loggedDays] of monthCounts) {
+      if (loggedDays <= 0 || !key.startsWith(`${year}-`)) continue;
+      if (isPeriodPublished(monthPeriod(year, Number(key.slice(5, 7))), today)) return true;
+    }
+    return false;
+  };
+
   const summaries: RecapYearSummary[] = [];
   for (let year = last; year >= first; year -= 1) {
-    if (!isPeriodPublished(yearPeriod(year), today)) continue;
-    summaries.push({ year, loggedDays: counts.get(year) ?? 0 });
+    const published = isPeriodPublished(yearPeriod(year), today);
+    if (!published && !hasPublishedMonth(year)) continue;
+    summaries.push({ year, loggedDays: counts.get(year) ?? 0, published });
   }
   return summaries;
 }

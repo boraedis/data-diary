@@ -25,8 +25,8 @@ export default async function RecapIndexPage() {
 
       {years.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No recap is ready yet — each one appears a few days after its year ends, once there are
-          days to summarize.
+          No recap is ready yet — each one appears a few days after its month or year ends, once
+          there are days to summarize.
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
@@ -39,6 +39,7 @@ export default async function RecapIndexPage() {
                     {year.loggedDays === 0
                       ? "No days logged this year."
                       : `${year.loggedDays} day${year.loggedDays === 1 ? "" : "s"} logged.`}
+                    {year.published ? null : " Year in progress — months available."}
                   </CardDescription>
                 </CardHeader>
               </Card>
