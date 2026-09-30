@@ -21,7 +21,9 @@
  *   npm run dev:pr
  *
  * Requires NEON_API_KEY (a Neon API key with access to this project) and
- * NEON_PROJECT_ID in your environment or .env.local — the same values the
+ * NEON_PROJECT_ID in your environment, .env.local or .env (.env is the usual
+ * home — .env.local is just where this script writes the PR's DATABASE_URL,
+ * and wins if a key is in both) — the same values the
  * "PR database branch" workflow uses, just available locally too. Neither
  * is GitHub-specific, so a Neon API key with only this project's scope is
  * enough; don't reuse an org-wide key here.
@@ -40,17 +42,22 @@ function sh(cmd) {
   return execSync(cmd, { encoding: "utf8" }).trim();
 }
 
-// .env.local isn't loaded by node by default outside of `next dev` itself —
-// read NEON_API_KEY/NEON_PROJECT_ID out of it directly if they're not
-// already in the environment, without touching any other variable there.
-function loadDotEnvLocalFallback(keys) {
-  const envPath = ".env.local";
-  if (!existsSync(envPath)) return;
-  const lines = readFileSync(envPath, "utf8").split("\n");
-  for (const line of lines) {
-    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (match && keys.includes(match[1]) && !process.env[match[1]]) {
-      process.env[match[1]] = match[2];
+// Neither .env nor .env.local is loaded by node by default outside of
+// `next dev` itself — read the keys this script needs out of them directly
+// if they're not already in the environment, without touching any other
+// variable. Same precedence Next uses: real environment, then .env.local,
+// then .env. Shared secrets (the Neon key and project id) belong in .env;
+// .env.local is where this script writes the PR-specific DATABASE_URL, so
+// it stays the per-PR override rather than a second copy of everything.
+function loadDotEnvFallback(keys) {
+  for (const envPath of [".env.local", ".env"]) {
+    if (!existsSync(envPath)) continue;
+    for (const line of readFileSync(envPath, "utf8").split("\n")) {
+      const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (!match || !keys.includes(match[1]) || process.env[match[1]]) continue;
+      // Next strips one layer of matching quotes from a value; do the same
+      // so a quoted key in .env doesn't arrive with the quotes attached.
+      process.env[match[1]] = match[2].trim().replace(/^(["'])(.*)\1$/, "$2");
     }
   }
 }
@@ -123,12 +130,12 @@ async function main() {
     process.exit(1);
   }
 
-  loadDotEnvLocalFallback(["NEON_API_KEY", "NEON_PROJECT_ID", "GITHUB_TOKEN"]);
+  loadDotEnvFallback(["NEON_API_KEY", "NEON_PROJECT_ID", "GITHUB_TOKEN"]);
   const neonApiKey = process.env.NEON_API_KEY;
   const neonProjectId = process.env.NEON_PROJECT_ID;
   if (!neonApiKey || !neonProjectId) {
     console.error(
-      "Missing NEON_API_KEY and/or NEON_PROJECT_ID. Set both in your environment or .env.local — see scripts/dev-pr.mjs's header comment."
+      "Missing NEON_API_KEY and/or NEON_PROJECT_ID. Set both in your environment, .env.local or .env — see scripts/dev-pr.mjs's header comment."
     );
     process.exit(1);
   }
