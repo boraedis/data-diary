@@ -51,6 +51,7 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       topArtist: null,
       topGenre: null,
       firsts: { newArtists: { total: 0, examples: [] }, newMovieGenres: [] },
+      picks: { songs: [], podcasts: [], games: [], sports: [], sportsMode: "team" },
     },
     peoplePlaces: {
       topPerson: null,
@@ -108,6 +109,7 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       topArtist: { name: "Radiohead", minutes: 1200 },
       topGenre: { name: "art rock", minutes: 2000 },
       firsts: { newArtists: { total: 30, examples: ["Alvvays", "Bicep"] }, newMovieGenres: [] },
+      picks: { songs: [], podcasts: [], games: [], sports: [], sportsMode: "team" },
     },
     peoplePlaces: {
       topPerson: { name: "Sam", days: 140, priorDays: 120 },

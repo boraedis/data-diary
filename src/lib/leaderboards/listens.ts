@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { rankSnapshots, STANDARD_RANK_WINDOWS, type RankSnapshot } from "@/lib/ranking";
-import { toLeaderboardRows, type LeaderboardColumns, type LeaderboardRow } from "@/lib/leaderboards/rows";
+import { competitionRanks, toLeaderboardRows, type LeaderboardColumns, type LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { LeaderboardOption } from "@/lib/leaderboards/options";
 import { formatTitleCase } from "@/lib/viz/format";
 
@@ -184,6 +184,71 @@ async function listenLeaderboard(query: ListenQuery, kind: SQL): Promise<Leaderb
 
   const ranked = rankSnapshots(snapshots, STANDARD_RANK_WINDOWS);
   return toLeaderboardRows(ranked, STANDARD_RANK_WINDOWS, (key) => labels.get(key) ?? { name: "Unknown" });
+}
+
+/**
+ * The top `limit` keys by listening time inside one half-open window
+ * (`[from, to)`), for the recap (#528).
+ *
+ * The same `ListenQuery` fragments as the all-time leaderboards, so a song
+ * is credited to the same key and labelled the same way here as on the
+ * music page — only the window differs. It sums and truncates in SQL
+ * (`limit`), so a year of ~17k songs never leaves the database. No
+ * movement: a recap period is already a fixed window, so rows carry null
+ * `previousRanks`/`gained` and the table drops those columns.
+ *
+ * Ranked by **listening time, not play count** — the same rule as the
+ * recap's top artist (`recap-entertainment.ts`): a count rewards short
+ * tracks and repeat singles, time rewards what you spent the period with.
+ * Ties share the better rank, as everywhere else.
+ */
+async function periodListenLeaderboard(
+  query: ListenQuery,
+  kind: SQL,
+  from: Date,
+  to: Date,
+  limit: number,
+): Promise<LeaderboardRow[]> {
+  const db = getDb();
+  // ISO strings rather than Date params: raw `sql` has no column to tell
+  // the driver how to serialise a Date.
+  const result = await db.execute(sql`
+    select ${query.key} as key, ${query.name} as name, ${query.detail} as detail, ${query.color} as color,
+      sum(l.ms_played)::float8 as total, count(*)::int as plays
+    from ${query.from}
+    where ${kind} and l.played_at >= ${from.toISOString()}::timestamptz
+      and l.played_at < ${to.toISOString()}::timestamptz
+      ${query.where ? sql`and ${query.where}` : sql``}
+    group by 1, 2, 3, 4
+    order by total desc, key
+    limit ${limit}
+  `);
+  const rows = (Array.isArray(result) ? result : (result as { rows: unknown[] }).rows) as SnapshotRow[];
+  const hours = rows.map((r) => Number(r.total) / MS_PER_HOUR);
+  const ranks = competitionRanks(hours);
+  return rows.map((r, i) => {
+    const name = r.name ?? "Unknown";
+    return {
+      key: r.key,
+      rank: ranks[i],
+      name: query.formatName ? query.formatName(name) : name,
+      detail: r.detail,
+      context: null,
+      color: r.color,
+      value: Math.round(hours[i] * 1000) / 1000,
+      count: Number(r.plays),
+      previousRanks: null,
+      gained: null,
+    };
+  });
+}
+
+export function getPeriodMusicLeaderboard(mode: MusicMode, from: Date, to: Date, limit: number) {
+  return periodListenLeaderboard(MUSIC_QUERIES[mode], sql`l.track_name is not null`, from, to, limit);
+}
+
+export function getPeriodPodcastLeaderboard(mode: PodcastMode, from: Date, to: Date, limit: number) {
+  return periodListenLeaderboard(PODCAST_QUERIES[mode], sql`l.episode_name is not null`, from, to, limit);
 }
 
 export function getMusicLeaderboardData(mode: MusicMode): Promise<LeaderboardRow[]> {

@@ -100,7 +100,7 @@ const awayTeams = alias(sportsTeams, "away_teams");
 const homeLeagues = alias(sportsLeagues, "home_leagues");
 const awayLeagues = alias(sportsLeagues, "away_leagues");
 
-export async function getSportsLeaderboardData(mode: SportsMode): Promise<LeaderboardRow[]> {
+export async function getSportsWatches(): Promise<SportsWatch[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -135,7 +135,7 @@ export async function getSportsLeaderboardData(mode: SportsMode): Promise<Leader
     .leftJoin(awayTeams, eq(sportsWatches.awayTeamId, awayTeams.id))
     .leftJoin(awayLeagues, eq(awayTeams.leagueId, awayLeagues.id));
 
-  const watches: SportsWatch[] = rows.map((r) => ({
+  return rows.map((r) => ({
     date: r.date,
     minutes: r.minutes ?? 0,
     sportId: r.sportId,
@@ -146,5 +146,8 @@ export async function getSportsLeaderboardData(mode: SportsMode): Promise<Leader
     // column in it is null — i.e. no team in that slot.
     teams: [r.home, r.away].filter((t): t is SportsTeam => t !== null),
   }));
-  return buildSportsLeaderboard(watches, mode);
+}
+
+export async function getSportsLeaderboardData(mode: SportsMode): Promise<LeaderboardRow[]> {
+  return buildSportsLeaderboard(await getSportsWatches(), mode);
 }
