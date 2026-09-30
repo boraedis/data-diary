@@ -1,6 +1,6 @@
 import type { PeopleDay } from "@/lib/charts";
 import { categoricalColor, CATEGORICAL_SLOT_COUNT } from "@/lib/viz/color";
-import { buildTreeFromLevels, pruneEmptyBranches, type HierarchyDatum } from "@/lib/viz/hierarchy";
+import { buildTreeFromLevels, type HierarchyDatum } from "@/lib/viz/hierarchy";
 
 // The People Treemap's tree (#213), kept pure and out of the component —
 // the same split `life-timeline.ts` has from its chart. Legacy's
@@ -60,40 +60,52 @@ export function tagColors(days: PeopleDay[]): Map<string, string> {
 }
 
 /**
- * The treemap's tree: every person logged in `days`, sized by the number
- * of days they appear on, either grouped under their tag or flat.
+ * The treemap's tree: every person, sized by the number of days they
+ * appear on in `days`, either grouped under their tag or flat.
  *
- * `days` is `getPeopleDailyData`'s output, already narrowed to the time
- * range the reader picked — positive slots only, and deduplicated per day
- * (see that function), so a person in two slots on one day counts once.
- * `colors` comes from `tagColors` over the *unfiltered* history.
+ * `days` is `getPeopleDailyData`'s output — positive slots only, and
+ * deduplicated per day (see that function), so a person in two slots on
+ * one day counts once — cut down to whatever the chart is showing: the
+ * whole history, or everything up to a time-lapse frame. `colors` comes
+ * from `tagColors` over the *unfiltered* history.
+ *
+ * The tree's *shape* always comes from `roster` (the whole history), not
+ * from `days`: someone not yet logged by a frame is still a leaf, just
+ * worth zero. That's what lets InteractiveTreemap animate one frame into
+ * the next — it tweens a tree in place only while its key paths stay the
+ * same, and a person popping into existence mid-playback would change
+ * them. So there's no pruning here; a zero tile is simply not drawn.
  *
  * Flat mode still colours each tile by its tag: the grouping moves the
  * tiles around, it doesn't change what their colour means.
  *
- * Returns `null` when nobody is in range.
+ * Returns `null` when the roster is empty.
  */
 export function buildPeopleTree(
   days: PeopleDay[],
   grouping: PeopleTreemapGrouping,
   colors: Map<string, string>,
+  roster: PeopleDay[] = days,
 ): HierarchyDatum | null {
-  const byName = new Map<string, { name: string; tagName: string | null; days: number }>();
+  const counts = new Map<string, number>();
   for (const day of days) {
+    for (const person of day.people) counts.set(person.name, (counts.get(person.name) ?? 0) + 1);
+  }
+  const everyone = new Map<string, { name: string; tagName: string | null }>();
+  for (const day of roster) {
     for (const person of day.people) {
-      const entry = byName.get(person.name) ?? { name: person.name, tagName: person.tagName, days: 0 };
-      entry.days += 1;
-      byName.set(person.name, entry);
+      if (!everyone.has(person.name)) everyone.set(person.name, { name: person.name, tagName: person.tagName });
     }
   }
-  const rows = [...byName.values()];
+  if (everyone.size === 0) return null;
+  const rows = [...everyone.values()];
   const colorOf = (tagName: string | null) => (tagName === null ? UNTAGGED_COLOR : (colors.get(tagName) ?? UNTAGGED_COLOR));
 
   const toLeaf = (row: (typeof rows)[number]): HierarchyDatum => ({
     // Person names are unique in the schema, so the name is a safe key.
     key: row.name,
     name: row.name,
-    value: row.days,
+    value: counts.get(row.name) ?? 0,
     shortName: initialsOf(row.name),
     // Read only when a person is itself a top-level branch (flat mode) —
     // grouped, the colour comes from the tag node above it.
@@ -101,7 +113,7 @@ export function buildPeopleTree(
   });
 
   if (grouping === "none") {
-    return pruneEmptyBranches({ key: "__root__", name: "Everyone", children: rows.map(toLeaf) });
+    return { key: "__root__", name: "Everyone", children: rows.map(toLeaf) };
   }
 
   const tree = buildTreeFromLevels(rows, {
@@ -112,12 +124,11 @@ export function buildPeopleTree(
   // `buildTreeFromLevels` makes plain grouping nodes; the tag's own
   // colour goes on them here, since that's the depth-1 branch the
   // primitive reads a branch's colour from.
-  const withColors: HierarchyDatum = {
+  return {
     ...tree,
     children: tree.children?.map((group) => ({
       ...group,
       color: group.name === UNTAGGED_NAME ? UNTAGGED_COLOR : colorOf(group.name),
     })),
   };
-  return pruneEmptyBranches(withColors);
 }

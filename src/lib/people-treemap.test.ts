@@ -73,7 +73,19 @@ describe("buildPeopleTree", () => {
     ]);
   });
 
-  it("returns null when nobody is in range", () => {
+  it("keeps the roster's shape, with zeros for anyone not yet logged", () => {
+    const firstDay = DAYS.slice(0, 1);
+    const frame = buildPeopleTree(firstDay, "tag", colors, DAYS)!;
+    const full = buildPeopleTree(DAYS, "tag", colors)!;
+    const paths = (tree: typeof full) =>
+      tree.children!.flatMap((group) => group.children!.map((person) => `${group.key}/${person.key}`)).sort();
+    expect(paths(frame)).toEqual(paths(full));
+    const work = frame.children!.find((c) => c.name === "Work")!;
+    expect(work.children!.map((c) => [c.name, c.value])).toEqual([["Jo Park", 0]]);
+    expect(sumValues(frame)).toBe(2);
+  });
+
+  it("returns null when the roster is empty", () => {
     expect(buildPeopleTree([], "tag", colors)).toBeNull();
   });
 });

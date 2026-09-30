@@ -8,8 +8,11 @@ import type { HierarchyDatum } from "@/lib/viz/hierarchy";
 // A mounted-DOM pass over what treemap.test.ts's pure rules can't reach:
 // that the d3 render function runs, that groups and leaves both become
 // tiles, and that a click drives the zoom and the breadcrumb React
-// renders. jsdom does no layout, so this proves structure and wiring, not
-// appearance — the tile geometry is d3's own math.
+// renders, and that a same-shaped new tree updates the existing tiles in
+// place. jsdom does no layout, so this proves structure and wiring, not
+// appearance — the tile geometry is d3's own math. The tweens themselves
+// aren't exercised: tests that change data or zoom pass
+// `transitionMs={0}` so the end state is written synchronously.
 
 const TREE: HierarchyDatum = {
   key: "root",
@@ -60,7 +63,8 @@ describe("InteractiveTreemap", () => {
   });
 
   it("zooms into a tile's group on click, and back out from the breadcrumb", () => {
-    const { container } = render(<InteractiveTreemap data={TREE} width={600} height={400} />);
+    // Snapped, so exiting tiles are gone at once rather than fading out.
+    const { container } = render(<InteractiveTreemap data={TREE} width={600} height={400} transitionMs={0} />);
     act(() => {
       tileFor(container, "alex").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -89,5 +93,62 @@ describe("InteractiveTreemap", () => {
     expect(container.querySelectorAll("svg rect")).toHaveLength(2);
     const family = d3.select(tileFor(container, "family")).datum() as d3.HierarchyNode<HierarchyDatum>;
     expect(family.value).toBe(80);
+  });
+
+  it("updates a same-shaped tree in place — same elements, new sizes", () => {
+    const { container, rerender } = render(
+      <InteractiveTreemap data={TREE} width={600} height={400} transitionMs={0} />,
+    );
+    const before = tileFor(container, "alex");
+    const widthBefore = Number(before.getAttribute("width")) * Number(before.getAttribute("height"));
+
+    const grown: HierarchyDatum = {
+      ...TREE,
+      children: [TREE.children![0], { key: "jo", name: "Jo Park", value: 400 }],
+    };
+    rerender(<InteractiveTreemap data={grown} width={600} height={400} transitionMs={0} />);
+
+    const after = tileFor(container, "alex");
+    expect(after).toBe(before);
+    expect(Number(after.getAttribute("width")) * Number(after.getAttribute("height"))).toBeLessThan(widthBefore);
+  });
+
+  it("keeps a zoom across a same-shaped data change", () => {
+    const { container, rerender } = render(
+      <InteractiveTreemap data={TREE} width={600} height={400} transitionMs={0} />,
+    );
+    act(() => {
+      tileFor(container, "alex").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const next: HierarchyDatum = { ...TREE, children: [TREE.children![0], { key: "jo", name: "Jo Park", value: 5 }] };
+    rerender(<InteractiveTreemap data={next} width={600} height={400} transitionMs={0} />);
+    expect((screen.getByRole("button", { name: "Family" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(container.querySelectorAll("svg rect")).toHaveLength(2);
+  });
+
+  it("arranges tiles by the layout seed, sizes them by the data", () => {
+    // In the data Jo is biggest; in the seed Family is. Resquarify places
+    // the first row from the top-left, so whichever the arrangement came
+    // from sits at the origin.
+    const data: HierarchyDatum = {
+      ...TREE,
+      children: [
+        { ...TREE.children![0], children: TREE.children![0].children!.map((c) => ({ ...c, value: 1 })) },
+        { key: "jo", name: "Jo Park", value: 100 },
+      ],
+    };
+    const origin = (container: HTMLElement, key: string) =>
+      tileFor(container, key).parentElement!.getAttribute("transform") === "translate(0,0)";
+
+    const unseeded = render(<InteractiveTreemap data={data} width={600} height={400} transitionMs={0} />);
+    expect(origin(unseeded.container, "jo")).toBe(true);
+    unseeded.unmount();
+
+    const seeded = render(
+      <InteractiveTreemap data={data} layoutSeed={TREE} width={600} height={400} transitionMs={0} />,
+    );
+    expect(origin(seeded.container, "family")).toBe(true);
+    const jo = d3.select(tileFor(seeded.container, "jo")).datum() as d3.HierarchyNode<HierarchyDatum>;
+    expect(jo.value).toBe(100);
   });
 });

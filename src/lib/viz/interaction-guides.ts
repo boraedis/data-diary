@@ -45,7 +45,7 @@ export const DONUT_INTERACTION_GUIDE =
   "Click a slice to zoom into it; click the center (or press Escape) to zoom back out. Hover a slice for its exact value. Right-click a slice — or focus it and press Delete or x — to exclude it from the chart; the remaining slices re-base against the reduced total, and a row below the breadcrumb lists what's excluded, with its own weight, and lets you restore it one at a time or all at once.";
 
 export const TREEMAP_INTERACTION_GUIDE =
-  "Each tile's area is its share of the whole. Click a tile to zoom into the group it belongs to; click a step in the path above the chart (or press Escape) to zoom back out. Hover or focus a tile for its exact value and its share of its group and of the whole. Tiles too small for a name show initials or nothing — zoom in, or hover, to read them.";
+  "Each tile's area is its share of the whole. Click a tile to zoom into the group it belongs to; click a step in the path above the chart (or press Escape) to zoom back out. Hover or focus a tile for its exact value and its share of its group and of the whole. Tiles too small for a name show initials or nothing — zoom in, or hover, to read them. Where there's a Play control, it grows the treemap month by month from the first logged day, each tile swelling in place rather than jumping around — drag the scrubber to see it as it stood at any month, and pick a speed.";
 
 export const GEO_INTERACTION_GUIDE =
   "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show.";
