@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as d3 from "d3";
+import { defaultColorOf, depthFill, findByKeyPath, keyPathOf } from "@/lib/viz/hierarchy-layout";
 import {
   LABEL_FONT_TIERS,
   MIN_ARC_ANGLE,
-  defaultColorOf,
-  depthFill,
-  findByKeyPath,
   isArcInPlay,
   isArcVisible,
-  keyPathOf,
   labelFontSize,
   labelTransform,
   pathIsExcluded,
