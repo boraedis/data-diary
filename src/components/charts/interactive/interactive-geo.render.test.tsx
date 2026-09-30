@@ -293,17 +293,26 @@ describe("InteractiveGeo base map, routes and marker annotations", () => {
   });
 });
 
-describe("InteractiveGeo hover-only markers", () => {
-  it("draws nothing visible but still shows a tooltip on focus", () => {
+describe("InteractiveGeo hit radius and marker detail", () => {
+  it("draws a small dot with a transparent ring out to its hit radius", () => {
     const { container } = renderMap({
-      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019", hoverOnly: true }],
-      getMarkerSecondaryValue: () => ({ label: "most visited", value: "Istanbul, 64%" }),
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019", radius: 2, hitRadius: 7 }],
     });
     const dot = container.querySelector("circle.geo-marker")!;
-    expect(dot.getAttribute("fill-opacity")).toBe("0");
-    expect(dot.getAttribute("stroke")).toBe("none");
-    fireEvent.focus(dot);
+    expect(dot.getAttribute("r")).toBe("2");
+    expect(dot.getAttribute("stroke")).toBe("transparent");
+    // The ring is centred on the edge, so 10px wide reaches out to r = 7.
+    expect(dot.getAttribute("stroke-width")).toBe("10");
+  });
+
+  it("renders the detail accessor's content under the tooltip rows", () => {
+    const { container } = renderMap({
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019", radius: 2, hitRadius: 7 }],
+      getMarkerValue: () => 300,
+      getMarkerDetail: () => <span>Istanbul 64%</span>,
+    });
+    fireEvent.focus(container.querySelector("circle.geo-marker")!);
     expect(tooltip().getByText("Mar 2019")).toBeTruthy();
-    expect(tooltip().getByText("Istanbul, 64%")).toBeTruthy();
+    expect(tooltip().getByText("Istanbul 64%")).toBeTruthy();
   });
 });

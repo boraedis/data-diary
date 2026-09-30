@@ -57,6 +57,7 @@ export function ChartTooltip({
   title,
   rows,
   containerWidth,
+  footer,
 }: {
   x: number;
   y: number;
@@ -65,6 +66,9 @@ export function ChartTooltip({
   title?: string;
   rows: TooltipRow[];
   containerWidth: number;
+  /** Optional content below the rows — for detail that isn't a
+   * label/value pair, like #215's compact bar of a window's place mix. */
+  footer?: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [flip, setFlip] = useState(false);
@@ -75,7 +79,7 @@ export function ChartTooltip({
     // Re-measure on every position change rather than assuming a fixed
     // width — row content (series names, values) varies per point.
     setFlip(x + 12 + el.offsetWidth > containerWidth);
-  }, [x, containerWidth, rows]);
+  }, [x, containerWidth, rows, footer]);
 
   if (rows.length === 0) return null;
 
@@ -106,6 +110,7 @@ export function ChartTooltip({
           </div>
         ))}
       </div>
+      {footer ? <div className="mt-1.5">{footer}</div> : null}
     </div>
   );
 }

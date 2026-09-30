@@ -20,13 +20,14 @@ import {
   mergeNearbyLabels,
   rollingTrail,
   windowMix,
+  type CentreArea,
   type CentrePeriod,
   type LocationCentreData,
   type TrailPoint,
 } from "@/lib/location-centre";
 import { daysBetween } from "@/lib/date";
 import type { LngLat } from "@/lib/viz/geo-centre";
-import { sequentialScale } from "@/lib/viz/color";
+import { CATEGORICAL_SLOT_COUNT, categoricalColor, sequentialScale } from "@/lib/viz/color";
 import { formatDate, formatPercent, formatThousandsNumber } from "@/lib/viz/format";
 import { LOCATION_CENTRE_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { LOCATION_CENTRE_METHODOLOGY } from "@/lib/viz/methodology";
@@ -85,9 +86,17 @@ const BASE_MAX_RADIUS = 22;
 const BASE_MIN_RADIUS = 3;
 const BASE_COLOR = "var(--muted-foreground)";
 const ANCHOR_RADIUS = 4;
-/** Hit radius of the hidden bi-monthly points. A little bigger than a
- * visible dot, since there's nothing on screen to aim at. */
-const HIDDEN_POINT_RADIUS = 5;
+/** The bi-monthly points: a dot small enough to read as texture along the
+ * line rather than a second set of year dots, with a hover target a good
+ * deal bigger than it (owner feedback: invisible points were too hard to
+ * find, and a dot this size is too small to hit on its own). */
+const POINT_RADIUS = 2;
+const POINT_HIT_RADIUS = 7;
+
+/** Areas named under a tooltip's mix bar. The bar itself shows every
+ * area; the names stop at three so the tooltip stays compact. */
+const MIX_NAMED = 3;
+const MIX_BAR_WIDTH = 176;
 const BRIDGE_COLOR = "var(--muted-foreground)";
 
 const formatDays = (v: number) => formatThousandsNumber(Math.round(v));
@@ -149,9 +158,10 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     return out;
   }, [runs, colorOf]);
 
-  const { markers, valueById, secondaryById } = useMemo(() => {
+  const { markers, valueById, secondaryById, mixById } = useMemo(() => {
     const valueById = new Map<string, number>();
     const secondaryById = new Map<string, GeoSecondaryRow>();
+    const mixById = new Map<string, { area: number; share: number }[]>();
 
     // Places first, so the trail's dots draw on top of them.
     const baseMarkers: GeoMarker[] = current.bases.map((b) => {
@@ -179,17 +189,13 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       lastKey = key;
       anchors.push({ ...p, label: view === ALL ? key : formatDate(`${key}-01`, "monthShort") });
     }
-    /** Tooltip rows for a point on the trail: the days behind it, and the
-     * area that held the most of them. The title is the point's own
-     * month, not a merged label like "2016–2018": the figures are this
-     * one window's. */
+    /** Tooltip content for a point on the trail: the days behind it, and
+     * how they split between areas (drawn by MixDetail). The title is the
+     * point's own month, not a merged label like "2016–2018": the figures
+     * are this one window's. */
     const describe = (id: string, p: TrailPoint) => {
       valueById.set(id, p.days);
-      const mix = windowMix(index, p.date, Number(windowDays));
-      if (mix) {
-        const area = data.areas[mix.area];
-        secondaryById.set(id, { label: "most visited", value: `${area.label}, ${formatPercent(mix.share)}` });
-      }
+      mixById.set(id, windowMix(index, p.date, Number(windowDays)));
       return formatDate(p.date, "monthYear");
     };
 
@@ -207,11 +213,11 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       };
     });
 
-    // Every two months between the year dots, a point you can hover but
-    // can't see (owner's ask): the detail's there when you look for it,
-    // and the line stays a line. All-years view only — within one year
-    // every month already has its own labelled dot.
-    const hiddenMarkers: GeoMarker[] = [];
+    // Every two months between the year dots, a small unlabelled point
+    // with its own tooltip (owner's ask), so the detail's there along the
+    // whole line without a label every inch. All-years view only — within
+    // one year every month already has its own labelled dot.
+    const pointMarkers: GeoMarker[] = [];
     if (view === ALL) {
       const anchorDates = new Set(anchors.map((a) => a.date));
       let lastBucket = "";
@@ -221,25 +227,42 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         lastBucket = bucket;
         if (anchorDates.has(p.date)) continue;
         const id = `point:${p.date}`;
-        hiddenMarkers.push({
+        pointMarkers.push({
           id,
           position: p.position,
           label: describe(id, p),
           color: colorOf(p.date),
-          radius: HIDDEN_POINT_RADIUS,
-          hoverOnly: true,
+          opacity: 0.9,
+          radius: POINT_RADIUS,
+          hitRadius: POINT_HIT_RADIUS,
         });
       }
     }
 
-    // Hidden points before the year dots, so a year dot wins where they
-    // overlap.
-    return { markers: [...baseMarkers, ...hiddenMarkers, ...anchorMarkers], valueById, secondaryById };
-  }, [current, runs, view, colorOf, data, index, windowDays]);
+    // Bi-monthly points before the year dots, so a year dot wins where
+    // their hover targets overlap.
+    return { markers: [...baseMarkers, ...pointMarkers, ...anchorMarkers], valueById, secondaryById, mixById };
+  }, [current, runs, view, colorOf, index, windowDays]);
 
   // Stable accessors — both are useD3 dependencies inside InteractiveGeo.
   const getMarkerValue = useCallback((m: GeoMarker) => valueById.get(String(m.id)) ?? null, [valueById]);
   const getMarkerSecondary = useCallback((m: GeoMarker) => secondaryById.get(String(m.id)) ?? null, [secondaryById]);
+
+  // Each area's colour in a mix bar is its all-time rank's fixed slot, so
+  // an area is the same colour in every tooltip; beyond the fifth, areas
+  // share the muted overflow colour (categoricalColor's own rule).
+  const areaColor = useMemo(() => {
+    const rank = new Map(data.all.bases.map((b, i) => [b.key, i]));
+    return (area: number) =>
+      categoricalColor(Math.min(rank.get(data.areas[area].key) ?? CATEGORICAL_SLOT_COUNT, CATEGORICAL_SLOT_COUNT));
+  }, [data]);
+  const getMarkerDetail = useCallback(
+    (m: GeoMarker) => {
+      const mix = mixById.get(String(m.id));
+      return mix && mix.length > 0 ? <MixDetail mix={mix} areas={data.areas} colorOf={areaColor} /> : null;
+    },
+    [mixById, data, areaColor],
+  );
 
   // Framed once, on the places that matter and the 1-year trail, so neither
   // picker ever moves the map. A MultiPoint of corners rather than a
@@ -344,11 +367,51 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
               formatMarkerValue={formatDays}
               markerValueLabel="located days"
               getMarkerSecondaryValue={getMarkerSecondary}
+              getMarkerDetail={getMarkerDetail}
               ariaLabel={`World map. A line traces the centre of mass of where I spent my days${view === ALL ? "" : ` in ${view}`}, averaged over a ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} window and coloured from earliest to latest, with a labelled dot where each ${view === ALL ? "year" : "month"} begins. Shaded circles are the places I spent time, sized by their share of days. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details.`}
             />
           )}
         </ResponsiveChart>
       </ChartCard>
     </ChartPage>
+  );
+}
+
+/**
+ * How a trail point's window splits between areas, in a tooltip's worth
+ * of space (owner feedback: the top area alone said too little, a row
+ * per area would be too tall). One thin 100% bar carries the whole mix —
+ * every area, however small — and one wrapping line names the largest
+ * few with their shares.
+ */
+function MixDetail({
+  mix,
+  areas,
+  colorOf,
+}: {
+  mix: { area: number; share: number }[];
+  areas: CentreArea[];
+  colorOf: (area: number) => string;
+}) {
+  const named = mix.slice(0, MIX_NAMED);
+  const rest = mix.slice(MIX_NAMED).reduce((sum, m) => sum + m.share, 0);
+  return (
+    <div className="flex flex-col gap-1" style={{ width: MIX_BAR_WIDTH }}>
+      <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full" aria-hidden>
+        {mix.map((m) => (
+          <span key={m.area} style={{ width: `${m.share * 100}%`, background: colorOf(m.area) }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-tight">
+        {named.map((m) => (
+          <span key={m.area} className="flex items-center gap-1">
+            <span aria-hidden className="inline-block size-1.5 rounded-full" style={{ background: colorOf(m.area) }} />
+            <span className="text-popover-foreground">{areas[m.area].label}</span>
+            <span className="text-muted-foreground tabular-nums">{formatPercent(m.share)}</span>
+          </span>
+        ))}
+        {rest > 0 ? <span className="text-muted-foreground tabular-nums">+{formatPercent(rest)} elsewhere</span> : null}
+      </div>
+    </div>
   );
 }

@@ -174,17 +174,19 @@ describe("windowMix", () => {
     );
     const index = indexDaily(data.daily);
     // A window wide enough to hold every day: DC 20 + 5, Dubai 10 + 5.
-    const mix = windowMix(index, "2020-02-05", 400)!;
-    expect(data.areas[mix.area].label).toBe("Washington DC");
-    expect(mix.share).toBeCloseTo(25 / 40);
+    const mix = windowMix(index, "2020-02-05", 400);
+    expect(mix.map((m) => data.areas[m.area].label)).toEqual(["Washington DC", "Dubai"]);
+    expect(mix[0].share).toBeCloseTo(25 / 40);
+    expect(mix[1].share).toBeCloseTo(15 / 40);
     // A narrow window around the Dubai stretch.
-    const feb = windowMix(index, "2020-02-05", 7)!;
-    expect(data.areas[feb.area].label).toBe("Dubai");
-    expect(feb.share).toBeCloseTo(1);
+    const feb = windowMix(index, "2020-02-05", 7);
+    expect(feb).toHaveLength(1);
+    expect(data.areas[feb[0].area].label).toBe("Dubai");
+    expect(feb[0].share).toBeCloseTo(1);
   });
 
-  it("returns null for an empty window", () => {
-    expect(windowMix(indexDaily([]), "2020-01-01", 30)).toBeNull();
+  it("returns nothing for an empty window", () => {
+    expect(windowMix(indexDaily([]), "2020-01-01", 30)).toEqual([]);
   });
 });
 

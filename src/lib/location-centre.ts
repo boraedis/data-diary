@@ -367,17 +367,18 @@ export function rollingTrail(index: DailyIndex | null, windowDays: number, stepD
 }
 
 /**
- * The most-visited area in the window centred on `date`, and its share of
- * the window's located days — what a trail point's tooltip reports. Walks
- * the window day by day (O(window)), which is fine for the few dozen
- * points that have tooltips; the line itself never needs it.
+ * Every area's share of the located days in the window centred on `date`,
+ * largest first — what a trail point's tooltip reports. Walks the window
+ * day by day (O(window)), which is fine for the hundred-odd points that
+ * have tooltips; the line itself never needs it. Empty for a window with
+ * no located days.
  */
 export function windowMix(
   index: DailyIndex | null,
   date: string,
   windowDays: number,
-): { area: number; share: number } | null {
-  if (!index) return null;
+): { area: number; share: number }[] {
+  if (!index) return [];
   const [lo, hi] = windowBounds(index, daysBetween(index.first, date), windowDays);
   const totals = new Map<number, number>();
   let located = 0;
@@ -388,12 +389,9 @@ export function windowMix(
     const areasOfDay = d.slice(4) as number[];
     for (const area of areasOfDay) totals.set(area, (totals.get(area) ?? 0) + 1 / areasOfDay.length);
   }
-  let best: { area: number; share: number } | null = null;
-  for (const [area, days] of totals) {
-    const share = days / located;
-    if (!best || share > best.share || (share === best.share && area < best.area)) best = { area, share };
-  }
-  return best;
+  return [...totals.entries()]
+    .map(([area, days]) => ({ area, share: days / located }))
+    .sort((a, b) => b.share - a.share || a.area - b.area);
 }
 
 /**
