@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import * as d3 from "d3";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
@@ -231,5 +231,105 @@ describe("InteractiveGeo region secondary row", () => {
     fireEvent.focus(regionNamed(container, "AlsoLogged"));
     expect(tooltip().getByText("days")).toBeTruthy();
     expect(tooltip().queryByText("First visited")).toBeNull();
+  });
+});
+
+// #215's additions: a plain base map under markers, routes between them,
+// and per-marker styling/labels.
+describe("InteractiveGeo base map, routes and marker annotations", () => {
+  const markers = [
+    { id: "home", position: [0.5, 0.5] as [number, number], label: "Home", color: "red", radius: 9, opacity: 0.3 },
+    { id: "2019", position: [4.5, 0.5] as [number, number], label: "2019", annotation: "2019–2020" },
+  ];
+
+  it("draws regions in one neutral fill with no legend and no region tooltip", () => {
+    const { container } = renderMap({ regionsAsBasemap: true, markers });
+    expect(fillOf(container, "Logged")).toBe(noDataFill());
+    expect(fillOf(container, "Travelled")).toBe(noDataFill());
+    expect(screen.queryByText("no data")).toBeNull();
+    fireEvent.focus(regionNamed(container, "Logged"));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("draws a route, dashed only when asked", () => {
+    const { container } = renderMap({
+      markers,
+      routes: [
+        { id: "a", coordinates: [[0.5, 0.5], [4.5, 0.5]] },
+        { id: "b", coordinates: [[4.5, 0.5], [2.5, 0.5]], dashed: true },
+      ],
+    });
+    const paths = [...container.querySelectorAll("g.geo-routes path")];
+    expect(paths).toHaveLength(2);
+    expect(paths[0].getAttribute("stroke-dasharray")).toBeNull();
+    expect(paths[1].getAttribute("stroke-dasharray")).not.toBeNull();
+  });
+
+  it("applies a marker's own colour, opacity and fixed radius, and draws its annotation", () => {
+    const { container } = renderMap({ markers });
+    const [home, stop] = [...container.querySelectorAll("circle.geo-marker")];
+    expect(home.getAttribute("fill")).toBe("red");
+    expect(home.getAttribute("fill-opacity")).toBe("0.3");
+    expect(home.getAttribute("r")).toBe("9");
+    expect(stop.getAttribute("fill-opacity")).toBe("0.85");
+    const labels = [...container.querySelectorAll("text.geo-annotation")].map((t) => t.textContent);
+    expect(labels).toEqual(["2019–2020"]);
+  });
+
+  it("uses a secondary row's own label when the accessor returns one", () => {
+    const { container } = renderMap({
+      markers,
+      getMarkerValue: () => 12,
+      getMarkerSecondaryValue: (m) => (m.id === "home" ? { label: "share", value: "58%" } : "plain"),
+      markerSecondaryLabel: "detail",
+    });
+    const [home, stop] = [...container.querySelectorAll("circle.geo-marker")];
+    fireEvent.focus(home);
+    expect(tooltip().getByText("share")).toBeTruthy();
+    expect(tooltip().getByText("58%")).toBeTruthy();
+    fireEvent.blur(home);
+    fireEvent.focus(stop);
+    expect(tooltip().getByText("detail")).toBeTruthy();
+  });
+});
+
+describe("InteractiveGeo hit radius and marker detail", () => {
+  it("draws a small dot with a transparent ring out to its hit radius", () => {
+    const { container } = renderMap({
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019", radius: 2, hitRadius: 7 }],
+    });
+    const dot = container.querySelector("circle.geo-marker")!;
+    expect(dot.getAttribute("r")).toBe("2");
+    expect(dot.getAttribute("stroke")).toBe("transparent");
+    // The ring is centred on the edge, so 10px wide reaches out to r = 7.
+    expect(dot.getAttribute("stroke-width")).toBe("10");
+  });
+
+  it("renders the detail accessor's content under the tooltip rows", () => {
+    const { container } = renderMap({
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019", radius: 2, hitRadius: 7 }],
+      getMarkerValue: () => 300,
+      getMarkerDetail: () => <span>Istanbul 64%</span>,
+    });
+    fireEvent.focus(container.querySelector("circle.geo-marker")!);
+    expect(tooltip().getByText("Mar 2019")).toBeTruthy();
+    expect(tooltip().getByText("Istanbul 64%")).toBeTruthy();
+  });
+});
+
+describe("InteractiveGeo marker clicks", () => {
+  it("hands a clicked or keyboard-activated marker to onMarkerClick", () => {
+    const onMarkerClick = vi.fn();
+    const { container } = renderMap({
+      markers: [{ id: "p", position: [0.5, 0.5], label: "Mar 2019" }],
+      onMarkerClick,
+    });
+    const dot = container.querySelector("circle.geo-marker")!;
+    fireEvent.click(dot);
+    expect(onMarkerClick).toHaveBeenCalledTimes(1);
+    expect(onMarkerClick.mock.calls[0][0].id).toBe("p");
+    fireEvent.keyDown(dot, { key: "Enter" });
+    fireEvent.keyDown(dot, { key: "a" });
+    expect(onMarkerClick).toHaveBeenCalledTimes(2);
   });
 });

@@ -50,6 +50,12 @@ export const TREEMAP_INTERACTION_GUIDE =
 export const GEO_INTERACTION_GUIDE =
   "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show.";
 
+/** The Centre of Gravity map (#215) — built on `InteractiveGeo`, but its
+ * content is all markers and a path, with no choropleth or drill-down,
+ * so the generic geo paragraph above would promise things it doesn't do. */
+export const LOCATION_CENTRE_INTERACTION_GUIDE =
+  "The line traces the centre of mass of where I spent my days, each point averaging the window of years before it, coloured from earliest (pale) to latest (strong). Window sets how many years back each point looks: 1 year shows moves and long stretches away, 5 years only the broad drift between homes. Drag the Years slider's two handles to show any span of whole years; the circles and the coverage figure follow the span, and bringing both handles to the same year shows that year month by month. A labelled dot marks where each year begins (each month, in a single year), and a dot labelled Now marks the latest point; one dot labelled with several years (\"2016–2018\") is where the line sat at the start of each of them. In a span of several years, small dots between the year dots mark every two months. The line breaks where too few days are located to place, and a dashed line bridges the gap. The shaded circles are the areas being averaged (a metro, or a municipality outside one), sized by their share of the span's days; the ten with the most days overall each have their own colour and their name on the map, and keep that colour in every tooltip and in the key above the map. Hover any dot for the days behind it and how they split between areas: the bar shows the whole mix, and the three largest areas are named with their shares. Click a dot (or focus it and press Enter) to pin a full breakdown of its window: the exact dates, every area with its share, the countries, and the areas first visited in that window. Click the dot again, press Escape or use the close button to dismiss it. Hover a circle for its share of the span. Scroll or pinch to zoom, drag to pan, click a country to zoom to it, and click the background to reset.";
+
 export const BAR_RACE_INTERACTION_GUIDE =
   "Use the playback controls to run, pause, or scrub the animation. Hover a bar for its exact value at that point in time.";
 
