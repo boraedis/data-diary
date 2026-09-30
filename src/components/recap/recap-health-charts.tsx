@@ -69,8 +69,9 @@ export function RecapHappinessTrend({ series, periodLabel }: { series: Happiness
           series={lineSeries}
           width={width}
           height={height}
-          // Fixed 0-100 so a flat-looking year isn't stretched into drama.
-          yDomain={[0, 100]}
+          // No fixed domain: scores sit tightly near the top of 0-100 (a
+          // typical year averages ~88), so the primitive's auto-fit domain is
+          // what makes the trend readable.
           zoom="none"
           dateFormat={bucket === "week" ? "short" : "monthYear"}
           valueFormat={(v) => v.toFixed(1)}
