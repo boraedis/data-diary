@@ -299,6 +299,34 @@ export type GeoMarker = {
   position: [number, number];
   /** Tooltip title — typically the place's name. */
   label: string;
+  /** Per-marker fill, overriding `markerColor` — for a chart whose markers
+   * are several different things (#215's bases, each in its own fixed
+   * categorical slot, under a path of centres). */
+  color?: string;
+  /** Fill opacity, default 0.85. Lower it for markers that are context
+   * for other markers drawn on top of them. */
+  opacity?: number;
+  /** Fixed *screen* radius in px, bypassing `getMarkerValue` scaling for
+   * this marker only — so one chart can mix value-sized markers with
+   * fixed-size ones without the two sharing a size scale. */
+  radius?: number;
+  /** Short text drawn beside the dot, always visible — e.g. #215's
+   * "2016–2018". Same constant screen size under zoom as the dot. Keep it
+   * to a handful of markers; nothing here stops labels colliding. */
+  annotation?: string;
+};
+
+/** A line drawn between markers (#215's path of centres). Drawn as a
+ * great circle — d3-geo interpolates a LineString along the sphere, so a
+ * long hop curves the way a flight route does instead of following the
+ * projection's straight line. */
+export type GeoRoute = {
+  id: string;
+  /** [lng, lat] pairs, in order. */
+  coordinates: [number, number][];
+  /** For a hop that isn't a measured move — e.g. the line bridging a
+   * period with too little data to plot. */
+  dashed?: boolean;
 };
 
 export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties> = {
@@ -418,13 +446,15 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * when getMarkerValue is also given. */
   markerValueLabel?: string;
   /** Optional second tooltip row for a marker, below the value row — a
-   * plain string, not a magnitude (e.g. #177's city-heatmap uses this for
+   * plain string (labelled with `markerSecondaryLabel`), or a
+   * `GeoSecondaryRow` carrying its own label when different markers need
+   * differently-named rows. Not a magnitude (e.g. #177's city-heatmap uses this for
    * which neighborhood the place resolves to). Return an explicit string
    * like "not mapped" to actively flag a gap rather than returning null —
    * a missing row and "no match found" read very differently when the
    * whole point is spotting a mismatch from the tooltip. Return null only
    * for "this row doesn't apply to this marker at all". */
-  getMarkerSecondaryValue?: (marker: GeoMarker) => string | null;
+  getMarkerSecondaryValue?: (marker: GeoMarker) => string | GeoSecondaryRow | null;
   /** Label for the secondary row, e.g. "neighborhood". */
   markerSecondaryLabel?: string;
   ariaLabel?: string;
@@ -489,6 +519,17 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * Pass a stable reference (module-level or memoized) — it's a useD3
    * dependency, same caveat as `markers`. */
   contextFeatures?: FeatureCollection<Geometry, GeoJsonProperties>;
+  /** Lines between markers, drawn above the regions and beneath the
+   * markers, panning/zooming with both. Non-interactive — hover the
+   * markers they join. Stable reference, same useD3 caveat as `markers`. */
+  routes?: GeoRoute[];
+  /** Draws the regions as a plain base map rather than a choropleth: one
+   * neutral land fill, no colour legend, no region tooltip. For a chart
+   * whose data is entirely in its markers (#215) — without this, every
+   * country would carry the "no data" fill and a legend naming it, which
+   * reads as a claim about countries the chart isn't making. Click-to-zoom
+   * still works; `getValue` is ignored. */
+  regionsAsBasemap?: boolean;
 };
 
 /** Discriminated union so one hover state serves both layers — a marker
@@ -531,6 +572,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   resolveExpansion,
   fitTo,
   contextFeatures,
+  routes,
+  regionsAsBasemap = false,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // The one region currently shown as its own subdivisions, together with
@@ -661,6 +704,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
    *
    * O(drawn), same as `domain` above and memoized alongside it. */
   const legendSwatches = useMemo(() => {
+    if (regionsAsBasemap) return [];
     let travelled = false;
     let none = false;
     for (const d of drawn) {
@@ -673,9 +717,11 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
     if (travelled) out.push({ label: travelledLabel, color: travelledColor });
     if (none) out.push({ label: noDataLabel, color: noDataColor });
     return out;
-  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel, noDataColor]);
+  }, [drawn, resolveFill, travelledLabel, travelledColor, noDataLabel, noDataColor, regionsAsBasemap]);
 
-  const mapHeight = Math.max(0, height - LEGEND_AREA_HEIGHT - (legendSwatches.length ? LEGEND_SWATCH_ROW_HEIGHT : 0));
+  const mapHeight = regionsAsBasemap
+    ? height
+    : Math.max(0, height - LEGEND_AREA_HEIGHT - (legendSwatches.length ? LEGEND_SWATCH_ROW_HEIGHT : 0));
   const resolvedMarkerColor = markerColor ?? categoricalColor(0);
 
   /** Show one region as its own subdivisions, restoring whichever region
@@ -780,7 +826,16 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       // zoom handler's closure can reach the current selection to
       // counter-scale it on every tick. Stays null for a markerless map.
       let markerNodes: d3.Selection<SVGCircleElement, { marker: GeoMarker; xy: [number, number] }, d3.BaseType, unknown> | null = null;
+      let annotationNodes: d3.Selection<SVGTextElement, { marker: GeoMarker; xy: [number, number] }, d3.BaseType, unknown> | null = null;
+      function placeAnnotations(k: number) {
+        annotationNodes
+          ?.attr("x", (d) => d.xy[0] + (markerRadius(d) + 4) / k)
+          .attr("y", (d) => d.xy[1])
+          .attr("font-size", 11 / k)
+          .attr("stroke-width", 3 / k);
+      }
       function markerRadius(d: { marker: GeoMarker }) {
+        if (d.marker.radius != null) return d.marker.radius;
         const v = getMarkerValue?.(d.marker);
         return scaleMarkersByValue && markerRadiusScale && v != null && v > 0 ? markerRadiusScale(v) : MARK_SPECS.marker.radius;
       }
@@ -816,7 +871,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .join("path")
         .attr("class", "geo-region")
         .attr("d", (d) => path(d.feature))
-        .attr("fill", (d) => resolveFill(d).color)
+        .attr("fill", (d) => (regionsAsBasemap ? noDataColor : resolveFill(d).color))
         // `--card`, not `--border`: two adjacent regions landing on the
         // same ramp value (a common case — the ramp only has so many
         // steps) need a border that separates them from *each other*, not
@@ -877,6 +932,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           // of growing with the map — see `markers`' own prop comment.
           const k = event.transform.k;
           markerNodes?.attr("r", (d) => markerRadius(d) / k).attr("stroke-width", MARK_SPECS.marker.ringWidth / k);
+          placeAnnotations(k);
         });
 
       /** Zoom to any GeoJSON object's bounds — a single feature, or a
@@ -1013,13 +1069,40 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         if (target) zoomToBounds(target.feature);
       }
 
-      attachMarkHover<DrawnFeature>(
-        regions as unknown as d3.Selection<d3.BaseType, DrawnFeature, d3.BaseType, unknown>,
-        {
-          onHover: (drawnFeature, clientPos) => setHovered({ kind: "region", drawn: drawnFeature, clientPos }),
-          onLeave: () => setHovered(null),
-        },
-      );
+      // A base map's regions have nothing to report — see
+      // `regionsAsBasemap` — so they get no tooltip at all.
+      if (!regionsAsBasemap) {
+        attachMarkHover<DrawnFeature>(
+          regions as unknown as d3.Selection<d3.BaseType, DrawnFeature, d3.BaseType, unknown>,
+          {
+            onHover: (drawnFeature, clientPos) => setHovered({ kind: "region", drawn: drawnFeature, clientPos }),
+            onLeave: () => setHovered(null),
+          },
+        );
+      }
+
+      // Routes (#215), between the regions and the markers. Stroke width
+      // and dash stay constant on screen via non-scaling-stroke, the same
+      // treatment region borders get — a dash pattern is measured in
+      // screen pixels under it too, so dashes don't stretch as you zoom.
+      if (routes && routes.length > 0) {
+        g.append("g")
+          .attr("class", "geo-routes")
+          .attr("aria-hidden", "true")
+          .style("pointer-events", "none")
+          .selectAll<SVGPathElement, GeoRoute>("path")
+          .data(routes)
+          .join("path")
+          .attr("d", (r) => path({ type: "LineString", coordinates: r.coordinates }))
+          .attr("fill", "none")
+          .attr("stroke", "var(--foreground)")
+          .attr("stroke-opacity", 0.7)
+          .attr("stroke-width", 2)
+          .attr("stroke-linecap", "round")
+          .attr("stroke-linejoin", "round")
+          .attr("stroke-dasharray", (r) => (r.dashed ? "4 5" : null))
+          .attr("vector-effect", "non-scaling-stroke");
+      }
 
       // Marker overlay (#264) — projected straight from each marker's own
       // [lng, lat] via the same fitted projection the regions use, so it
@@ -1053,8 +1136,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           // would appear bloated by exactly that factor until the next
           // zoom event corrected them.
           .attr("r", (d) => markerRadius(d) / carriedTransform.k)
-          .attr("fill", resolvedMarkerColor)
-          .attr("fill-opacity", 0.85)
+          .attr("fill", (d) => d.marker.color ?? resolvedMarkerColor)
+          .attr("fill-opacity", (d) => d.marker.opacity ?? 0.85)
           .attr("stroke", "var(--card)")
           .attr("stroke-width", MARK_SPECS.marker.ringWidth / carriedTransform.k);
 
@@ -1073,6 +1156,28 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
             onLeave: () => setHovered(null),
           },
         );
+
+        // Annotations (#215), drawn after every marker so no dot covers
+        // another's label. Font size and offset are counter-scaled like
+        // the dots themselves; the halo is a stroke in the card colour
+        // painted under the fill (`paint-order`), which keeps a label
+        // legible across a route or a coastline without a box behind it.
+        const annotated = positioned.filter((d) => d.marker.annotation);
+        annotationNodes = g
+          .selectAll<SVGTextElement, { marker: GeoMarker; xy: [number, number] }>("text.geo-annotation")
+          .data(annotated)
+          .join("text")
+          .attr("class", "geo-annotation")
+          .attr("aria-hidden", "true")
+          .style("pointer-events", "none")
+          .attr("fill", "var(--foreground)")
+          .attr("stroke", "var(--card)")
+          .attr("stroke-linejoin", "round")
+          .attr("paint-order", "stroke")
+          .attr("font-weight", 600)
+          .attr("dominant-baseline", "middle")
+          .text((d) => d.marker.annotation!);
+        placeAnnotations(carriedTransform.k);
       }
     },
     [
@@ -1101,6 +1206,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       markerRadiusScale,
       scaleMarkersByValue,
       resolvedMarkerColor,
+      routes,
+      regionsAsBasemap,
+      noDataColor,
     ],
   );
 
@@ -1111,7 +1219,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   const hoveredValue = hoveredFill?.value ?? null;
   const hoveredColor = hoveredFill?.state === "value" ? hoveredFill.color : undefined;
   const hoveredMarkerValue = hovered?.kind === "marker" ? (getMarkerValue?.(hovered.marker) ?? null) : null;
-  const hoveredMarkerSecondary = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
+  const hoveredMarkerSecondaryRaw = hovered?.kind === "marker" ? (getMarkerSecondaryValue?.(hovered.marker) ?? null) : null;
+  const hoveredMarkerSecondary: GeoSecondaryRow | null =
+    typeof hoveredMarkerSecondaryRaw === "string"
+      ? { label: markerSecondaryLabel, value: hoveredMarkerSecondaryRaw }
+      : hoveredMarkerSecondaryRaw;
+  const hoveredMarkerColor = hovered?.kind === "marker" ? (hovered.marker.color ?? resolvedMarkerColor) : resolvedMarkerColor;
   // Read for either fill state — a real value or the travelled tint can
   // both have something to add (see getSecondaryValue's own prop comment)
   // — but only ever from the hovered polygon's own accessor, same as
@@ -1215,16 +1328,16 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
                           {
                             label: markerValueLabel,
                             value: formatMarkerValue(hoveredMarkerValue),
-                            color: resolvedMarkerColor,
+                            color: hoveredMarkerColor,
                             variant: "swatch" as const,
                           },
                         ]),
                     ...(hoveredMarkerSecondary != null
                       ? [
                           {
-                            label: markerSecondaryLabel,
-                            value: hoveredMarkerSecondary,
-                            color: resolvedMarkerColor,
+                            label: hoveredMarkerSecondary.label,
+                            value: hoveredMarkerSecondary.value,
+                            color: hoveredMarkerColor,
                             variant: "swatch" as const,
                           },
                         ]
@@ -1235,6 +1348,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           />
         ) : null}
       </div>
+      {regionsAsBasemap ? null : (
       <SequentialLegend
         domain={domain}
         colorScale={colorScale}
@@ -1247,6 +1361,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         swatches={legendSwatches}
         className="pt-2"
       />
+      )}
     </div>
   );
 }

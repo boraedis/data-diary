@@ -42,6 +42,7 @@ import { addDays, parseDate } from "@/lib/date";
 import { getProfileSettings, listProfileOccupations, listProfileRelationships, listProfileResidences } from "@/lib/profile";
 import type { InteractiveScrollerRegion } from "@/components/charts/interactive/interactive-scroller";
 import type { LifeTimelineEntry } from "@/lib/life-timeline";
+import { buildLocationCentreData, type LocationCentreData } from "@/lib/location-centre";
 import type { WorkDay } from "@/lib/work";
 import type { PeopleNetworkDay, PeopleNetworkInput } from "@/lib/people-network";
 export type { LifeTimelineEntry } from "@/lib/life-timeline";
@@ -2086,4 +2087,40 @@ export async function getCountryHistoryData(): Promise<CountryDay[]> {
     if (countries.size > 0) out.push({ date: row.date, countries: [...countries] });
   }
   return out;
+}
+
+/**
+ * Everything /charts/location-centre needs (#215), already reduced to
+ * per-period centres and bases — the method itself lives in
+ * src/lib/location-centre.ts. Computed here rather than shipping the raw
+ * days to the client: the output is a few hundred small records, the
+ * input is every logged day.
+ *
+ * Only `days.place1Id`/`place2Id` feed it. Unlogged travel is left out
+ * (passed through, not lived in), and so is a workout's location, which
+ * would count a gym day twice.
+ */
+export async function getLocationCentreData(): Promise<LocationCentreData> {
+  const db = getDb();
+  const [dayRows, catalog, metroRows] = await Promise.all([
+    db
+      .select({ date: days.date, place1Id: days.place1Id, place2Id: days.place2Id })
+      .from(days)
+      .where(or(isNotNull(days.place1Id), isNotNull(days.place2Id)))
+      .orderBy(asc(days.date)),
+    db
+      .select({
+        id: places.id,
+        name: places.name,
+        idPath: places.idPath,
+        category: places.category,
+        subcategory: places.subcategory,
+        metroId: places.metroId,
+        lat: places.lat,
+        lng: places.lng,
+      })
+      .from(places),
+    db.select({ id: metros.id, name: metros.name, country: metros.country }).from(metros),
+  ]);
+  return buildLocationCentreData(dayRows, catalog, metroRows);
 }

@@ -47,6 +47,12 @@ export const DONUT_INTERACTION_GUIDE =
 export const GEO_INTERACTION_GUIDE =
   "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show.";
 
+/** The Centre of Gravity map (#215) — built on `InteractiveGeo`, but its
+ * content is all markers and a path, with no choropleth or drill-down,
+ * so the generic geo paragraph above would promise things it doesn't do. */
+export const LOCATION_CENTRE_INTERACTION_GUIDE =
+  "The line joins where my days were centred, in order: one dot per year, or per month once you pick a year from Period. A dot labelled with several years (\"2016–2018\") is where the centre stayed for all of them. A dashed line bridges periods with too few located days to place. The shaded circles behind it are the places the centre is weighing up, sized by their share of days, in the same colour in every period. Hover a dot or circle for its days and share, and for how far the centre sits from the nearest place when it lands between them. Scroll or pinch to zoom, drag to pan, click a country to zoom to it, and click the background to reset.";
+
 export const BAR_RACE_INTERACTION_GUIDE =
   "Use the playback controls to run, pause, or scrub the animation. Hover a bar for its exact value at that point in time.";
 

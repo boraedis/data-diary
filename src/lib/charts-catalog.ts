@@ -305,6 +305,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["people"],
   },
   {
+    href: "/charts/location-centre",
+    title: "Centre of Gravity",
+    description: "Where my days were centred each year, and how that moved around the world.",
+    categories: ["places"],
+  },
+  {
     href: "/charts/world",
     title: "World Heatmap",
     description: "A heatmap of the world describing which countries I have visited and spent time in.",
