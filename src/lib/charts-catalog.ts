@@ -374,6 +374,9 @@ export const CHARTS: ChartEntry[] = [
     href: "/charts/entertainment-mix",
     title: "Entertainment Mix",
     description: "Average daily time on movies, TV, books, sports and games, stacked over time.",
+    categories: ["entertainment"],
+  },
+  {
     href: "/charts/tv-backlog",
     title: "TV Backlog",
     description: "Aired episodes of the shows I follow that were still unwatched, each day, by show.",
