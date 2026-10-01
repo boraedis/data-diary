@@ -347,6 +347,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["entertainment"],
   },
   {
+    href: "/charts/music-race",
+    title: "Music Race",
+    description: "An animated ranking of the artists I've listened to most, month by month.",
+    categories: ["entertainment"],
+  },
+  {
     href: "/charts/podcast-leaderboard",
     title: "Podcast Leaderboard",
     description: "A leaderboard of the podcasts and podcast categories I've listened to most.",
