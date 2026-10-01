@@ -98,7 +98,7 @@ export async function getMusicTrendByArtist(): Promise<MusicTrendData> {
              to_char(date_trunc('month', l.played_at at time zone 'UTC'), 'YYYY-MM-DD') as month,
              sum(l.ms_played) as ms
       from music_listens l join artists a on a.id = l.artist_id
-      group by l.artist_id, a.name, 2
+      group by l.artist_id, a.name, 3
     ),
     ranked as (
       select artist_id, row_number() over (order by sum(ms) desc, artist_id) as rank
