@@ -8,6 +8,7 @@ import { InteractiveArea, type InteractiveAreaCategory, type InteractiveAreaMode
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { parseDate, toDateString } from "@/lib/date";
+import { CATEGORICAL_SLOT_COUNT, categoricalColor } from "@/lib/viz/color";
 import { formatDate, formatThousandsNumber } from "@/lib/viz/format";
 import type { BacklogSeries } from "@/lib/tv-backlog";
 import { AREA_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -33,6 +34,18 @@ export function TvBacklogChart({ series }: { series: BacklogSeries }) {
   const [mode, setMode] = useState<InteractiveAreaMode>("stacked");
   const [range, setRange] = useState<[Date, Date] | null>(null);
   const { bands, days } = series;
+  // Every show gets a colour, cycling through the five palette slots in
+  // band order (biggest first), so neighbouring bands never match. This
+  // departs on purpose from the app's rule that categorical hues aren't
+  // cycled (viz/color.ts): a backlog spans dozens of shows, and the muted
+  // tail the primitive would otherwise use for all but five of them made
+  // most of the chart one undifferentiated beige. Colour alone doesn't
+  // identify a show here — the tooltip and in-band labels do. Indexed over
+  // the *full* list, so a show keeps its colour when the range narrows.
+  const colors = useMemo(
+    () => new Map(bands.map((b, i) => [b.id, categoricalColor(i % CATEGORICAL_SLOT_COUNT)])),
+    [bands],
+  );
 
   const fullDomain = useMemo<[Date, Date] | null>(
     () => (days.length === 0 ? null : [parseDate(days[0].date), parseDate(days[days.length - 1].date)]),
@@ -49,8 +62,8 @@ export function TvBacklogChart({ series }: { series: BacklogSeries }) {
   // show with nothing in the window is dropped rather than left in the legend.
   const categories = useMemo<InteractiveAreaCategory[]>(() => {
     const present = new Set(points.flatMap((p) => Object.keys(p.values)));
-    return bands.filter((b) => present.has(b.id));
-  }, [bands, points]);
+    return bands.filter((b) => present.has(b.id)).map((b) => ({ ...b, color: colors.get(b.id) }));
+  }, [bands, points, colors]);
 
   return (
     <ChartPage

@@ -23,9 +23,14 @@ import { addDays, todayDateString } from "@/lib/date";
 //
 // **Left out entirely:** episodes with no air date (can't place them); any
 // episode with an undated watch (the legacy "watched before I tracked"
-// mark — it was never backlog); shows with no dated watch at all (no start);
-// and shows marked not-interested with no drop date (can't place when they
-// left). Shows I'm following but that are fully caught up contribute zero.
+// mark — it was never backlog); and shows with no dated watch at all (no
+// start). Shows I'm following but that are fully caught up contribute zero.
+//
+// **Dropped shows** leave the backlog on their `uninterested_date`. Legacy
+// shows marked not-interested often have none, so those leave on the day of
+// their last dated watch instead — the last evidence I was still following
+// them. (An earlier version left such shows out entirely, which made every
+// show dropped before that date was recorded vanish from the chart.)
 //
 // Aggregated to events in SQL, so thousands of episodes never leave the
 // database; only a (day, show, net change) row wherever something moved.
@@ -41,7 +46,7 @@ export type BacklogSeries = { bands: BacklogBand[]; days: BacklogDay[] };
 export async function getBacklogEvents(): Promise<BacklogEvent[]> {
   const result = await getDb().execute(sql`
     with starts as (
-      select e.show_id, min(w.date) as start
+      select e.show_id, min(w.date) as start, max(w.date) as last
       from tv_episode_watches w join tv_episodes e on e.id = w.episode_id
       where w.date is not null
       group by e.show_id
@@ -49,15 +54,19 @@ export async function getBacklogEvents(): Promise<BacklogEvent[]> {
     spans as (
       select sh.id as show_id, sh.title,
              greatest(e.air_date, s.start) as enter,
-             least(min(w.date), sh.uninterested_date) as exit,
+             least(
+               min(w.date),
+               -- Dropped: the recorded drop date, else (legacy shows often
+               -- have none) the day of the show's last dated watch.
+               case when sh.interested then null else coalesce(sh.uninterested_date, s.last) end
+             ) as exit,
              bool_or(w.id is not null and w.date is null) as undated
       from tv_episodes e
       join tv_shows sh on sh.id = e.show_id
       join starts s on s.show_id = e.show_id
       left join tv_episode_watches w on w.episode_id = e.id
       where e.air_date is not null
-        and (sh.interested or sh.uninterested_date is not null)
-      group by e.id, e.air_date, s.start, sh.id, sh.title, sh.uninterested_date
+      group by e.id, e.air_date, s.start, s.last, sh.id, sh.title, sh.interested, sh.uninterested_date
     ),
     live as (
       select show_id, title, enter, exit from spans where not undated and (exit is null or enter < exit)
