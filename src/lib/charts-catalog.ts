@@ -377,6 +377,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["entertainment"],
   },
   {
+    href: "/charts/tv-backlog",
+    title: "TV Backlog",
+    description: "Aired episodes of the shows I follow that were still unwatched, each day, by show.",
+    categories: ["entertainment"],
+  },
+  {
     href: "/charts/sports-leaderboard",
     title: "Sports Leaderboard",
     description: "A leaderboard of the sports, leagues, conferences and teams I've watched most.",
