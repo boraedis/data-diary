@@ -434,13 +434,15 @@ export const CHARTS: ChartEntry[] = [
 
 // Hand-picked, not usage-derived (#268 triage decision) — a short, stable
 // list of the charts checked most often. Edit directly to change what
-// shows up in the landing page's favorites row.
+// shows up in the landing page's favorites row. Shown in catalog order, not
+// the order here. Updated in #502 (six, so the three-column grid fills).
 export const FAVORITE_CHART_HREFS: readonly string[] = [
-  "/charts/happiness-trend",
-  "/charts/weight",
-  "/charts/sleep-trend",
+  "/charts/happiness-daily",
+  "/charts/subs-daily",
+  "/charts/place-hierarchy",
+  "/charts/us-states",
   "/charts/people-table",
-  "/charts/places",
+  "/charts/people-calendar",
 ];
 
 export function chartsByCategory(category: ChartCategory): ChartEntry[] {
