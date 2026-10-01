@@ -28,10 +28,15 @@ import { addDays, todayDateString } from "@/lib/date";
 // left). Shows I'm following but that are fully caught up contribute zero.
 //
 // Aggregated to events in SQL, so thousands of episodes never leave the
-// database; only a (date, net change) row per day with any movement.
+// database; only a (day, show, net change) row wherever something moved.
 
-export type BacklogEvent = { date: string; delta: number };
-export type BacklogDay = { date: string; backlog: number };
+export type BacklogEvent = { date: string; showId: string; title: string; delta: number };
+export type BacklogBand = { id: string; label: string };
+/** One calendar day: the backlog per show, only for shows with any (a
+ * caught-up show is simply absent, not a zero entry — a show with a
+ * thousand quiet days would otherwise ship a thousand zeros). */
+export type BacklogDay = { date: string; values: Record<string, number> };
+export type BacklogSeries = { bands: BacklogBand[]; days: BacklogDay[] };
 
 export async function getBacklogEvents(): Promise<BacklogEvent[]> {
   const result = await getDb().execute(sql`
@@ -42,7 +47,8 @@ export async function getBacklogEvents(): Promise<BacklogEvent[]> {
       group by e.show_id
     ),
     spans as (
-      select greatest(e.air_date, s.start) as enter,
+      select sh.id as show_id, sh.title,
+             greatest(e.air_date, s.start) as enter,
              least(min(w.date), sh.uninterested_date) as exit,
              bool_or(w.id is not null and w.date is null) as undated
       from tv_episodes e
@@ -51,37 +57,57 @@ export async function getBacklogEvents(): Promise<BacklogEvent[]> {
       left join tv_episode_watches w on w.episode_id = e.id
       where e.air_date is not null
         and (sh.interested or sh.uninterested_date is not null)
-      group by e.id, e.air_date, s.start, sh.uninterested_date
+      group by e.id, e.air_date, s.start, sh.id, sh.title, sh.uninterested_date
     ),
     live as (
-      select enter, exit from spans where not undated and (exit is null or enter < exit)
+      select show_id, title, enter, exit from spans where not undated and (exit is null or enter < exit)
     )
-    select to_char(d, 'YYYY-MM-DD') as date, sum(delta)::int as delta
+    select to_char(d, 'YYYY-MM-DD') as date, show_id::text as "showId", title, sum(delta)::int as delta
     from (
-      select enter as d, 1 as delta from live
+      select show_id, title, enter as d, 1 as delta from live
       union all
-      select exit as d, -1 as delta from live where exit is not null
+      select show_id, title, exit as d, -1 as delta from live where exit is not null
     ) ev
-    group by d
+    group by d, show_id, title
     order by d
   `);
   return (Array.isArray(result) ? result : (result as { rows: unknown[] }).rows) as BacklogEvent[];
 }
 
-/** Running sum of the events as one row per calendar day, zero-change days
+/** Running sums of the events as one row per calendar day, quiet days
  * included, from the first event to `through` (default today). Events after
- * `through` — episodes yet to air — don't appear. Pure, so it's testable
+ * `through` — episodes yet to air — don't appear. Bands come out biggest
+ * show first, by total episode-days in the backlog. Pure, so it's testable
  * without a database. */
-export function buildBacklogSeries(events: BacklogEvent[], through: string = todayDateString()): BacklogDay[] {
-  if (events.length === 0) return [];
-  const byDate = new Map<string, number>();
-  for (const e of events) byDate.set(e.date, (byDate.get(e.date) ?? 0) + Number(e.delta));
-  const first = [...byDate.keys()].sort()[0];
-  const out: BacklogDay[] = [];
-  let backlog = 0;
-  for (let date = first; date <= through; date = addDays(date, 1)) {
-    backlog += byDate.get(date) ?? 0;
-    out.push({ date, backlog });
+export function buildBacklogSeries(events: BacklogEvent[], through: string = todayDateString()): BacklogSeries {
+  if (events.length === 0) return { bands: [], days: [] };
+  const byDate = new Map<string, BacklogEvent[]>();
+  for (const e of events) {
+    const list = byDate.get(e.date);
+    if (list) list.push(e);
+    else byDate.set(e.date, [e]);
   }
-  return out;
+  const first = [...byDate.keys()].sort()[0];
+
+  const level = new Map<string, number>();
+  const titles = new Map<string, string>();
+  const totals = new Map<string, number>();
+  const days: BacklogDay[] = [];
+  for (let date = first; date <= through; date = addDays(date, 1)) {
+    for (const e of byDate.get(date) ?? []) {
+      level.set(e.showId, (level.get(e.showId) ?? 0) + Number(e.delta));
+      titles.set(e.showId, e.title);
+    }
+    const values: Record<string, number> = {};
+    for (const [id, n] of level) {
+      if (n <= 0) continue;
+      values[id] = n;
+      totals.set(id, (totals.get(id) ?? 0) + n);
+    }
+    days.push({ date, values });
+  }
+  const bands = [...totals.keys()]
+    .sort((a, b) => (totals.get(b) as number) - (totals.get(a) as number))
+    .map((id) => ({ id, label: titles.get(id) as string }));
+  return { bands, days };
 }
