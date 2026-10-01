@@ -17,6 +17,7 @@ export default async function ManageArtistsPage() {
     getMusicCurationStats(),
   ]);
   const artistsWithGenres = artists.filter((a) => a.genres.length > 0).length;
+  const artistsWithGroup = artists.filter((a) => a.hasGroup).length;
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
@@ -43,6 +44,14 @@ export default async function ManageArtistsPage() {
                 label="Artists with a genre"
                 href="#artist-list"
                 done={artistsWithGenres}
+                total={artists.length}
+              />
+            )}
+            {artists.length > 0 && (
+              <ReviewProgressRow
+                label="Artists with a genre group"
+                href="#artist-list"
+                done={artistsWithGroup}
                 total={artists.length}
               />
             )}
