@@ -353,6 +353,12 @@ export const CHARTS: ChartEntry[] = [
     categories: ["entertainment"],
   },
   {
+    href: "/charts/ranking-ribbon",
+    title: "Ranking Ribbon",
+    description: "How my top 10 films and books shifted from year to year.",
+    categories: ["entertainment"],
+  },
+  {
     href: "/charts/podcast-leaderboard",
     title: "Podcast Leaderboard",
     description: "A leaderboard of the podcasts and podcast categories I've listened to most.",

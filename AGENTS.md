@@ -90,6 +90,7 @@ Current shape:
   | `InteractiveTimeline` | shipped | #119 | life timeline |
   | `InteractiveStrip` (group means ± 95% CI, n per row) | shipped | #444 | work vs. happiness |
   | `InteractiveTreemap` (nested, zoom-into-group, animated) | shipped | #213 | people treemap |
+  | `InteractiveBump` (ranks over time as ribbons) | shipped | #222 | ranking ribbon, from the history log (#546) |
 
   `InteractiveDonut` and `InteractiveTreemap` are the two primitives here
   that take a *tree* rather than a series — the same tree, so a page can
