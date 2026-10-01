@@ -29,6 +29,10 @@ export const dayTypeEnum = pgEnum("day_type", [
   "jobless",
 ]);
 
+// What a save did to one item of a ranking (#546): entered the list, left
+// it, or changed rank. See movieRankingEvents.
+export const rankingEventKindEnum = pgEnum("ranking_event_kind", ["add", "remove", "move"]);
+
 export const workLocationEnum = pgEnum("work_location_option", [
   "home",
   "office",
@@ -718,6 +722,35 @@ export const movieRankings = pgTable("movie_rankings", {
     .references(() => movies.id, { onDelete: "restrict" }),
 });
 
+// The ranking's history (#546): an append-only delta log beside the
+// current-list table above, which is a snapshot that every save replaces
+// wholesale. Each save diffs the old list against the new one and logs only
+// what changed (src/lib/ranking-history.ts), so replaying the events in
+// order reproduces the list at any past instant — what a ranked-films-over-
+// time ribbon needs. `add` carries only `toRank`, `remove` only `fromRank`,
+// `move` both. Inserting at rank 1 shifts everything below it, logging a
+// `move` for each: noisy, but exact. Legacy kept only the current list, so
+// there is no history before this table existed; the current list was
+// seeded as `add` events when it shipped.
+//
+// `onDelete: "restrict"` for the same reason as movieRankings: a logged
+// movie is "in use". Per-domain tables (books below) rather than one
+// polymorphic log, like the rest of this schema.
+export const movieRankingEvents = pgTable(
+  "movie_ranking_events",
+  {
+    id: serial("id").primaryKey(),
+    movieId: integer("movie_id")
+      .notNull()
+      .references(() => movies.id, { onDelete: "restrict" }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    kind: rankingEventKindEnum("kind").notNull(),
+    fromRank: smallint("from_rank"),
+    toRank: smallint("to_rank"),
+  },
+  (table) => [index("movie_ranking_events_at_idx").on(table.at)]
+);
+
 export const tvShows = pgTable("tv_shows", {
   id: serial("id").primaryKey(),
   tmdbId: integer("tmdb_id").notNull().unique(),
@@ -856,6 +889,22 @@ export const bookRankings = pgTable("book_rankings", {
     .notNull()
     .references(() => books.id, { onDelete: "restrict" }),
 });
+
+// Same delta log as movieRankingEvents (#546), for books.
+export const bookRankingEvents = pgTable(
+  "book_ranking_events",
+  {
+    id: serial("id").primaryKey(),
+    bookId: integer("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "restrict" }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    kind: rankingEventKindEnum("kind").notNull(),
+    fromRank: smallint("from_rank"),
+    toRank: smallint("to_rank"),
+  },
+  (table) => [index("book_ranking_events_at_idx").on(table.at)]
+);
 
 // --- Entertainment: sports ---------------------------------------------
 // Fully manual catalog, no external API — the historical survey found this

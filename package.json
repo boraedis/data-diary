@@ -14,6 +14,7 @@
     "backfill:place-paths": "node scripts/backfill-place-paths.mjs",
     "backfill:entertainment-duration-location": "node scripts/backfill-entertainment-duration-location.mjs",
     "migrate:watchlist-rankings": "node scripts/migrate-watchlist-rankings.mjs",
+    "seed:ranking-events": "node scripts/seed-ranking-events.mjs",
     "diagnose:place-cycles": "node scripts/diagnose-place-cycles.mjs",
     "diagnose:city-place-coords": "tsx scripts/find-misplaced-city-places.mjs",
     "split:duplicate-places": "node scripts/split-duplicate-places.mjs",
