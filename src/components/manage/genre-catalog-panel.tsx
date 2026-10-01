@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { GenreGroupItem, GenreItem } from "@/lib/catalog-admin";
+import { formatHoursTotal } from "@/lib/viz/format";
 
 // Genre groups and genre-to-group assignment, stacked on the Artists page
 // (genres are an artist attribute) rather than living on their own
@@ -17,7 +18,7 @@ import type { GenreGroupItem, GenreItem } from "@/lib/catalog-admin";
 // ever come from the Spotify import pipeline (src/lib/music-import.ts).
 
 type GenreGroupWithCount = GenreGroupItem & { genreCount: number };
-type GenreWithCount = GenreItem & { artistCount: number };
+type GenreWithCount = GenreItem & { artistCount: number; hours: number };
 
 export function GenreCatalogPanel({
   initialGenreGroups,
@@ -135,6 +136,9 @@ function GenreGroupsSection({
 function GenresSection({ initial, groups }: { initial: GenreWithCount[]; groups: GenreGroupWithCount[] }) {
   const [genres, setGenres] = useState(initial);
   const [showAll, setShowAll] = useState(false);
+  // Arrives most-listened first (#540), so the top 20 unassigned genres are
+  // the ones carrying the most listening — grouping one moves every artist
+  // that has it out of the Music Trend's "No group" band.
   const visible = showAll ? genres : genres.filter((g) => g.groupId === null).slice(0, 20);
 
   async function assign(id: number, groupId: number | null) {
@@ -167,7 +171,12 @@ function GenresSection({ initial, groups }: { initial: GenreWithCount[]; groups:
           {visible.map((genre) => (
             <div key={genre.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm">
               <span className="flex-1">{genre.name}</span>
-              <span className="font-mono text-xs text-muted-foreground">{genre.artistCount}</span>
+              <span className="font-mono text-xs text-muted-foreground" title="Hours listened, across every artist with this genre">
+                {formatHoursTotal(genre.hours)}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground" title="Artists with this genre">
+                {genre.artistCount}
+              </span>
               <Select
                 className="h-8 w-40 text-xs"
                 value={genre.groupId ?? ""}

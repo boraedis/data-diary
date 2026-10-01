@@ -7,7 +7,7 @@
 // growing without bound — every function here follows the exact same
 // "upsert-by-unique-key on create, get/update/delete + usage check" shape
 // established there.
-import { and, asc, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { parseOptionalHexColor } from "@/lib/color";
@@ -36,6 +36,7 @@ import {
   metros,
   movies,
   movieWatches,
+  musicListens,
   people,
   placeCategories,
   places,
@@ -1561,19 +1562,32 @@ export async function deleteGenreGroup(id: number): Promise<void> {
 
 export type GenreItem = { id: number; name: string; groupId: number | null };
 
-export async function listGenres(): Promise<(GenreItem & { artistCount: number })[]> {
+/** Genres with their artist count and listening time (#540): `hours` is
+ * every listen of every artist carrying the genre, credited in full, so
+ * genres overlap and don't sum to total listening — fine for ranking which
+ * ungrouped genre to assign first, which is all this is for. Most-listened
+ * first. */
+export async function listGenres(): Promise<(GenreItem & { artistCount: number; hours: number })[]> {
   const db = getDb();
-  return db
+  const rows = await db
     .select({
       id: genres.id,
       name: genres.name,
       groupId: genres.groupId,
       artistCount: count(artistGenres.artistId),
+      ms: sql<string | null>`coalesce(sum(l.ms), 0)`,
     })
     .from(genres)
     .leftJoin(artistGenres, eq(artistGenres.genreId, genres.id))
+    .leftJoin(
+      sql`(select artist_id, sum(ms_played) as ms from music_listens group by artist_id) l`,
+      sql`l.artist_id = ${artistGenres.artistId}`,
+    )
     .groupBy(genres.id, genres.name, genres.groupId)
     .orderBy(asc(genres.name));
+  return rows
+    .map(({ ms, ...g }) => ({ ...g, hours: Number(ms ?? 0) / MS_PER_HOUR }))
+    .sort((a, b) => b.hours - a.hours);
 }
 
 export async function updateGenreGroupAssignment(id: number, groupId: number | null): Promise<GenreItem> {
@@ -1616,8 +1630,26 @@ export function validateArtistAliasesInput(body: unknown): Result<{ aliases: str
   return { ok: true, value: { aliases } };
 }
 
-export async function listArtists(): Promise<(ArtistItem & { genres: string[] })[]> {
+/** An artist as the manage list shows it (#540): their genres, whether any
+ * of those genres has a genre group, and how long I've listened to them.
+ * `hasGroup` is what the Music Trend's "No group" band is made of — an
+ * artist with no genres at all and one whose genres are all ungrouped both
+ * land there — so the list can be filtered to exactly those. */
+export type ArtistListItem = ArtistItem & { genres: string[]; hasGroup: boolean; hours: number };
+
+const MS_PER_HOUR = 3_600_000;
+
+/** Every artist, **most-listened first** (#540) — so the biggest gaps in the
+ * catalog are the first ones you meet. Listening time is `sum(ms_played)`,
+ * the same measure as the leaderboards and the Music Trend; ties (and the
+ * never-played) fall back to name order. */
+export async function listArtists(): Promise<ArtistListItem[]> {
   const db = getDb();
+  const listened = db
+    .select({ artistId: musicListens.artistId, ms: sum(musicListens.msPlayed).as("ms") })
+    .from(musicListens)
+    .groupBy(musicListens.artistId)
+    .as("listened");
   const rows = await db
     .select({
       id: artists.id,
@@ -1625,22 +1657,36 @@ export async function listArtists(): Promise<(ArtistItem & { genres: string[] })
       aliases: artists.aliases,
       spotifyId: artists.spotifyId,
       genreName: genres.name,
+      genreGroupId: genres.groupId,
+      ms: listened.ms,
     })
     .from(artists)
     .leftJoin(artistGenres, eq(artistGenres.artistId, artists.id))
     .leftJoin(genres, eq(genres.id, artistGenres.genreId))
+    .leftJoin(listened, eq(listened.artistId, artists.id))
     .orderBy(asc(artists.name));
 
-  const byArtist = new Map<number, ArtistItem & { genres: string[] }>();
+  const byArtist = new Map<number, ArtistListItem>();
   for (const row of rows) {
     let entry = byArtist.get(row.id);
     if (!entry) {
-      entry = { id: row.id, name: row.name, aliases: row.aliases, spotifyId: row.spotifyId, genres: [] };
+      entry = {
+        id: row.id,
+        name: row.name,
+        aliases: row.aliases,
+        spotifyId: row.spotifyId,
+        genres: [],
+        hasGroup: false,
+        hours: Number(row.ms ?? 0) / MS_PER_HOUR,
+      };
       byArtist.set(row.id, entry);
     }
     if (row.genreName) entry.genres.push(row.genreName);
+    if (row.genreGroupId !== null) entry.hasGroup = true;
   }
-  return [...byArtist.values()];
+  // Rows came back name-ordered and Map keeps insertion order, so a stable
+  // sort on hours alone leaves ties alphabetical.
+  return [...byArtist.values()].sort((a, b) => b.hours - a.hours);
 }
 
 // Unlike listArtists (genre names only, for search/browse display), the
