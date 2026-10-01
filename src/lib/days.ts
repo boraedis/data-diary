@@ -1,9 +1,11 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { diffRanking } from "@/lib/ranking-history";
 import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
 import { geocodeAddress } from "@/lib/geocode";
 import {
+  bookRankingEvents,
   bookRankings,
   bookReadingSessions,
   books,
@@ -18,6 +20,7 @@ import {
   exercises,
   games,
   gameSessions,
+  movieRankingEvents,
   movieRankings,
   movies,
   movieWatches,
@@ -3221,9 +3224,20 @@ export async function setMovieRanking(movieIds: number[]): Promise<void> {
     throw new Error(`Movie not found: ${missingIds.join(", ")}`);
   }
   const db = getDb();
+  // Read the old order before it's replaced, so the save can log exactly
+  // what it changed (#546). Like the rest of this save, the sequence isn't
+  // atomic (see above): a failure between the replace and the log would
+  // leave the list changed with its history one save behind.
+  const before = (await db.select({ id: movieRankings.movieId }).from(movieRankings).orderBy(asc(movieRankings.rank))).map((r) => r.id);
   await db.delete(movieRankings);
   if (movieIds.length > 0) {
     await db.insert(movieRankings).values(movieIds.map((movieId, i) => ({ rank: i + 1, movieId })));
+  }
+  const deltas = diffRanking(before, movieIds);
+  if (deltas.length > 0) {
+    await db.insert(movieRankingEvents).values(
+      deltas.map((d) => ({ movieId: d.itemId, kind: d.kind, fromRank: d.fromRank, toRank: d.toRank })),
+    );
   }
 }
 
@@ -4019,9 +4033,20 @@ export async function setBookRanking(bookIds: number[]): Promise<void> {
     throw new Error(`Book not found: ${missingIds.join(", ")}`);
   }
   const db = getDb();
+  // Read the old order before it's replaced, so the save can log exactly
+  // what it changed (#546). Like the rest of this save, the sequence isn't
+  // atomic (see above): a failure between the replace and the log would
+  // leave the list changed with its history one save behind.
+  const before = (await db.select({ id: bookRankings.bookId }).from(bookRankings).orderBy(asc(bookRankings.rank))).map((r) => r.id);
   await db.delete(bookRankings);
   if (bookIds.length > 0) {
     await db.insert(bookRankings).values(bookIds.map((bookId, i) => ({ rank: i + 1, bookId })));
+  }
+  const deltas = diffRanking(before, bookIds);
+  if (deltas.length > 0) {
+    await db.insert(bookRankingEvents).values(
+      deltas.map((d) => ({ bookId: d.itemId, kind: d.kind, fromRank: d.fromRank, toRank: d.toRank })),
+    );
   }
 }
 

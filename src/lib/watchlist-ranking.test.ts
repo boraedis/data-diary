@@ -33,7 +33,14 @@ describe("setMovieRanking", () => {
   it("replaces the ranking table with the given order on success", async () => {
     const insertedRows: unknown[] = [];
     dbState.current = {
-      select: () => ({ from: () => ({ where: () => Promise.resolve([{ id: 1 }, { id: 2 }]) }) }) as never,
+      select: () =>
+        ({
+          from: () => ({
+            where: () => Promise.resolve([{ id: 1 }, { id: 2 }]),
+            // The current ranking, read before it's replaced (#546): movie 1 was #1.
+            orderBy: () => Promise.resolve([{ id: 1 }]),
+          }),
+        }) as never,
       insert: () => ({
         values: (rows: unknown) => {
           insertedRows.push(rows);
@@ -49,13 +56,18 @@ describe("setMovieRanking", () => {
         { rank: 1, movieId: 2 },
         { rank: 2, movieId: 1 },
       ],
+      // ...and the save logs exactly what changed: 1 slid #1 -> #2, 2 entered at #1.
+      [
+        { movieId: 1, kind: "move", fromRank: 1, toRank: 2 },
+        { movieId: 2, kind: "add", fromRank: null, toRank: 1 },
+      ],
     ]);
   });
 
   it("skips the insert entirely when clearing the ranking (empty list)", async () => {
     let insertCalled = false;
     dbState.current = {
-      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }) as never,
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]), orderBy: () => Promise.resolve([]) }) }) as never,
       insert: () => {
         insertCalled = true;
         return { values: () => Promise.resolve(undefined) } as never;
@@ -88,7 +100,13 @@ describe("setBookRanking", () => {
   it("replaces the ranking table with the given order on success", async () => {
     const insertedRows: unknown[] = [];
     dbState.current = {
-      select: () => ({ from: () => ({ where: () => Promise.resolve([{ id: 3 }, { id: 7 }]) }) }) as never,
+      select: () =>
+        ({
+          from: () => ({
+            where: () => Promise.resolve([{ id: 3 }, { id: 7 }]),
+            orderBy: () => Promise.resolve([{ id: 7 }]),
+          }),
+        }) as never,
       insert: () => ({
         values: (rows: unknown) => {
           insertedRows.push(rows);
@@ -104,6 +122,36 @@ describe("setBookRanking", () => {
         { rank: 1, bookId: 3 },
         { rank: 2, bookId: 7 },
       ],
+      [
+        { bookId: 7, kind: "move", fromRank: 1, toRank: 2 },
+        { bookId: 3, kind: "add", fromRank: null, toRank: 1 },
+      ],
     ]);
+  });
+});
+
+describe("ranking history (#546)", () => {
+  it("logs nothing when the saved order is unchanged", async () => {
+    const inserts: unknown[] = [];
+    dbState.current = {
+      select: () =>
+        ({
+          from: () => ({
+            where: () => Promise.resolve([{ id: 4 }]),
+            orderBy: () => Promise.resolve([{ id: 4 }]),
+          }),
+        }) as never,
+      insert: () => ({
+        values: (rows: unknown) => {
+          inserts.push(rows);
+          return Promise.resolve(undefined);
+        },
+      }) as never,
+      delete: () => Promise.resolve(undefined) as never,
+      update: () => Promise.resolve(undefined) as never,
+    };
+    await setMovieRanking([4]);
+    // Only the ranking rewrite itself; no events.
+    expect(inserts).toEqual([[{ rank: 1, movieId: 4 }]]);
   });
 });
