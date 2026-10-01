@@ -123,3 +123,11 @@ export const LIFE_TRACKING_SPAN: TrackingSpan = {
   start: "2023-02-18",
   note: "Backfilled from memory for significant life events, not logged day-by-day like the rest of this app's data.",
 };
+
+/** The TV Backlog starts at the first dated TV watch, the same day as
+ * `ENTERTAINMENT_TREND_TRACKING_SPAN` (its comment names it): a show only
+ * counts as followed from its first dated watch. */
+export const TV_BACKLOG_TRACKING_SPAN: TrackingSpan = {
+  start: "2022-01-05",
+  note: "Shows count from their first logged watch, so earlier viewing isn't part of the backlog.",
+};

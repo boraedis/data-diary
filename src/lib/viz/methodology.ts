@@ -110,3 +110,6 @@ export const ENTERTAINMENT_METHODOLOGY =
 
 export const SPORTS_METHODOLOGY =
   "Every game watched is logged with its sport, league, the two teams playing and how long I watched. Conferences are the ones each team belongs to in the catalog — ACC, NFC North, Eastern and so on.";
+
+export const TV_BACKLOG_METHODOLOGY =
+  "An episode counts as backlog from the day it aired, or the day I started watching its show if that was later, until I watched it. A show is one I follow from its first logged watch until I dropped it, so the day I start a long-running show, every episode already aired and not yet seen joins the backlog at once. Episodes watched before I began tracking, shows I'd dropped without a date, and episodes with no air date are left out, and episodes yet to air aren't counted. Each point is the average backlog across its period.";
