@@ -259,3 +259,17 @@ describe("buildTimelineView", () => {
     expect(buildTimelineView([], { mode: "occupation", groupBy: "entry" })).toEqual([]);
   });
 });
+
+describe("overview lanes by occupation type (#560)", () => {
+  it("gives school its own lane between jobs and homes, but keeps it in the Occupation mode", () => {
+    const entries = [
+      entry({ id: "home", kind: "residence" }),
+      entry({ id: "school", occupationType: "education" }),
+      entry({ id: "job", occupationType: "work" }),
+    ];
+    const lanes = [...new Set(buildTimelineView(entries, { mode: "all", groupBy: "entry" }).map((i) => i.lane))];
+    expect(lanes).toEqual(["Occupation", "Education", "Residence"]);
+    const focused = buildTimelineView(entries, { mode: "occupation", groupBy: "entry" });
+    expect(focused.map((i) => i.id).sort()).toEqual(["job", "school"]);
+  });
+});

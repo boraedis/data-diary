@@ -33,6 +33,14 @@ export const dayTypeEnum = pgEnum("day_type", [
 // it, or changed rank. See movieRankingEvents.
 export const rankingEventKindEnum = pgEnum("ranking_event_kind", ["add", "remove", "move"]);
 
+// What a profile occupation entry *is* (#560). Work and school are both
+// "things you spent your days on", which is why they share a table, but the
+// recap and the work breakdown treat them differently: you graduate from a
+// school rather than leave it, and a school day is not a day worked. No
+// `other` until there is a real case for one — an enum value nothing uses
+// is just a choice the editor has to explain.
+export const occupationTypeEnum = pgEnum("occupation_type", ["work", "education"]);
+
 export const workLocationEnum = pgEnum("work_location_option", [
   "home",
   "office",
@@ -1349,6 +1357,9 @@ export const profileOccupations = pgTable(
   {
     id: serial("id").primaryKey(),
     name: text("name").notNull(),
+    // Defaults to work so every row that predates #560 keeps meaning what it
+    // always did; schools are re-tagged by hand in the profile editor.
+    type: occupationTypeEnum("type").notNull().default("work"),
     position: text("position"),
     company: text("company"),
     placeId: integer("place_id").references(() => places.id, { onDelete: "set null" }),
@@ -1566,6 +1577,7 @@ export const cityNeighborhoodOverrides = pgTable(
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
+export type OccupationType = (typeof occupationTypeEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];

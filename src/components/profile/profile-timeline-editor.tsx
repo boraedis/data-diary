@@ -6,9 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import { SearchPanel, type SearchItem } from "@/components/entry-forms/search-panel";
 import { SearchCombobox } from "@/components/entry-forms/search-combobox";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { OCCUPATION_TYPE_LABELS } from "@/lib/occupation-type";
+import type { OccupationType } from "@/db/schema";
 import { TimelinePreviewChart } from "@/components/profile/timeline-preview-chart";
 import type {
   ProfileOccupationItem,
@@ -38,7 +41,8 @@ function formatRange(start: string, end: string | null): string {
 function secondaryLine(type: ProfileEntryType, entry: ProfileEntry): string | null {
   if (type === "occupation") {
     const e = entry as ProfileOccupationItem;
-    return [e.position, e.company].filter(Boolean).join(" at ") || e.placeName;
+    const line = [e.position, e.company].filter(Boolean).join(" at ") || e.placeName;
+    return e.type === "education" ? [OCCUPATION_TYPE_LABELS.education, line].filter(Boolean).join(" · ") : line;
   }
   if (type === "residence") return (entry as ProfileResidenceItem).placeName;
   return (entry as ProfileRelationshipItem).personName;
@@ -79,6 +83,7 @@ export function ProfileTimelineEditor({
   const [end, setEnd] = useState("");
   const [alias, setAlias] = useState("");
   const [color, setColor] = useState("");
+  const [occupationType, setOccupationType] = useState<OccupationType>("work");
   const [position, setPosition] = useState("");
   const [company, setCompany] = useState("");
   const [placeId, setPlaceId] = useState<number | null>(null);
@@ -99,6 +104,7 @@ export function ProfileTimelineEditor({
     setEnd("");
     setAlias("");
     setColor("");
+    setOccupationType("work");
     setPosition("");
     setCompany("");
     setPlaceId(null);
@@ -116,6 +122,7 @@ export function ProfileTimelineEditor({
     setColor(entry.color ?? "");
     if (type === "occupation") {
       const e = entry as ProfileOccupationItem;
+      setOccupationType(e.type);
       setPosition(e.position ?? "");
       setCompany(e.company ?? "");
       setPlaceId(e.placeId);
@@ -154,6 +161,7 @@ export function ProfileTimelineEditor({
       color: color.trim() || null,
     };
     if (type === "occupation") {
+      body.type = occupationType;
       body.position = position.trim() || null;
       body.company = company.trim() || null;
       body.placeId = placeId;
@@ -277,6 +285,20 @@ export function ProfileTimelineEditor({
 
           {type === "occupation" ? (
             <>
+              <div className="space-y-1.5">
+                <Label htmlFor="pte-type">Type</Label>
+                <Select
+                  id="pte-type"
+                  value={occupationType}
+                  onChange={(ev) => setOccupationType(ev.target.value as OccupationType)}
+                >
+                  {(Object.keys(OCCUPATION_TYPE_LABELS) as OccupationType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {OCCUPATION_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="pte-position">Position</Label>
                 <Input id="pte-position" value={position} onChange={(e) => setPosition(e.target.value)} />

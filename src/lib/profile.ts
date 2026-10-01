@@ -11,6 +11,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
 import {
+  occupationTypeEnum,
   people,
   places,
   profileOccupationRoles,
@@ -18,6 +19,7 @@ import {
   profileRelationships,
   profileResidences,
   profileSettings,
+  type OccupationType,
 } from "@/db/schema";
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -111,6 +113,7 @@ export type ProfileOccupationRole = {
 export type ProfileOccupationItem = {
   id: number;
   name: string;
+  type: OccupationType;
   position: string | null;
   company: string | null;
   placeId: number | null;
@@ -124,6 +127,7 @@ export type ProfileOccupationItem = {
 
 export type ProfileOccupationInput = {
   name: string;
+  type: OccupationType;
   position: string | null;
   company: string | null;
   placeId: number | null;
@@ -140,6 +144,17 @@ export function validateProfileOccupationInput(body: unknown): Result<ProfileOcc
   const b = body as Record<string, unknown>;
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) return { ok: false, error: "Name is required" };
+
+  // A missing type means "work": older clients and scripts that predate
+  // #560 keep working, but a present-and-wrong value is rejected rather
+  // than silently coerced.
+  let type: OccupationType = "work";
+  if (b.type !== undefined && b.type !== null) {
+    if (typeof b.type !== "string" || !(occupationTypeEnum.enumValues as readonly string[]).includes(b.type)) {
+      return { ok: false, error: "Invalid type" };
+    }
+    type = b.type as OccupationType;
+  }
 
   const dates = validateTimelineDates(b);
   if (!dates.ok) return dates;
@@ -159,6 +174,7 @@ export function validateProfileOccupationInput(body: unknown): Result<ProfileOcc
     ok: true,
     value: {
       name,
+      type,
       position: typeof b.position === "string" && b.position.trim() ? b.position.trim() : null,
       company: typeof b.company === "string" && b.company.trim() ? b.company.trim() : null,
       placeId,
@@ -173,6 +189,7 @@ export function validateProfileOccupationInput(body: unknown): Result<ProfileOcc
 const OCCUPATION_COLUMNS = {
   id: profileOccupations.id,
   name: profileOccupations.name,
+  type: profileOccupations.type,
   position: profileOccupations.position,
   company: profileOccupations.company,
   placeId: profileOccupations.placeId,
