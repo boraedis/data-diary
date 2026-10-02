@@ -23,7 +23,33 @@ import { cn } from "@/lib/utils";
  * flow under the trigger. We don't bother live-tracking the trigger's
  * position while open — a scroll or resize just closes the dropdown instead,
  * which is simple and matches how most comboboxes behave anyway.
+ *
+ * Width (#563): the trigger fills its container (`w-full`) with a floor of
+ * `MIN_TRIGGER_WIDTH`, and the dropdown is at least `MIN_DROPDOWN_WIDTH`
+ * even when the trigger is narrower. Both matter because the trigger sits
+ * in flex rows beside a "+ New" button: with no explicit width it used to
+ * collapse to its placeholder's width until something was selected, which
+ * made the list too narrow to read and the exercise/location pickers hard
+ * to use. The dropdown is clamped to the viewport so a wide panel opened
+ * from a trigger near the right edge shifts left instead of running off it.
  */
+const MIN_TRIGGER_WIDTH = 160;
+const MIN_DROPDOWN_WIDTH = 288;
+const VIEWPORT_MARGIN = 8;
+
+/** Where the dropdown goes under `rect`: at least `MIN_DROPDOWN_WIDTH` wide
+ * (or the trigger's width, if larger), never wider than the viewport, and
+ * shifted left rather than clipped when it would overflow the right edge. */
+export function dropdownPosition(
+  rect: { left: number; bottom: number; width: number },
+  viewportWidth: number
+): { top: number; left: number; width: number } {
+  const maxWidth = Math.max(0, viewportWidth - VIEWPORT_MARGIN * 2);
+  const width = Math.min(Math.max(rect.width, MIN_DROPDOWN_WIDTH), maxWidth);
+  const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportWidth - VIEWPORT_MARGIN - width));
+  return { top: rect.bottom + 4, left, width };
+}
+
 export function SearchCombobox({
   id,
   items,
@@ -99,14 +125,14 @@ export function SearchCombobox({
       const next = !prev;
       if (next && triggerRef.current) {
         const rect = triggerRef.current.getBoundingClientRect();
-        setPosition({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+        setPosition(dropdownPosition(rect, window.innerWidth));
       }
       return next;
     });
   }
 
   return (
-    <div className="relative">
+    <div className="relative w-full" style={{ minWidth: MIN_TRIGGER_WIDTH }}>
       <button
         type="button"
         id={id}
