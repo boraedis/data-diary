@@ -120,6 +120,13 @@ export function SearchCombobox({
     };
   }, [open]);
 
+  // Closing via a pick, Clear or Escape returns focus to the trigger, so the
+  // form can be tabbed on from where the picker was.
+  function close() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
   function toggleOpen() {
     setOpen((prev) => {
       const next = !prev;
@@ -160,12 +167,16 @@ export function SearchCombobox({
               style={{ top: position.top, left: position.left, width: position.width }}
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") close();
+              }}
             >
               <SearchPanel
                 items={items}
+                refocusOnSelect={false}
                 onSelect={(id) => {
                   onChange(id);
-                  setOpen(false);
+                  close();
                 }}
                 placeholder={placeholder}
                 autoFocus={true}
@@ -178,7 +189,7 @@ export function SearchCombobox({
                   className="mt-2 w-full"
                   onClick={() => {
                     onChange(null);
-                    setOpen(false);
+                    close();
                   }}
                 >
                   Clear selection
