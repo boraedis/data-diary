@@ -90,9 +90,9 @@ export function DailyExplorer({
    * passed straight through to `InteractiveScroller`. For a chart with more
    * series than read well at once (the nine subs, #120). */
   initialHiddenIds?: readonly string[];
-  /** Open zoomed out and animate into this window (#565); omit to open on
+  /** Zoom-in on load (#565); omit for the last three months, `null` for
    * everything. Passed straight to `InteractiveScroller`. */
-  initialFocus?: InitialFocus;
+  initialFocus?: InitialFocus | null;
   /** Horizontal target lines, passed straight through to
    * `InteractiveScroller` (#444). Pass a stable array. */
   referenceLines?: readonly ReferenceLine[];

@@ -7,7 +7,7 @@ import { useInitialFocus } from "@/hooks/use-initial-focus";
 import { toDateString } from "@/lib/date";
 import { formatDate, type DateFormatPreset } from "@/lib/viz/format";
 import { categoricalColor } from "@/lib/viz/color";
-import type { InitialFocus } from "@/lib/viz/initial-focus";
+import { DEFAULT_INITIAL_FOCUS, type InitialFocus } from "@/lib/viz/initial-focus";
 import { drawStandardAxes, styleAxis } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
@@ -116,10 +116,11 @@ export type InteractiveScrollerProps = {
    * state's initial value, after which the reader owns it. */
   initialHiddenIds?: readonly string[];
   /** Open zoomed out, then animate into this window (#565) — last N days or
-   * an explicit range. Read once on mount: the reader owns the window after
-   * that, and their first input stops the animation. Omit to open on the
-   * full extent. */
-  initialFocus?: InitialFocus;
+   * an explicit range. Defaults to the last three months
+   * (`DEFAULT_INITIAL_FOCUS`); pass `null` to open on the full extent. Read
+   * once on mount: the reader owns the window after that, and their first
+   * input stops the animation. */
+  initialFocus?: InitialFocus | null;
 };
 
 type ResolvedSeries = InteractiveScrollerSeries & { color: string };
@@ -452,7 +453,7 @@ export function InteractiveScroller({
   margin,
   ariaLabel,
   initialHiddenIds,
-  initialFocus,
+  initialFocus = DEFAULT_INITIAL_FOCUS,
 }: InteractiveScrollerProps) {
   const MARGIN = { ...DEFAULT_MARGIN, ...margin };
   const clipId = useId().replace(/[:]/g, "");

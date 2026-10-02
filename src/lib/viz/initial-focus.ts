@@ -18,6 +18,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * sleep chart used 3000; that stays a per-chart override. */
 export const DEFAULT_FOCUS_DURATION_MS = 1500;
 
+/** Where every scroller opens unless told otherwise: the last three months.
+ * Short enough that individual days are readable (a daily log is thousands
+ * of points, a sliver each at full extent), long enough to show a trend.
+ * Data shorter than this just opens on everything, with no animation. */
+export const DEFAULT_INITIAL_FOCUS: InitialFocus = { lastDays: 90 };
+
 export type InitialFocus = {
   /** Animation length. 0 (or a reduced-motion preference) jumps straight
    * to the window. */

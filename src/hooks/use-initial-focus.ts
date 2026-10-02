@@ -27,7 +27,7 @@ const TAKEOVER_EVENTS = ["pointerdown", "wheel", "keydown", "touchstart"] as con
  */
 export function useInitialFocus(
   full: readonly [Date, Date] | null,
-  focus: InitialFocus | undefined,
+  focus: InitialFocus | null | undefined,
   onDomain: (domain: [Date, Date]) => void,
 ) {
   const onDomainRef = useRef(onDomain);

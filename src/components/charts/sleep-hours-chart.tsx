@@ -19,7 +19,7 @@ import { parseDate } from "@/lib/date";
 import type { ProfileRegionGroups, SleepNight } from "@/lib/charts";
 import { DAY_TYPE_LABELS, DAY_TYPE_ORDER, dayTypeColor } from "@/lib/viz/day-type";
 import { formatDate, formatDuration } from "@/lib/viz/format";
-import type { InitialFocus } from "@/lib/viz/initial-focus";
+import { DEFAULT_INITIAL_FOCUS, type InitialFocus } from "@/lib/viz/initial-focus";
 import { SLEEP_HOURS_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { SLEEP_HOURS_METHODOLOGY } from "@/lib/viz/methodology";
 import { buildSleepBars, clockTicks, fitClockDomain, formatAxisClock, sleepDates, type SleepBar } from "@/lib/viz/sleep-hours";
@@ -46,28 +46,26 @@ const MARGIN = { top: 12, right: 12, bottom: 28, left: 48 };
 const DAY_MS = 86_400_000;
 
 /**
- * How much history the chart settles on.
+ * How much history the chart settles on is `OPENING_FOCUS` below: the last
+ * three months, like every scroller.
  *
- * Density is the design question here: the log holds ~2,600 nights, and
- * at the full extent on a laptop-width card each gets well under a pixel.
- * That isn't useless — the bars merge into a band whose edges are the
- * bedtime and wake-time envelope, which is exactly the shape of the years
- * — but a single night can no longer be picked out. A year is ~365 bars,
- * two or three pixels each, where every night is still its own mark and
- * hover still lands on the night under the pointer. So the chart opens on
- * the latest year (zooming in to it from the full extent, below), and
- * zooming or the range slider reach back to the
- * start: it's windowed, not aggregated, because averaging nights would
+ * Density is the design question: the log holds ~2,600 nights, and at the
+ * full extent on a laptop-width card each gets well under a pixel. That
+ * isn't useless — the bars merge into a band whose edges are the bedtime
+ * and wake-time envelope, which is exactly the shape of the years — but a
+ * single night can no longer be picked out. Three months is ~90 bars, ten
+ * pixels or so each, where every night is its own mark and hover lands on
+ * the night under the pointer. Zooming or the range slider reach back to
+ * the start: it's windowed, not aggregated, because averaging nights would
  * erase the night-to-night scatter this chart exists to show (Sleep Trend
  * already does the averaged view).
  */
-const DEFAULT_WINDOW_DAYS = 365;
 
 /** Legacy opened this chart zoomed out and took three seconds to zoom into
  * its start window (#565) — so a reader sees how much history there is
- * before landing on the recent stretch. Legacy's window was 45 nights; this
- * keeps the year above, which is the density call this file already made. */
-const OPENING_FOCUS: InitialFocus = { lastDays: DEFAULT_WINDOW_DAYS, durationMs: 3000 };
+ * before landing on the recent stretch. Same three-month window as every
+ * scroller (`DEFAULT_INITIAL_FOCUS`), keeping legacy's slower animation. */
+const OPENING_FOCUS: InitialFocus = { ...DEFAULT_INITIAL_FOCUS, durationMs: 3000 };
 
 /** Zooming in stops at about a fortnight on screen — past that the bars
  * are already at `MARK_SPECS.bar.maxThickness` and more zoom only adds
