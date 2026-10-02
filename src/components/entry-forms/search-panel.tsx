@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +56,7 @@ export function SearchPanel({
   className,
   autoFocus,
   trailingAction,
+  refocusOnSelect = true,
 }: {
   items: SearchItem[];
   onSelect: (id: number) => void;
@@ -72,6 +73,10 @@ export function SearchPanel({
    * button that wants to read as part of the same search ribbon rather than
    * a separate control floating above or below it. */
   trailingAction?: ReactNode;
+  /** Put focus back in the search box after a pick (default). A host that
+   * closes the panel on select (`SearchCombobox`) turns this off and returns
+   * focus to its own trigger instead. */
+  refocusOnSelect?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +88,32 @@ export function SearchPanel({
   function pick(run: (id: number) => void, id: number) {
     run(id);
     setQuery("");
-    inputRef.current?.focus();
+    if (refocusOnSelect) inputRef.current?.focus();
+  }
+
+  // Arrow-key navigation between the search box and the result rows: Down
+  // from the input enters the first row and keeps going; Up from the first
+  // row returns to the input. Only each row's main button participates — the
+  // small secondary action stays reachable by Tab, so arrowing doesn't
+  // double the stops per row.
+  const listRef = useRef<HTMLDivElement>(null);
+  function rowButtons(): HTMLButtonElement[] {
+    return Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>("[data-search-row]") ?? []);
+  }
+  function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const rows = rowButtons();
+    const current = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const inInput = document.activeElement === inputRef.current;
+    if (!inInput && current === -1) return;
+    e.preventDefault();
+    if (e.key === "ArrowDown") {
+      rows[inInput ? 0 : Math.min(current + 1, rows.length - 1)]?.focus();
+    } else if (current <= 0) {
+      inputRef.current?.focus();
+    } else {
+      rows[current - 1].focus();
+    }
   }
   // Deduplicate items by ID to handle data with duplicate IDs (keep first occurrence)
   const deduplicated = useMemo(() => {
@@ -119,7 +149,7 @@ export function SearchPanel({
   const filtered = useMemo(() => deduplicated.filter((item) => matches(item, query)), [deduplicated, query]);
 
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    <div className={cn("flex flex-col gap-2", className)} onKeyDown={handleKeyDown}>
       <div className="flex items-center gap-2">
         <Input
           ref={inputRef}
@@ -131,7 +161,7 @@ export function SearchPanel({
         />
         {trailingAction}
       </div>
-      <div className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
+      <div ref={listRef} className="max-h-72 overflow-y-auto rounded-lg border border-border md:max-h-96">
         {filtered.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
@@ -143,8 +173,9 @@ export function SearchPanel({
             >
               <button
                 type="button"
+                data-search-row
                 onClick={() => pick(onSelect, item.id)}
-                className="flex flex-1 flex-col items-start gap-0.5 px-3.5 py-2.5 text-left hover:bg-accent"
+                className="flex flex-1 flex-col items-start gap-0.5 px-3.5 py-2.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
               >
                 <span className="text-base">{item.primary}</span>
                 {item.secondary ? (
