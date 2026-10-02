@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +74,17 @@ export function SearchPanel({
   trailingAction?: ReactNode;
 }) {
   const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Clicking a result row moves focus onto the button, so without this the
+  // next search means reaching for the mouse again. Runs synchronously inside
+  // the click handler — a modal that `onSelect` opens mounts (and takes focus)
+  // after this, so it isn't fought. Deliberately not `SearchCombobox`'s
+  // concern: there, closing should hand focus back to the trigger instead.
+  function pick(run: (id: number) => void, id: number) {
+    run(id);
+    setQuery("");
+    inputRef.current?.focus();
+  }
   // Deduplicate items by ID to handle data with duplicate IDs (keep first occurrence)
   const deduplicated = useMemo(() => {
     const seen = new Set<number>();
@@ -111,6 +122,7 @@ export function SearchPanel({
     <div className={cn("flex flex-col gap-2", className)}>
       <div className="flex items-center gap-2">
         <Input
+          ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={placeholder}
@@ -131,10 +143,7 @@ export function SearchPanel({
             >
               <button
                 type="button"
-                onClick={() => {
-                  onSelect(item.id);
-                  setQuery("");
-                }}
+                onClick={() => pick(onSelect, item.id)}
                 className="flex flex-1 flex-col items-start gap-0.5 px-3.5 py-2.5 text-left hover:bg-accent"
               >
                 <span className="text-base">{item.primary}</span>
@@ -150,10 +159,7 @@ export function SearchPanel({
                   type="button"
                   aria-label={secondaryAction.ariaLabel}
                   title={secondaryAction.ariaLabel}
-                  onClick={() => {
-                    secondaryAction.onSelect(item.id);
-                    setQuery("");
-                  }}
+                  onClick={() => pick(secondaryAction.onSelect, item.id)}
                   className="flex w-12 shrink-0 items-center justify-center border-l border-border text-muted-foreground hover:bg-accent hover:text-destructive"
                 >
                   {secondaryAction.icon}

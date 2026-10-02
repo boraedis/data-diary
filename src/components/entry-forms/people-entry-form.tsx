@@ -380,55 +380,66 @@ export function PeopleEntryForm({
         <CardHeader>
           <CardTitle>People</CardTitle>
           <CardDescription>
-            {POSITIVE_PEOPLE_SLOTS} positive, {NEGATIVE_PEOPLE_SLOTS} negative (rare). Tap a search
+            {POSITIVE_PEOPLE_SLOTS} positive, {NEGATIVE_PEOPLE_SLOTS} negative (rare, shown once used). Tap a search
             result to add as positive, or use the − for negative.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
-          <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-6">
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase text-muted-foreground">Positive</p>
-              {positive.map((personId, slot) => (
-                <SlotRow
-                  key={`positive-${slot}`}
-                  index={slot}
-                  personId={personId}
-                  people={items}
-                  onRemove={() => removeSlot("positive", slot)}
-                  onPromote={slot > 0 ? () => promoteSlot("positive", slot) : null}
-                />
-              ))}
+          {/* Desktop: slots left, search right and sticky, so the results
+              aren't stranded below the slots at the bottom of the page. */}
+          <div className="flex flex-col gap-5 md:grid md:grid-cols-2 md:items-start md:gap-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Positive</p>
+                {positive.map((personId, slot) => (
+                  <SlotRow
+                    key={`positive-${slot}`}
+                    index={slot}
+                    personId={personId}
+                    people={items}
+                    onRemove={() => removeSlot("positive", slot)}
+                    onPromote={slot > 0 ? () => promoteSlot("positive", slot) : null}
+                  />
+                ))}
+              </div>
+              {/* Negatives are rare, so the column stays hidden until one is
+                  filled; the "−" on a search row still creates one, since
+                  addToValence takes the first empty slot. */}
+              {negative.some((id) => id !== null) ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Negative</p>
+                  {negative.map((personId, slot) => (
+                    <SlotRow
+                      key={`negative-${slot}`}
+                      index={slot}
+                      personId={personId}
+                      people={items}
+                      onRemove={() => removeSlot("negative", slot)}
+                      onPromote={slot > 0 ? () => promoteSlot("negative", slot) : null}
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase text-muted-foreground">Negative</p>
-              {negative.map((personId, slot) => (
-                <SlotRow
-                  key={`negative-${slot}`}
-                  index={slot}
-                  personId={personId}
-                  people={items}
-                  onRemove={() => removeSlot("negative", slot)}
-                  onPromote={slot > 0 ? () => promoteSlot("negative", slot) : null}
-                />
-              ))}
+
+            <div className="md:sticky md:top-4">
+              <PersonAddPanel
+                items={items}
+                usedIds={usedIds}
+                mentionStats={mentionStats}
+                onAddPositive={(id) => addToValence("positive", id)}
+                onAddNegative={(id) => addToValence("negative", id)}
+                onCreated={handleCreated}
+                tags={tags}
+                onTagCreated={(tag) => setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))}
+              />
             </div>
           </div>
-
-          <PersonAddPanel
-            items={items}
-            usedIds={usedIds}
-            mentionStats={mentionStats}
-            onAddPositive={(id) => addToValence("positive", id)}
-            onAddNegative={(id) => addToValence("negative", id)}
-            onCreated={handleCreated}
-            tags={tags}
-            onTagCreated={(tag) => setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))}
-          />
         </CardContent>
       </Card>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-4xl">
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>

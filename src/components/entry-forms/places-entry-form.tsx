@@ -462,7 +462,7 @@ export function PlacesEntryForm({
             {PLACE_SLOTS} places. Search to pick somewhere — it fills the next open slot.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="flex flex-col gap-4 md:grid md:grid-cols-2 md:items-start md:gap-6">
           <div className="space-y-2">
             {slots.map((placeId, slot) => (
               <SlotRow
@@ -476,7 +476,7 @@ export function PlacesEntryForm({
             ))}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 md:sticky md:top-4">
             <div className="flex items-center justify-between">
               <Label>Add a place</Label>
               <Button type="button" variant="outline" size="xs" onClick={() => setModalOpen(true)}>
@@ -507,7 +507,7 @@ export function PlacesEntryForm({
       </Card>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-4xl">
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>
