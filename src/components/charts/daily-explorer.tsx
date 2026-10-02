@@ -15,6 +15,7 @@ import { parseDate } from "@/lib/date";
 import type { DailyValue } from "@/lib/charts";
 import { SCROLLER_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import type { TrackingSpan } from "@/lib/viz/tracking-span";
+import type { InitialFocus } from "@/lib/viz/initial-focus";
 
 /**
  * Legacy's "scroller" shape with controls: every logged day, zoomable, with
@@ -56,6 +57,7 @@ export function DailyExplorer({
   extraFilters,
   initialWindow = 30,
   initialHiddenIds,
+  initialFocus,
   referenceLines,
   ariaLabel,
 }: {
@@ -88,6 +90,9 @@ export function DailyExplorer({
    * passed straight through to `InteractiveScroller`. For a chart with more
    * series than read well at once (the nine subs, #120). */
   initialHiddenIds?: readonly string[];
+  /** Open zoomed out and animate into this window (#565); omit to open on
+   * everything. Passed straight to `InteractiveScroller`. */
+  initialFocus?: InitialFocus;
   /** Horizontal target lines, passed straight through to
    * `InteractiveScroller` (#444). Pass a stable array. */
   referenceLines?: readonly ReferenceLine[];
@@ -138,6 +143,7 @@ export function DailyExplorer({
               regions={regions}
               valueFormat={valueFormat}
               initialHiddenIds={initialHiddenIds}
+              initialFocus={initialFocus}
               referenceLines={referenceLines}
               ariaLabel={ariaLabel}
             />

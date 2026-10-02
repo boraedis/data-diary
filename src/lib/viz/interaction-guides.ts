@@ -21,7 +21,7 @@ export const LINE_SERIES_HOVER_INTERACTION_GUIDE =
   "Hover near a line to pick it out: it's drawn on top, the rest fade, and the readout gives that line's name, date and value. With the chart focused, the left and right arrow keys move through time and up and down move between lines.";
 
 export const SCROLLER_INTERACTION_GUIDE =
-  "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry. Click a legend entry to hide or show that line or the rolling average. Where a dotted line is drawn, it marks a fixed target (8 hours, say), labelled at its right end.";
+  "Scroll or drag directly on the chart to zoom in, or drag the strip below it; double-click to reset. Hover or use the arrow keys to inspect an individual entry. Click a legend entry to hide or show that line or the rolling average. Where a chart opens on a recent stretch, it zooms in from the full history on load; touch the chart and the animation stops. Where a dotted line is drawn, it marks a fixed target (8 hours, say), labelled at its right end.";
 
 export const STRIP_INTERACTION_GUIDE =
   "Each row is one group: the dot is its average, the whiskers its 95% confidence interval, and n how many days it holds. A wide interval means too few days to trust the average yet. Hover a row, or focus the chart and use the up and down arrow keys, for its exact figures. Switch Show to Every day to draw each day behind the averages. The dotted line is the average across every day shown.";
@@ -72,7 +72,7 @@ export const TIMELINE_INTERACTION_GUIDE =
  * primitive, so it gets its own paragraph rather than borrowing one that
  * would promise zoom it doesn't have. */
 export const SLEEP_HOURS_INTERACTION_GUIDE =
-  "Each bar is one night, from falling asleep at its top to waking at its bottom, coloured by the kind of day it led into. Scroll on the chart to zoom, drag to pan, double-click to show everything; the period slider moves the same window. Hover a night, or focus the chart and use the left and right arrow keys, for when you fell asleep and woke up. Click a legend entry to hide that day type. The Regions picker shades jobs, homes, relationships or age behind the bars. The clock axis refits to the nights in view.";
+  "Each bar is one night, from falling asleep at its top to waking at its bottom, coloured by the kind of day it led into. The chart opens on the whole history and zooms in to the latest year; touch it, or the slider, and the animation stops where it is. Scroll on the chart to zoom, drag to pan, double-click to show everything; the period slider moves the same window. Hover a night, or focus the chart and use the left and right arrow keys, for when you fell asleep and woke up. Click a legend entry to hide that day type. The Regions picker shades jobs, homes, relationships or age behind the bars. The clock axis refits to the nights in view.";
 
 /** Shown in the popup's Methodology section until a chart has real,
  * hand-written copy from #316 — the content follow-up ticket. Deliberately

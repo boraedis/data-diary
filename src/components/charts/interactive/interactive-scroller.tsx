@@ -3,9 +3,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import { useD3 } from "@/hooks/use-d3";
+import { useInitialFocus } from "@/hooks/use-initial-focus";
 import { toDateString } from "@/lib/date";
 import { formatDate, type DateFormatPreset } from "@/lib/viz/format";
 import { categoricalColor } from "@/lib/viz/color";
+import type { InitialFocus } from "@/lib/viz/initial-focus";
 import { drawStandardAxes, styleAxis } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
@@ -113,6 +115,11 @@ export type InteractiveScrollerProps = {
    * `InteractiveLine`'s prop of the same name: read once as the toggle
    * state's initial value, after which the reader owns it. */
   initialHiddenIds?: readonly string[];
+  /** Open zoomed out, then animate into this window (#565) — last N days or
+   * an explicit range. Read once on mount: the reader owns the window after
+   * that, and their first input stops the animation. Omit to open on the
+   * full extent. */
+  initialFocus?: InitialFocus;
 };
 
 type ResolvedSeries = InteractiveScrollerSeries & { color: string };
@@ -445,6 +452,7 @@ export function InteractiveScroller({
   margin,
   ariaLabel,
   initialHiddenIds,
+  initialFocus,
 }: InteractiveScrollerProps) {
   const MARGIN = { ...DEFAULT_MARGIN, ...margin };
   const clipId = useId().replace(/[:]/g, "");
@@ -486,6 +494,7 @@ export function InteractiveScroller({
 
   const [visibleDomain, setVisibleDomain] = useState<[Date, Date] | null>(null);
   const effectiveDomain = visibleDomain ?? fullXDomain;
+  useInitialFocus(fullXDomain, initialFocus, setVisibleDomain);
 
   const [legendRef, legendReserve] = useLegendHeight(LEGEND_HEIGHT);
   const minimapReserve = MINIMAP_HEIGHT + MINIMAP_AXIS_HEIGHT;
