@@ -121,7 +121,7 @@ export const MAX_MONTH_STORY_CARDS = 5;
 
 /**
  * Cards that only mean something over a year and are never dealt for a
- * month.
+ * month, or for a chapter short enough to be told like one.
  *
  * - `subs-most-improved`: a sub's daily average moving between two
  *   adjacent months is a handful of days either side, and calling that
@@ -147,8 +147,14 @@ export type RecapStoryInput = {
   periodLabel: string;
   /** What the period is, for copy that names it generically ("Your month
    * in mood") and for which cards and how many are dealt. Null for an
-   * arbitrary window, which is told like a year. */
-  periodUnit: "year" | "month" | null;
+   * arbitrary window, which is told like a year. "chapter" is a life
+   * chapter (#519): named as one, and dealt like a year unless `compact`. */
+  periodUnit: "year" | "month" | "chapter" | null;
+  /** Deal the month-sized story — `MAX_MONTH_STORY_CARDS`, no year-only
+   * cards — for a period that isn't a month but is about as short as one.
+   * Set for short chapters (#519, `isCompactChapter`); a month is always
+   * compact regardless. */
+  compact?: boolean;
   priorLabel: string;
   loggedDays: number;
   priorLoggedDays: number;
@@ -202,7 +208,9 @@ function formatMinutes(minutes: number): string {
 function buildCandidates(input: RecapStoryInput): Candidate[] {
   const { periodLabel, priorLabel, health, body, entertainment, peoplePlaces, subs } = input;
   // An arbitrary window has no better generic noun than "year" had before
-  // months existed; no route builds one today.
+  // months existed; no route builds one today. A chapter is named as one:
+  // "Your chapter in mood" for an eight-year home is true where "Your year
+  // in mood" isn't.
   const noun = input.periodUnit ?? "year";
   const { happiness, sleep, exercise } = health;
   const candidates: Candidate[] = [];
@@ -668,11 +676,11 @@ function selectCards(candidates: Candidate[], limit: number): Candidate[] {
  * that predates most of this app's tracking.
  */
 export function buildRecapStory(input: RecapStoryInput): RecapStoryCard[] {
-  const isMonth = input.periodUnit === "month";
+  const compact = input.periodUnit === "month" || input.compact === true;
   const candidates = buildCandidates(input).filter(
-    (candidate) => !isMonth || !YEAR_ONLY_CARD_IDS.has(candidate.card.id)
+    (candidate) => !compact || !YEAR_ONLY_CARD_IDS.has(candidate.card.id)
   );
-  const selected = selectCards(candidates, isMonth ? MAX_MONTH_STORY_CARDS : MAX_STORY_CARDS);
+  const selected = selectCards(candidates, compact ? MAX_MONTH_STORY_CARDS : MAX_STORY_CARDS);
   if (selected.length < MIN_STORY_CARDS) return [];
 
   const domainRank = new Map(DOMAIN_ORDER.map((domain, index) => [domain, index]));

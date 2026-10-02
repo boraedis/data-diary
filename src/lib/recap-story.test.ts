@@ -145,6 +145,7 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
     ],
     lifeEvents: [
       {
+        key: "occupation-1",
         kind: "occupation",
         framing: "started",
         title: "New job",
@@ -338,6 +339,7 @@ describe("buildRecapStory", () => {
     const cards = buildRecapStory(
       fullInput({
         lifeEvents: Array.from({ length: 9 }, (_, i) => ({
+          key: `residence-${i}`,
           kind: "residence" as const,
           framing: "started" as const,
           title: `Move ${i}`,
@@ -387,6 +389,37 @@ describe("buildRecapStory for a month", () => {
     const flat = month({ loggedDays: 28, priorLoggedDays: 28 });
     expect(buildRecapStory(flat).find((card) => card.id === "days-logged")?.detail).toBe(
       "Same as February 2025.",
+    );
+  });
+});
+
+// #519: a life chapter is named as a chapter, and told at month scale only
+// when it's about as short as one.
+describe("buildRecapStory for a chapter", () => {
+  const chapter = (overrides: Partial<RecapStoryInput> = {}) =>
+    fullInput({ periodLabel: "Acme", priorLabel: "the 2 years before", periodUnit: "chapter", ...overrides });
+
+  it("names the period as a chapter in its generic copy", () => {
+    const card = buildRecapStory(chapter()).find((c) => c.id === "happiness-average");
+    expect(card?.kicker).toBe("Your chapter in mood");
+  });
+
+  it("deals a long chapter like a year, sub mover included", () => {
+    expect(buildRecapStory(chapter()).length).toBe(MAX_STORY_CARDS);
+    expect(idsOf(chapter({ health: emptyInput().health }))).toContain("subs-most-improved");
+  });
+
+  it("deals a compact chapter like a month", () => {
+    expect(buildRecapStory(chapter({ compact: true })).length).toBe(MAX_MONTH_STORY_CARDS);
+    expect(idsOf(chapter({ compact: true, health: emptyInput().health }))).not.toContain(
+      "subs-most-improved",
+    );
+  });
+
+  it("reads its relative prior label inside the comparison sentence", () => {
+    const flat = chapter({ loggedDays: 700, priorLoggedDays: 700 });
+    expect(buildRecapStory(flat).find((card) => card.id === "days-logged")?.detail).toBe(
+      "Same as the 2 years before.",
     );
   });
 });

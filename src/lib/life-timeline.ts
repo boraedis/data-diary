@@ -91,17 +91,30 @@ function overviewLane(entry: LifeTimelineEntry): string {
  * in the ones that don't.
  */
 export function chainRoles(entry: LifeTimelineEntry): TimelineInterval[] {
-  const sorted = [...entry.roles].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
-  return sorted.map((role, i) => {
-    const next = sorted[i + 1];
-    return {
-      id: role.id,
-      lane: entry.label,
-      label: role.label,
-      start: role.start,
-      end: role.end ?? next?.start ?? entry.end,
-    };
-  });
+  return chainRoleEnds(entry.roles, entry.end).map((role) => ({
+    id: role.id,
+    lane: entry.label,
+    label: role.label,
+    start: role.start,
+    end: role.end,
+  }));
+}
+
+/**
+ * The rule `chainRoles` draws with, on its own: roles start-ascending, each
+ * with its end resolved to its own `end`, else the next role's start, else
+ * `occupationEnd` (null when the job is still ongoing).
+ *
+ * Split out so a role's span means the same thing everywhere it's used —
+ * the life-timeline bars and the role chapters a recap is built from
+ * (#519) — rather than each re-deriving "until the next one begins".
+ */
+export function chainRoleEnds<R extends { start: string; end: string | null }>(
+  roles: R[],
+  occupationEnd: string | null,
+): R[] {
+  const sorted = [...roles].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  return sorted.map((role, i) => ({ ...role, end: role.end ?? sorted[i + 1]?.start ?? occupationEnd }));
 }
 
 function laneFor(entry: LifeTimelineEntry, groupBy: LifeTimelineGroupBy): string {
