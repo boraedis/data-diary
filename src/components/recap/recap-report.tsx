@@ -10,6 +10,7 @@ import { RecapSubsSection } from "@/components/recap/recap-subs-section";
 import { buildRecapStory } from "@/lib/recap-story";
 import { getRecapBody } from "@/lib/recap-body";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
+import { isCompactChapter, type RecapChapter } from "@/lib/recap-chapters";
 import { listRecapLifeEvents } from "@/lib/recap-life-events";
 import { getRecapHealth } from "@/lib/recap-health";
 import { getRecapMoments } from "@/lib/recap-moments";
@@ -66,10 +67,33 @@ import {
 // month clears and a sparse one honestly doesn't; moments are scored
 // against the all-time distribution, so a month surfaces its own few
 // without any threshold changing.
+//
+// **Chapters (#519).** A life chapter is passed as `chapter` alongside its
+// period. Still no fetcher changes; three display decisions differ:
+//
+// - It's named as a chapter, not by calendar unit — read from the prop, not
+//   from `periodUnit`, which would call a chapter that happens to run
+//   January 1 to December 31 a year.
+// - A short chapter (`isCompactChapter`) gets the month's trimmed set
+//   above; a long one gets the year's. Length, not kind, is what decides
+//   how much a chapter can honestly say.
+// - Life events drop the chapter's own entry — "Started Acme" inside the
+//   recap of Acme is the chapter describing itself — and keep everything
+//   else that overlapped it, *including* entries that ran throughout. At
+//   chapter scope those are the point: which home this job was lived from,
+//   which job this relationship ran alongside. (A role chapter keeps its
+//   job, for the same reason.)
 
-export async function RecapReport({ period }: { period: RecapPeriod }) {
-  const unit = periodUnit(period);
+export async function RecapReport({
+  period,
+  chapter,
+}: {
+  period: RecapPeriod;
+  chapter?: RecapChapter;
+}) {
+  const unit = chapter ? "chapter" : periodUnit(period);
   const isMonth = unit === "month";
+  const compact = isMonth || (chapter !== undefined && isCompactChapter(period));
   const prior = previousPeriod(period);
   const [
     loggedDays,
@@ -93,9 +117,11 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
     listRecapLifeEvents(period),
   ]);
 
-  const lifeEvents = isMonth
-    ? allLifeEvents.filter((event) => event.framing !== "throughout")
-    : allLifeEvents;
+  const lifeEvents = chapter
+    ? allLifeEvents.filter((event) => event.key !== chapter.key)
+    : isMonth
+      ? allLifeEvents.filter((event) => event.framing !== "throughout")
+      : allLifeEvents;
 
   const daysLogged = toRecapStat({
     value: loggedDays,
@@ -108,6 +134,7 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
   const story = buildRecapStory({
     periodLabel: period.label,
     periodUnit: unit,
+    compact,
     priorLabel: prior.label,
     loggedDays,
     priorLoggedDays,
@@ -134,7 +161,7 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
         subs={subs}
         periodLabel={period.label}
         priorLabel={prior.label}
-        showMovers={!isMonth}
+        showMovers={!compact}
       />
 
       <RecapEntertainmentSection
@@ -147,7 +174,7 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
         data={peoplePlaces}
         periodLabel={period.label}
         priorLabel={prior.label}
-        showMap={!isMonth}
+        showMap={!compact}
       />
 
       <RecapMomentsCard moments={moments} periodLabel={period.label} />
@@ -156,10 +183,13 @@ export async function RecapReport({ period }: { period: RecapPeriod }) {
         events={lifeEvents}
         periodLabel={period.label}
         periodNoun={unit ?? "period"}
+        throughoutLabel={chapter ? "Throughout" : undefined}
         description={
-          isMonth
-            ? `Jobs, homes and relationships that started or ended in ${period.label}.`
-            : undefined
+          chapter
+            ? `The other jobs, homes and relationships that overlapped ${period.label}.`
+            : isMonth
+              ? `Jobs, homes and relationships that started or ended in ${period.label}.`
+              : undefined
         }
       />
     </RecapStoryView>

@@ -104,6 +104,18 @@ export function periodLengthDays(period: RecapPeriod): number {
  * This returns a window, not a promise that the window has data in it —
  * `hasPrior` in `toRecapStat` below is what decides whether a comparison is
  * shown at all.
+ *
+ * **Chapters (#519)** are the arbitrary windows this generic branch exists
+ * for: a job, a home or a relationship compares against the equal-length
+ * stretch of life immediately before it began — "the 2 years before", not
+ * the previous chapter of the same kind, which may be a decade earlier,
+ * a tenth as long, or (for the first one) not exist. A chapter near the
+ * start of the record gets a prior window that runs back past the first
+ * logged day; it has no logged days, fails `toRecapStat`'s coverage check,
+ * and renders as the existing "no earlier period" state with no special
+ * case here. Its label is relative ("the 3 months before") rather than a
+ * date range, because it's read inside sentences — "Up 4 points from the 3
+ * months before" — where a pair of dates reads like a table cell.
  */
 export function previousPeriod(period: RecapPeriod): RecapPeriod {
   const unit = periodUnit(period);
@@ -123,7 +135,28 @@ export function previousPeriod(period: RecapPeriod): RecapPeriod {
   const length = periodLengthDays(period);
   const end = addDays(period.start, -1);
   const start = addDays(period.start, -length);
-  return { start, end, label: `${formatDate(start)} – ${formatDate(end)}` };
+  // "the year before", not "the 1 year before".
+  const span = describeSpan(length).replace(/^1 /, "");
+  return { start, end, label: `the ${span} before` };
+}
+
+/**
+ * A day count as the unit a person would say it in: "3 weeks", "5 months",
+ * "2 years", "8½ years". Approximate on purpose — it names a window in prose,
+ * and the window's exact bounds are in the data, not the sentence.
+ */
+export function describeSpan(lengthDays: number): string {
+  const unit = (count: number, singular: string) => `${count} ${singular}${count === 1 ? "" : "s"}`;
+  if (lengthDays < 21) return unit(lengthDays, "day");
+  if (lengthDays < 61) return unit(Math.round(lengthDays / 7), "week");
+  const months = Math.round(lengthDays / 30.44);
+  if (months < 12) return unit(months, "month");
+  // Half-years from a year up: "1½ years" is a real difference from "1
+  // year" or "2 years" at that scale, and finer than that isn't — nobody
+  // calls a 13-month job "13 months" in prose.
+  const halves = Math.round(lengthDays / 182.62);
+  const whole = Math.floor(halves / 2);
+  return halves % 2 === 0 ? unit(whole, "year") : `${whole}½ years`;
 }
 
 // --- Publishing: when a period's recap exists at all ------------------------

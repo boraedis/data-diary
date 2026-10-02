@@ -34,7 +34,26 @@ export type RecapLifeEventKind = "occupation" | "education" | "residence" | "rel
  */
 export type RecapLifeEventFraming = "started" | "ended" | "started-and-ended" | "throughout";
 
+/** Which profile table a row lives in, for `lifeEntryKey`. Education is an
+ * occupation row, so it has no table of its own here. */
+export type LifeEntryTable = "occupation" | "role" | "residence" | "relationship";
+
+/**
+ * A profile row's identity across the recap: "occupation-7", "role-12".
+ *
+ * One format shared by life events and chapters (#519), because a chapter's
+ * report has to recognise its own entry in the life-events list in order to
+ * leave it out — "Started Acme" inside the recap of Acme is the chapter
+ * describing itself. It doubles as the chapter's route segment, so it's
+ * URL-safe and stable for as long as the row exists.
+ */
+export function lifeEntryKey(table: LifeEntryTable, id: number): string {
+  return `${table}-${id}`;
+}
+
 export type RecapLifeEvent = {
+  /** `lifeEntryKey` of the row this event came from. */
+  key: string;
   kind: RecapLifeEventKind;
   framing: RecapLifeEventFraming;
   /** The entry's `alias` when it has one, else its full name — same
@@ -94,6 +113,7 @@ function sortDateFor(
 
 function toEvent(
   period: RecapPeriod,
+  key: string,
   kind: RecapLifeEventKind,
   item: { name: string; alias: string | null; start: string; end: string | null; color: string | null },
   detail: string | null
@@ -101,6 +121,7 @@ function toEvent(
   const framing = classifyOverlap(period, item.start, item.end);
   if (framing === null) return null;
   return {
+    key,
     kind,
     framing,
     title: item.alias ?? item.name,
@@ -130,6 +151,7 @@ function roleEvents(period: RecapPeriod, occupation: ProfileOccupationItem): Rec
         role.start >= period.start && role.start <= period.end && role.start !== occupation.start
     )
     .map((role) => ({
+      key: lifeEntryKey("role", role.id),
       kind: "role" as const,
       framing: "started" as const,
       title: role.position,
@@ -176,16 +198,24 @@ export async function listRecapLifeEvents(period: RecapPeriod): Promise<RecapLif
   for (const occupation of occupations) {
     // School is its own kind so the card can say "Graduated" rather than
     // "Left" (#560); its role changes (a degree programme, say) stay roles.
-    const event = toEvent(period, occupation.type === "education" ? "education" : "occupation", occupation, occupationDetail(occupation));
+    const event = toEvent(
+      period,
+      lifeEntryKey("occupation", occupation.id),
+      occupation.type === "education" ? "education" : "occupation",
+      occupation,
+      occupationDetail(occupation)
+    );
     if (event) events.push(event);
     events.push(...roleEvents(period, occupation));
   }
   for (const residence of residences) {
-    const event = toEvent(period, "residence", residence, residence.placeName);
+    const key = lifeEntryKey("residence", residence.id);
+    const event = toEvent(period, key, "residence", residence, residence.placeName);
     if (event) events.push(event);
   }
   for (const relationship of relationships) {
-    const event = toEvent(period, "relationship", relationship, relationship.personName);
+    const key = lifeEntryKey("relationship", relationship.id);
+    const event = toEvent(period, key, "relationship", relationship, relationship.personName);
     if (event) events.push(event);
   }
 

@@ -4,6 +4,7 @@ import { RecapReport } from "@/components/recap/recap-report";
 import { Card, CardContent } from "@/components/ui/card";
 import { todayDateString } from "@/lib/date";
 import { isPeriodPublished, periodPublishDate, type RecapPeriod } from "@/lib/recap";
+import type { RecapChapter } from "@/lib/recap-chapters";
 import { recapPeriodKey } from "@/lib/recap-seen";
 import { formatDate } from "@/lib/viz/format";
 
@@ -23,17 +24,34 @@ import { formatDate } from "@/lib/viz/format";
 //   rather than anything access-controlled. It exists so the owner can
 //   peek at a month as it's going, and is labelled so a half-finished
 //   recap is never mistaken for the real one.
+//
+// A life chapter (#519) passes `chapter` too. The rule is unchanged — its
+// period ends on the chapter's end — but an ongoing chapter has no end to
+// count from, so its waiting state says "still going" instead of a date,
+// and it never touches the seen-badge set, which only knows calendar keys.
 
-export function RecapGate({ period, preview }: { period: RecapPeriod; preview: boolean }) {
+export function RecapGate({
+  period,
+  preview,
+  chapter,
+}: {
+  period: RecapPeriod;
+  preview: boolean;
+  chapter?: RecapChapter;
+}) {
   const today = todayDateString();
-  if (isPeriodPublished(period, today)) {
+  // An ongoing chapter's period ends today (`chapterPeriod`), so the date
+  // rule alone would publish it a few days from now, forever. It's in
+  // progress until it has a real end.
+  const ongoing = chapter !== undefined && chapter.end === null;
+  if (!ongoing && isPeriodPublished(period, today)) {
     // Opening a published recap is what clears its "new" badge (#518). Not
     // done for a preview, which isn't the real recap.
-    const key = recapPeriodKey(period);
+    const key = chapter ? null : recapPeriodKey(period);
     return (
       <>
         {key !== null ? <MarkRecapSeen periodKey={key} /> : null}
-        <RecapReport period={period} />
+        <RecapReport period={period} chapter={chapter} />
       </>
     );
   }
@@ -45,10 +63,19 @@ export function RecapGate({ period, preview }: { period: RecapPeriod; preview: b
           role="status"
           className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
         >
-          Preview — {period.label} isn&apos;t complete yet, so this recap is partial and will
-          change. It&apos;s published on {formatDate(periodPublishDate(period), "dayYear")}.
+          {ongoing ? (
+            <>
+              Preview — {period.label} is still going, so this recap covers it so far and will
+              change. It&apos;s published a few days after it ends.
+            </>
+          ) : (
+            <>
+              Preview — {period.label} isn&apos;t complete yet, so this recap is partial and will
+              change. It&apos;s published on {formatDate(periodPublishDate(period), "dayYear")}.
+            </>
+          )}
         </p>
-        <RecapReport period={period} />
+        <RecapReport period={period} chapter={chapter} />
       </div>
     );
   }
@@ -60,8 +87,17 @@ export function RecapGate({ period, preview }: { period: RecapPeriod; preview: b
           Recap {period.label} isn&apos;t ready yet
         </h2>
         <p className="text-sm text-muted-foreground">
-          It&apos;s published on {formatDate(periodPublishDate(period), "dayYear")} — a few days after
-          the period ends, to leave time to fill in anything you haven&apos;t logged.
+          {ongoing ? (
+            <>
+              {period.label} is still going. Its recap is published a few days after it ends —
+              once an end date is recorded in your profile.
+            </>
+          ) : (
+            <>
+              It&apos;s published on {formatDate(periodPublishDate(period), "dayYear")} — a few days
+              after the period ends, to leave time to fill in anything you haven&apos;t logged.
+            </>
+          )}
         </p>
         <Link
           href="?preview=1"

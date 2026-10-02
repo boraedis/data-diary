@@ -34,9 +34,9 @@ const FRAMING_LABELS: Record<
   role: { started: "New role", ended: "Ended", "started-and-ended": "Held briefly" },
 };
 
-function framingLabel(event: RecapLifeEvent, periodNoun: string): string {
+function framingLabel(event: RecapLifeEvent, throughoutLabel: string): string {
   return event.framing === "throughout"
-    ? `All ${periodNoun}`
+    ? throughoutLabel
     : FRAMING_LABELS[event.kind][event.framing];
 }
 
@@ -44,6 +44,7 @@ export function RecapLifeEventsCard({
   events,
   periodLabel,
   periodNoun = "year",
+  throughoutLabel = `All ${periodNoun}`,
   description,
 }: {
   events: RecapLifeEvent[];
@@ -51,6 +52,10 @@ export function RecapLifeEventsCard({
   /** Names the period in the "All year" framing — "month" on a monthly
    * recap (#176). */
   periodNoun?: string;
+  /** Overrides the "All year" framing outright, for a period whose noun
+   * doesn't read that way — "All chapter" isn't English, so a chapter
+   * (#519) says "Throughout". */
+  throughoutLabel?: string;
   /** Overrides the default description, for a caller that filtered the
    * list (the monthly recap drops entries that ran through the whole
    * month, so "or ran through" would be untrue). */
@@ -68,7 +73,7 @@ export function RecapLifeEventsCard({
       <ul className="flex flex-col gap-3">
         {events.map((event) => (
           <li
-            key={`${event.kind}-${event.title}-${event.start}`}
+            key={event.key}
             className="flex items-start gap-3 border-b border-border/60 pb-3 last:border-0 last:pb-0"
           >
             {/* The entry's own color from the profile admin UI, the same
@@ -86,7 +91,7 @@ export function RecapLifeEventsCard({
             </div>
             <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
               <span className="text-xs font-medium">
-                {framingLabel(event, periodNoun)}
+                {framingLabel(event, throughoutLabel)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {KIND_LABELS[event.kind]}
