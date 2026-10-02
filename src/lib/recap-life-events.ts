@@ -22,7 +22,7 @@ import {
 
 /** Which table an event came from. `role` is a position change inside an
  * occupation, not a separate job. */
-export type RecapLifeEventKind = "occupation" | "residence" | "relationship" | "role";
+export type RecapLifeEventKind = "occupation" | "education" | "residence" | "relationship" | "role";
 
 /**
  * How an entry's date range sits against the period, which is what decides
@@ -174,7 +174,9 @@ export async function listRecapLifeEvents(period: RecapPeriod): Promise<RecapLif
   const events: RecapLifeEvent[] = [];
 
   for (const occupation of occupations) {
-    const event = toEvent(period, "occupation", occupation, occupationDetail(occupation));
+    // School is its own kind so the card can say "Graduated" rather than
+    // "Left" (#560); its role changes (a degree programme, say) stay roles.
+    const event = toEvent(period, occupation.type === "education" ? "education" : "occupation", occupation, occupationDetail(occupation));
     if (event) events.push(event);
     events.push(...roleEvents(period, occupation));
   }

@@ -1,4 +1,5 @@
 import { getWorkLeaderboardDays } from "@/lib/charts";
+import { isWork } from "@/lib/occupation-type";
 import { listProfileOccupations, type ProfileOccupationItem } from "@/lib/profile";
 import { rankCreditedSessions, type Credit, type CreditedSession } from "@/lib/leaderboards/sessions";
 import type { LeaderboardColumns, LeaderboardRow } from "@/lib/leaderboards/rows";
@@ -15,7 +16,8 @@ import {
 //
 // Days don't record which job they were for — only that they were a work
 // day — so a day is credited to whichever occupations were active on its
-// date in the profile's occupation history. That's what makes the
+// date in the profile's occupation history (work entries only — education
+// is excluded, see `creditsFor`). That's what makes the
 // days-worked measure reach back years: `dayType = "work"` does, even
 // though hours and productivity only start in May 2026.
 
@@ -40,7 +42,7 @@ export const WORK_MEASURES: LeaderboardOption<WorkLeaderboardMeasure>[] = [
  * `ProfileOccupationItem`, so tests can build one without a place. */
 export type Occupation = Pick<
   ProfileOccupationItem,
-  "id" | "name" | "alias" | "company" | "position" | "start" | "end" | "color"
+  "id" | "name" | "type" | "alias" | "company" | "position" | "start" | "end" | "color"
 > & { roles: { position: string; start: string; end: string | null }[] };
 
 function isActive(occ: Occupation, date: string): boolean {
@@ -77,7 +79,10 @@ function creditsFor(day: WorkDay, mode: WorkMode, occupations: Occupation[]): Cr
     case "commute":
       return commuteCategories(day).map((c) => ({ key: c, name: COMMUTE_LABELS[c] }));
   }
-  const active = occupations.filter((o) => isActive(o, day.date));
+  // Only jobs earn work credit (#560): a school day is not a day worked, and
+  // letting it share the credit would inflate every job's totals and split
+  // hours onto a degree.
+  const active = occupations.filter((o) => isWork(o) && isActive(o, day.date));
   switch (mode) {
     // Per occupation *entry*, not per name: two stints at the same place
     // (the two Delta co-ops) are two rows, told apart by their years.

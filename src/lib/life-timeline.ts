@@ -1,3 +1,4 @@
+import type { OccupationType } from "@/db/schema";
 import type { TimelineInterval } from "@/lib/viz/timeline";
 
 // Pure view-building for the life-timeline chart (#310 follow-up): which
@@ -16,6 +17,9 @@ import type { TimelineInterval } from "@/lib/viz/timeline";
 export type LifeTimelineEntry = TimelineInterval & {
   color: string | null;
   kind: LifeTimelineKind;
+  /** Occupations only: school gets its own lane in the overview so it's not
+   * read as a job (#560). Absent means work. */
+  occupationType?: OccupationType;
   company: string | null;
   /** Where the entry's place sits in the place hierarchy. Resolved from
    * the place's ancestors by their own category/subcategory taxonomy, not
@@ -60,6 +64,17 @@ const KIND_LANES: Record<LifeTimelineKind, string> = {
   residence: "Residence",
   relationship: "Relationship",
 };
+
+/** School's own overview lane (#560). It stays `kind: "occupation"` so the
+ * focused Occupation mode still shows it — it is part of that history —
+ * but in the overview a degree sitting in the job lane reads as a job. */
+const EDUCATION_LANE = "Education";
+
+function overviewLane(entry: LifeTimelineEntry): string {
+  return entry.kind === "occupation" && entry.occupationType === "education"
+    ? EDUCATION_LANE
+    : KIND_LANES[entry.kind];
+}
 
 /**
  * Expands one occupation into a bar per role.
@@ -166,7 +181,7 @@ export function buildTimelineView(
           // Overview mode always lanes by which timeline an entry belongs
           // to — that's what "all" means, and no grouping applies across
           // three different kinds of thing.
-          lane: mode === "all" ? KIND_LANES[entry.kind] : laneFor(entry, groupBy),
+          lane: mode === "all" ? overviewLane(entry) : laneFor(entry, groupBy),
           label: entry.label,
           start: entry.start,
           end: entry.end,
@@ -188,7 +203,7 @@ function orderLanes(intervals: TimelineInterval[], mode: LifeTimelineMode): Time
     if (known === undefined || interval.start < known) earliestByLane.set(interval.lane, interval.start);
   }
 
-  const kindOrder = Object.values(KIND_LANES);
+  const kindOrder = [KIND_LANES.occupation, EDUCATION_LANE, KIND_LANES.residence, KIND_LANES.relationship];
   const rank = (lane: string): [number, string] => {
     if (lane === UNGROUPED_LANE) return [2, ""];
     if (mode === "all") return [1, String(kindOrder.indexOf(lane)).padStart(3, "0")];

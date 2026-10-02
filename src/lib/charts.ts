@@ -382,6 +382,7 @@ export async function getLifeTimelineData(): Promise<LifeTimelineEntry[]> {
     end: item.end,
     color: item.color,
     kind: "occupation",
+    occupationType: item.type,
     company: item.company,
     ...levelsFor(item.placeId),
     roles: item.roles.map((role) => ({

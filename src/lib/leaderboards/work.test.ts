@@ -6,6 +6,7 @@ import type { WorkDay } from "@/lib/work";
 // pinned in ranking.test.ts.
 
 const occ = (o: Partial<Occupation> & Pick<Occupation, "id" | "name" | "start">): Occupation => ({
+  type: "work",
   alias: null,
   company: null,
   position: null,
@@ -39,6 +40,16 @@ describe("buildWorkLeaderboard", () => {
       ["Undergrad", 2],
       ["Co-op", 1],
     ]);
+  });
+
+  it("credits nothing to education, on either measure (#560)", () => {
+    const school = occ({ id: 9, name: "Georgia Tech", type: "education", start: "2020-01-01", end: "2020-12-31" });
+    const days = [day("2020-06-10", { minutes: 480 })];
+    // The school is active on the same date as the co-op but earns no share:
+    // hours stay whole on the job instead of splitting onto a degree.
+    expect(byName(buildWorkLeaderboard(days, [school, coop], "job", "days"))).toEqual([["Co-op", 1]]);
+    expect(byName(buildWorkLeaderboard(days, [school, coop], "job", "hours"))).toEqual([["Co-op", 8]]);
+    expect(buildWorkLeaderboard(days, [school], "company", "days")).toEqual([]);
   });
 
   it("only counts work days on the days measure", () => {

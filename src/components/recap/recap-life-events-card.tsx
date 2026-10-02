@@ -11,6 +11,7 @@ import type { RecapLifeEvent, RecapLifeEventKind } from "@/lib/recap-life-events
 
 const KIND_LABELS: Record<RecapLifeEventKind, string> = {
   occupation: "Job",
+  education: "School",
   residence: "Home",
   relationship: "Relationship",
   role: "Role",
@@ -27,6 +28,7 @@ const FRAMING_LABELS: Record<
   Record<Exclude<RecapLifeEvent["framing"], "throughout">, string>
 > = {
   occupation: { started: "Started", ended: "Left", "started-and-ended": "Started and left" },
+  education: { started: "Enrolled", ended: "Graduated", "started-and-ended": "Enrolled and graduated" },
   residence: { started: "Moved in", ended: "Moved out", "started-and-ended": "Moved in and out" },
   relationship: { started: "Began", ended: "Ended", "started-and-ended": "Began and ended" },
   role: { started: "New role", ended: "Ended", "started-and-ended": "Held briefly" },
