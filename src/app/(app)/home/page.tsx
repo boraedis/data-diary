@@ -80,8 +80,8 @@ export default async function HomePage() {
       {/* Bottom section */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-4">
-          {/* On this day (#522) — absent, not empty, when nothing qualifies */}
-          {onThisDay ? <OnThisDayCard highlight={onThisDay} /> : null}
+          {/* On this day (#522) — always shown: it's the only way into /on-this-day */}
+          <OnThisDayCard highlight={onThisDay} />
 
           {/* Upcoming birthdays */}
           <Card>

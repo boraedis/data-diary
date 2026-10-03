@@ -117,7 +117,7 @@ describe("pickHomeHighlight", () => {
     expect(pickHomeHighlight(years)?.year).toBe(2024);
   });
 
-  it("is null when only dips (or nothing) qualify, so Home renders no card", () => {
+  it("is null when only dips (or nothing) qualify, so Home shows its quiet line", () => {
     expect(pickHomeHighlight([])).toBeNull();
     expect(
       pickHomeHighlight([

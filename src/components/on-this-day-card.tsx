@@ -6,8 +6,12 @@ import { formatDate } from "@/lib/viz/format";
 // Home's "on this day" teaser (#522). One line by design: the scope on
 // #522 keeps Home to the single strongest moment and moves everything else
 // to /on-this-day, which this card is the only way into (no section-link
-// tile — it's a daily surface, not a section). The caller renders nothing
-// at all when there's no highlight, so there's no empty state here.
+// tile — it's a daily surface, not a section).
+//
+// Because it's the only way in, it always renders. The first cut hid it on
+// a date with no highlight, which left /on-this-day unreachable on exactly
+// the days you'd want to browse past dates — so a quiet date gets one muted
+// line instead of a highlight, and the link stays.
 //
 // `OnThisDayYearCard` below is the full page's per-year card, kept beside
 // it so the two surfaces format a moment the same way.
@@ -16,21 +20,24 @@ export function yearsAgoLabel(yearsAgo: number): string {
   return yearsAgo === 1 ? "1 year ago" : `${yearsAgo} years ago`;
 }
 
-export function OnThisDayCard({ highlight }: { highlight: OnThisDayHighlight }) {
-  const { moment } = highlight;
+export function OnThisDayCard({ highlight }: { highlight: OnThisDayHighlight | null }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>On this day</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <Link href={highlight.href} className="group flex flex-col gap-0.5">
-          <span className="font-medium group-hover:underline">{moment.headline}</span>
-          <span className="text-sm text-muted-foreground">
-            {yearsAgoLabel(highlight.yearsAgo)} · {formatDate(moment.date, "dayYear")}
-            {moment.detail ? ` · ${moment.detail}` : null}
-          </span>
-        </Link>
+        {highlight ? (
+          <Link href={highlight.href} className="group flex flex-col gap-0.5">
+            <span className="font-medium group-hover:underline">{highlight.moment.headline}</span>
+            <span className="text-sm text-muted-foreground">
+              {yearsAgoLabel(highlight.yearsAgo)} · {formatDate(highlight.moment.date, "dayYear")}
+              {highlight.moment.detail ? ` · ${highlight.moment.detail}` : null}
+            </span>
+          </Link>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nothing standout on this date in past years.</p>
+        )}
         <Link href="/on-this-day" className="text-sm text-muted-foreground hover:text-foreground">
           See all years &rarr;
         </Link>

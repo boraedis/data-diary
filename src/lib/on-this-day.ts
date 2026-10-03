@@ -18,7 +18,7 @@ import { buildRecapMoments, loadMomentInputs, type RecapMoment } from "@/lib/rec
 // Two surfaces, deliberately unequal (scope agreed on #522):
 //
 // - **Home** gets at most one line — the single strongest moment across
-//   every past year — or nothing at all. A ten-year diary would otherwise
+//   every past year — or a single quiet line. A ten-year diary would otherwise
 //   put a ten-row card on the page loaded every visit. Only real moments
 //   qualify there; no structured-fact fallback, and no happiness dips (Home
 //   shouldn't open on "your hardest day, four years ago").
@@ -119,7 +119,8 @@ export function pickYearMoment(candidates: YearCandidates): RecapMoment | null {
 }
 
 /** Home's single highlight: the strongest non-dip moment across every past
- * year, or null — in which case Home renders nothing at all. */
+ * year, or null — in which case Home's card shows one quiet line and its
+ * link to the full page, never a filler fact. */
 export function pickHomeHighlight(
   years: YearCandidates[]
 ): { year: number; date: string; moment: RecapMoment } | null {
