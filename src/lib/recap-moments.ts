@@ -330,10 +330,14 @@ export async function loadMomentInputs(windows: RecapPeriod[]): Promise<MomentIn
   // first-time artists in another, which would bury every other signal in
   // the list. Both are already reported as counts by their own sections.
   // A first country is rare and unambiguous.
-  const firstCountries = [...firstByPlace].flatMap(([placeId, date]) => {
+  const firstByCountry = new Map<string, string>();
+  for (const [placeId, date] of firstByPlace) {
     const country = countryByPlaceId.get(placeId);
-    return country ? [{ key: country, date }] : [];
-  });
+    if (!country) continue;
+    const seen = firstByCountry.get(country);
+    if (seen === undefined || date < seen) firstByCountry.set(country, date);
+  }
+  const firstCountries = [...firstByCountry].map(([key, date]) => ({ key, date }));
 
   const [row] = baselineRows;
   const baseline: HappinessBaseline | null =
