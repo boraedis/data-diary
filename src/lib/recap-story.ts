@@ -7,6 +7,7 @@ import type { RecapLifeEvent } from "@/lib/recap-life-events";
 import type { RecapMoment } from "@/lib/recap-moments";
 import type { RecapPeoplePlaces } from "@/lib/recap-people-places";
 import type { RecapSubs } from "@/lib/recap-subs";
+import type { RecapScreenTime, RecapWork } from "@/lib/recap-work";
 
 // Which cards a period's story is made of (issue #175, epic #130).
 //
@@ -160,6 +161,8 @@ export type RecapStoryInput = {
   priorLoggedDays: number;
   health: RecapHealth;
   body: RecapBody;
+  work: RecapWork;
+  screenTime: RecapScreenTime;
   entertainment: RecapEntertainment;
   peoplePlaces: RecapPeoplePlaces;
   subs: RecapSubs;
@@ -206,7 +209,7 @@ function formatMinutes(minutes: number): string {
 }
 
 function buildCandidates(input: RecapStoryInput): Candidate[] {
-  const { periodLabel, priorLabel, health, body, entertainment, peoplePlaces, subs } = input;
+  const { periodLabel, priorLabel, health, body, work, screenTime, entertainment, peoplePlaces, subs } = input;
   // An arbitrary window has no better generic noun than "year" had before
   // months existed; no route builds one today. A chapter is named as one:
   // "Your chapter in mood" for an eight-year home is true where "Your year
@@ -333,6 +336,29 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
         (value) => `${value.toFixed(1)} ${unit}`,
       ),
       weight,
+    });
+  }
+
+  // Screen time (#530): phone only, the one device logged long enough to
+  // have years behind it. Same gate and neutral phrasing as coffee and
+  // walking, and weighted just under them — a habit card, first out of a
+  // crowded health domain.
+  const { phone } = screenTime;
+  if (phone.average !== null && phone.daysLogged >= MIN_DAYS_FOR_AVERAGE) {
+    add({
+      id: "phone-time",
+      domain: "health",
+      kicker: "Your daily phone time",
+      value: formatMinutes(phone.average),
+      unit: null,
+      headline: `A typical day, across ${phone.daysLogged} logged ${plural(phone.daysLogged, "day")}.`,
+      detail: comparisonLine(
+        phone.average,
+        phone.priorAverage !== null && phone.priorDaysLogged >= MIN_DAYS_FOR_AVERAGE ? phone.priorAverage : null,
+        priorLabel,
+        formatMinutes,
+      ),
+      weight: 54,
     });
   }
 
@@ -624,6 +650,29 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
       detail: null,
       items: ranked.slice(0, 3).map((moment) => moment.headline),
       weight: 80,
+    });
+  }
+
+  // Days worked (#530) sits in `life` beside the job changes it explains,
+  // rather than taking a sixth domain the palette has no slot for. Read
+  // from `dayType`, so it has years of history where hours don't (see
+  // recap-work.ts). Weighted under life events and moments: it's the
+  // backdrop, they're what changed.
+  if (work.daysWorked > 0) {
+    add({
+      id: "days-worked",
+      domain: "life",
+      kicker: `Your ${noun} at work`,
+      value: work.daysWorked.toLocaleString(),
+      unit: plural(work.daysWorked, "day"),
+      headline: `Days you worked, of ${work.daysTyped} with a day type logged.`,
+      detail: comparisonLine(
+        work.daysWorked,
+        work.priorDaysTyped > 0 ? work.priorDaysWorked : null,
+        priorLabel,
+        (value) => `${value} ${plural(value, "day")}`,
+      ),
+      weight: 60,
     });
   }
 
