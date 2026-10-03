@@ -7,7 +7,7 @@ import {
   pickYearMoment,
   recapHrefFor,
   shiftMonthDay,
-  windowAround,
+  dayPeriod,
   type YearCandidates,
 } from "@/lib/on-this-day";
 import type { RecapMoment } from "@/lib/recap-moments";
@@ -43,9 +43,8 @@ describe("month-day handling", () => {
     expect(dateInYear("10-03", 2023)).toBe("2023-10-03");
   });
 
-  it("windows three days either side, across month and year ends", () => {
-    expect(windowAround("2023-01-02")).toMatchObject({ start: "2022-12-30", end: "2023-01-05" });
-    expect(windowAround("2023-02-28")).toMatchObject({ start: "2023-02-25", end: "2023-03-03" });
+  it("asks about exactly the one date, no window", () => {
+    expect(dayPeriod("2023-01-02")).toMatchObject({ start: "2023-01-02", end: "2023-01-02" });
   });
 });
 
@@ -70,17 +69,13 @@ describe("recapHrefFor", () => {
 });
 
 describe("pickYearMoment", () => {
-  it("prefers magnitude, then the moment closest to the date", () => {
+  it("prefers the higher-magnitude moment on the day", () => {
     const year: YearCandidates = {
       year: 2022,
       date: "2022-10-03",
-      moments: [
-        moment("2022-10-01", "first-genre", 0.4),
-        moment("2022-10-05", "first-country", 0.9),
-        moment("2022-10-03", "first-country", 0.9),
-      ],
+      moments: [moment("2022-10-03", "first-genre", 0.4), moment("2022-10-03", "first-country", 0.9)],
     };
-    expect(pickYearMoment(year)?.date).toBe("2022-10-03");
+    expect(pickYearMoment(year)?.kind).toBe("first-country");
   });
 
   it("includes dips — the full page is the honest view", () => {
@@ -101,7 +96,7 @@ describe("pickHomeHighlight", () => {
   it("picks the single strongest moment across years", () => {
     const years: YearCandidates[] = [
       { year: 2024, date: "2024-10-03", moments: [moment("2024-10-03", "first-genre", 0.4)] },
-      { year: 2019, date: "2019-10-03", moments: [moment("2019-10-02", "first-country", 0.9)] },
+      { year: 2019, date: "2019-10-03", moments: [moment("2019-10-03", "first-country", 0.9)] },
     ];
     expect(pickHomeHighlight(years)).toMatchObject({ year: 2019, moment: { kind: "first-country" } });
   });
@@ -109,7 +104,7 @@ describe("pickHomeHighlight", () => {
   it("never leads with a dip, however extreme", () => {
     const years: YearCandidates[] = [
       { year: 2024, date: "2024-10-03", moments: [moment("2024-10-03", "happiness-dip", 1)] },
-      { year: 2021, date: "2021-10-03", moments: [moment("2021-10-04", "first-genre", 0.4)] },
+      { year: 2021, date: "2021-10-03", moments: [moment("2021-10-03", "first-genre", 0.4)] },
     ];
     expect(pickHomeHighlight(years)?.moment.kind).toBe("first-genre");
   });

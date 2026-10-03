@@ -8,7 +8,6 @@ import {
   monthDayOf,
   parseMonthDay,
   shiftMonthDay,
-  WINDOW_DAYS,
 } from "@/lib/on-this-day";
 import { formatDate } from "@/lib/viz/format";
 
@@ -105,8 +104,8 @@ export default async function OnThisDayPage({
             ))}
           </ul>
           <p className="text-center text-xs text-muted-foreground">
-            Highlights are the recap&rsquo;s automatic moments within {WINDOW_DAYS} days of the
-            date. Feb 29 shows Feb 28 in other years.
+            Highlights are the recap&rsquo;s automatic moments, on exactly this date. Feb 29
+            shows Feb 28 in other years.
           </p>
         </>
       )}

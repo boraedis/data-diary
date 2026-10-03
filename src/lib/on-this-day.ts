@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { days, people, places } from "@/db/schema";
-import { addDays, daysBetween, isValidDateString } from "@/lib/date";
+import { addDays, isValidDateString } from "@/lib/date";
 import { getDb } from "@/lib/db";
 import { getRecapDataRange, isPeriodPublished, yearPeriod, type RecapPeriod } from "@/lib/recap";
 import { buildRecapMoments, loadMomentInputs, type RecapMoment } from "@/lib/recap-moments";
@@ -24,16 +24,6 @@ import { buildRecapMoments, loadMomentInputs, type RecapMoment } from "@/lib/rec
 // is the obvious thing this feature makes you want to add ("what did I
 // write that day?"), and surfacing it is a separate, deliberate decision —
 // the same line the rest of the recap holds.
-
-/**
- * How far either side of the date a moment may fall and still count.
- *
- * Moments are rare by construction (a 99th-percentile day, a first
- * country), so an exact-date match would leave most years empty. A week
- * centred on the date is close enough to still read as "around this time"
- * — and ±3 matches the proposal on #522.
- */
-export const WINDOW_DAYS = 3;
 
 // --- Month-day handling ---------------------------------------------------
 
@@ -67,18 +57,26 @@ export function shiftMonthDay(monthDay: string, delta: number): string {
  * **Feb 29 falls back to Feb 28 in a non-leap year** — the last day of the
  * same month, so the year still answers "what was happening at the end of
  * February". March 1 was the other candidate and was passed over because it
- * moves the date into a different month. The ±3-day window means a Feb 28
- * stand-in still picks up moments from early March either way.
+ * moves the date into a different month.
  */
 export function dateInYear(monthDay: string, year: number): string {
   const date = `${year}-${monthDay}`;
   return isValidDateString(date) ? date : `${year}-02-28`;
 }
 
-/** The moment window around a date, as a `RecapPeriod` so the moments
- * engine takes it unchanged. */
-export function windowAround(date: string): RecapPeriod {
-  return { start: addDays(date, -WINDOW_DAYS), end: addDays(date, WINDOW_DAYS), label: date };
+/**
+ * The single day a year is asked about, as a `RecapPeriod` so the moments
+ * engine takes it unchanged.
+ *
+ * **Exactly the same date, no window** (decided on #522 after a first cut
+ * used ±3 days): "on this day" means this day. A moment from three days
+ * earlier reads as a different anniversary, and the full page's facts are
+ * already for the exact date, so the two halves of a year's card now agree
+ * on which day they're about. The cost is that moments match less often —
+ * see `pickHomeHighlight` for what Home does about that.
+ */
+export function dayPeriod(date: string): RecapPeriod {
+  return { start: date, end: date, label: date };
 }
 
 // --- Selection ------------------------------------------------------------
@@ -89,20 +87,11 @@ export function windowAround(date: string): RecapPeriod {
  * 1. **Magnitude**, descending — the engine's own cross-kind ranking
  *    (`MAGNITUDE` in recap-moments.ts), so "notable" means the same thing
  *    here as in the recap.
- * 2. **Distance from the date**, ascending — between equals, the one that
- *    happened *on* the day beats one three days off.
- * 3. **Newer first** — the remaining tie-break, and the order the full page
- *    reads in anyway.
+ * 2. **Newer first** — the tie-break, and the order the full page reads in
+ *    anyway.
  */
-export function compareCandidates(
-  a: { moment: RecapMoment; date: string },
-  b: { moment: RecapMoment; date: string }
-): number {
-  return (
-    b.moment.magnitude - a.moment.magnitude ||
-    Math.abs(daysBetween(a.date, a.moment.date)) - Math.abs(daysBetween(b.date, b.moment.date)) ||
-    b.moment.date.localeCompare(a.moment.date)
-  );
+export function compareCandidates(a: { moment: RecapMoment }, b: { moment: RecapMoment }): number {
+  return b.moment.magnitude - a.moment.magnitude || b.moment.date.localeCompare(a.moment.date);
 }
 
 /** Kinds Home never leads with. The full page still shows them. */
@@ -119,9 +108,7 @@ export type YearCandidates = {
 /** The strongest moment in a year's window, dips included — the full
  * page's pick. */
 export function pickYearMoment(candidates: YearCandidates): RecapMoment | null {
-  const [best] = candidates.moments
-    .map((moment) => ({ moment, date: candidates.date }))
-    .sort(compareCandidates);
+  const [best] = candidates.moments.map((moment) => ({ moment })).sort(compareCandidates);
   return best?.moment ?? null;
 }
 
@@ -163,7 +150,7 @@ export function recapHrefFor(year: number, today: string): string | null {
  *
  * This is the cost #522 asked to be checked: Home runs it on every visit.
  * It is one `loadMomentInputs` call — an aggregate for the happiness
- * distribution, the scores inside ~10 one-week windows, and earliest-date
+ * distribution, the scores on ~10 single dates, and earliest-date
  * aggregates for places and genres — never a whole-year moments pass per
  * past year, and never every logged day shipped to the server.
  */
@@ -174,7 +161,7 @@ async function loadYearCandidates(monthDay: string, today: string): Promise<Year
   if (years.length === 0) return [];
 
   const dates = years.map((year) => dateInYear(monthDay, year));
-  const windows = dates.map(windowAround);
+  const windows = dates.map(dayPeriod);
   const inputs = await loadMomentInputs(windows);
 
   return years.map((year, i) => ({

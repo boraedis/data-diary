@@ -33,7 +33,9 @@ export function RecapMomentsCard({
       <ul className="flex flex-col">
         {shown.map((moment) => (
           <li
-            key={`${moment.kind}-${moment.date}`}
+            // Kind + date isn't unique: two genres can both be first seen
+            // on the same day. The headline names the genre, so it is.
+            key={`${moment.kind}-${moment.date}-${moment.headline}`}
             className="flex items-baseline justify-between gap-3 border-b border-border/60 py-2 last:border-0"
           >
             <span className="flex min-w-0 flex-col gap-0.5">

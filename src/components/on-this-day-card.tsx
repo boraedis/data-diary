@@ -58,11 +58,9 @@ export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {
             className="group flex flex-col gap-0.5 border-l-2 border-primary pl-3"
           >
             <span className="font-medium group-hover:underline">{moment.headline}</span>
-            <span className="text-sm text-muted-foreground">
-              {/* The moment can sit a few days off the date — say which. */}
-              {moment.date === entry.date ? "On the day" : formatDate(moment.date, "weekday")}
-              {moment.detail ? ` · ${moment.detail}` : null}
-            </span>
+            {moment.detail ? (
+              <span className="text-sm text-muted-foreground">{moment.detail}</span>
+            ) : null}
           </Link>
         ) : null}
 
