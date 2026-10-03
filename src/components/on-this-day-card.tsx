@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { OnThisDayHighlight, OnThisDayYear } from "@/lib/on-this-day";
+import type { OnThisDayFallback, OnThisDayHome, OnThisDayYear } from "@/lib/on-this-day";
 import { formatDate } from "@/lib/viz/format";
 
 // Home's "on this day" teaser (#522). One line by design: the scope on
@@ -20,7 +20,7 @@ export function yearsAgoLabel(yearsAgo: number): string {
   return yearsAgo === 1 ? "1 year ago" : `${yearsAgo} years ago`;
 }
 
-export function OnThisDayCard({ highlight }: { highlight: OnThisDayHighlight | null }) {
+export function OnThisDayCard({ highlight, fallback }: OnThisDayHome) {
   return (
     <Card>
       <CardHeader>
@@ -35,8 +35,10 @@ export function OnThisDayCard({ highlight }: { highlight: OnThisDayHighlight | n
               {highlight.moment.detail ? ` · ${highlight.moment.detail}` : null}
             </span>
           </Link>
+        ) : fallback ? (
+          <FallbackLine fallback={fallback} />
         ) : (
-          <p className="text-sm text-muted-foreground">Nothing standout on this date in past years.</p>
+          <p className="text-sm text-muted-foreground">Nothing logged on this date in past years.</p>
         )}
         <Link href="/on-this-day" className="text-sm text-muted-foreground hover:text-foreground">
           See all years &rarr;
@@ -44,6 +46,32 @@ export function OnThisDayCard({ highlight }: { highlight: OnThisDayHighlight | n
       </CardContent>
     </Card>
   );
+}
+
+/** The happiest-past-year fallback. Quieter than a real highlight — normal
+ * weight, no accent — so a milestone still stands out on the days there is
+ * one. */
+function FallbackLine({ fallback }: { fallback: OnThisDayFallback }) {
+  const where = fallback.places[0] ?? null;
+  const who = fallback.people.length > 0 ? `with ${listNames(fallback.people)}` : null;
+  return (
+    <Link href={fallback.href} className="group flex flex-col gap-0.5">
+      <span className="text-sm group-hover:underline">
+        Your happiest {formatDate(fallback.date, "short")}: {fallback.happiness} / 100
+      </span>
+      <span className="text-sm text-muted-foreground">
+        {[where, who, `${yearsAgoLabel(fallback.yearsAgo)}`].filter(Boolean).join(" · ")}
+      </span>
+    </Link>
+  );
+}
+
+/** "Jordan", "Jordan and Priya", "Jordan, Priya and 2 others" — two names
+ * at most, so a busy day doesn't wrap the card. */
+function listNames(names: string[]): string {
+  if (names.length <= 2) return names.join(" and ");
+  const rest = names.length - 2;
+  return `${names[0]}, ${names[1]} and ${rest} other${rest === 1 ? "" : "s"}`;
 }
 
 export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {

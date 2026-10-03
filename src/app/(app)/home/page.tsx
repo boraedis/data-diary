@@ -5,7 +5,7 @@ import { RecentDaysScroller } from "@/components/recent-days-scroller";
 import { OnThisDayCard } from "@/components/on-this-day-card";
 import { todayDateString } from "@/lib/date";
 import { getHomeDashboardData, type BirthdayEntry } from "@/lib/home";
-import { getOnThisDayHighlight } from "@/lib/on-this-day";
+import { getOnThisDayForHome } from "@/lib/on-this-day";
 import { countUnseen, getUnseenRecaps } from "@/lib/recap-seen";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +53,7 @@ export default async function HomePage() {
   const [data, unseenRecaps, onThisDay] = await Promise.all([
     getHomeDashboardData(),
     getUnseenRecaps(),
-    getOnThisDayHighlight(todayDateString()),
+    getOnThisDayForHome(todayDateString()),
   ]);
   const newRecaps = countUnseen(unseenRecaps);
   const todayDate = data.recentDays[data.recentDays.length - 1]?.date ?? "";
@@ -81,7 +81,7 @@ export default async function HomePage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-4">
           {/* On this day (#522) — always shown: it's the only way into /on-this-day */}
-          <OnThisDayCard highlight={onThisDay} />
+          <OnThisDayCard {...onThisDay} />
 
           {/* Upcoming birthdays */}
           <Card>

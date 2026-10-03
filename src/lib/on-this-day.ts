@@ -17,11 +17,12 @@ import { buildRecapMoments, loadMomentInputs, type RecapMoment } from "@/lib/rec
 //
 // Two surfaces, deliberately unequal (scope agreed on #522):
 //
-// - **Home** gets at most one line — the single strongest moment across
-//   every past year — or a single quiet line. A ten-year diary would otherwise
-//   put a ten-row card on the page loaded every visit. Only real moments
-//   qualify there; no structured-fact fallback, and no happiness dips (Home
-//   shouldn't open on "your hardest day, four years ago").
+// - **Home** gets at most one line: the single strongest moment across
+//   every past year, else the happiest past year's version of today
+//   (`OnThisDayFallback`), else a quiet line. A ten-year diary would
+//   otherwise put a ten-row card on the page loaded every visit. No
+//   happiness dips (Home shouldn't open on "your hardest day, four years
+//   ago") — and the fallback is the *top* score, so it can't be one either.
 // - **`/on-this-day`** is the full view: every past year, its strongest
 //   moment (dips included — the honest version lives here), plus the
 //   date's structured facts so a quiet year still shows something.
@@ -119,8 +120,8 @@ export function pickYearMoment(candidates: YearCandidates): RecapMoment | null {
 }
 
 /** Home's single highlight: the strongest non-dip moment across every past
- * year, or null — in which case Home's card shows one quiet line and its
- * link to the full page, never a filler fact. */
+ * year, or null — in which case Home falls back to the happiest past year
+ * (`pickHappiestYear`). */
 export function pickHomeHighlight(
   years: YearCandidates[]
 ): { year: number; date: string; moment: RecapMoment } | null {
@@ -190,15 +191,83 @@ export type OnThisDayHighlight = {
   href: string;
 };
 
-/** Home's one line, or null. */
-export async function getOnThisDayHighlight(today: string): Promise<OnThisDayHighlight | null> {
-  const picked = pickHomeHighlight(await loadYearCandidates(monthDayOf(today), today));
-  if (picked === null) return null;
+/**
+ * Home's fallback when no moment qualifies: the happiest of the past
+ * years' versions of today, with where you were and who you were with.
+ *
+ * Agreed on #522 after exact-date matching made real moments rare. It's
+ * still a genuine pick — "the best of your Oct 3rds" — rather than a random
+ * year as filler, it never surfaces a bad day (it's the top score), and
+ * happiness is the field logged most consistently, so it's nearly always
+ * available. Kept deliberately simple: highest score wins, ties go to the
+ * newer year.
+ */
+export type OnThisDayFallback = {
+  year: number;
+  yearsAgo: number;
+  date: string;
+  happiness: number;
+  places: string[];
+  people: string[];
+  href: string;
+};
+
+/** What Home shows: a moment when one qualifies, else the happiest past
+ * year, else neither (the card's quiet line). */
+export type OnThisDayHome = {
+  highlight: OnThisDayHighlight | null;
+  fallback: OnThisDayFallback | null;
+};
+
+/** The pure half of the fallback: highest happiness, then newer year. */
+export function pickHappiestYear(
+  years: { year: number; date: string; facts: OnThisDayFacts | null }[]
+): { year: number; date: string; facts: OnThisDayFacts & { happiness: number } } | null {
+  let best: { year: number; date: string; facts: OnThisDayFacts & { happiness: number } } | null = null;
+  for (const { year, date, facts } of years) {
+    if (facts === null || facts.happiness === null) continue;
+    const happiness = facts.happiness;
+    if (best === null || happiness > best.facts.happiness || (happiness === best.facts.happiness && year > best.year)) {
+      best = { year, date, facts: { ...facts, happiness } };
+    }
+  }
+  return best;
+}
+
+export async function getOnThisDayForHome(today: string): Promise<OnThisDayHome> {
+  const candidates = await loadYearCandidates(monthDayOf(today), today);
+  const todayYear = Number(today.slice(0, 4));
+
+  const picked = pickHomeHighlight(candidates);
+  if (picked !== null) {
+    return {
+      highlight: {
+        year: picked.year,
+        yearsAgo: todayYear - picked.year,
+        moment: picked.moment,
+        href: recapHrefFor(picked.year, today) ?? `/day/${picked.moment.date}`,
+      },
+      fallback: null,
+    };
+  }
+
+  // Only a quiet day pays for the facts read — ten day rows and their names.
+  const facts = await loadFacts(candidates.map((c) => c.date));
+  const happiest = pickHappiestYear(
+    candidates.map((c) => ({ year: c.year, date: c.date, facts: facts.get(c.date) ?? null }))
+  );
+  if (happiest === null) return { highlight: null, fallback: null };
   return {
-    year: picked.year,
-    yearsAgo: Number(today.slice(0, 4)) - picked.year,
-    moment: picked.moment,
-    href: recapHrefFor(picked.year, today) ?? `/day/${picked.moment.date}`,
+    highlight: null,
+    fallback: {
+      year: happiest.year,
+      yearsAgo: todayYear - happiest.year,
+      date: happiest.date,
+      happiness: happiest.facts.happiness,
+      places: happiest.facts.places,
+      people: happiest.facts.people,
+      href: `/day/${happiest.date}`,
+    },
   };
 }
 

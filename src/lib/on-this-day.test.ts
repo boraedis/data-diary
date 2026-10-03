@@ -3,6 +3,7 @@ import {
   dateInYear,
   parseMonthDay,
   pastYears,
+  pickHappiestYear,
   pickHomeHighlight,
   pickYearMoment,
   recapHrefFor,
@@ -124,5 +125,37 @@ describe("pickHomeHighlight", () => {
         { year: 2024, date: "2024-10-03", moments: [moment("2024-10-03", "happiness-dip", 0.8)] },
       ])
     ).toBeNull();
+  });
+});
+
+describe("pickHappiestYear (Home's fallback)", () => {
+  const facts = (happiness: number | null) => ({ happiness, places: ["Lisbon"], people: ["Jordan"] });
+
+  it("picks the past year with the highest score on the date", () => {
+    const picked = pickHappiestYear([
+      { year: 2024, date: "2024-10-03", facts: facts(71) },
+      { year: 2021, date: "2021-10-03", facts: facts(94) },
+      { year: 2019, date: "2019-10-03", facts: facts(88) },
+    ]);
+    expect(picked).toMatchObject({ year: 2021, facts: { happiness: 94, places: ["Lisbon"] } });
+  });
+
+  it("breaks a tie toward the newer year", () => {
+    const picked = pickHappiestYear([
+      { year: 2020, date: "2020-10-03", facts: facts(90) },
+      { year: 2023, date: "2023-10-03", facts: facts(90) },
+    ]);
+    expect(picked?.year).toBe(2023);
+  });
+
+  it("skips years with no score, and is null when none has one", () => {
+    expect(
+      pickHappiestYear([
+        { year: 2024, date: "2024-10-03", facts: facts(null) },
+        { year: 2022, date: "2022-10-03", facts: null },
+        { year: 2020, date: "2020-10-03", facts: facts(60) },
+      ])?.year
+    ).toBe(2020);
+    expect(pickHappiestYear([{ year: 2024, date: "2024-10-03", facts: facts(null) }])).toBeNull();
   });
 });
