@@ -3,6 +3,7 @@ import Link from "next/link";
 import { FacelapseHero } from "@/components/facelapse-hero";
 import { buttonVariants } from "@/components/ui/button";
 import { getPublicLandingData } from "@/lib/public-profile";
+import { isOwnerSession } from "@/lib/session";
 import { parseDate } from "@/lib/date";
 import { PROJECT_DEFAULTS } from "@/lib/project-defaults";
 
@@ -68,7 +69,10 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 export default async function LandingPage() {
-  const { project, ownerName, diaryStartDate, stats } = await getPublicLandingData();
+  const [{ project, ownerName, diaryStartDate, stats }, isOwner] = await Promise.all([
+    getPublicLandingData(),
+    isOwnerSession(),
+  ]);
 
   const projectName = project.name ?? PROJECT_DEFAULTS.name;
   const tagline = project.tagline ?? PROJECT_DEFAULTS.tagline;
@@ -115,11 +119,13 @@ export default async function LandingPage() {
         </Link>
       </div>
 
+      {/* A signed-in owner sees this page as visitors do (#510), so the
+          sign-in link becomes the way back into the private app. */}
       <Link
-        href="/login"
+        href={isOwner ? "/home" : "/login"}
         className="mt-12 text-sm text-muted-foreground underline-offset-4 hover:underline"
       >
-        Owner? Sign in
+        {isOwner ? "Back to your diary" : "Owner? Sign in"}
       </Link>
     </main>
   );

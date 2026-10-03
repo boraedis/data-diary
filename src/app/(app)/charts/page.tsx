@@ -23,7 +23,7 @@ export default function ChartsIndexPage() {
           <Link href="/charts/all" className="text-xs text-muted-foreground hover:text-foreground">
             All charts
           </Link>
-          <Link href="/" className="text-xs text-muted-foreground hover:text-foreground">
+          <Link href="/home" className="text-xs text-muted-foreground hover:text-foreground">
             Home
           </Link>
         </div>
