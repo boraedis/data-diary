@@ -104,8 +104,9 @@ export default async function OnThisDayPage({
             ))}
           </ul>
           <p className="text-center text-xs text-muted-foreground">
-            Highlights are the recap&rsquo;s automatic moments, on exactly this date. Feb 29
-            shows Feb 28 in other years.
+            Highlights are picked automatically from exactly this date: life milestones, first
+            times (a country, a city, someone you went on to see often) and standout days. Feb
+            29 shows Feb 28 in other years.
           </p>
         </>
       )}

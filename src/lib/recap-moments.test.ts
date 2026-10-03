@@ -4,8 +4,12 @@ import {
   happinessBaseline,
   happinessMoments,
   happinessMomentsFromBaseline,
+  MIN_DAYS_FOR_PERSON,
+  personMagnitude,
   type HappinessScore,
+  type MomentInputs,
 } from "@/lib/recap-moments";
+import type { LifeEventSources } from "@/lib/recap-life-events";
 import { yearPeriod } from "@/lib/recap";
 
 // Covers the happiness signal (issue #174) — the percentile rule, the
@@ -14,6 +18,24 @@ import { yearPeriod } from "@/lib/recap";
 // covered by the foundation's own tests.
 
 const period = yearPeriod(2025);
+
+/** Empty inputs with `overrides` on top — logging began long before 2025,
+ * so the warm-up never applies unless a test moves it. */
+function inputsWith(overrides: Partial<MomentInputs>): MomentInputs {
+  return {
+    baseline: null,
+    scores: [],
+    firstCountries: [],
+    firstGenres: [],
+    firstCities: [],
+    placesLoggedFrom: "2015-01-01",
+    firstPeople: [],
+    maxPersonDays: 0,
+    peopleLoggedFrom: "2015-01-01",
+    lifeSources: null,
+    ...overrides,
+  };
+}
 
 /** `count` filler days at `score`, starting well before the period so they
  * only ever act as baseline. */
@@ -131,7 +153,7 @@ describe("narrow moment inputs", () => {
 
   it("finds first times from earliest-per-key appearances, ranked by magnitude", () => {
     const moments = buildRecapMoments(
-      {
+      inputsWith({
         baseline: null,
         scores: [],
         firstCountries: [
@@ -139,9 +161,110 @@ describe("narrow moment inputs", () => {
           { key: "France", date: "2019-08-01" },
         ],
         firstGenres: [{ key: "Horror", date: "2025-01-10" }],
-      },
+      }),
       period
     );
     expect(moments.map((m) => m.headline)).toEqual(["First time in Japan", "First horror film"]);
+  });
+});
+
+// The kinds added for "on this day" (#522).
+describe("first day with a person", () => {
+  it("ignores people logged on fewer than the minimum days", () => {
+    const moments = buildRecapMoments(
+      inputsWith({
+        firstPeople: [
+          { name: "Once", date: "2025-03-01", totalDays: MIN_DAYS_FOR_PERSON - 1 },
+          { name: "Regular", date: "2025-03-02", totalDays: MIN_DAYS_FOR_PERSON },
+        ],
+        maxPersonDays: 500,
+      }),
+      period
+    );
+    expect(moments.map((m) => m.headline)).toEqual(["First day with Regular"]);
+  });
+
+  it("ranks people with tons of days highest — the most-logged person matches a best-ever day", () => {
+    expect(personMagnitude(1500, 1500)).toBeCloseTo(1);
+    expect(personMagnitude(MIN_DAYS_FOR_PERSON, 1500)).toBeCloseTo(0.5);
+    // Log-scaled: a few hundred days sits well above someone met a dozen times.
+    expect(personMagnitude(300, 1500)).toBeGreaterThan(0.8);
+    expect(personMagnitude(12, 1500)).toBeLessThan(0.55);
+  });
+
+  it("puts a heavily-logged person above a first country, a light one below", () => {
+    const moments = buildRecapMoments(
+      inputsWith({
+        firstCountries: [{ key: "Japan", date: "2025-05-01" }],
+        firstPeople: [
+          { name: "Partner", date: "2025-02-01", totalDays: 1500 },
+          { name: "Acquaintance", date: "2025-06-01", totalDays: 15 },
+        ],
+        maxPersonDays: 1500,
+      }),
+      period
+    );
+    expect(moments.map((m) => m.headline)).toEqual([
+      "First day with Partner",
+      "First time in Japan",
+      "First day with Acquaintance",
+    ]);
+  });
+
+  it("ignores firsts in the warm-up after people logging began", () => {
+    const moments = buildRecapMoments(
+      inputsWith({
+        peopleLoggedFrom: "2025-01-01",
+        firstPeople: [
+          { name: "Parent", date: "2025-01-20", totalDays: 900 },
+          { name: "New friend", date: "2025-06-01", totalDays: 40 },
+        ],
+        maxPersonDays: 900,
+      }),
+      period
+    );
+    expect(moments.map((m) => m.headline)).toEqual(["First day with New friend"]);
+  });
+});
+
+describe("first time in a city", () => {
+  it("is dropped when a first country lands the same day", () => {
+    const moments = buildRecapMoments(
+      inputsWith({
+        firstCountries: [{ key: "Japan", date: "2025-05-01" }],
+        firstCities: [
+          { key: "Tokyo", date: "2025-05-01" },
+          { key: "Osaka", date: "2025-05-04" },
+        ],
+      }),
+      period
+    );
+    expect(moments.map((m) => m.headline)).toEqual(["First time in Japan", "First time in Osaka"]);
+  });
+});
+
+describe("life starts", () => {
+  const sources = {
+    occupations: [
+      {
+        id: 1, name: "Acme", alias: null, type: "work", start: "2025-04-01", end: "2025-09-30",
+        color: null, position: "Engineer", company: null, placeName: null, roles: [],
+      },
+    ],
+    residences: [
+      { id: 2, name: "Elm St", alias: null, start: "2020-01-01", end: "2025-07-01", color: null, placeName: null },
+    ],
+    relationships: [],
+  } as unknown as LifeEventSources;
+
+  it("reports starts only — an ending isn't resurfaced", () => {
+    const moments = buildRecapMoments(inputsWith({ lifeSources: sources }), period);
+    expect(moments.map((m) => [m.kind, m.headline, m.date])).toEqual([
+      ["life-start", "Started at Acme", "2025-04-01"],
+    ]);
+  });
+
+  it("is absent when life sources weren't loaded (the recap's own path)", () => {
+    expect(buildRecapMoments(inputsWith({}), period)).toEqual([]);
   });
 });

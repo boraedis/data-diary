@@ -9,6 +9,12 @@ import { buildRecapMoments, loadMomentInputs, type RecapMoment } from "@/lib/rec
 // today's date in past years, built on the recap's moments engine (#174)
 // rather than a second definition of "notable".
 //
+// What counts (agreed on #522): the recap's happiness spikes/dips and first
+// countries/genres, plus three kinds added for this feature — life starts,
+// first time in a city, and the first day with someone you went on to log
+// often (scored by how often; see `personMagnitude`). The engine owns all
+// of it; this module only picks among what it returns.
+//
 // Two surfaces, deliberately unequal (scope agreed on #522):
 //
 // - **Home** gets at most one line — the single strongest moment across
@@ -150,9 +156,10 @@ export function recapHrefFor(year: number, today: string): string | null {
  *
  * This is the cost #522 asked to be checked: Home runs it on every visit.
  * It is one `loadMomentInputs` call — an aggregate for the happiness
- * distribution, the scores on ~10 single dates, and earliest-date
- * aggregates for places and genres — never a whole-year moments pass per
- * past year, and never every logged day shipped to the server.
+ * distribution, the scores on ~10 single dates, earliest-date aggregates
+ * for places, people and genres, and the handful of profile rows — never a
+ * whole-year moments pass per past year, and never every logged day
+ * shipped to the server.
  */
 async function loadYearCandidates(monthDay: string, today: string): Promise<YearCandidates[]> {
   const range = await getRecapDataRange();
@@ -162,7 +169,10 @@ async function loadYearCandidates(monthDay: string, today: string): Promise<Year
 
   const dates = years.map((year) => dateInYear(monthDay, year));
   const windows = dates.map(dayPeriod);
-  const inputs = await loadMomentInputs(windows);
+  // Life starts on: an anniversary of a job, a home or a relationship is
+  // what this feature is best at, and unlike the recap there's no Life
+  // events section here already saying it.
+  const inputs = await loadMomentInputs(windows, { lifeStarts: true });
 
   return years.map((year, i) => ({
     year,
