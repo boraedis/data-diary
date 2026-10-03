@@ -27,9 +27,12 @@ export function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   const authenticated = verifySessionToken(token);
 
-  // An authenticated visitor hitting the public landing page should land on
-  // their own dashboard instead of the public splash.
-  if (pathname === "/" && authenticated) {
+  // The public pages, "/" included, render for the owner too (#510) — an
+  // earlier "/" → /home redirect here meant the owner could never see the
+  // public site without signing out, and broke the profile page's "View
+  // public site" link. The landing page offers a way back to /home instead.
+  // /login is the one public page with nothing to show a signed-in owner.
+  if (pathname === "/login" && authenticated) {
     return NextResponse.redirect(new URL("/home", request.url));
   }
 

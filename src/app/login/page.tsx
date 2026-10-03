@@ -14,6 +14,18 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+// Where to go after signing in: the page the proxy bounced you from, or
+// the dashboard. "/" would be the public landing page (#510), not where an
+// owner signing in means to go. Only same-site paths are honoured — "//host"
+// and "/\host" are protocol-relative URLs a crafted ?from= could use to
+// redirect off-site.
+function safeReturnPath(from: string | null): string {
+  if (!from || !from.startsWith("/") || from.startsWith("//") || from.startsWith("/\\")) {
+    return "/home";
+  }
+  return from === "/" ? "/home" : from;
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -39,7 +51,7 @@ function LoginForm() {
       return;
     }
 
-    router.replace(searchParams.get("from") || "/");
+    router.replace(safeReturnPath(searchParams.get("from")));
     router.refresh();
   }
 
