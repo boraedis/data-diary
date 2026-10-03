@@ -7,6 +7,7 @@ import { RecapPeoplePlacesSection } from "@/components/recap/recap-people-places
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { RecapStoryView } from "@/components/recap/recap-story";
 import { RecapSubsSection } from "@/components/recap/recap-subs-section";
+import { RecapWorkSection } from "@/components/recap/recap-work-section";
 import { buildRecapStory } from "@/lib/recap-story";
 import { getRecapBody } from "@/lib/recap-body";
 import { getRecapEntertainment } from "@/lib/recap-entertainment";
@@ -16,6 +17,7 @@ import { getRecapHealth } from "@/lib/recap-health";
 import { getRecapMoments } from "@/lib/recap-moments";
 import { getRecapPeoplePlaces } from "@/lib/recap-people-places";
 import { getRecapSubs } from "@/lib/recap-subs";
+import { getRecapWork } from "@/lib/recap-work";
 import {
   MIN_DAYS_FOR_TOTAL,
   countLoggedDays,
@@ -62,7 +64,8 @@ import {
 //   the interesting month — the one something started or ended — gets
 //   buried in them.
 //
-// Health, entertainment and moments carry over whole. Their averages are
+// Health, body & habits, work & screen time (#530), entertainment and
+// moments carry over whole. Their averages are
 // already held to `MIN_DAYS_FOR_AVERAGE` (14 days), which a well-logged
 // month clears and a sparse one honestly doesn't; moments are scored
 // against the all-time distribution, so a month surfaces its own few
@@ -103,6 +106,7 @@ export async function RecapReport({
     subs,
     health,
     body,
+    { work, screenTime },
     moments,
     allLifeEvents,
   ] = await Promise.all([
@@ -113,6 +117,7 @@ export async function RecapReport({
     getRecapSubs(period, prior),
     getRecapHealth(period, prior),
     getRecapBody(period, prior),
+    getRecapWork(period, prior),
     getRecapMoments(period),
     listRecapLifeEvents(period),
   ]);
@@ -140,6 +145,8 @@ export async function RecapReport({
     priorLoggedDays,
     health,
     body,
+    work,
+    screenTime,
     entertainment,
     peoplePlaces,
     subs,
@@ -156,6 +163,13 @@ export async function RecapReport({
       <RecapHealthSection health={health} periodLabel={period.label} priorLabel={prior.label} />
 
       <RecapBodySection body={body} periodLabel={period.label} priorLabel={prior.label} />
+
+      <RecapWorkSection
+        work={work}
+        screenTime={screenTime}
+        periodLabel={period.label}
+        priorLabel={prior.label}
+      />
 
       <RecapSubsSection
         subs={subs}
