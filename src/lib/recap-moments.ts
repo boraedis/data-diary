@@ -1,8 +1,8 @@
-import { asc, eq, isNotNull } from "drizzle-orm";
+import { and, between, count, isNotNull, max, min, or, sql } from "drizzle-orm";
 import { days, movieWatches, movies } from "@/db/schema";
 import { getDb } from "@/lib/db";
 import { firstSeenInPeriodWithDates, type RecapPeriod } from "@/lib/recap";
-import { loadRecapPeoplePlacesInput } from "@/lib/recap-people-places";
+import { resolvePlaceRoots } from "@/lib/recap-people-places";
 
 // The recap's data-derived moments engine (issue #174, epic #130).
 //
@@ -100,15 +100,48 @@ function percentile(sorted: number[], fraction: number): number {
  * extreme day in that direction sits from it. Naturally lands in 0-1, and
  * is symmetric: the worst day ever and the best day ever both score 1.
  */
-function happinessMagnitude(score: number, sorted: number[]): number {
-  const median = percentile(sorted, 0.5);
-  const extreme = score >= median ? sorted[sorted.length - 1] : sorted[0];
+function happinessMagnitude(score: number, baseline: HappinessBaseline): number {
+  const { median } = baseline;
+  const extreme = score >= median ? baseline.max : baseline.min;
   const span = Math.abs(extreme - median);
   if (span === 0) return 0;
   return Math.min(1, Math.abs(score - median) / span);
 }
 
 export type HappinessScore = { date: string; happiness: number };
+
+/**
+ * Everything the happiness rule needs from the all-time distribution: its
+ * size, the two cutoffs, and the anchors magnitude is scaled against.
+ *
+ * A summary rather than the scores themselves so the distribution can be
+ * computed in SQL (`loadMomentInputs`) instead of every score being shipped
+ * to the server just to be sorted — Home asks this question on every visit
+ * for "on this day" (#522). `happinessBaseline` is the same summary in JS;
+ * the two agree because `percentile` is `PERCENTILE_CONT`'s definition.
+ */
+export type HappinessBaseline = {
+  count: number;
+  spikeAt: number;
+  dipAt: number;
+  median: number;
+  min: number;
+  max: number;
+};
+
+/** The baseline from raw scores, or null when there are none. */
+export function happinessBaseline(scores: number[]): HappinessBaseline | null {
+  if (scores.length === 0) return null;
+  const sorted = [...scores].sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    spikeAt: percentile(sorted, SPIKE_PERCENTILE),
+    dipAt: percentile(sorted, DIP_PERCENTILE),
+    median: percentile(sorted, 0.5),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  };
+}
 
 /**
  * Happiness moments for the period, from the all-time distribution.
@@ -122,13 +155,27 @@ export type HappinessScore = { date: string; happiness: number };
  * near-identical entries crowding out everything else in the list.
  */
 export function happinessMoments(allTime: HappinessScore[], period: RecapPeriod): RecapMoment[] {
-  if (allTime.length < MIN_SCORES_FOR_PERCENTILES) return [];
+  return happinessMomentsFromBaseline(
+    happinessBaseline(allTime.map((row) => row.happiness)),
+    allTime,
+    period
+  );
+}
 
-  const sorted = [...allTime.map((row) => row.happiness)].sort((a, b) => a - b);
-  const spikeAt = percentile(sorted, SPIKE_PERCENTILE);
-  const dipAt = percentile(sorted, DIP_PERCENTILE);
+/**
+ * `happinessMoments` against a precomputed baseline. `scores` only has to
+ * cover the period — rows outside it are ignored, and the all-time
+ * comparison lives entirely in `baseline`.
+ */
+export function happinessMomentsFromBaseline(
+  baseline: HappinessBaseline | null,
+  scores: HappinessScore[],
+  period: RecapPeriod
+): RecapMoment[] {
+  if (baseline === null || baseline.count < MIN_SCORES_FOR_PERCENTILES) return [];
+  const { spikeAt, dipAt } = baseline;
 
-  const inPeriod = allTime
+  const inPeriod = scores
     .filter((row) => row.date >= period.start && row.date <= period.end)
     .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -143,7 +190,7 @@ export function happinessMoments(allTime: HappinessScore[], period: RecapPeriod)
       kind,
       headline: kind === "happiness-spike" ? "One of your best days" : "One of your hardest days",
       detail: `${best.happiness} / 100`,
-      magnitude: happinessMagnitude(best.happiness, sorted),
+      magnitude: happinessMagnitude(best.happiness, baseline),
     });
     run = null;
   };
@@ -190,58 +237,142 @@ function daysBetween(from: string, to: string): number {
 }
 
 /**
- * Every moment for the period, ranked.
+ * What the moments rules read, shaped as narrowly as each rule allows.
  *
- * Sorted by magnitude descending, ties broken by date ascending so the
- * order is stable between requests.
+ * None of the three signals needs the full history row by row: happiness
+ * needs the all-time *distribution* (`baseline`) plus the scores inside the
+ * window, and a first time only needs the *earliest* appearance of each
+ * country or genre — `firstSeenInPeriodWithDates` keeps the minimum per key
+ * anyway, so pre-minimising in SQL gives it the same answer from a few
+ * hundred rows instead of every logged day. That's what lets Home ask "on
+ * this day" (#522) every visit without a whole-history pass per request.
  */
-export async function getRecapMoments(period: RecapPeriod): Promise<RecapMoment[]> {
-  const db = getDb();
+export type MomentInputs = {
+  baseline: HappinessBaseline | null;
+  /** Scores inside the requested windows only. */
+  scores: HappinessScore[];
+  /** Earliest appearance of each country, all time. */
+  firstCountries: { key: string; date: string }[];
+  /** Earliest watch of each film genre, all time. */
+  firstGenres: { key: string; date: string }[];
+};
 
-  const [scoreRows, placesInput, watchRows] = await Promise.all([
+/**
+ * Loads `MomentInputs` covering every window in `windows` at once — one
+ * read whether that's a single recap period or a decade of "on this day"
+ * windows.
+ */
+export async function loadMomentInputs(windows: RecapPeriod[]): Promise<MomentInputs> {
+  const db = getDb();
+  // `sql.raw` because these are module constants, not input — and inlining
+  // them keeps `percentile_cont`'s argument a literal double rather than a
+  // parameter Postgres has to infer a type for.
+  const pct = (fraction: number) =>
+    sql<number>`percentile_cont(${sql.raw(String(fraction))}) within group (order by ${days.happiness})`.mapWith(Number);
+
+  const [baselineRows, scoreRows, place1Rows, place2Rows, genreResult] = await Promise.all([
     db
-      .select({ date: days.date, happiness: days.happiness })
+      .select({
+        count: count(),
+        spikeAt: pct(SPIKE_PERCENTILE),
+        dipAt: pct(DIP_PERCENTILE),
+        median: pct(0.5),
+        min: min(days.happiness),
+        max: max(days.happiness),
+      })
       .from(days)
-      .where(isNotNull(days.happiness))
-      .orderBy(asc(days.date)),
-    loadRecapPeoplePlacesInput(),
+      .where(isNotNull(days.happiness)),
+    windows.length === 0
+      ? []
+      : db
+          .select({ date: days.date, happiness: days.happiness })
+          .from(days)
+          .where(
+            and(
+              isNotNull(days.happiness),
+              or(...windows.map((w) => between(days.date, w.start, w.end)))
+            )
+          ),
+    // The two place slots separately rather than a union, so both stay
+    // typed builder queries; merged to one earliest date per place below.
     db
-      .select({ date: movieWatches.date, genres: movies.genres })
-      .from(movieWatches)
-      .innerJoin(movies, eq(movies.id, movieWatches.movieId)),
+      .select({ placeId: days.place1Id, first: min(days.date) })
+      .from(days)
+      .where(isNotNull(days.place1Id))
+      .groupBy(days.place1Id),
+    db
+      .select({ placeId: days.place2Id, first: min(days.date) })
+      .from(days)
+      .where(isNotNull(days.place2Id))
+      .groupBy(days.place2Id),
+    db.execute(sql`
+      select g.genre as key, to_char(min(${movieWatches.date}), 'YYYY-MM-DD') as date
+      from ${movieWatches}
+      inner join ${movies} on ${movies.id} = ${movieWatches.movieId}
+      cross join lateral unnest(${movies.genres}) as g(genre)
+      group by g.genre
+    `),
   ]);
 
-  const scores: HappinessScore[] = scoreRows.map((row) => ({
-    date: row.date,
-    happiness: row.happiness as number,
-  }));
+  const firstByPlace = new Map<number, string>();
+  for (const { placeId, first } of [...place1Rows, ...place2Rows]) {
+    if (placeId === null || first === null) continue;
+    const seen = firstByPlace.get(placeId);
+    if (seen === undefined || first < seen) firstByPlace.set(placeId, first);
+  }
+  // Country resolution is shared with the people & places section, so the
+  // moments list and the countries-visited count can never disagree about
+  // what counts as a country (see `loadRecapPeoplePlacesInput`).
+  const { countryByPlaceId } = await resolvePlaceRoots([...firstByPlace.keys()]);
 
   // Countries only — not places or artists. Those were tried and cut: the
   // real data produces 203 first-time places in a single year and 456
   // first-time artists in another, which would bury every other signal in
   // the list. Both are already reported as counts by their own sections.
   // A first country is rare and unambiguous.
-  const countryAppearances = placesInput.days.flatMap((day) =>
-    day.placeIds.flatMap((id) => {
-      const country = placesInput.countryByPlaceId.get(id);
-      return country ? [{ key: country, date: day.date }] : [];
-    })
-  );
+  const firstCountries = [...firstByPlace].flatMap(([placeId, date]) => {
+    const country = countryByPlaceId.get(placeId);
+    return country ? [{ key: country, date }] : [];
+  });
 
-  const genreAppearances = watchRows.flatMap((row) =>
-    row.genres.map((genre) => ({ key: genre, date: row.date }))
-  );
+  const [row] = baselineRows;
+  const baseline: HappinessBaseline | null =
+    row && row.count > 0 && row.min !== null && row.max !== null
+      ? { count: row.count, spikeAt: row.spikeAt, dipAt: row.dipAt, median: row.median, min: row.min, max: row.max }
+      : null;
 
+  const genreRows = (Array.isArray(genreResult) ? genreResult : (genreResult as { rows: unknown[] }).rows) as {
+    key: string;
+    date: string;
+  }[];
+
+  return {
+    baseline,
+    scores: scoreRows.map((r) => ({ date: r.date, happiness: r.happiness as number })),
+    firstCountries,
+    firstGenres: genreRows,
+  };
+}
+
+/**
+ * Every moment for the period, ranked — the pure half of
+ * `getRecapMoments`. `inputs` may cover more than `period` (on this day
+ * loads every year's window at once); anything outside it is ignored.
+ *
+ * Sorted by magnitude descending, ties broken by date ascending so the
+ * order is stable between requests.
+ */
+export function buildRecapMoments(inputs: MomentInputs, period: RecapPeriod): RecapMoment[] {
   const moments: RecapMoment[] = [
-    ...happinessMoments(scores, period),
-    ...firstSeenInPeriodWithDates(period, countryAppearances).map((entry) => ({
+    ...happinessMomentsFromBaseline(inputs.baseline, inputs.scores, period),
+    ...firstSeenInPeriodWithDates(period, inputs.firstCountries).map((entry) => ({
       date: entry.date,
       kind: "first-country" as const,
       headline: `First time in ${entry.key}`,
       detail: null,
       magnitude: MAGNITUDE.firstCountry,
     })),
-    ...firstSeenInPeriodWithDates(period, genreAppearances).map((entry) => ({
+    ...firstSeenInPeriodWithDates(period, inputs.firstGenres).map((entry) => ({
       date: entry.date,
       kind: "first-genre" as const,
       headline: `First ${entry.key.toLowerCase()} film`,
@@ -253,4 +384,9 @@ export async function getRecapMoments(period: RecapPeriod): Promise<RecapMoment[
   return moments.sort(
     (a, b) => b.magnitude - a.magnitude || a.date.localeCompare(b.date)
   );
+}
+
+/** Every moment for the period, ranked. */
+export async function getRecapMoments(period: RecapPeriod): Promise<RecapMoment[]> {
+  return buildRecapMoments(await loadMomentInputs([period]), period);
 }
