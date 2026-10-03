@@ -288,17 +288,38 @@ export async function loadRecapPeoplePlacesInput(): Promise<RecapPeoplePlacesInp
   const personIds = [...new Set(slots.flatMap((s) => s.personIds))];
   const placeIds = [...new Set(slots.flatMap((s) => s.placeIds))];
 
-  const [personRows, placeRows] = await Promise.all([
+  const [personRows, placeRoots] = await Promise.all([
     personIds.length
       ? db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, personIds))
       : [],
-    placeIds.length
-      ? db
-          .select({ id: places.id, name: places.name, idPath: places.idPath })
-          .from(places)
-          .where(inArray(places.id, placeIds))
-      : [],
+    resolvePlaceRoots(placeIds),
   ]);
+
+  return {
+    days: slots,
+    personNames: new Map(personRows.map((r) => [r.id, r.name])),
+    ...placeRoots,
+  };
+}
+
+/**
+ * Names, countries and root colors for a set of place ids.
+ *
+ * Split out of `loadRecapPeoplePlacesInput` for "on this day" (#522),
+ * which needs the same country resolution for a handful of places without
+ * loading every day's slots: the one-definition argument above is the
+ * whole reason this is shared rather than re-derived.
+ */
+export async function resolvePlaceRoots(
+  placeIds: number[]
+): Promise<Pick<RecapPeoplePlacesInput, "placeNames" | "countryByPlaceId" | "colorByPlaceId">> {
+  const db = getDb();
+  const placeRows = placeIds.length
+    ? await db
+        .select({ id: places.id, name: places.name, idPath: places.idPath })
+        .from(places)
+        .where(inArray(places.id, placeIds))
+    : [];
 
   const rootIdByPlaceId = new Map<number, number | null>();
   for (const place of placeRows) {
@@ -327,8 +348,6 @@ export async function loadRecapPeoplePlacesInput(): Promise<RecapPeoplePlacesInp
   }
 
   return {
-    days: slots,
-    personNames: new Map(personRows.map((r) => [r.id, r.name])),
     placeNames: new Map(placeRows.map((r) => [r.id, r.name])),
     countryByPlaceId,
     colorByPlaceId,

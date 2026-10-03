@@ -4,6 +4,8 @@ import {
   listProfileRelationships,
   listProfileResidences,
   type ProfileOccupationItem,
+  type ProfileRelationshipItem,
+  type ProfileResidenceItem,
 } from "@/lib/profile";
 
 // The recap's life-events section (issue #173, epic #130).
@@ -187,12 +189,33 @@ function occupationDetail(occupation: ProfileOccupationItem): string | null {
  * rather than a re-query.
  */
 export async function listRecapLifeEvents(period: RecapPeriod): Promise<RecapLifeEvent[]> {
+  return buildRecapLifeEvents(await loadLifeEventSources(), period);
+}
+
+/** The three profile lists life events are built from. */
+export type LifeEventSources = {
+  occupations: ProfileOccupationItem[];
+  residences: ProfileResidenceItem[];
+  relationships: ProfileRelationshipItem[];
+};
+
+/** Split from `listRecapLifeEvents` so "on this day" (#522) can load the
+ * lists once and ask about ten single-day periods, instead of re-reading
+ * them per past year. */
+export async function loadLifeEventSources(): Promise<LifeEventSources> {
   const [occupations, residences, relationships] = await Promise.all([
     listProfileOccupations(),
     listProfileResidences(),
     listProfileRelationships(),
   ]);
+  return { occupations, residences, relationships };
+}
 
+/** The pure half of `listRecapLifeEvents`. */
+export function buildRecapLifeEvents(
+  { occupations, residences, relationships }: LifeEventSources,
+  period: RecapPeriod
+): RecapLifeEvent[] {
   const events: RecapLifeEvent[] = [];
 
   for (const occupation of occupations) {
