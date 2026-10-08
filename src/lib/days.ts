@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { diffRanking } from "@/lib/ranking-history";
 import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
+import { checkDomainDurations, checkWorkoutDurations } from "@/lib/duration-limits";
 import { geocodeAddress } from "@/lib/geocode";
 import {
   bookRankingEvents,
@@ -945,6 +946,9 @@ export async function validateHealthPayload(body: unknown): Promise<Result<Healt
     };
   }
 
+  const durationError = checkWorkoutDurations(workoutsResult.value);
+  if (durationError) return { ok: false, error: durationError };
+
   const locationIds = workoutsResult.value
     .map((w) => w.locationId)
     .filter((id): id is number => id !== null);
@@ -1244,6 +1248,9 @@ export function validateEntertainmentPayload(body: unknown): Result<Entertainmen
     entries.push({ entertainmentId, durationMinutes, locationType });
   }
 
+  const durationError = checkDomainDurations("entertainment", entries.map((e) => e.durationMinutes));
+  if (durationError) return { ok: false, error: durationError };
+
   return { ok: true, value: { entries } };
 }
 
@@ -1278,6 +1285,9 @@ export function validateMoviesPayload(body: unknown): Result<MoviesPayload> {
     entries.push({ movieId, rating, locationType, durationMinutes });
   }
 
+  const durationError = checkDomainDurations("movies", entries.map((e) => e.durationMinutes));
+  if (durationError) return { ok: false, error: durationError };
+
   return { ok: true, value: { entries } };
 }
 
@@ -1301,6 +1311,9 @@ export function validateTvEpisodesPayload(body: unknown): Result<TvEpisodesPaylo
     if (durationMinutes === null) return { ok: false, error: "Duration is required for an episode watch" };
     entries.push({ episodeId, durationMinutes, locationType });
   }
+
+  const durationError = checkDomainDurations("tv", entries.map((e) => e.durationMinutes));
+  if (durationError) return { ok: false, error: durationError };
 
   return { ok: true, value: { entries } };
 }
@@ -1382,6 +1395,9 @@ export async function validateSportsPayload(body: unknown): Promise<Result<Sport
     entries.push(p);
   }
 
+  const durationError = checkDomainDurations("sports", entries.map((e) => e.durationMinutes));
+  if (durationError) return { ok: false, error: durationError };
+
   return { ok: true, value: { entries } };
 }
 
@@ -1418,6 +1434,9 @@ export function validateBooksPayload(body: unknown): Result<BooksPayload> {
     entries.push({ bookId, startPage, endPage, completed, locationType, durationMinutes });
   }
 
+  const durationError = checkDomainDurations("books", entries.map((e) => e.durationMinutes));
+  if (durationError) return { ok: false, error: durationError };
+
   return { ok: true, value: { entries } };
 }
 
@@ -1444,6 +1463,9 @@ export function validateGamesPayload(body: unknown): Result<GamesPayload> {
 
     entries.push({ gameId, durationMinutes, deviceType, locationType });
   }
+
+  const durationError = checkDomainDurations("games", entries.map((e) => e.durationMinutes));
+  if (durationError) return { ok: false, error: durationError };
 
   return { ok: true, value: { entries } };
 }

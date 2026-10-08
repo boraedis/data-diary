@@ -4,6 +4,7 @@ import { HealthEntryForm } from "@/components/entry-forms/health-entry-form";
 import { isValidDateString } from "@/lib/date";
 import { getPlaceMentionCounts, listExercisesCatalog, listPlacesCatalog, loadDay } from "@/lib/days";
 import { listExerciseSubtypes, listMetros, listPlaceCategories } from "@/lib/catalog-admin";
+import { dayTotalMinutes } from "@/lib/duration-limits";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ export default async function HealthEntryPage({
         placeCatalog={placeCatalog}
         subtypeCatalog={subtypeCatalog}
         placeCreateOptions={{ categories: placeCategories, metros, mentionCounts: placeMentionCounts }}
+        otherDayMinutes={dayTotalMinutes({ ...day, workouts: [] })}
       />
     </main>
   );

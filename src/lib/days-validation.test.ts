@@ -438,3 +438,65 @@ describe("validateSportsPayload", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// #588: the shared duration limits (src/lib/duration-limits.ts), as each
+// validator applies them. Saves are replace-on-save, so a payload holds the
+// day's whole list for its domain: "an existing row plus a new row" is two
+// entries in one payload.
+describe("duration limits (#588)", () => {
+  const game = (durationMinutes: number) => ({ gameId: 1, locationType: "Home", durationMinutes });
+
+  it("accepts exactly a day, and rejects a minute more", () => {
+    expect(validateGamesPayload({ entries: [game(1440)] }).ok).toBe(true);
+    const over = validateGamesPayload({ entries: [game(1441)] });
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.error).toMatch(/A game session can't last 24h 1m/);
+  });
+
+  it("rejects zero, negative and fractional minutes", () => {
+    for (const m of [0, -5, 12.5]) {
+      expect(validateGamesPayload({ entries: [game(m)] }).ok).toBe(false);
+    }
+  });
+
+  it("rejects an existing row plus a new row that together pass a day, showing the total", () => {
+    const result = validateGamesPayload({ entries: [game(1000), game(500)] });
+    expect(result).toEqual({
+      ok: false,
+      error: "Game sessions on this day add up to 25h, more than the 24h in a day.",
+    });
+    expect(validateGamesPayload({ entries: [game(1000), game(440)] }).ok).toBe(true);
+  });
+
+  it("applies to every duration-carrying validator", async () => {
+    // Asserting the message, not just `ok: false`, so a payload failing some
+    // other required field can't pass this by accident.
+    const overCap = (result: { ok: boolean; error?: string }) => expect(result.error).toMatch(/can't last 24h 1m/);
+    overCap(validateEntertainmentPayload({ entries: [{ entertainmentId: 1, locationType: "Home", durationMinutes: 1441 }] }));
+    overCap(validateMoviesPayload({ entries: [{ movieId: 1, locationType: "Home", durationMinutes: 1441 }] }));
+    overCap(validateTvEpisodesPayload({ entries: [{ episodeId: 1, locationType: "Home", durationMinutes: 1441 }] }));
+    overCap(validateBooksPayload({ entries: [{ bookId: 1, locationType: "Home", durationMinutes: 1441, startPage: 1, endPage: 2 }] }));
+
+    dbState.current = createMockDb([[{ id: 1, isTeamSport: false }]]);
+    overCap(
+      await validateSportsPayload({
+        entries: [{ sportId: 1, leagueId: 10, season: "2024", homeTeamId: 100, locationType: "Bar", durationMinutes: 1441 }],
+      }),
+    );
+  });
+
+  it("counts a strength workout's set time toward the workouts' day total", async () => {
+    dbState.current = createMockDb([[{ id: 1, category: "strength" as const }, { id: 2, category: "distance" as const }]]);
+    const result = await validateHealthPayload({
+      workouts: [
+        // 23h of distance plus 2h of timed sets.
+        { exerciseId: 2, durationMinutes: 1380, sets: [] },
+        { exerciseId: 1, durationMinutes: null, sets: [{ setNumber: 1, reps: 1, weightLbs: null, durationSeconds: 7200 }] },
+      ],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "Workouts on this day add up to 25h, more than the 24h in a day.",
+    });
+  });
+});
