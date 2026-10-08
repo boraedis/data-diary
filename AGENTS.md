@@ -271,6 +271,19 @@ concern if something private ends up served from one by accident.
   change gets run through the dataviz skill's `validate_palette.js`
   (colorblind-safety, contrast, lightness) before it's trusted — see #16's
   final comment for the last full validation record.
+- **Non-negative measures never show axis below zero** (#584). A
+  duration, count, or weight can't go negative, so a strip of "−1h" under
+  the data reads as a bug and squashes the plot. Any auto-fit value domain
+  goes through `padDomain` (`src/lib/viz/domain.ts`), which floors the
+  headroom at 0 whenever nothing being fitted is negative — inferred from
+  the values, so new charts get it for free. It *floors*, it doesn't
+  *pin*: weight still fits to ~160–190. Pin the baseline with
+  `InteractiveLine`'s `yMin` only where zero itself is meaningful. A
+  ±spread band (std dev, CI) around a non-negative mean must be clipped at
+  0 before it reaches the domain, as `TrendExplorer` and the training
+  volume chart do, or the band's tail drags the axis negative anyway.
+  Charts that start at 0 by construction (area, histogram, bars) already
+  comply.
 - **Interaction guides track reality.** #315 gave every chart page a
   `ChartInfo` popup whose "Interaction guide" section documents what a
   chart actually supports (`src/lib/viz/interaction-guides.ts`, one

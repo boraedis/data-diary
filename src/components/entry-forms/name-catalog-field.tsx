@@ -30,6 +30,8 @@ export function NameCatalogField({
   onCreated,
   apiPath,
   modalTitle,
+  extraCreateFields,
+  emptyLabel = "None",
 }: {
   id: string;
   value: string | null;
@@ -39,6 +41,12 @@ export function NameCatalogField({
   /** e.g. "/api/entertainment-location-types" or "/api/sports-game-types" */
   apiPath: string;
   modalTitle: string;
+  /** Merged into the create POST body — for a catalog scoped by something
+   * besides its name, e.g. exercise subtypes' `{ category }` (#581). */
+  extraCreateFields?: Record<string, unknown>;
+  /** The blank option's label — "None" for an optional field; a required
+   * one (a workout's variant) reads better as a prompt. */
+  emptyLabel?: string;
 }) {
   const hasUnlistedValue = value !== null && !items.some((item) => item.name === value);
   const [modalOpen, setModalOpen] = useState(false);
@@ -54,7 +62,7 @@ export function NameCatalogField({
       const res = await fetch(apiPath, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), ...extraCreateFields }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -82,7 +90,7 @@ export function NameCatalogField({
           onChange={(e) => onChange(e.target.value || null)}
           className="flex-1"
         >
-          <option value="">None</option>
+          <option value="">{emptyLabel}</option>
           {hasUnlistedValue ? <option value={value ?? ""}>{value}</option> : null}
           {items.map((item) => (
             <option key={item.id} value={item.name}>

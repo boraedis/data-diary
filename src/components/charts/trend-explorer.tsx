@@ -241,6 +241,21 @@ export function TrendExplorer<T extends { date: string }>({
   ): { points: InteractiveLinePoint[]; itemsByPoint: T[][] } => {
     const points: InteractiveLinePoint[] = [];
     const itemsByPoint: T[][] = [];
+    // A ±1 SD band around a skewed non-negative measure (screen time, with
+    // its occasional 10h day) routinely reaches below zero, and InteractiveLine
+    // fits its y-axis to the band — so the band alone dragged the axis to
+    // "−2h" (#584). Clip it at the floor: `yMin` when the caller pins one,
+    // else zero whenever this series has no negative values at all.
+    const bandFloor =
+      yMin ??
+      (buckets.every(({ items }) =>
+        items.every((item) => {
+          const v = valueOf(item);
+          return v === undefined || v >= 0;
+        }),
+      )
+        ? 0
+        : undefined);
     for (const { start, items } of buckets) {
       const included = items.filter((item) => valueOf(item) !== undefined);
       if (included.length === 0) continue;
@@ -279,7 +294,10 @@ export function TrendExplorer<T extends { date: string }>({
         x: parseDate(start),
         y: aggregate === "sum" && cycle === null ? total : mean,
         ...(aggregate === "mean"
-          ? { bandLow: yMin === undefined ? mean - stdDev : Math.max(yMin, mean - stdDev), bandHigh: mean + stdDev }
+          ? {
+              bandLow: bandFloor === undefined ? mean - stdDev : Math.max(bandFloor, mean - stdDev),
+              bandHigh: mean + stdDev,
+            }
           : {}),
       });
       itemsByPoint.push(included);

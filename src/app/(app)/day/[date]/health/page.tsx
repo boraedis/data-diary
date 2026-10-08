@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { DayNav } from "@/components/day-nav";
 import { HealthEntryForm } from "@/components/entry-forms/health-entry-form";
 import { isValidDateString } from "@/lib/date";
-import { listExercisesCatalog, listPlacesCatalog, loadDay } from "@/lib/days";
+import { getPlaceMentionCounts, listExercisesCatalog, listPlacesCatalog, loadDay } from "@/lib/days";
+import { listExerciseSubtypes, listMetros, listPlaceCategories } from "@/lib/catalog-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +17,16 @@ export default async function HealthEntryPage({
     notFound();
   }
 
-  const [day, exerciseCatalog, placeCatalog] = await Promise.all([
-    loadDay(date),
-    listExercisesCatalog(),
-    listPlacesCatalog(),
-  ]);
+  const [day, exerciseCatalog, placeCatalog, subtypeCatalog, placeCategories, metros, placeMentionCounts] =
+    await Promise.all([
+      loadDay(date),
+      listExercisesCatalog(),
+      listPlacesCatalog(),
+      listExerciseSubtypes(),
+      listPlaceCategories(),
+      listMetros(),
+      getPlaceMentionCounts(),
+    ]);
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
@@ -35,6 +41,8 @@ export default async function HealthEntryPage({
         }}
         exerciseCatalog={exerciseCatalog}
         placeCatalog={placeCatalog}
+        subtypeCatalog={subtypeCatalog}
+        placeCreateOptions={{ categories: placeCategories, metros, mentionCounts: placeMentionCounts }}
       />
     </main>
   );

@@ -12,6 +12,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/lib/db";
 import { parseOptionalHexColor } from "@/lib/color";
 import type { SportsWatchHistoryEntry } from "@/lib/days";
+import { formatMatchup } from "@/lib/sports-matchup";
 import {
   artistGenres,
   artists,
@@ -1263,7 +1264,7 @@ export async function getEntertainmentLocationTypeUsage(id: number): Promise<Ent
     ...sportsRows.map((r) => ({
       date: r.date,
       kind: "Sports",
-      label: r.homeTeamName && r.awayTeamName ? `${r.homeTeamName} vs ${r.awayTeamName}` : null,
+      label: r.homeTeamName && r.awayTeamName ? formatMatchup(r.awayTeamName, r.homeTeamName) : null,
     })),
     ...gameRows.map((r) => ({ date: r.date, kind: "Game", label: r.label as string | null })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));

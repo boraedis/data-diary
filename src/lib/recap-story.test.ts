@@ -56,6 +56,24 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [] },
     },
     body: { weight: noMetric(), coffee: noMetric(), distance: noMetric(), training: { hours: 0, priorHours: 0, daysTrained: 0, priorDaysTrained: 0 } },
+    work: {
+      daysWorked: 0,
+      priorDaysWorked: 0,
+      daysTyped: 0,
+      priorDaysTyped: 0,
+      hours: noMetric(),
+      productivity: noMetric(),
+      jobs: [],
+      locations: [],
+      commute: [],
+    },
+    screenTime: {
+      phone: noMetric(),
+      laptop: noMetric(),
+      instagram: noMetric(),
+      instagramShare: null,
+      followers: { first: null, last: null, priorLast: null, daysLogged: 0, priorDaysLogged: 0 },
+    },
     entertainment: {
       totals: [],
       topMovie: null,
@@ -259,6 +277,29 @@ describe("buildRecapStory", () => {
     });
     expect(rich).toEqual(expect.arrayContaining(["coffee", "distance"]));
     expect(rich).not.toContain("weight");
+  });
+
+  it("deals phone time over enough logged days, and days worked from day types", () => {
+    const base = emptyInput({ loggedDays: 300 });
+    const phone = (daysLogged: number) => ({ ...noMetric(), average: 150, daysLogged });
+    const work = { ...base.work, daysWorked: 220, daysTyped: 330, priorDaysWorked: 200, priorDaysTyped: 0 };
+    // Coffee keeps the thin story above MIN_STORY_CARDS, so a missing
+    // phone card is the gate working, not the whole story being dropped.
+    const coffee = { ...noMetric(), average: 2, daysLogged: 200 };
+    const thin = buildRecapStory({
+      ...base,
+      work,
+      body: { ...base.body, coffee },
+      screenTime: { ...base.screenTime, phone: phone(5) },
+    }).map((card) => card.id);
+    expect(thin).toContain("days-worked");
+    expect(thin).not.toContain("phone-time");
+    const story = buildRecapStory({ ...base, work, screenTime: { ...base.screenTime, phone: phone(200) } });
+    expect(story.map((card) => card.id)).toEqual(expect.arrayContaining(["phone-time", "days-worked"]));
+    const daysWorked = story.find((card) => card.id === "days-worked");
+    expect(daysWorked?.value).toBe("220");
+    // No day types in the prior period, so no comparison — not "up 220".
+    expect(daysWorked?.detail).toBeNull();
   });
 
   it("only deals the good-day streak when it is a real run over enough logged days", () => {

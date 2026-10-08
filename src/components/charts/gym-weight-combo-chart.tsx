@@ -18,6 +18,7 @@ import type { GymWeightComboData } from "@/lib/charts";
 import { COMBO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { TRAINING_METHODOLOGY, WEIGHT_METHODOLOGY } from "@/lib/viz/methodology";
 import { TRAINING_TRACKING_SPAN } from "@/lib/viz/tracking-span";
+import { padDomain } from "@/lib/viz/domain";
 
 const MARGIN = { top: 12, right: 48, bottom: 28, left: 48 };
 
@@ -66,13 +67,9 @@ function Combo({
       // is where the two series were hardest to tell apart on one plot.
       const LANE_FRACTION = 0.75;
 
-      const weightExtent = weight.length
-        ? (d3.extent(weight, (w) => w.weightKg) as [number, number])
-        : [0, 1];
-      const weightPad = (weightExtent[1] - weightExtent[0]) * 0.1 || 1;
       const yWeight = d3
         .scaleLinear()
-        .domain([weightExtent[0] - weightPad, weightExtent[1] + weightPad])
+        .domain(padDomain(weight.map((w) => w.weightKg)))
         .range([innerHeight * LANE_FRACTION, 0]);
 
       const yHours = d3
