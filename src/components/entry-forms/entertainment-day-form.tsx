@@ -37,6 +37,7 @@ import type {
   TvShowCatalogItem,
 } from "@/lib/days";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { checkDomainDurations, crossDomainWarning, dayTotalMinutes } from "@/lib/duration-limits";
 
 /** The merged entertainment day-entry page (issue #61) — one unified search
  * across movies/TV/sports leagues/books/games/generic entertainment (games
@@ -138,6 +139,19 @@ export function EntertainmentDayForm({
   const [gameRows, setGameRows] = useState<GameRow[]>(
     initial.gameSessions.map((s) => ({ gameId: s.gameId, durationMinutes: s.durationMinutes, deviceType: s.deviceType, locationType: s.locationType }))
   );
+  // The day's total across every domain (#588): this form's live rows,
+  // plus the day's workouts as loaded, which this form doesn't edit.
+  const overDayWarning = crossDomainWarning(
+    dayTotalMinutes({
+      workouts: initial.workouts,
+      entertainment: otherRows,
+      movies: movieRows,
+      tvEpisodeWatches: tvRows,
+      sportsWatches: sportsRows,
+      bookSessions: bookRows,
+      gameSessions: gameRows,
+    }),
+  );
 
   const [pendingOpen, setPendingOpen] = useState<PendingOpen>(null);
   const nonceRef = useRef(0);
@@ -222,6 +236,21 @@ export function EntertainmentDayForm({
   // time it runs — that response alone is enough to resync every section's
   // rows.
   async function handleSubmit() {
+    // The server's own checks (#588), run here first so a typo is caught
+    // before six requests go out, and the first five save without the
+    // sixth.
+    const durationError =
+      checkDomainDurations("movies", movieRows.map((r) => r.durationMinutes)) ??
+      checkDomainDurations("tv", tvRows.map((r) => r.durationMinutes)) ??
+      checkDomainDurations("sports", sportsRows.map((r) => r.durationMinutes)) ??
+      checkDomainDurations("books", bookRows.map((r) => r.durationMinutes)) ??
+      checkDomainDurations("games", gameRows.map((r) => r.durationMinutes)) ??
+      checkDomainDurations("entertainment", otherRows.map((r) => r.durationMinutes));
+    if (durationError) {
+      setError(durationError);
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -381,7 +410,10 @@ export function EntertainmentDayForm({
       />
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
+        <div className="mx-auto flex w-full max-w-md flex-wrap items-center justify-between px-4 py-3 md:max-w-2xl">
+          {overDayWarning ? (
+            <p className="w-full pb-1 text-xs text-amber-600 dark:text-amber-400">{overDayWarning}</p>
+          ) : null}
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>

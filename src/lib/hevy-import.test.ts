@@ -202,5 +202,22 @@ describe("parseHevyImport", () => {
       expect(bicepCurl.durationMinutes).toBe(10); // 1 set
       expect(squat.durationMinutes).toBe(30); // 3 sets
     });
+
+    // #588: saved durations must be at least a whole minute, so time that
+    // plain rounding would send to 0 rounds up to 1, and no time stays null.
+    it("never produces a zero-minute duration", () => {
+      const text = ["S", "Tue, Mar 28, 2023", "", "Lying Leg Raise", "Set 1: 20s", "", "Bicep Curl", "Set 1: 10 reps"].join("\n");
+      const tiny = parse(text, { sessionTotalMinutes: 1 });
+      expect(tiny.ok).toBe(true);
+      if (!tiny.ok) return;
+      expect(tiny.workouts.find((w) => w.exerciseName === "Lying Leg Raise")!.durationMinutes).toBe(1);
+      // 1 − 20s leaves 40s for the curl's one set: under a minute, still 1.
+      expect(tiny.workouts.find((w) => w.exerciseName === "Bicep Curl")!.durationMinutes).toBe(1);
+
+      // A session total the timed sets use up entirely leaves the rest with no time at all.
+      const spent = parse(text, { sessionTotalMinutes: 0 });
+      if (!spent.ok) return;
+      expect(spent.workouts.find((w) => w.exerciseName === "Bicep Curl")!.durationMinutes).toBeNull();
+    });
   });
 });

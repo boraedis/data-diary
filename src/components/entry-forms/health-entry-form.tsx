@@ -19,6 +19,7 @@ import { HevyImportModal } from "@/components/entry-forms/hevy-import-modal";
 import { NameCatalogField } from "@/components/entry-forms/name-catalog-field";
 import { PlacePicker, type PlaceCreateOptions } from "@/components/entry-forms/place-picker";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { checkWorkoutDurations, crossDomainWarning, workoutMinutes } from "@/lib/duration-limits";
 import type {
   DayPayload,
   HealthPayload,
@@ -111,6 +112,7 @@ export function HealthEntryForm({
   placeCatalog,
   subtypeCatalog,
   placeCreateOptions,
+  otherDayMinutes = 0,
 }: {
   date: string;
   initial: HealthPayload;
@@ -118,6 +120,10 @@ export function HealthEntryForm({
   placeCatalog: PlaceCatalogItem[];
   subtypeCatalog: ExerciseSubtypeItem[];
   placeCreateOptions: PlaceCreateOptions;
+  /** Everything else logged on this day, in minutes (entertainment,
+   * movies, TV, sports, books, games), for the cross-domain warning
+   * (#588). Workouts are this form's own live rows, added on top. */
+  otherDayMinutes?: number;
 }) {
   const router = useRouter();
   const [health, setHealth] = useState<{
@@ -130,6 +136,7 @@ export function HealthEntryForm({
     sick: initial.sick,
   });
   const [workouts, setWorkouts] = useState<WorkoutDraft[]>(() => toDrafts(initial.workouts));
+  const overDayWarning = crossDomainWarning(otherDayMinutes + workouts.reduce((sum, w) => sum + workoutMinutes(w), 0));
   const [exercises, setExercises] = useState<ExerciseCatalogItem[]>(exerciseCatalog);
   const [places, setPlaces] = useState<PlaceCatalogItem[]>(placeCatalog);
   const [subtypes, setSubtypes] = useState<ExerciseSubtypeItem[]>(subtypeCatalog);
@@ -277,6 +284,12 @@ export function HealthEntryForm({
     // than guessing — but the day can't save until it's filled in.
     if (workouts.some(isIncomplete)) {
       setError("Subtype is required for all workouts");
+      return;
+    }
+
+    const durationError = checkWorkoutDurations(workouts);
+    if (durationError) {
+      setError(durationError);
       return;
     }
 
@@ -608,7 +621,10 @@ export function HealthEntryForm({
       />
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">
+        <div className="mx-auto flex w-full max-w-md flex-wrap items-center justify-between px-4 py-3 md:max-w-2xl">
+          {overDayWarning ? (
+            <p className="w-full pb-1 text-xs text-amber-600 dark:text-amber-400">{overDayWarning}</p>
+          ) : null}
           <span className="text-sm">
             {error ? (
               <span className="text-destructive">{error}</span>
