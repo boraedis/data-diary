@@ -26,7 +26,6 @@ export default async function HappinessEntryPage({
         initial={{
           happiness: day.happiness,
           happinessReason: day.happinessReason,
-          journal: day.journal,
           dayType: day.dayType,
         }}
       />

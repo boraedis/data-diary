@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DayPayload, HappinessPayload } from "@/lib/days";
 import { PercentInput } from "../ui/percent-input";
@@ -28,8 +27,9 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  // Journal entries are the main thing worth protecting here (issue #143) —
-  // easy to lose a paragraph of writing to an accidental nav click.
+  // Unsaved-changes guard (issue #143). The journal, the main thing this
+  // originally protected, now lives in its own section (#340), but losing
+  // an edited score or reason to a stray nav click is still worth a prompt.
   const [dirty, setDirty] = useState(false);
   useUnsavedChangesGuard(dirty);
 
@@ -61,7 +61,6 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
       setHappinessState({
         happiness: saved.happiness,
         happinessReason: saved.happinessReason,
-        journal: saved.journal,
         dayType: saved.dayType,
       });
       setDirty(false);
@@ -99,15 +98,6 @@ export function HappinessEntryForm({ date, initial }: { date: string; initial: H
               id="reason"
               value={happiness.happinessReason ?? ""}
               onChange={(e) => set("happinessReason", e.target.value || null)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="journal">Journal</Label>
-            <Textarea
-              id="journal"
-              rows={4}
-              value={happiness.journal ?? ""}
-              onChange={(e) => set("journal", e.target.value || null)}
             />
           </div>
           <div className="space-y-1.5">

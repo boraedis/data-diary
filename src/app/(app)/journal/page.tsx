@@ -41,7 +41,7 @@ function EntryCard({ entry, query }: { entry: JournalEntry; query: string }) {
     <Card>
       <CardContent className="flex flex-col gap-2 py-4">
         {/* Links to the day as a whole rather than straight to the
-            happiness section that owns the journal field: reading an old
+            journal section that owns the field: reading an old
             entry, the usual next question is what the rest of that day
             looked like, and the day hub is one hop from the editor. */}
         <Link
