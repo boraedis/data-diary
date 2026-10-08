@@ -292,6 +292,33 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
     });
   }
 
+  // Where you slept most (#531). Gated like the report's location table: on
+  // nights *with a location recorded*, since most nights have none. Weighted
+  // under the average so it only surfaces once health has room for a
+  // second sleep card.
+  const located = sleep.locations;
+  const topLocation = located.rows.find((row) => !row.other && row.nights > 0);
+  if (topLocation && located.locatedNights >= MIN_DAYS_FOR_AVERAGE) {
+    const priorTop = located.rows.find((row) => row.label === topLocation.label);
+    add({
+      id: "sleep-location",
+      domain: "health",
+      kicker: "Where you slept most",
+      value: topLocation.label,
+      unit: null,
+      headline: `${topLocation.nights} of ${located.locatedNights} nights with a location recorded.`,
+      detail:
+        located.priorLocatedNights >= MIN_DAYS_FOR_AVERAGE && priorTop
+          ? `${priorTop.priorNights} of ${located.priorLocatedNights} in ${priorLabel}.`
+          : null,
+      items: located.rows
+        .filter((row) => row !== topLocation && !row.other && row.nights > 0)
+        .slice(0, 2)
+        .map((row) => row.label),
+      weight: 64,
+    });
+  }
+
   if (exercise.daysTrained > 0) {
     add({
       id: "days-trained",
