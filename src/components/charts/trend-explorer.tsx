@@ -17,6 +17,7 @@ import {
   formatCyclePosition,
   groupByPeriod,
   poolCircularWindow,
+  rangeForSelection,
   type Cycle,
   type Period,
 } from "@/lib/viz/bin";
@@ -209,6 +210,14 @@ export function TrendExplorer<T extends { date: string }>({
     if (data.length === 0) return null;
     return [parseDate(data[0].date), parseDate(data[data.length - 1].date)];
   }, [data]);
+
+  // Dragging across the chart (#110) sets the same range the picker does,
+  // so the two are one control. Not offered on a fold, whose x positions
+  // are reference dates in one stand-in year rather than a span of real
+  // time to narrow to.
+  const selectRange = (selection: [Date, Date] | null) => {
+    setRange(selection && domain && !isCycle(bucketing) ? rangeForSelection(bucketing, selection, domain) : null);
+  };
 
   // Timeline periods and fold positions both reduce to "a start date and
   // its rows" here — all the point math below needs from either.
@@ -424,6 +433,7 @@ export function TrendExplorer<T extends { date: string }>({
               yMin={yMin}
               yTickFormat={yTickFormat}
               ariaLabel={ariaLabel}
+              onSelectRange={cycle === null ? selectRange : undefined}
             />
           )}
         </ResponsiveChart>

@@ -13,7 +13,7 @@ import {
 import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { TimeRangePicker } from "@/components/charts/interactive/time-range-picker";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
-import { groupByPeriod, type Period } from "@/lib/viz/bin";
+import { groupByPeriod, rangeForSelection, type Period } from "@/lib/viz/bin";
 import { parseDate } from "@/lib/date";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDuration } from "@/lib/viz/format";
@@ -267,6 +267,10 @@ export function TrainingVolumeChart({ data, rows }: { data: TrainingDay[]; rows:
               yDomain={yDomain}
               valueFormat={formatDuration}
               dateFormat="monthYear"
+              // Drag across the chart to narrow the range picker's span (#110).
+              onSelectRange={(selection) =>
+                setRange(selection && fullDomain ? rangeForSelection(period, selection, fullDomain) : null)
+              }
               ariaLabel="Average daily training duration over time. Use the legend to isolate a category or exercise; arrow keys inspect individual buckets."
             />
           )}
