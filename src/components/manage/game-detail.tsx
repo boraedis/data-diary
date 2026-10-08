@@ -7,7 +7,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
+import { formatDuration, formatHoursTotal } from "@/lib/viz/format";
 import type { GameCatalogItem, GameUsage } from "@/lib/days";
 import type { GameCategoryItem, GameSubcategoryItem } from "@/lib/catalog-admin";
 
@@ -28,6 +30,10 @@ export function GameDetail({
   const [subtype, setSubtype] = useState(initial.subtype ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sessions with no duration recorded add nothing rather than blocking the
+  // total, so it reads as "time logged", not "time played".
+  const totalMinutes = usage.sessions.reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0);
 
   const typeNames = categories.map((c) => c.name);
   const subtypeNames = categories.flatMap((c) => c.subcategories.map((s) => s.name));
@@ -149,6 +155,27 @@ export function GameDetail({
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card size="sm">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Session history</CardTitle>
+            {usage.sessions.length > 0 ? (
+              <span className="font-mono text-sm text-muted-foreground">{formatHoursTotal(totalMinutes / 60)} total</span>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+          <CatalogUsageHistory
+            history={usage.sessions.map((s) => ({
+              date: s.date,
+              label: s.durationMinutes === null ? null : formatDuration(s.durationMinutes / 60),
+              secondary: [s.deviceType, s.locationType].filter(Boolean).join(" · ") || null,
+            }))}
+            daySegment="entertainment"
+          />
         </CardContent>
       </Card>
     </>
