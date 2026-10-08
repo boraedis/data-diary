@@ -192,7 +192,8 @@ together by the workflows in `.github/workflows/`:
   branch and as the fallback database for stray Preview Deployments.
 - **A branch per open PR** — `pr-db-branch-create.yml` creates (and
   `pr-db-branch-delete.yml` later deletes) a disposable Neon branch named
-  `pr-<N>` for every PR into `main`, copy-on-write branched from
+  `pr-<N>` for every PR into `main` or into an `epic/*` branch (see
+  `AGENTS.md`'s "Epic branches"), copy-on-write branched from
   `production` (Neon has no "create an empty branch" option), with that
   PR's `schema.ts` already pushed to it. Immediately after, the workflow
   runs `scripts/seed-pr-fixture.mjs`, which TRUNCATEs everything the branch
@@ -204,12 +205,16 @@ together by the workflows in `.github/workflows/`:
   actual Vercel Preview Deployment) both fetch the connection string
   directly from the Neon API instead.
 
+- **Epic sub-issues** — PRs merged into an `epic/*` branch don't trigger
+  GitHub's `Closes #N` (it only acts on the default branch), so
+  `epic-subissue-close.yml` closes the issues those PRs reference instead.
+
 - **Backups** — `scheduled-backup.yml` dumps production weekly into the
   private [`boraedis/data-diary-backups`](https://github.com/boraedis/data-diary-backups)
   repo, independent of Neon's own point-in-time restore. See
   [Backups](#backups) below.
 
-`ci.yml` runs on every PR into `main`: lint, `next typegen` + `tsc --noEmit`,
+`ci.yml` runs on every PR into `main` or an `epic/*` branch: lint, `next typegen` + `tsc --noEmit`,
 and a `next build` against the QA database (every page in the app is
 `export const dynamic = "force-dynamic"`, so the build itself never queries
 the database — but a few modules read env vars at import time, so real

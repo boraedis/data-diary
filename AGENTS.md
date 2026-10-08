@@ -305,7 +305,9 @@ concern if something private ends up served from one by accident.
   commits on that **same** branch — never a new branch/PR — until it
   merges. Once a PR merges, further changes need a fresh branch/PR even if
   they're "more of the same feature" (see the squash-merge note below for
-  why this matters mechanically, not just procedurally).
+  why this matters mechanically, not just procedurally). Sub-issues of an
+  epic follow the same rule, except their PRs target the epic's branch
+  rather than `main`. See "Epic branches" below.
 - After opening or meaningfully updating a PR, post a comment on its linked
   issue summarizing what shipped, mapped against the issue's acceptance
   criteria — and note explicitly what couldn't be verified.
@@ -323,6 +325,47 @@ concern if something private ends up served from one by accident.
   not a sign of lost work. To check whether a branch's changes actually
   landed, diff trees instead: `git diff <main-tip> <branch-tip> --stat` —
   empty output means the content is fully present on `main`.
+
+### Epic branches
+
+Decided on #601 (2026-10-08), starting with the video journal epic (#338).
+A large, net-new feature built across several PRs should only reach `main`
+once it's a ready product, not one sub-issue at a time. Small standalone
+issues keep the plain one-PR-to-`main` flow above; this is for epics.
+
+- **The epic gets a long-lived `epic/<slug>` branch**, cut from `main`
+  (e.g. `epic/video-journal`). It has its own PR into `main`, opened as a
+  draft once the branch has its first merged sub-issue, with
+  `Closes #<epic>` in its body.
+- **Each sub-issue still gets its own branch and PR**, but cut from and
+  targeting the epic branch. Sub-branches can't live *under* the epic's
+  name: git can't have both `epic/video-journal` and
+  `epic/video-journal/340-recorder` as refs. Use a normal name like
+  `claude/340-video-recorder`. Sub-issue PRs say `Part of #<epic>` plus
+  `Closes #<sub-issue>`, and squash-merge into the epic branch.
+- **A sub-issue closes when its PR merges into the epic branch.** GitHub
+  only acts on `Closes #N` for merges into the default branch, so
+  `.github/workflows/epic-subissue-close.yml` does it for `epic/**`
+  merges. The epic issue itself closes when the epic PR merges into
+  `main`, through GitHub's normal keyword handling.
+- **CI and per-PR databases cover epic work too.** `ci.yml`,
+  `pr-db-branch-create.yml` and `pr-db-branch-delete.yml` trigger on PRs
+  into `epic/**` as well as `main`. A sub-issue PR with a schema change gets
+  its own `pr-<N>` Neon branch, and `npm run dev:pr` works on it as usual.
+  The epic PR gets one too, which is the place to test the integrated
+  feature. Production only sees the schema when the epic merges
+  (`migrate-prod.yml` still runs on pushes to `main` only).
+- **Keep the epic branch current by merging `main` into it, never
+  rebasing.** Sub-branches are cut from it, so rewriting its history
+  strands them. A sub-branch that needs work merged into the epic after it
+  was cut merges the epic branch in the same way.
+- **Merge the epic PR into `main` with a merge commit, not a squash.**
+  Each sub-issue is already one squashed commit on the epic branch, so a
+  merge commit keeps one commit per sub-issue on `main` (readable history
+  and `git bisect` granularity). Squashing would collapse the whole epic
+  into a single commit. Because of that merge commit, the squash-merge
+  gotcha above applies between a sub-branch and its epic branch, but not
+  between the epic branch and `main`.
 
 ## Working with GitHub issues
 

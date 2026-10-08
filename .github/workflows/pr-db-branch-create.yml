@@ -1,6 +1,7 @@
 name: PR database branch
 
-# Gives every PR into main its own disposable Neon Postgres branch, with
+# Gives every PR into main — or into an `epic/*` branch (#601), since a
+# sub-issue PR there can carry a schema change too — its own disposable Neon Postgres branch, with
 # this PR's schema changes already applied and a small made-up fixture
 # dataset in it (scripts/seed-pr-fixture.mjs) — not real diary data. Run
 # `npm run dev:pr` locally (see scripts/dev-pr.mjs) to point .env.local at
@@ -36,7 +37,7 @@ name: PR database branch
 # that can't happen unnoticed again.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "epic/**"]
     types: [opened, reopened, synchronize]
 
 permissions:
