@@ -4148,13 +4148,34 @@ export async function updateGameCatalogEntry(
   return updated;
 }
 
-// Only real block — gameSessions.gameId is onDelete: "restrict".
-export type GameUsage = { sessionCount: number };
+// `sessionCount` is the only real delete block (gameSessions.gameId is
+// onDelete: "restrict"). `sessions` backs the game page's Session history
+// card (#589): the way to find a bad entry (a 30h Backgammon session) and
+// jump to its day to fix it, newest first like every other catalog
+// history list.
+export type GameUsage = {
+  sessionCount: number;
+  sessions: {
+    date: string;
+    durationMinutes: number | null;
+    deviceType: string | null;
+    locationType: string | null;
+  }[];
+};
 
 export async function getGameUsage(id: number): Promise<GameUsage> {
   const db = getDb();
-  const rows = await db.select({ id: gameSessions.id }).from(gameSessions).where(eq(gameSessions.gameId, id));
-  return { sessionCount: rows.length };
+  const sessions = await db
+    .select({
+      date: gameSessions.date,
+      durationMinutes: gameSessions.durationMinutes,
+      deviceType: gameSessions.deviceType,
+      locationType: gameSessions.locationType,
+    })
+    .from(gameSessions)
+    .where(eq(gameSessions.gameId, id))
+    .orderBy(desc(gameSessions.date), desc(gameSessions.id));
+  return { sessionCount: sessions.length, sessions };
 }
 
 export async function deleteGameCatalogEntry(id: number): Promise<void> {
