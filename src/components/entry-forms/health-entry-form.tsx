@@ -14,9 +14,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { CatalogPicker } from "@/components/entry-forms/catalog-picker";
 import { ExercisePicker, type ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
 import { HevyImportModal } from "@/components/entry-forms/hevy-import-modal";
+import { NameCatalogField } from "@/components/entry-forms/name-catalog-field";
+import { PlacePicker, type PlaceCreateOptions } from "@/components/entry-forms/place-picker";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type {
   DayPayload,
@@ -26,6 +27,7 @@ import type {
   WorkoutSetPayload,
 } from "@/lib/days";
 import type { HevyParsedWorkout } from "@/lib/hevy-import";
+import type { ExerciseSubtypeItem } from "@/lib/catalog-admin";
 import type { WorkoutDataSource } from "@/db/schema";
 
 type WorkoutDraft = {
@@ -107,11 +109,15 @@ export function HealthEntryForm({
   initial,
   exerciseCatalog,
   placeCatalog,
+  subtypeCatalog,
+  placeCreateOptions,
 }: {
   date: string;
   initial: HealthPayload;
   exerciseCatalog: ExerciseCatalogItem[];
   placeCatalog: PlaceCatalogItem[];
+  subtypeCatalog: ExerciseSubtypeItem[];
+  placeCreateOptions: PlaceCreateOptions;
 }) {
   const router = useRouter();
   const [health, setHealth] = useState<{
@@ -126,6 +132,7 @@ export function HealthEntryForm({
   const [workouts, setWorkouts] = useState<WorkoutDraft[]>(() => toDrafts(initial.workouts));
   const [exercises, setExercises] = useState<ExerciseCatalogItem[]>(exerciseCatalog);
   const [places, setPlaces] = useState<PlaceCatalogItem[]>(placeCatalog);
+  const [subtypes, setSubtypes] = useState<ExerciseSubtypeItem[]>(subtypeCatalog);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -214,6 +221,27 @@ export function HealthEntryForm({
 
   function handlePlaceCreated(item: PlaceCatalogItem) {
     setPlaces((prev) => [...prev, item]);
+  }
+
+  function handleSubtypeCreated(item: ExerciseSubtypeItem) {
+    // createExerciseSubtype returns the existing row on a duplicate name, so
+    // guard against listing it twice.
+    setSubtypes((prev) =>
+      prev.some((s) => s.id === item.id) ? prev : [...prev, item].sort((a, b) => a.name.localeCompare(b.name))
+    );
+  }
+
+  // Changing the exercise to one in another category drops the variant too:
+  // subtypes are scoped per category (Barbell means nothing on a run), so a
+  // carried-over value would just sit there as an unlisted option.
+  function changeExercise(index: number, exerciseId: number | null) {
+    const prevCategory = exercises.find((e) => e.id === workouts[index].exerciseId)?.category ?? null;
+    const nextCategory = exercises.find((e) => e.id === exerciseId)?.category ?? null;
+    updateWorkout(index, {
+      exerciseId,
+      locationId: null,
+      ...(prevCategory !== nextCategory ? { subtype: null } : {}),
+    });
   }
 
   function handleHevyImport(parsed: HevyParsedWorkout[], locationId: number | null) {
@@ -399,7 +427,7 @@ export function HealthEntryForm({
                       id={`exercise-${wi}`}
                       items={exercises}
                       valueId={workout.exerciseId}
-                      onChange={(id) => updateWorkout(wi, { exerciseId: id, locationId: null })}
+                      onChange={(id) => changeExercise(wi, id)}
                       onCreated={handleExerciseCreated}
                     />
                   </div>
@@ -407,13 +435,23 @@ export function HealthEntryForm({
                   {category ? (
                     <div className="space-y-1.5">
                       <Label htmlFor={`subtype-${wi}`}>Variant</Label>
-                      <Input
+                      {/* A select over the exercise_subtypes catalog for this
+                          exercise's category (#581), not free text — typos
+                          like "Dumbell" were splitting one variant in two.
+                          The column itself stays free text (see the
+                          `workouts.subtype` schema comment), so a historical
+                          value missing from the catalog still shows as its
+                          own option rather than reading as blank. */}
+                      <NameCatalogField
                         id={`subtype-${wi}`}
-                        placeholder="e.g. Barbell, Dumbbell, Machine"
-                        value={workout.subtype ?? ""}
-                        onChange={(e) =>
-                          updateWorkout(wi, { subtype: e.target.value.trim() === "" ? null : e.target.value })
-                        }
+                        value={workout.subtype}
+                        onChange={(value) => updateWorkout(wi, { subtype: value })}
+                        items={subtypes.filter((s) => s.category === category)}
+                        onCreated={(item) => handleSubtypeCreated({ ...item, category })}
+                        apiPath="/api/exercise-subtypes"
+                        extraCreateFields={{ category }}
+                        modalTitle="New variant"
+                        emptyLabel="Pick a variant…"
                       />
                     </div>
                   ) : null}
@@ -424,15 +462,13 @@ export function HealthEntryForm({
                       {/* Workout location is the same places catalog day-level
                           places uses (not a category-scoped catalog — see the
                           comment above the `exercises` table in schema.ts). */}
-                      <CatalogPicker
+                      <PlacePicker
                         id={`location-${wi}`}
-                        itemLabel="Place"
-                        items={places}
+                        places={places}
                         valueId={workout.locationId}
                         onChange={(id) => updateWorkout(wi, { locationId: id })}
                         onCreated={handlePlaceCreated}
-                        createApiPath="/api/places"
-                        addLabel="New place"
+                        createOptions={placeCreateOptions}
                       />
                     </div>
                   ) : null}
@@ -567,6 +603,7 @@ export function HealthEntryForm({
         exerciseCatalog={exercises}
         placeCatalog={places}
         onPlaceCreated={handlePlaceCreated}
+        placeCreateOptions={placeCreateOptions}
         onImport={handleHevyImport}
       />
 

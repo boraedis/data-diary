@@ -19,7 +19,7 @@ import type { EntertainmentCatalogItem } from "@/lib/days";
 import type { EntertainmentKindItem } from "@/lib/catalog-admin";
 
 /** Search-and-select-from-catalog + "+ New" modal for entertainment. Unlike
- * the plain CatalogPicker (exercise locations), a new entertainment entry
+ * a flat name-only catalog, a new entertainment entry
  * needs a kind picked alongside its title — the catalog's identity is
  * (kindId, title), not title alone ("Dune" the book and "Dune" the movie
  * are different rows). `detail` is a free-text disambiguator (a year, an

@@ -11,6 +11,7 @@ import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
 import { Legend, useLegendHeight } from "./legend";
 import { drawReferenceLines, NO_REFERENCE_LINES, referenceLineValues, type ReferenceLine } from "./reference-lines";
+import { padDomain } from "@/lib/viz/domain";
 
 // Click-to-toggle legend (`hiddenIds`/`onToggle`) added for the Exercise
 // Trend chart's category/exercise breakdown (#411) — the same pattern
@@ -142,7 +143,10 @@ export type InteractiveLineProps = {
    * never zooms/pans past it. */
   xDomain?: [Date, Date];
   /** Caller-injected y domain — omit to auto-domain (with headroom) from
-   * whatever's currently visible, including band bounds. Auto-domaining
+   * whatever's currently visible, including band bounds. The headroom never
+   * extends below zero when everything visible is non-negative
+   * (`padDomain`, #584), so durations and counts never show a "−1h" strip.
+   * Auto-domaining
    * re-scales the y-axis as you zoom in on the x-axis (each visible slice
    * gets its own well-fit range); pass this explicitly for a fixed scale
    * that shouldn't shift under zoom (e.g. happiness's natural 0-100). */
@@ -521,13 +525,13 @@ export function InteractiveLine({
         }),
     );
     values.push(...referenceLineValues(referenceLines));
-    const [lo, hi] = (d3.extent(values.length ? values : [0, 1]) as [number, number]);
     if (yMin !== undefined) {
+      const hi = d3.max(values) ?? 1;
       const top = Math.max(hi, yMin);
       return [yMin, top + ((top - yMin) * 0.1 || 1)];
     }
-    const pad = (hi - lo) * 0.1 || 1;
-    return [lo - pad, hi + pad];
+    // Floored at zero for non-negative data (#584) — see padDomain.
+    return padDomain(values);
   }, [yDomain, yMin, visibleSeries, effectiveDomain, referenceLines]);
 
   const y = useMemo(

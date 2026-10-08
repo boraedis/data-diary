@@ -204,9 +204,10 @@ function ImpactTrendExplorer({
   }, [shown, timeline, s, e, dayDates, colorOf, selection.people]);
 
   // Fitted to what's visible, so narrowing the range zooms the y-axis too.
-  // Clamped at zero rather than left to InteractiveLine's auto-domain, whose
-  // padding can dip below it — a standing is never negative (positive slots
-  // only), so space under zero would be plot spent on nothing.
+  // Clamped at zero — a standing is never negative (positive slots only),
+  // so space under zero would be plot spent on nothing; the same rule
+  // InteractiveLine's own auto-domain now applies (padDomain, #584), kept
+  // explicit here for its tighter 5% headroom.
   const yDomain = useMemo<[number, number]>(() => {
     let min = Infinity;
     let max = 0;

@@ -12,6 +12,7 @@ import { NameCatalogField } from "@/components/entry-forms/name-catalog-field";
 import { usePendingOpenMatch, type PendingOpen } from "@/lib/use-pending-open";
 import type { EntertainmentLocationTypeItem, SportsDivisionItem, SportsGameTypeItem, SportsSeasonItem } from "@/lib/catalog-admin";
 import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem } from "@/lib/days";
+import { formatMatchup } from "@/lib/sports-matchup";
 
 // The nested shape GET /api/sports actually returns — leagues and teams
 // hydrated onto each sport so the picker cascade (sport -> league -> team)
@@ -598,20 +599,10 @@ function SportsWatchDetailModal({
             </Select>
           </div>
 
-          <TeamSelect
-            id="sports-detail-home"
-            label={sport.isTeamSport ? "Home team" : "Athlete"}
-            value={homeTeamId}
-            onChange={wrapChange(setHomeTeamId)}
-            teams={sport.teams}
-            leagues={sport.leagues}
-            selectedLeagueId={leagueId}
-            onNew={() => {
-              setNewTeamSlot("home");
-              setNewTeamOpen(true);
-            }}
-          />
-
+          {/* Away above home (#583) — the order a US scoreboard or
+              schedule lists them, and the order formatMatchup prints. An
+              individual sport has no away side; its one "Athlete" picker
+              still fills the home slot, so nothing about storage moves. */}
           {sport.isTeamSport ? (
             <TeamSelect
               id="sports-detail-away"
@@ -627,6 +618,20 @@ function SportsWatchDetailModal({
               }}
             />
           ) : null}
+
+          <TeamSelect
+            id="sports-detail-home"
+            label={sport.isTeamSport ? "Home team" : "Athlete"}
+            value={homeTeamId}
+            onChange={wrapChange(setHomeTeamId)}
+            teams={sport.teams}
+            leagues={sport.leagues}
+            selectedLeagueId={leagueId}
+            onNew={() => {
+              setNewTeamSlot("home");
+              setNewTeamOpen(true);
+            }}
+          />
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -894,7 +899,7 @@ export function SportsSection({
     const away = items.flatMap((s) => s.teams).find((t) => t.id === row.awayTeamId);
     const parts = [
       sport?.name ?? "Unknown",
-      home && away ? `${home.name} vs ${away.name}` : (home?.name ?? away?.name ?? null),
+      formatMatchup(away?.name, home?.name),
       row.season,
       row.watchedLive ? "live" : null,
     ].filter(Boolean);
