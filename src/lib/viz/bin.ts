@@ -1,4 +1,4 @@
-import { addDays } from "@/lib/date";
+import { addDays, parseDate, toDateString } from "@/lib/date";
 
 // Shared client-side grouping/binning helper (#16's "binning/grouping
 // helpers" scope item).
@@ -90,6 +90,33 @@ export function groupByPeriod<T>(items: T[], period: Period, getDate: (item: T) 
     }
   }
   return [...buckets.values()].sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/**
+ * The last calendar day of the `period` bucket that begins on `start` (a
+ * bucket's own `start`, as `groupByPeriod` returns it).
+ */
+export function periodEnd(period: Period, start: string): string {
+  if (period === "week") return addDays(start, 6);
+  const [year, month] = start.split("-").map(Number);
+  const months = period === "month" ? 1 : period === "quarter" ? 3 : 12;
+  // Day 0 of the month after the bucket's last is that last month's final
+  // day, which `Date` resolves (leap years included) without a table.
+  return toDateString(new Date(year, month - 1 + months, 0));
+}
+
+/**
+ * The date range a drag across a period-bucketed line chart selects
+ * (`InteractiveLine`'s `onSelectRange`, #110): from the first selected
+ * point's bucket start through the last day of the last selected point's
+ * bucket, clamped to the data's own `domain` so a range picker sharing the
+ * state keeps its thumbs on the track. The points sit on their buckets'
+ * first days, so ending on the last point's own date would cut that bucket
+ * down to one day.
+ */
+export function rangeForSelection(period: Period, selection: [Date, Date], domain: [Date, Date]): [Date, Date] {
+  const end = parseDate(periodEnd(period, toDateString(selection[1])));
+  return [selection[0] < domain[0] ? domain[0] : selection[0], end > domain[1] ? domain[1] : end];
 }
 
 // --- Cyclical folding (#451) ----------------------------------------------

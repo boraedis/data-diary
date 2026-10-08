@@ -6,7 +6,9 @@ import {
   foldByCycle,
   formatCyclePosition,
   groupByPeriod,
+  periodEnd,
   poolCircularWindow,
+  rangeForSelection,
   summarizePeriods,
 } from "@/lib/viz/bin";
 
@@ -125,5 +127,30 @@ describe("cyclical folding", () => {
     expect(formatCyclePosition("weekday", "2000-01-07", true)).toBe("Fri");
     expect(formatCyclePosition("monthOfYear", "2000-02-01", true)).toBe("Feb");
     expect(formatCyclePosition("dayOfYear", "2000-03-14")).toBe("March 14");
+  });
+});
+
+describe("periodEnd", () => {
+  it("finds the last day of each period's bucket", () => {
+    expect(periodEnd("week", "2026-02-09")).toBe("2026-02-15");
+    expect(periodEnd("month", "2026-02-01")).toBe("2026-02-28");
+    expect(periodEnd("month", "2024-02-01")).toBe("2024-02-29");
+    expect(periodEnd("month", "2025-12-01")).toBe("2025-12-31");
+    expect(periodEnd("quarter", "2026-10-01")).toBe("2026-12-31");
+    expect(periodEnd("year", "2026-01-01")).toBe("2026-12-31");
+  });
+});
+
+describe("rangeForSelection", () => {
+  const domain: [Date, Date] = [new Date(2020, 0, 15), new Date(2023, 5, 10)];
+  it("runs from the first point through the end of the last point's bucket", () => {
+    const [from, to] = rangeForSelection("month", [new Date(2021, 2, 1), new Date(2021, 5, 1)], domain);
+    expect(from).toEqual(new Date(2021, 2, 1));
+    expect(to).toEqual(new Date(2021, 5, 30));
+  });
+  it("clamps to the data's own extent", () => {
+    const [from, to] = rangeForSelection("year", [new Date(2020, 0, 1), new Date(2023, 0, 1)], domain);
+    expect(from).toEqual(domain[0]);
+    expect(to).toEqual(domain[1]);
   });
 });
