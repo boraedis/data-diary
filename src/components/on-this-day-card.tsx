@@ -1,0 +1,175 @@
+import Link from "next/link";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { OnThisDayFallback, OnThisDayHome, OnThisDayYear } from "@/lib/on-this-day";
+import type { RecapMoment } from "@/lib/recap-moments";
+import { formatDate } from "@/lib/viz/format";
+
+// Home's "on this day" teaser (#522). One line by design: the scope on
+// #522 keeps Home to the single strongest moment and moves everything else
+// to /on-this-day, which this card is the only way into (no section-link
+// tile — it's a daily surface, not a section).
+//
+// Because it's the only way in, it always renders. The first cut hid it on
+// a date with no highlight, which left /on-this-day unreachable on exactly
+// the days you'd want to browse past dates — so a quiet date gets one muted
+// line instead of a highlight, and the link stays.
+//
+// `OnThisDayYearCard` below is the full page's per-year card, kept beside
+// it so the two surfaces format a moment the same way.
+
+export function yearsAgoLabel(yearsAgo: number): string {
+  return yearsAgo === 1 ? "1 year ago" : `${yearsAgo} years ago`;
+}
+
+export function OnThisDayCard({ highlight, fallback }: OnThisDayHome) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>On this day</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {highlight ? (
+          <Link href={highlight.href} className="group flex flex-col gap-0.5">
+            <span className="font-medium group-hover:underline">{highlight.moment.headline}</span>
+            <span className="text-sm text-muted-foreground">
+              {yearsAgoLabel(highlight.yearsAgo)} · {formatDate(highlight.moment.date, "dayYear")}
+              {highlight.moment.detail ? ` · ${highlight.moment.detail}` : null}
+            </span>
+          </Link>
+        ) : fallback ? (
+          <FallbackLine fallback={fallback} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Nothing logged on this date in past years.</p>
+        )}
+        <Link href="/on-this-day" className="text-sm text-muted-foreground hover:text-foreground">
+          See all years &rarr;
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The happiest-past-year fallback. Quieter than a real highlight — normal
+ * weight, no accent — so a milestone still stands out on the days there is
+ * one. */
+function FallbackLine({ fallback }: { fallback: OnThisDayFallback }) {
+  const where = fallback.places[0] ?? null;
+  const who = fallback.people.length > 0 ? `with ${listNames(fallback.people)}` : null;
+  return (
+    <Link href={fallback.href} className="group flex flex-col gap-0.5">
+      <span className="text-sm group-hover:underline">
+        Your happiest {formatDate(fallback.date, "short")}: {fallback.happiness} / 100
+      </span>
+      <span className="text-sm text-muted-foreground">
+        {[where, who, `${yearsAgoLabel(fallback.yearsAgo)}`].filter(Boolean).join(" · ")}
+      </span>
+    </Link>
+  );
+}
+
+/** "Jordan", "Jordan and Priya", "Jordan, Priya and 2 others" — two names
+ * at most, so a busy day doesn't wrap the card. */
+function listNames(names: string[]): string {
+  if (names.length <= 2) return names.join(" and ");
+  const rest = names.length - 2;
+  return `${names[0]}, ${names[1]} and ${rest} other${rest === 1 ? "" : "s"}`;
+}
+
+/** The full page's per-year card. The year Home calls out for this date
+ * (`entry.featured`) is pinned to the top by the loader and marked here
+ * with a ring and a label, so the page opens on the same thing Home
+ * showed. */
+export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {
+  const { moment, otherMoment, facts } = entry;
+  return (
+    <Card className={entry.featured ? "ring-2 ring-primary" : undefined}>
+      <CardHeader>
+        <CardTitle className="flex items-baseline justify-between gap-3">
+          <span className="flex items-baseline gap-2">
+            {entry.year}
+            {entry.featured ? (
+              <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+                {entry.featured === "moment" ? "Top pick" : `Happiest ${formatDate(entry.date, "short")}`}
+              </span>
+            ) : null}
+          </span>
+          <span className="text-sm font-normal text-muted-foreground">
+            {yearsAgoLabel(entry.yearsAgo)} · {formatDate(entry.date, "weekdayYear")}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {moment ? <MomentLine moment={moment} primary /> : null}
+        {otherMoment ? <MomentLine moment={otherMoment} primary={false} /> : null}
+
+        {facts ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            {facts.happiness !== null ? (
+              <>
+                <dt className="text-muted-foreground">Happiness</dt>
+                <dd
+                  className={`tabular-nums ${entry.featured === "happiest" ? "font-medium text-primary" : ""}`}
+                >
+                  {facts.happiness} / 100
+                </dd>
+              </>
+            ) : null}
+            {facts.places.length > 0 ? (
+              <>
+                <dt className="text-muted-foreground">Where</dt>
+                <dd>{facts.places.join(", ")}</dd>
+              </>
+            ) : null}
+            {facts.people.length > 0 ? (
+              <>
+                <dt className="text-muted-foreground">With</dt>
+                <dd>{facts.people.join(", ")}</dd>
+              </>
+            ) : null}
+          </dl>
+        ) : null}
+
+        <div className="flex gap-4 text-sm">
+          {facts ? (
+            <Link href={`/day/${entry.date}`} className="text-muted-foreground hover:text-foreground">
+              Open day &rarr;
+            </Link>
+          ) : null}
+          {entry.recapHref ? (
+            <Link href={entry.recapHref} className="text-muted-foreground hover:text-foreground">
+              {entry.year} recap &rarr;
+            </Link>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * One moment on the full page, with its score called out on the right.
+ *
+ * The score is the engine's magnitude — the number every pick on this page
+ * and on Home is ranked by — shown so the ranking can be checked by eye
+ * while the weights are still being tuned (asked for on #522). Hovering it
+ * names the kind, since a 0.90 means something different for a first
+ * country (fixed) than for a happiness spike (computed).
+ */
+function MomentLine({ moment, primary }: { moment: RecapMoment; primary: boolean }) {
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-3 border-l-2 pl-3 ${primary ? "border-primary" : "border-border"}`}
+    >
+      <Link href={`/day/${moment.date}`} className="group flex min-w-0 flex-col gap-0.5">
+        <span className={`${primary ? "font-medium" : "text-sm"} group-hover:underline`}>{moment.headline}</span>
+        {moment.detail ? <span className="text-sm text-muted-foreground">{moment.detail}</span> : null}
+      </Link>
+      <span
+        className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+        title={`Score (${moment.kind})`}
+      >
+        {moment.magnitude.toFixed(2)}
+      </span>
+    </div>
+  );
+}

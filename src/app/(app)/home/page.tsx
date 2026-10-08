@@ -2,7 +2,10 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GoToDate } from "@/components/go-to-date";
 import { RecentDaysScroller } from "@/components/recent-days-scroller";
+import { OnThisDayCard } from "@/components/on-this-day-card";
+import { todayDateString } from "@/lib/date";
 import { getHomeDashboardData, type BirthdayEntry } from "@/lib/home";
+import { getOnThisDayForHome } from "@/lib/on-this-day";
 import { countUnseen, getUnseenRecaps } from "@/lib/recap-seen";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +50,11 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 export default async function HomePage() {
-  const [data, unseenRecaps] = await Promise.all([getHomeDashboardData(), getUnseenRecaps()]);
+  const [data, unseenRecaps, onThisDay] = await Promise.all([
+    getHomeDashboardData(),
+    getUnseenRecaps(),
+    getOnThisDayForHome(todayDateString()),
+  ]);
   const newRecaps = countUnseen(unseenRecaps);
   const todayDate = data.recentDays[data.recentDays.length - 1]?.date ?? "";
 
@@ -72,30 +79,35 @@ export default async function HomePage() {
 
       {/* Bottom section */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {/* Upcoming birthdays */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Upcoming birthdays</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data.upcomingBirthdays.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No people with birthdays on file.</p>
-            ) : (
-              <ul className="flex flex-col divide-y">
-                {data.upcomingBirthdays.map((entry) => (
-                  <li key={entry.name} className="flex items-baseline justify-between gap-4 py-2 first:pt-0 last:pb-0">
-                    <span className="font-medium">{entry.name}</span>
-                    <span
-                      className={`shrink-0 text-sm ${entry.daysUntil === 0 ? "font-medium text-primary" : "text-muted-foreground"}`}
-                    >
-                      {birthdayNote(entry)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-4">
+          {/* On this day (#522) — always shown: it's the only way into /on-this-day */}
+          <OnThisDayCard {...onThisDay} />
+
+          {/* Upcoming birthdays */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Upcoming birthdays</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {data.upcomingBirthdays.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No people with birthdays on file.</p>
+              ) : (
+                <ul className="flex flex-col divide-y">
+                  {data.upcomingBirthdays.map((entry) => (
+                    <li key={entry.name} className="flex items-baseline justify-between gap-4 py-2 first:pt-0 last:pb-0">
+                      <span className="font-medium">{entry.name}</span>
+                      <span
+                        className={`shrink-0 text-sm ${entry.daysUntil === 0 ? "font-medium text-primary" : "text-muted-foreground"}`}
+                      >
+                        {birthdayNote(entry)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Navigation column */}
         <div className="flex flex-col gap-3">
