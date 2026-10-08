@@ -8,6 +8,7 @@ import { styleAxis } from "./axis";
 import { MARK_SPECS } from "./marks";
 import { ChartTooltip, type TooltipRow } from "./tooltip";
 import type { ReferenceLine } from "./reference-lines";
+import { padDomain } from "@/lib/viz/domain";
 
 // InteractiveStrip (#444) — "how does this value differ between groups":
 // one row per group, each day a faint dot, and the group's mean drawn over
@@ -130,10 +131,10 @@ export function InteractiveStrip({
       if (showPoints) for (const v of r.values) extent.push(v.value);
     }
     for (const l of referenceLines ?? []) extent.push(l.value);
-    let [lo, hi] = (d3.extent(extent.length ? extent : [0, 1]) as [number, number]);
-    const pad = (hi - lo) * 0.08 || 1;
-    lo -= pad;
-    hi += pad;
+    // Floored at zero for non-negative data (#584) — a group's CI can still
+    // dip below it on its own, so those whiskers clip at the axis rather
+    // than inventing negative hours.
+    let [lo, hi] = padDomain(extent, 0.08);
     if (valueBounds) {
       lo = Math.max(valueBounds[0], lo);
       hi = Math.min(valueBounds[1], hi);

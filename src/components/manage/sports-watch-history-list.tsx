@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { SportsWatchHistoryEntry } from "@/lib/days";
+import { formatMatchup } from "@/lib/sports-matchup";
 
 /**
  * Shared watch-history list for the sports league/team detail pages —
@@ -34,7 +35,7 @@ export function SportsWatchHistoryList({
           const opponent = isHome ? w.awayTeamName : w.homeTeamName;
           matchup = opponent ? `${isHome ? "vs" : "@"} ${opponent}` : null;
         } else {
-          matchup = w.homeTeamName && w.awayTeamName ? `${w.homeTeamName} vs ${w.awayTeamName}` : null;
+          matchup = w.homeTeamName && w.awayTeamName ? formatMatchup(w.awayTeamName, w.homeTeamName) : null;
         }
         return (
           <Link

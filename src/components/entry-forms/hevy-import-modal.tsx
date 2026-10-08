@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Textarea } from "@/components/ui/textarea";
 import { DurationInput } from "@/components/ui/duration-input";
-import { CatalogPicker } from "@/components/entry-forms/catalog-picker";
+import { PlacePicker, type PlaceCreateOptions } from "@/components/entry-forms/place-picker";
 import type { ExerciseCatalogItem } from "@/components/entry-forms/exercise-picker";
 import type { PlaceCatalogItem } from "@/lib/days";
 import { parseHevyImport, type HevyParsedWorkout } from "@/lib/hevy-import";
@@ -27,6 +27,7 @@ export function HevyImportModal({
   exerciseCatalog,
   placeCatalog,
   onPlaceCreated,
+  placeCreateOptions,
   onImport,
 }: {
   open: boolean;
@@ -35,6 +36,7 @@ export function HevyImportModal({
   exerciseCatalog: ExerciseCatalogItem[];
   placeCatalog: PlaceCatalogItem[];
   onPlaceCreated: (item: PlaceCatalogItem) => void;
+  placeCreateOptions: PlaceCreateOptions;
   onImport: (workouts: HevyParsedWorkout[], locationId: number | null) => void;
 }) {
   const [text, setText] = useState("");
@@ -109,15 +111,13 @@ export function HevyImportModal({
 
         <div className="space-y-1.5">
           <Label htmlFor="hevy-location">Location (applies to every workout in this paste)</Label>
-          <CatalogPicker
+          <PlacePicker
             id="hevy-location"
-            itemLabel="Place"
-            items={placeCatalog}
+            places={placeCatalog}
             valueId={locationId}
             onChange={setLocationId}
             onCreated={onPlaceCreated}
-            createApiPath="/api/places"
-            addLabel="New place"
+            createOptions={placeCreateOptions}
           />
         </div>
 

@@ -21,7 +21,8 @@ import { HAPPINESS_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 //
 // No fixed `yDomain` here, deliberately unlike happiness-averager-chart.tsx's
 // own `yDomain={[0, 100]}` — InteractiveScroller's default auto-domain
-// (min/max of whatever's currently VISIBLE, ±10% padding, recomputed live
+// (min/max of whatever's currently VISIBLE, ±10% padding floored at zero
+// — see padDomain in src/lib/viz/domain.ts — recomputed live
 // as you zoom/pan) is exactly the "focus in on the relevant range as you
 // zoom" behavior wanted here; pinning to the metric's full 0-100 range
 // would defeat that by keeping the axis static regardless of zoom level.
