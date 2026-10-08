@@ -12,6 +12,14 @@ import { ChartTooltip, type TooltipRow } from "./tooltip";
 import { Legend, useLegendHeight } from "./legend";
 import { drawReferenceLines, NO_REFERENCE_LINES, referenceLineValues, type ReferenceLine } from "./reference-lines";
 import { padDomain } from "@/lib/viz/domain";
+import {
+  placePointLabels,
+  pointPriorities,
+  pointsSparseEnough,
+  preferredSide,
+  spreadEndLabels,
+  type PointLabelCandidate,
+} from "@/lib/viz/line-labels";
 
 // Click-to-toggle legend (`hiddenIds`/`onToggle`) added for the Exercise
 // Trend chart's category/exercise breakdown (#411) — the same pattern
@@ -39,6 +47,74 @@ const DEFAULT_MARGIN = { top: 12, right: 16, bottom: 28, left: 44 };
 const OVERVIEW_HEIGHT = 64;
 const LEGEND_HEIGHT = 28;
 const MIN_MAIN_HEIGHT = 160;
+
+// On-chart labels (#110). See `lineLabels`/`pointLabels` on the props for
+// when each is drawn.
+const LABEL_FONT_SIZE = 11;
+/** Line height used for both kinds of label's collision box, px. */
+const LABEL_HEIGHT = 14;
+const MAX_AUTO_LINE_LABELS = 6;
+const MAX_AUTO_POINT_LABEL_SERIES = 2;
+/** Below this total width, "auto" line labels give their gutter back to
+ * the plot and leave naming to the legend. */
+const MIN_LINE_LABEL_WIDTH = 480;
+/** The gutter never takes more than this share of the width; longer names
+ * are cut short with an ellipsis. */
+const MAX_GUTTER_SHARE = 0.25;
+const GUTTER_PAD = 8;
+/** A drag shorter than this is a click, not a selection, px. */
+const MIN_SELECT_PX = 6;
+
+let measureNode: SVGTextElement | null | undefined;
+/** Labels repeat ("7.2" in many months), and each measurement forces a
+ * layout, so widths are remembered per text and weight. */
+const measured = new Map<string, number>();
+/** Narrower than any digit or letter at 11px, so `text.length` times this
+ * is a width no real rendering comes in under. Used to reject a dense
+ * series before measuring any of its labels. */
+const MIN_CHAR_WIDTH = 4;
+
+/**
+ * Rendered width of `text` at the labels' size, px. The gutter for line
+ * labels has to be known before the x scale is built, which is before this
+ * chart's own `<svg>` exists to measure into, so this measures in one
+ * shared, hidden `<svg>` on the page, inheriting the page's font as the
+ * real labels do. Where SVG text can't be measured (jsdom, which has no
+ * layout to be right about anyway), it estimates from the character count.
+ */
+function measureLabel(text: string, weight: 400 | 600 = 400): number {
+  if (measureNode === undefined) {
+    measureNode = null;
+    if (typeof document !== "undefined") {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("aria-hidden", "true");
+      svg.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden";
+      const node = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      node.style.fontSize = `${LABEL_FONT_SIZE}px`;
+      svg.appendChild(node);
+      document.body.appendChild(svg);
+      if (typeof node.getComputedTextLength === "function") measureNode = node;
+      else svg.remove();
+    }
+  }
+  if (!measureNode) return text.length * LABEL_FONT_SIZE * (weight === 600 ? 0.62 : 0.58);
+  const key = `${weight}:${text}`;
+  const cached = measured.get(key);
+  if (cached !== undefined) return cached;
+  measureNode.style.fontWeight = String(weight);
+  measureNode.textContent = text;
+  const width = measureNode.getComputedTextLength();
+  measured.set(key, width);
+  return width;
+}
+
+/** `text`, cut to fit `maxWidth` with an ellipsis if it doesn't. */
+function fitLabel(text: string, maxWidth: number, weight: 400 | 600): string {
+  if (measureLabel(text, weight) <= maxWidth) return text;
+  let cut = text;
+  while (cut.length > 1 && measureLabel(`${cut}…`, weight) > maxWidth) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}…`;
+}
 
 export type InteractiveLinePoint = {
   x: Date;
@@ -213,6 +289,47 @@ export type InteractiveLineProps = {
    * without it, so don't combine this with `initialHiddenIds`. */
   showLegend?: boolean;
   hover?: InteractiveLineHover;
+  /** Each visible line's name, in its colour, just right of the plot at
+   * the height its line ends (#110, legacy Averager's `endValueLabel`). In
+   * addition to the legend, not instead of it: the legend is still the
+   * click-to-toggle control. A right gutter is reserved to fit the longest
+   * name, so the plot narrows to make room.
+   *
+   * - "auto" (default): on with two to six visible lines in "x" hover, on a
+   *   plot wide enough to give up the gutter. One line is already named by
+   *   the chart's title. Past six, the names stack into a column nobody can
+   *   match to lines, and "series" hover exists for charts with that many.
+   * - `true` / `false`: always / never. */
+  lineLabels?: "auto" | boolean;
+  /** Each point's value written beside it (#110, legacy Averager's value
+   * labels), above a peak and below a trough. A label is dropped, not
+   * squeezed in, if it would cross any line, cover a marker, or overlap a
+   * label already placed. The last point and the line's extremes are
+   * placed first, so those are the ones that survive a crowded stretch.
+   * See `src/lib/viz/line-labels.ts`.
+   *
+   * - "auto" (default): on for one or two visible lines in "x" hover, for
+   *   each line whose points sit far enough apart that every neighbouring
+   *   pair of labels clears each other (yearly buckets, a recap's twelve
+   *   months; not a ten-year monthly trend).
+   * - `true`: every visible line, dense or not, still subject to the
+   *   collision rules. `false`: never. */
+  pointLabels?: "auto" | boolean;
+  /** Formats a point label — defaults to `valueFormat`. */
+  pointLabelFormat?: (value: number) => string;
+  /** Turns on drag-to-select (#110's "simple x-axis zoom, no scroll"):
+   * drag across the plot and, on release, this receives the dates of the
+   * first and last points inside the selection. Double-clicking calls it
+   * with `null`. The chart doesn't zoom itself. The caller narrows its own
+   * data range, the same state its range picker drives, so the drag and
+   * the picker are one control rather than two competing notions of what's
+   * shown (TrendExplorer re-buckets to the new range). A selection holding
+   * fewer than two points is ignored: one point isn't a trend.
+   *
+   * Mouse and pen only. A touch drag scrolls the page as it always has, and
+   * keyboard users have the range picker. Ignored when `zoom` is "direct"
+   * or "both", whose d3-zoom drag-to-pan owns the same gesture. */
+  onSelectRange?: (range: [Date, Date] | null) => void;
 };
 
 type ResolvedSeries = InteractiveLineSeries & { color: string };
@@ -463,9 +580,11 @@ export function InteractiveLine({
   initialHiddenIds,
   showLegend = true,
   hover = "x",
+  lineLabels = "auto",
+  pointLabels = "auto",
+  pointLabelFormat,
+  onSelectRange,
 }: InteractiveLineProps) {
-  const MARGIN = { ...DEFAULT_MARGIN, ...margin };
-
   const resolvedSeries = useMemo(() => resolveSeriesColors(series), [series]);
 
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set(initialHiddenIds));
@@ -473,6 +592,32 @@ export function InteractiveLine({
     () => resolvedSeries.filter((s) => !hiddenIds.has(s.id)),
     [resolvedSeries, hiddenIds],
   );
+
+  const showLineLabels =
+    lineLabels === "auto"
+      ? hover === "x" &&
+        visibleSeries.length >= 2 &&
+        visibleSeries.length <= MAX_AUTO_LINE_LABELS &&
+        width >= MIN_LINE_LABEL_WIDTH
+      : lineLabels && visibleSeries.length > 0;
+  const showPointLabels =
+    pointLabels === "auto"
+      ? hover === "x" && visibleSeries.length <= MAX_AUTO_POINT_LABEL_SERIES
+      : pointLabels;
+
+  // The line labels' gutter: the longest visible name, capped. Names are
+  // fitted to the capped width once here, so the drawing below and the
+  // margin agree on what fits.
+  const lineLabelTexts = useMemo(() => {
+    if (!showLineLabels) return null;
+    const maxWidth = Math.max(0, width * MAX_GUTTER_SHARE - GUTTER_PAD);
+    return new Map(visibleSeries.map((s) => [s.id, fitLabel(s.label, maxWidth, 600)]));
+  }, [showLineLabels, visibleSeries, width]);
+  const gutter = lineLabelTexts
+    ? GUTTER_PAD + Math.max(0, ...Array.from(lineLabelTexts.values(), (t) => measureLabel(t, 600))) + 4
+    : 0;
+  const MARGIN = { ...DEFAULT_MARGIN, ...margin };
+  MARGIN.right = Math.max(MARGIN.right, gutter);
 
   const fullXDomain = useMemo<[Date, Date]>(() => {
     if (xDomain) return xDomain;
@@ -540,6 +685,62 @@ export function InteractiveLine({
   );
 
   const crosshair = useLineCrosshair(visibleSeries, x, y, hover);
+
+  // Drag-to-select (see `onSelectRange`). The live drag is plain React
+  // state: it only moves the selection <div> on the HTML overlay, never
+  // anything `useD3` depends on, so a drag doesn't rebuild the SVG.
+  const selectable = onSelectRange !== undefined && !hasDirectZoom;
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
+  // clientX against the overlay's own box rather than offsetX: once the
+  // pointer is captured it can leave the overlay, and offsetX is then
+  // measured from whatever's under it.
+  const localX = (event: React.PointerEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return Math.min(innerWidth, Math.max(0, event.clientX - rect.left));
+  };
+  const finishDrag = (from: number, to: number) => {
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    if (!onSelectRange || hi - lo < MIN_SELECT_PX) return;
+    const dates = visibleSeries
+      .flatMap((s) => s.points.map((p) => p.x))
+      .filter((d) => {
+        const px = x(d);
+        return px >= lo && px <= hi;
+      })
+      .sort((a, b) => a.getTime() - b.getTime());
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    if (first && last && last.getTime() > first.getTime()) onSelectRange([first, last]);
+  };
+  const overlayHandlers = selectable
+    ? {
+        ...crosshair.handlers,
+        onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+          if (event.button !== 0 || event.pointerType === "touch") return;
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          const at = localX(event);
+          setDrag({ from: at, to: at });
+        },
+        onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
+          if (drag) {
+            const to = localX(event);
+            setDrag((cur) => (cur ? { ...cur, to } : cur));
+          } else {
+            crosshair.handlers.onPointerMove(event);
+          }
+        },
+        onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+          if (!drag) return;
+          event.currentTarget.releasePointerCapture?.(event.pointerId);
+          setDrag(null);
+          finishDrag(drag.from, localX(event));
+        },
+        onPointerCancel: () => setDrag(null),
+        onDoubleClick: () => onSelectRange?.(null),
+      }
+    : crosshair.handlers;
+  const dragging = drag !== null && Math.abs(drag.to - drag.from) >= MIN_SELECT_PX;
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<{
@@ -631,6 +832,15 @@ export function InteractiveLine({
     const tx = -baseX(domain[0]) * k;
     selection.call(behavior.transform, d3.zoomIdentity.translate(tx, 0).scale(k));
   }, [visibleDomain, hasDirectZoom, fullXDomain, innerWidth]);
+
+  // Consumers pass inline formatters, so reading this through a ref keeps
+  // it out of the rebuild's deps below: a new arrow each render (and hover
+  // re-renders on every pointer move) would otherwise redraw the whole SVG
+  // each time. Declared before `useD3`, so it's current when that runs.
+  const labelFormatRef = useRef(pointLabelFormat ?? valueFormat);
+  useEffect(() => {
+    labelFormatRef.current = pointLabelFormat ?? valueFormat;
+  }, [pointLabelFormat, valueFormat]);
 
   const ref = useD3<SVGSVGElement>(
     (svg) => {
@@ -730,8 +940,122 @@ export function InteractiveLine({
           .attr("stroke", "var(--card)")
           .attr("stroke-width", MARK_SPECS.marker.ringWidth);
       }
+
+      // Only what's inside the visible x domain gets a label: under brush
+      // or direct zoom, points outside it are drawn off the plot.
+      const [d0, d1] = x.domain();
+      const inDomain = (p: InteractiveLinePoint) => p.x >= d0 && p.x <= d1;
+      const radiusOf = (s: ResolvedSeries, p: InteractiveLinePoint, i: number) =>
+        !s.markers ? 0 : typeof s.markers === "function" ? s.markers(p, i) : MARK_SPECS.marker.radius;
+
+      if (showPointLabels) {
+        const format = labelFormatRef.current;
+        const lines = visibleSeries.map((s) => s.points.filter(inDomain).map((p) => ({ x: x(p.x), y: y(p.y) })));
+        const markerBoxes = visibleSeries.flatMap((s) =>
+          s.points.flatMap((p, i) => {
+            const r = radiusOf(s, p, i);
+            if (r <= 0 || !inDomain(p)) return [];
+            const cx = x(p.x);
+            const cy = y(p.y);
+            return [{ x0: cx - r, y0: cy - r, x1: cx + r, y1: cy + r }];
+          }),
+        );
+        const texts = new Map<string, string>();
+        const candidates: PointLabelCandidate[] = [];
+        visibleSeries.forEach((s, si) => {
+          const shown = s.points.map((p, i) => ({ p, i })).filter(({ p }) => inDomain(p));
+          if (shown.length === 0) return;
+          const labels = shown.map(({ p }) => format(p.y));
+          const xs = shown.map(({ p }) => x(p.x));
+          if (pointLabels === "auto" && !pointsSparseEnough(xs, labels.map((t) => t.length * MIN_CHAR_WIDTH))) return;
+          const widths = labels.map((t) => measureLabel(t));
+          if (pointLabels === "auto" && !pointsSparseEnough(xs, widths)) return;
+          const ys = shown.map(({ p }) => y(p.y));
+          const priorities = pointPriorities(shown.map(({ p }) => p.y));
+          shown.forEach(({ p, i }, k) => {
+            const key = `${si}:${i}`;
+            texts.set(key, labels[k]);
+            candidates.push({
+              key,
+              seriesIndex: si,
+              x: xs[k],
+              y: ys[k],
+              radius: radiusOf(s, p, i),
+              width: widths[k],
+              height: LABEL_HEIGHT,
+              // Earlier series outrank later ones outright; within a
+              // series, `pointPriorities` decides.
+              priority: (visibleSeries.length - si) * 1e6 + priorities[k],
+              prefer: preferredSide(ys, k),
+            });
+          });
+        });
+        const placed = placePointLabels(candidates, {
+          bounds: { x0: 0, y0: 0, x1: innerWidth, y1: innerHeight },
+          lines,
+          markers: markerBoxes,
+        });
+        for (const label of placed) {
+          const si = Number(label.key.split(":")[0]);
+          const s = visibleSeries[si];
+          g.append("text")
+            .attr("data-series-label", s.id)
+            .attr("x", label.x)
+            .attr("y", label.y)
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "central")
+            .attr("fill", s.color)
+            // A surface-coloured halo, so a label stays legible where it
+            // sits over a band or a gridline.
+            .attr("stroke", "var(--card)")
+            .attr("stroke-width", 3)
+            .attr("stroke-linejoin", "round")
+            .attr("paint-order", "stroke")
+            .style("font-size", `${LABEL_FONT_SIZE}px`)
+            .style("font-variant-numeric", "tabular-nums")
+            .text(texts.get(label.key) ?? "");
+        }
+      }
+
+      if (lineLabelTexts) {
+        const ends = visibleSeries.flatMap((s) => {
+          const shown = s.points.filter(inDomain);
+          const last = shown[shown.length - 1];
+          return last ? [{ s, y: y(last.y) }] : [];
+        });
+        const placedYs = spreadEndLabels(
+          ends.map((e) => e.y),
+          { height: LABEL_HEIGHT, min: -MARGIN.top, max: innerHeight + MARGIN.bottom / 2 },
+        );
+        ends.forEach(({ s }, k) => {
+          g.append("text")
+            .attr("data-series-label", s.id)
+            .attr("x", innerWidth + GUTTER_PAD)
+            .attr("y", placedYs[k])
+            .attr("dominant-baseline", "central")
+            .attr("fill", s.color)
+            .style("font-size", `${LABEL_FONT_SIZE}px`)
+            .style("font-weight", 600)
+            .text(lineLabelTexts.get(s.id) ?? s.label);
+        });
+      }
     },
-    [visibleSeries, regions, referenceLines, width, mainHeight, x, y, yTickFormat, xLabels, innerWidth, innerHeight],
+    [
+      visibleSeries,
+      regions,
+      referenceLines,
+      width,
+      mainHeight,
+      x,
+      y,
+      yTickFormat,
+      xLabels,
+      innerWidth,
+      innerHeight,
+      showPointLabels,
+      pointLabels,
+      lineLabelTexts,
+    ],
   );
 
   // "series" hover's emphasis, applied to the already-drawn marks rather
@@ -755,13 +1079,29 @@ export function InteractiveLine({
           ? MARK_SPECS.line.strokeWidth + 1
           : MARK_SPECS.line.strokeWidth;
       });
-    svg.selectAll<SVGCircleElement, unknown>("[data-series-marker]").attr("opacity", function () {
-      return focusedId === null || this.getAttribute("data-series-marker") === focusedId ? 1 : 0.15;
+    svg.selectAll<SVGElement, unknown>("[data-series-marker], [data-series-label]").attr("opacity", function () {
+      const id = this.getAttribute("data-series-marker") ?? this.getAttribute("data-series-label");
+      return focusedId === null || id === focusedId ? 1 : 0.15;
     });
     if (focusedId !== null) {
       svg.select(`[data-series-line="${CSS.escape(focusedId)}"]`).raise();
     }
-  }, [ref, hover, focusedId, visibleSeries, regions, width, mainHeight, x, y, yTickFormat, innerWidth, innerHeight]);
+  }, [
+    ref,
+    hover,
+    focusedId,
+    visibleSeries,
+    regions,
+    width,
+    mainHeight,
+    x,
+    y,
+    yTickFormat,
+    innerWidth,
+    innerHeight,
+    showPointLabels,
+    lineLabelTexts,
+  ]);
 
   // One combined pass over every series' hovered point (skipping series
   // with no point near the current crosshair position) — the tooltip's
@@ -825,20 +1165,27 @@ export function InteractiveLine({
             top: MARGIN.top,
             width: innerWidth,
             height: innerHeight,
-            cursor: hasDirectZoom ? "grab" : undefined,
+            cursor: hasDirectZoom ? "grab" : selectable ? "crosshair" : undefined,
           }}
           role="img"
           aria-label={ariaLabel ?? "Interactive chart. Use arrow keys to inspect data points, or hover to see values."}
-          {...crosshair.handlers}
+          {...overlayHandlers}
         >
-          {crosshair.pixelX !== null ? (
+          {dragging ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute top-0 bottom-0 border-x border-primary/50 bg-primary/10"
+              style={{ left: Math.min(drag.from, drag.to), width: Math.abs(drag.to - drag.from) }}
+            />
+          ) : null}
+          {crosshair.pixelX !== null && !dragging ? (
             <div
               aria-hidden
               className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
               style={{ left: crosshair.pixelX }}
             />
           ) : null}
-          {hover === "series" && crosshair.pixelX !== null && hoveredEntries[0] ? (
+          {hover === "series" && crosshair.pixelX !== null && !dragging && hoveredEntries[0] ? (
             // The picked point itself, so the tooltip's value visibly
             // belongs to one spot on one line.
             <div
@@ -855,7 +1202,7 @@ export function InteractiveLine({
             />
           ) : null}
         </div>
-        {tooltipRows.length > 0 && crosshair.pixelX !== null && tooltipTitleDate ? (
+        {tooltipRows.length > 0 && crosshair.pixelX !== null && !dragging && tooltipTitleDate ? (
           <ChartTooltip
             x={MARGIN.left + crosshair.pixelX}
             y={MARGIN.top + tooltipY}
