@@ -447,9 +447,12 @@ rather than the categorical slots (nine subs overflow five). The line
 charts open on A/W/Ni via the primitives' `initialHiddenIds`, with the
 rest toggled in from the legend.
 
-Still open: InteractiveLine's own label/hover/zoom pass (#110), and a per-primitive
-"notes & polish backlog" sub-issue for each primitive from the original
-epic (#111-#116). Each is workable independently — check the issue itself
-for its own scope/API-shape notes before starting.
+Still open: InteractiveLine's own label/hover/zoom pass (#110), and the
+"notes & polish backlog" sub-issues for InteractiveCalendar (#112) and
+InteractiveArea (#113), both under #109. The notes backlogs for
+InteractiveHist (#111), InteractiveNetwork (#114) and InteractiveGeo (#116)
+were closed as not planned on 2026-10-01. Each open one is workable
+independently — check the issue itself for its own scope/API-shape notes
+before starting.
 
 <!-- END:repo-development-guide -->
