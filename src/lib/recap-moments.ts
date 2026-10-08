@@ -105,15 +105,15 @@ const MAGNITUDE = {
  * this many days in total.
  *
  * Without a floor, every acquaintance logged once becomes a "first day
- * with" moment, and a date fills up with people who never mattered. Ten
- * days is "came back often enough to be part of your life" without
- * needing years of history to qualify.
+ * with" moment, and a date fills up with people who never mattered.
+ * Fifteen days is "came back often enough to be part of your life" without
+ * needing years of history to qualify — raised from ten on #522.
  */
-export const MIN_DAYS_FOR_PERSON = 10;
+export const MIN_DAYS_FOR_PERSON = 15;
 
 /**
  * Where someone just over `MIN_DAYS_FOR_PERSON` lands. Lowered from 0.5 to
- * 0.25 on #522: a person seen a dozen times shouldn't outrank a first film
+ * 0.25 on #522: a person seen a couple of dozen times shouldn't outrank a first film
  * genre (0.4), so the bottom of the person range now sits below every
  * fixed-score kind and only people logged often climb past them.
  */
@@ -127,7 +127,7 @@ export const PERSON_MAGNITUDE_FLOOR = 0.25;
  * Log rather than linear because day counts are wildly skewed — a partner
  * might have 1,500 days to a good friend's 60. Linear would squash
  * everyone but the top one or two against the floor; log keeps a friend of
- * a few hundred days well above someone met a dozen times, while the
+ * a few hundred days well above someone met a couple of dozen times, while the
  * people with tons of days still lead (asked for on #522). On this scale a
  * person outranks a first country about 87% of the way, in log terms, to
  * your most-logged person, and a first city (0.7) about 60% of the way.
