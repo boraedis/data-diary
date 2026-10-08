@@ -1,12 +1,14 @@
 name: CI
 
-# Runs on every PR into main. Add this as a required status check in main's
+# Runs on every PR into main, and into an `epic/*` branch — a sub-issue PR
+# merging into an epic branch (#601) deserves the same lint/type/build gate
+# long before the epic itself reaches main. Add this as a required status check in main's
 # branch protection rule (Settings -> Branches -> the rule -> Require status
 # checks to pass -> "build") so a PR with a broken build, failing lint, or
 # type error can't be merged in the first place.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "epic/**"]
 
 jobs:
   build:

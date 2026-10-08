@@ -1,7 +1,8 @@
 name: Delete PR database branch
 
 # Cleans up the disposable Neon branch created by pr-db-branch-create.yml
-# once its PR is closed (merged or not).
+# once its PR is closed (merged or not). Same triggers as the create
+# workflow: PRs into main and into `epic/*` branches (#601).
 #
 # This only covers the case where the job actually runs but the delete call
 # itself fails (Neon API error, rate limit, etc) — the failure-comment step
@@ -13,7 +14,7 @@ name: Delete PR database branch
 # — it runs independently of any single PR's workflow run.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "epic/**"]
     types: [closed]
 
 permissions:

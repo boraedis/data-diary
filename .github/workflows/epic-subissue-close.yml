@@ -1,0 +1,66 @@
+name: Close sub-issues merged into an epic
+
+# Epic work (#601) lands sub-issue PRs on a long-lived `epic/<slug>` branch
+# instead of main, and only the epic's own PR goes to main. GitHub's
+# `Closes #N` keyword only fires on merges into the *default* branch, so
+# without this a sub-issue would stay open after its PR merged into the
+# epic — and then close in one batch, much later, when the epic shipped.
+# The agreed rule is the opposite: a sub-issue is done once it's on the
+# epic branch; the epic issue is done once the epic is on main.
+#
+# Reads the merged PR's body for the same keywords GitHub itself honours
+# (close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved) followed
+# by a same-repo `#N`. Deliberately doesn't match plain mentions like
+# "Part of #338" — that's how a sub-issue PR refers to its epic, and the
+# epic must stay open until the epic PR merges into main (where GitHub's
+# own keyword handling closes it).
+on:
+  pull_request:
+    branches: ["epic/**"]
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  close-referenced-issues:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const pattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b/gi;
+            const numbers = [...new Set([...(pr.body ?? "").matchAll(pattern)].map((m) => Number(m[1])))];
+            if (numbers.length === 0) {
+              core.info("No closing keywords in the PR body; nothing to close.");
+              return;
+            }
+            for (const issue_number of numbers) {
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+              });
+              // `issues.get` also returns PRs; never close one of those, and
+              // leave already-closed issues alone rather than double-commenting.
+              if (issue.pull_request || issue.state === "closed") {
+                core.info(`#${issue_number}: skipped (${issue.pull_request ? "is a PR" : "already closed"}).`);
+                continue;
+              }
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body: `Closed by #${pr.number}, merged into \`${pr.base.ref}\`. This ships to \`main\` with the rest of the epic, when the epic's own PR merges.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                state: "closed",
+                state_reason: "completed",
+              });
+              core.info(`#${issue_number}: closed.`);
+            }

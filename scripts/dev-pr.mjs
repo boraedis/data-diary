@@ -4,7 +4,8 @@
  * manually copy-pasted connection string.
  *
  * How it works: pr-db-branch-create.yml (.github/workflows/) creates an
- * isolated Neon branch named `pr-<N>` for every open PR into main, with
+ * isolated Neon branch named `pr-<N>` for every open PR into main (or into
+ * an `epic/*` branch, for a sub-issue of an epic — see AGENTS.md), with
  * this PR's schema already applied, and comments on the PR once it's
  * ready. This script finds the open PR for your current git branch, then
  * asks the Neon API directly for that branch's connection string and
@@ -147,7 +148,7 @@ async function main() {
   const prs = await githubApi(`/repos/${repo}/pulls?head=${owner}:${branch}&state=open`);
   if (prs.length === 0) {
     console.error(
-      `No open PR found for branch "${branch}". Open one into main first — that's what triggers the isolated database branch.`
+      `No open PR found for branch "${branch}". Open one into main (or into its epic/* branch) first — that's what triggers the isolated database branch.`
     );
     process.exit(1);
   }
