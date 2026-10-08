@@ -74,13 +74,24 @@ function listNames(names: string[]): string {
   return `${names[0]}, ${names[1]} and ${rest} other${rest === 1 ? "" : "s"}`;
 }
 
+/** The full page's per-year card. The year Home calls out for this date
+ * (`entry.featured`) is pinned to the top by the loader and marked here
+ * with a ring and a label, so the page opens on the same thing Home
+ * showed. */
 export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {
-  const { moment, facts } = entry;
+  const { moment, otherMoment, facts } = entry;
   return (
-    <Card>
+    <Card className={entry.featured ? "ring-2 ring-primary" : undefined}>
       <CardHeader>
         <CardTitle className="flex items-baseline justify-between gap-3">
-          <span>{entry.year}</span>
+          <span className="flex items-baseline gap-2">
+            {entry.year}
+            {entry.featured ? (
+              <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+                {entry.featured === "moment" ? "Top pick" : `Happiest ${formatDate(entry.date, "short")}`}
+              </span>
+            ) : null}
+          </span>
           <span className="text-sm font-normal text-muted-foreground">
             {yearsAgoLabel(entry.yearsAgo)} · {formatDate(entry.date, "weekdayYear")}
           </span>
@@ -98,13 +109,28 @@ export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {
             ) : null}
           </Link>
         ) : null}
+        {otherMoment ? (
+          <Link
+            href={`/day/${otherMoment.date}`}
+            className="group flex flex-col gap-0.5 border-l-2 border-border pl-3"
+          >
+            <span className="text-sm group-hover:underline">{otherMoment.headline}</span>
+            {otherMoment.detail ? (
+              <span className="text-sm text-muted-foreground">{otherMoment.detail}</span>
+            ) : null}
+          </Link>
+        ) : null}
 
         {facts ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
             {facts.happiness !== null ? (
               <>
                 <dt className="text-muted-foreground">Happiness</dt>
-                <dd className="tabular-nums">{facts.happiness} / 100</dd>
+                <dd
+                  className={`tabular-nums ${entry.featured === "happiest" ? "font-medium text-primary" : ""}`}
+                >
+                  {facts.happiness} / 100
+                </dd>
               </>
             ) : null}
             {facts.places.length > 0 ? (

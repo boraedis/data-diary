@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildOnThisDayYears,
   dateInYear,
   parseMonthDay,
   pastYears,
@@ -157,5 +158,69 @@ describe("pickHappiestYear (Home's fallback)", () => {
       ])?.year
     ).toBe(2020);
     expect(pickHappiestYear([{ year: 2024, date: "2024-10-03", facts: facts(null) }])).toBeNull();
+  });
+});
+
+describe("buildOnThisDayYears (the full page)", () => {
+  const today = "2026-10-03";
+  const facts = (happiness: number | null) => ({ happiness, places: [], people: [] });
+
+  it("pins Home's highlight year to the top and leaves the rest newest first", () => {
+    const years = buildOnThisDayYears(
+      [
+        { year: 2025, date: "2025-10-03", moments: [] },
+        { year: 2022, date: "2022-10-03", moments: [] },
+        { year: 2019, date: "2019-10-03", moments: [moment("2019-10-03", "first-country", 0.9)] },
+      ],
+      new Map([
+        ["2025-10-03", facts(80)],
+        ["2022-10-03", facts(95)],
+        ["2019-10-03", facts(70)],
+      ]),
+      today
+    );
+    expect(years.map((y) => [y.year, y.featured])).toEqual([
+      [2019, "moment"],
+      [2025, null],
+      [2022, null],
+    ]);
+  });
+
+  it("falls back to pinning the happiest year when there's no highlight", () => {
+    const years = buildOnThisDayYears(
+      [
+        { year: 2025, date: "2025-10-03", moments: [] },
+        { year: 2022, date: "2022-10-03", moments: [] },
+      ],
+      new Map([
+        ["2025-10-03", facts(80)],
+        ["2022-10-03", facts(95)],
+      ]),
+      today
+    );
+    expect(years.map((y) => [y.year, y.featured])).toEqual([
+      [2022, "happiest"],
+      [2025, null],
+    ]);
+  });
+
+  it("shows Home's pick on the featured year and keeps a same-day dip beside it", () => {
+    const dip = moment("2024-10-03", "happiness-dip", 1);
+    const genre = moment("2024-10-03", "first-genre", 0.4);
+    const [featured] = buildOnThisDayYears(
+      [{ year: 2024, date: "2024-10-03", moments: [dip, genre] }],
+      new Map(),
+      today
+    );
+    expect(featured).toMatchObject({ featured: "moment", moment: genre, otherMoment: dip });
+  });
+
+  it("features nothing when no year has a highlight or a score", () => {
+    const years = buildOnThisDayYears(
+      [{ year: 2024, date: "2024-10-03", moments: [] }],
+      new Map([["2024-10-03", { happiness: null, places: ["Lisbon"], people: [] }]]),
+      today
+    );
+    expect(years.map((y) => y.featured)).toEqual([null]);
   });
 });

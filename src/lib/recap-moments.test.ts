@@ -5,6 +5,7 @@ import {
   happinessMoments,
   happinessMomentsFromBaseline,
   MIN_DAYS_FOR_PERSON,
+  PERSON_MAGNITUDE_FLOOR,
   personMagnitude,
   type HappinessScore,
   type MomentInputs,
@@ -186,10 +187,11 @@ describe("first day with a person", () => {
 
   it("ranks people with tons of days highest — the most-logged person matches a best-ever day", () => {
     expect(personMagnitude(1500, 1500)).toBeCloseTo(1);
-    expect(personMagnitude(MIN_DAYS_FOR_PERSON, 1500)).toBeCloseTo(0.5);
-    // Log-scaled: a few hundred days sits well above someone met a dozen times.
-    expect(personMagnitude(300, 1500)).toBeGreaterThan(0.8);
-    expect(personMagnitude(12, 1500)).toBeLessThan(0.55);
+    expect(personMagnitude(MIN_DAYS_FOR_PERSON, 1500)).toBeCloseTo(PERSON_MAGNITUDE_FLOOR);
+    // Log-scaled: a few hundred days sits well above someone met a dozen times,
+    // and the latter falls below a first genre (0.4).
+    expect(personMagnitude(300, 1500)).toBeGreaterThan(0.7);
+    expect(personMagnitude(12, 1500)).toBeLessThan(0.4);
   });
 
   it("puts a heavily-logged person above a first country, a light one below", () => {

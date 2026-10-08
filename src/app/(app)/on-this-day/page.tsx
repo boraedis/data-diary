@@ -105,8 +105,9 @@ export default async function OnThisDayPage({
           </ul>
           <p className="text-center text-xs text-muted-foreground">
             Highlights are picked automatically from exactly this date: life milestones, first
-            times (a country, a city, someone you went on to see often) and standout days. Feb
-            29 shows Feb 28 in other years.
+            times (a country, a city, someone you went on to see often) and standout days. The
+            year at the top is the one Home shows for this date — or, with no highlight, your
+            happiest. Feb 29 shows Feb 28 in other years.
           </p>
         </>
       )}

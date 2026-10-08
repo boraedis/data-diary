@@ -284,7 +284,14 @@ export type OnThisDayYear = {
   year: number;
   yearsAgo: number;
   date: string;
+  /** Set on the one year Home calls out for this date — its highlight, or
+   * the happiest-year fallback — which the full page pins to the top. */
+  featured: "moment" | "happiest" | null;
   moment: RecapMoment | null;
+  /** On the featured year only: the year's own strongest moment when it
+   * differs from the one Home called out. That's a dip on the same day,
+   * which Home skips but the full page still owes you. */
+  otherMoment: RecapMoment | null;
   /** Null when the date has no day row, or one with nothing structured to
    * show. */
   facts: OnThisDayFacts | null;
@@ -302,23 +309,48 @@ export async function getOnThisDay(monthDay: string, today: string): Promise<OnT
   if (candidates.length === 0) return [];
 
   const facts = await loadFacts(candidates.map((c) => c.date));
+  return buildOnThisDayYears(candidates, facts, today);
+}
+
+/** The pure half of `getOnThisDay`: one entry per year with something to
+ * show, the year Home calls out pinned first, the rest newest first. */
+export function buildOnThisDayYears(
+  candidates: YearCandidates[],
+  facts: Map<string, OnThisDayFacts>,
+  today: string
+): OnThisDayYear[] {
   const todayYear = Number(today.slice(0, 4));
 
-  return candidates.flatMap((c) => {
-    const moment = pickYearMoment(c);
+  // The same two picks, in the same order, as `getOnThisDayForHome`, so the
+  // top of this page is always what Home showed (or would show) for it.
+  const highlight = pickHomeHighlight(candidates);
+  const happiest = highlight
+    ? null
+    : pickHappiestYear(candidates.map((c) => ({ year: c.year, date: c.date, facts: facts.get(c.date) ?? null })));
+  const featuredYear = highlight?.year ?? happiest?.year ?? null;
+
+  const years = candidates.flatMap((c): OnThisDayYear[] => {
+    const own = pickYearMoment(c);
     const dayFacts = facts.get(c.date) ?? null;
-    if (moment === null && dayFacts === null) return [];
+    if (own === null && dayFacts === null) return [];
+    const featured = c.year === featuredYear;
+    const moment = featured && highlight ? highlight.moment : own;
     return [
       {
         year: c.year,
         yearsAgo: todayYear - c.year,
         date: c.date,
+        featured: featured ? (highlight ? "moment" : "happiest") : null,
         moment,
+        otherMoment: featured && own !== null && own !== moment ? own : null,
         facts: dayFacts,
         recapHref: recapHrefFor(c.year, today),
       },
     ];
   });
+
+  // Featured first, the rest newest first (the order they arrived in).
+  return [...years.filter((y) => y.featured), ...years.filter((y) => !y.featured)];
 }
 
 /** Happiness, places and positive people for a handful of dates — one

@@ -112,20 +112,28 @@ const MAGNITUDE = {
 export const MIN_DAYS_FOR_PERSON = 10;
 
 /**
+ * Where someone just over `MIN_DAYS_FOR_PERSON` lands. Lowered from 0.5 to
+ * 0.25 on #522: a person seen a dozen times shouldn't outrank a first film
+ * genre (0.4), so the bottom of the person range now sits below every
+ * fixed-score kind and only people logged often climb past them.
+ */
+export const PERSON_MAGNITUDE_FLOOR = 0.25;
+
+/**
  * How significant a first day with someone is, from how many days you've
- * logged with them overall: log-scaled between the floor (0.5) and the
- * most-logged person you have (1.0, level with your best-ever day).
+ * logged with them overall: log-scaled between `PERSON_MAGNITUDE_FLOOR`
+ * and the most-logged person you have (1.0, level with your best-ever day).
  *
  * Log rather than linear because day counts are wildly skewed — a partner
  * might have 1,500 days to a good friend's 60. Linear would squash
  * everyone but the top one or two against the floor; log keeps a friend of
  * a few hundred days well above someone met a dozen times, while the
  * people with tons of days still lead (asked for on #522). On this scale a
- * person outranks a first country at roughly 80% of the way, in log terms,
- * to your most-logged person.
+ * person outranks a first country about 87% of the way, in log terms, to
+ * your most-logged person, and a first city (0.7) about 60% of the way.
  */
 export function personMagnitude(totalDays: number, maxTotalDays: number): number {
-  const floor = 0.5;
+  const floor = PERSON_MAGNITUDE_FLOOR;
   if (maxTotalDays <= MIN_DAYS_FOR_PERSON) return floor;
   const t = Math.log(totalDays / MIN_DAYS_FOR_PERSON) / Math.log(maxTotalDays / MIN_DAYS_FOR_PERSON);
   return floor + (1 - floor) * Math.min(1, Math.max(0, t));
