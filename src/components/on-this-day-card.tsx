@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { OnThisDayFallback, OnThisDayHome, OnThisDayYear } from "@/lib/on-this-day";
+import type { RecapMoment } from "@/lib/recap-moments";
 import { formatDate } from "@/lib/viz/format";
 
 // Home's "on this day" teaser (#522). One line by design: the scope on
@@ -98,28 +99,8 @@ export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {moment ? (
-          <Link
-            href={`/day/${moment.date}`}
-            className="group flex flex-col gap-0.5 border-l-2 border-primary pl-3"
-          >
-            <span className="font-medium group-hover:underline">{moment.headline}</span>
-            {moment.detail ? (
-              <span className="text-sm text-muted-foreground">{moment.detail}</span>
-            ) : null}
-          </Link>
-        ) : null}
-        {otherMoment ? (
-          <Link
-            href={`/day/${otherMoment.date}`}
-            className="group flex flex-col gap-0.5 border-l-2 border-border pl-3"
-          >
-            <span className="text-sm group-hover:underline">{otherMoment.headline}</span>
-            {otherMoment.detail ? (
-              <span className="text-sm text-muted-foreground">{otherMoment.detail}</span>
-            ) : null}
-          </Link>
-        ) : null}
+        {moment ? <MomentLine moment={moment} primary /> : null}
+        {otherMoment ? <MomentLine moment={otherMoment} primary={false} /> : null}
 
         {facts ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -162,5 +143,33 @@ export function OnThisDayYearCard({ entry }: { entry: OnThisDayYear }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * One moment on the full page, with its score called out on the right.
+ *
+ * The score is the engine's magnitude — the number every pick on this page
+ * and on Home is ranked by — shown so the ranking can be checked by eye
+ * while the weights are still being tuned (asked for on #522). Hovering it
+ * names the kind, since a 0.90 means something different for a first
+ * country (fixed) than for a happiness spike (computed).
+ */
+function MomentLine({ moment, primary }: { moment: RecapMoment; primary: boolean }) {
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-3 border-l-2 pl-3 ${primary ? "border-primary" : "border-border"}`}
+    >
+      <Link href={`/day/${moment.date}`} className="group flex min-w-0 flex-col gap-0.5">
+        <span className={`${primary ? "font-medium" : "text-sm"} group-hover:underline`}>{moment.headline}</span>
+        {moment.detail ? <span className="text-sm text-muted-foreground">{moment.detail}</span> : null}
+      </Link>
+      <span
+        className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+        title={`Score (${moment.kind})`}
+      >
+        {moment.magnitude.toFixed(2)}
+      </span>
+    </div>
   );
 }
