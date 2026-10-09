@@ -12,7 +12,7 @@ import type { JournalOutcome, VideoLogSummary } from "@/lib/video-journal/video-
 /** One line on what a transcript did to the journal. */
 const OUTCOME_NOTE: Record<JournalOutcome, string> = {
   applied: "In the journal",
-  pending: "Waiting for your choice above",
+  pending: "Waiting for your choice",
   replaced: "Replaced the journal text",
   appended: "Added below the journal text",
   kept: "Not used in the journal (kept here)",
@@ -36,7 +36,11 @@ function statusLine(log: VideoLogSummary, transcriptionNotConfigured: boolean): 
         : { text: "Transcribing…", tone: "muted" };
     case "ready":
       if (!log.transcript?.trim()) return { text: "Transcribed. No speech found", tone: "muted" };
-      return { text: log.journalOutcome ? OUTCOME_NOTE[log.journalOutcome] : "Transcribed", tone: "muted" };
+      // Transcripts wait for Finalize (#613) to reach the journal.
+      return {
+        text: log.journalOutcome ? OUTCOME_NOTE[log.journalOutcome] : "Transcribed. Not in the journal until you finalize",
+        tone: "muted",
+      };
     case "failed":
       return {
         text: `Transcription failed${log.transcriptionError ? `: ${log.transcriptionError}` : ""}. The journal wasn't changed.`,

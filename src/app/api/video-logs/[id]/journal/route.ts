@@ -8,9 +8,11 @@ export const dynamic = "force-dynamic";
 
 const CHOICES = new Set<JournalChoice>(["replace", "append", "keep"]);
 
-/** Replace / Append / Keep for a transcript the journal didn't take
- * automatically (#341). `shownJournal` is the text the user was looking
- * at; if the journal has changed since, nothing is written (409). */
+/** Replace / Append / Keep a transcript's log block into the journal
+ * (#341's overwrite confirmation). Transcription never writes the journal
+ * itself; this is the write step for Finalize (#613), which owns the UI.
+ * `shownJournal` is the text the user was looking at; if the journal has
+ * changed since, nothing is written (409). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isVideoLogId(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
