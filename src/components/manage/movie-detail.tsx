@@ -5,6 +5,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type { MovieCatalogItem, MovieUsage } from "@/lib/days";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 // Same size TMDB serves the search-result thumbnails at (see POSTER_BASE in
 // movie-entry-form.tsx / tmdb-tv-search-modal.tsx) — kept a local constant
@@ -78,6 +79,8 @@ export function MovieDetail({ movie, usage }: { movie: MovieCatalogItem; usage: 
           />
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.watches} itemLabel={movie.title} />
 
       <Card size="sm">
         <CardHeader>

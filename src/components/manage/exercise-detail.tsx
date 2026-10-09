@@ -14,6 +14,7 @@ import { EXERCISE_CATEGORY_LABELS } from "@/components/manage/new-exercise-modal
 import type { ExerciseCatalogItem, ExerciseUsage } from "@/lib/days";
 import type { ExerciseCategory } from "@/db/schema";
 import type { ExerciseFocusItem, ExerciseFocusLink, ExerciseSubfocusItem } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 type FocusWithSubs = ExerciseFocusItem & { subfocuses: ExerciseSubfocusItem[] };
 
@@ -308,6 +309,8 @@ export function ExerciseDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.dates} itemLabel={exercise.name} />
 
       <Card size="sm">
         <CardHeader>

@@ -12,6 +12,7 @@ import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { SportsWatchHistoryList } from "@/components/manage/sports-watch-history-list";
 import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem, SportsTeamUsage } from "@/lib/days";
 import type { SportsDivisionItem } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 // Full detail page for a single team — see #9. Same shape as
 // SportsLeagueDetail; the extra fields (league, alias, home location,
@@ -227,6 +228,8 @@ export function SportsTeamDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.watches} itemLabel={team.name} color={team.color} />
 
       <Card size="sm">
         <CardHeader>

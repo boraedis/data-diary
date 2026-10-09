@@ -12,6 +12,7 @@ import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { SportsWatchHistoryList } from "@/components/manage/sports-watch-history-list";
 import type { SportCatalogItem, SportsLeagueItem, SportsLeagueUsage } from "@/lib/days";
 import type { SportsDivisionItem, SportsDivisionUsage, SportsSeasonItem, SportsSeasonUsage } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 type SeasonWithUsage = SportsSeasonItem & { usage: SportsSeasonUsage };
 type DivisionWithUsage = SportsDivisionItem & { usage: SportsDivisionUsage };
@@ -545,6 +546,8 @@ export function SportsLeagueDetail({
           ))}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.watches} itemLabel={league.name} />
 
       <Card size="sm">
         <CardHeader>

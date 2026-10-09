@@ -15,6 +15,7 @@ import type { TvEpisodeItem, TvEpisodeWatchItem, TvShowCatalogItem, TvShowUsage 
 // pulls TmdbMovieSearchResult in; only runtime code from tmdb.ts (which
 // holds the TMDB API key) must stay server-only.
 import type { TmdbSeasonSummary } from "@/lib/tmdb";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 // Same convention as MovieDetail's local POSTER_BASE — see that file's
 // comment for why this isn't imported from src/lib/tmdb.ts.
@@ -404,6 +405,8 @@ export function TvShowDetail({ show: initial, usage }: { show: TvShowCatalogItem
           />
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.watches} itemLabel={show.title} />
 
       <Card size="sm">
         <CardHeader>
