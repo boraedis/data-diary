@@ -20,8 +20,12 @@ export function videoLogErrorResponse(error: unknown): NextResponse {
     return NextResponse.json({ error: error.message }, { status: 503 });
   }
   console.error("[video-logs]", error);
+  // A failed Drizzle query's message is the SQL; the driver's reason (e.g.
+  // a missing table) is on `cause`, and is what the recorder should show.
+  const message =
+    error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : "Unknown error";
   return NextResponse.json(
-    { error: error instanceof Error ? error.message : "Unknown error" },
+    { error: message },
     // 502: almost every unexpected failure here is R2 or the database
     // misbehaving, and the device should retry later rather than give up.
     { status: 502 },

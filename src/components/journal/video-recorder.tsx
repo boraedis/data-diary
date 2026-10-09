@@ -75,7 +75,17 @@ const ERROR_ADVICE: Record<RecorderErrorKind, string> = {
   unknown: "Something went wrong starting the camera.",
 };
 
-export function VideoRecorder({ date, videoLogs }: { date: string; videoLogs: VideoLogSummary[] }) {
+export function VideoRecorder({
+  date,
+  videoLogs,
+  videoLogsError,
+}: {
+  date: string;
+  videoLogs: VideoLogSummary[];
+  /** Why the day's stored recordings couldn't be listed, if they
+   * couldn't. Recording and on-device storage still work. */
+  videoLogsError: string | null;
+}) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -654,6 +664,13 @@ export function VideoRecorder({ date, videoLogs }: { date: string; videoLogs: Vi
       ) : null}
 
       {memoryUpload ? <UploadStatusLine status={memoryUpload} /> : null}
+
+      {videoLogsError ? (
+        <p className="text-sm text-destructive">
+          Couldn&apos;t load this day&apos;s stored recordings: {videoLogsError}. Recording still works, and new takes are
+          kept on this device.
+        </p>
+      ) : null}
 
       <StoredRecordings
         recordings={videoLogs}

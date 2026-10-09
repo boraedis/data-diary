@@ -32,11 +32,13 @@ export function JournalSection({
   initialMode,
   initialJournal,
   videoLogs,
+  videoLogsError,
 }: {
   date: string;
   initialMode: JournalMode;
   initialJournal: string | null;
   videoLogs: VideoLogSummary[];
+  videoLogsError: string | null;
 }) {
   const [mode, setMode] = useState<JournalMode>(initialMode);
 
@@ -84,7 +86,7 @@ export function JournalSection({
         aria-labelledby="journal-tab-record"
         hidden={mode !== "record"}
       >
-        <VideoRecorder date={date} videoLogs={videoLogs} />
+        <VideoRecorder date={date} videoLogs={videoLogs} videoLogsError={videoLogsError} />
       </div>
     </div>
   );
