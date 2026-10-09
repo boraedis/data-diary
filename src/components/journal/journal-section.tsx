@@ -16,8 +16,9 @@ const MODES: { value: JournalMode; label: string }[] = [
 /**
  * The Journal day section's two equal ways in: Write and Record (#340,
  * epic #338). Neither is the "real" one. A day can be text-only,
- * video-only or both, so the switch is a plain two-way toggle with no
- * default nudging towards either.
+ * video-only or both, so the switch is a plain two-way toggle. Which pane
+ * opens first follows the day's content (the page passes Record when the
+ * day has recordings), not a preference for one way of journaling.
  *
  * Both panes stay mounted and the inactive one is only hidden. Switching
  * to check something in the other pane must not throw away a half-written
@@ -26,6 +27,9 @@ const MODES: { value: JournalMode; label: string }[] = [
  * The mode is mirrored into `?mode=` with `history.replaceState` (no
  * navigation, so no server round trip) so a reload lands back in the
  * same pane, and a bookmark/home-screen link can open straight to Record.
+ * Both modes are written explicitly, `write` included: without `?mode=`
+ * the page picks a default (Record when the day has recordings), and a
+ * reload shouldn't override a choice the user just made.
  */
 export function JournalSection({
   date,
@@ -45,8 +49,7 @@ export function JournalSection({
   function choose(next: JournalMode) {
     setMode(next);
     const url = new URL(window.location.href);
-    if (next === "write") url.searchParams.delete("mode");
-    else url.searchParams.set("mode", next);
+    url.searchParams.set("mode", next);
     window.history.replaceState(window.history.state, "", url);
   }
 

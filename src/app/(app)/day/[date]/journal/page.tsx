@@ -23,7 +23,6 @@ export default async function JournalEntryPage({
     notFound();
   }
   const { mode } = await searchParams;
-  const initialMode: JournalMode = mode === "record" ? "record" : "write";
 
   // Recordings load separately from the day itself, and a failure there
   // (R2 misconfigured, the video_logs table missing from whatever database
@@ -41,6 +40,13 @@ export default async function JournalEntryPage({
       },
     ),
   ]);
+
+  // An explicit ?mode= always wins. Otherwise a day that has recordings
+  // opens on Record, where they're listed and playable, and any other day
+  // opens on Write. Only stored recordings count: takes still on a device
+  // aren't visible to the server.
+  const initialMode: JournalMode =
+    mode === "record" || mode === "write" ? mode : videoLogsResult.logs.length > 0 ? "record" : "write";
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
