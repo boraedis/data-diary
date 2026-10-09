@@ -5,7 +5,10 @@ import {
   summarizeExercise,
   summarizeHappiness,
   summarizeSleep,
+  SLEEP_LOCATION_SLOTS,
+  type RecapSleepNight,
 } from "@/lib/recap-health";
+import { MIN_DAYS_FOR_AVERAGE } from "@/lib/recap";
 import { previousPeriod, yearPeriod } from "@/lib/recap";
 
 // Covers the folds behind the health & wellness section (issue #201): the
@@ -192,5 +195,80 @@ describe("longestGoodStreak", () => {
     expect(result.priorStreak?.length).toBe(2);
     expect(result.streak?.length).toBe(1);
     expect(result.series).toEqual([good("2025-06-01")]);
+  });
+});
+
+// #531: where the nights were slept, and naps.
+describe("summarizeSleep locations and naps", () => {
+  const night = (date: string, durationMinutes: number, locationType: string | null = null, napMinutes: number | null = null): RecapSleepNight => ({
+    date,
+    durationMinutes,
+    locationType,
+    napMinutes,
+  });
+
+  it("attributes each night to the period holding its row date", () => {
+    const result = summarizeSleep(
+      [night("2024-12-31", 300, "Home"), night("2025-01-01", 480, "Home"), night("2025-12-31", 420, "Hotel")],
+      period,
+      prior
+    );
+    expect(result.locations.rows).toEqual([
+      { label: "Home", other: false, colorIndex: 0, nights: 1, averageMinutes: 480, priorNights: 1, priorAverageMinutes: 300 },
+      { label: "Hotel", other: false, colorIndex: 1, nights: 1, averageMinutes: 420, priorNights: 0, priorAverageMinutes: null },
+    ]);
+    expect(result.locations).toMatchObject({ locatedNights: 2, priorLocatedNights: 1 });
+  });
+
+  it("counts an unrecorded location for coverage only, never as a row", () => {
+    const result = summarizeSleep(
+      [night("2025-03-01", 400, null), night("2025-03-02", 420, null), night("2025-03-03", 440, "Home")],
+      period,
+      prior
+    );
+    expect(result.nightsLogged).toBe(3);
+    expect(result.locations.locatedNights).toBe(1);
+    expect(result.locations.rows.map((r) => r.label)).toEqual(["Home"]);
+    // A plain SleepDay, with neither field, reads the same as null.
+    expect(summarizeSleep([{ date: "2025-03-01", durationMinutes: 400 }], period, prior).locations.locatedNights).toBe(0);
+  });
+
+  it("keeps naps apart from nights", () => {
+    const result = summarizeSleep(
+      [night("2025-05-01", 420, "Home", 30), night("2025-05-02", 400, "Home", 0), night("2024-05-01", 410, null, 45)],
+      period,
+      prior
+    );
+    expect(result.naps).toEqual({ totalMinutes: 30, daysWithNap: 1, priorTotalMinutes: 45, priorDaysWithNap: 1 });
+    // The nap adds to neither the night count nor the nights' durations.
+    expect(result.nightsLogged).toBe(2);
+    expect(result.averageMinutes).toBe(410);
+    expect(result.locations.rows[0].averageMinutes).toBe(410);
+  });
+
+  it("folds locations past the colour slots into one Other row with its own average", () => {
+    const places = ["A", "B", "C", "D", "E", "F", "G"];
+    // A gets 7 nights, B 6, ... G 1, so the ranking is alphabetical.
+    const nights = places.flatMap((p, i) =>
+      Array.from({ length: places.length - i }, (_, k) => night(`2025-0${i + 1}-${String(k + 1).padStart(2, "0")}`, p === "F" ? 300 : 600, p))
+    );
+    const rows = summarizeSleep(nights, period, prior).locations.rows;
+    expect(rows.map((r) => r.label)).toEqual(["A", "B", "C", "D", "E", "Other"]);
+    const other = rows[rows.length - 1];
+    // F's two nights at 300 and G's one at 600, averaged over all three.
+    expect(other).toMatchObject({ other: true, colorIndex: SLEEP_LOCATION_SLOTS, nights: 3, averageMinutes: 400 });
+  });
+
+  it("doesn't fold a lone extra location into Other", () => {
+    const nights = ["A", "B", "C", "D", "E", "F"].map((p, i) => night(`2025-02-0${i + 1}`, 400, p));
+    expect(summarizeSleep(nights, period, prior).locations.rows.some((r) => r.other)).toBe(false);
+  });
+
+  it("reports located-night coverage against the breakdown's threshold", () => {
+    const located = (n: number) =>
+      Array.from({ length: n }, (_, i) => night(`2025-04-${String(i + 1).padStart(2, "0")}`, 420, "Home"));
+    // The report and the story both gate the breakdown on this count.
+    expect(summarizeSleep(located(MIN_DAYS_FOR_AVERAGE - 1), period, prior).locations.locatedNights).toBeLessThan(MIN_DAYS_FOR_AVERAGE);
+    expect(summarizeSleep(located(MIN_DAYS_FOR_AVERAGE), period, prior).locations.locatedNights).toBe(MIN_DAYS_FOR_AVERAGE);
   });
 });
