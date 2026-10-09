@@ -6,6 +6,7 @@ import {
   rangeSummary,
   rankAreas,
   rollingTrail,
+  smoothTrail,
   windowDetail,
   windowMix,
   type CentreDay,
@@ -319,5 +320,47 @@ describe("rankAreas", () => {
     for (const area of rankAreas(days, CATALOG, METROS)) {
       expect(data.areas.find((a) => a.key === area.key)!.rank).toBe(area.rank);
     }
+  });
+});
+
+// #609: the second-level averager over the trail.
+describe("smoothTrail", () => {
+  const point = (date: string, position: [number, number]) => ({ date, position, days: 30 });
+  /** One trail point every 14 days from `start`. */
+  const run = (start: string, positions: [number, number][]) => positions.map((p, i) => point(addDays(start, i * 14), p));
+
+  it("is a no-op with no smoothing", () => {
+    const runs = [run("2020-01-01", [HOME, AWAY, HOME])];
+    expect(smoothTrail(runs, 0)).toBe(runs);
+  });
+
+  it("leaves a trail that never moves where it is", () => {
+    const [smoothed] = smoothTrail([run("2020-01-01", Array(10).fill(HOME))], 60);
+    for (const p of smoothed) expect(greatCircleKm(p.position, HOME)).toBeLessThan(0.01);
+  });
+
+  it("pulls a one-point spike most of the way back, without reaching the dot", () => {
+    const positions: [number, number][] = Array(11).fill(HOME);
+    positions[5] = AWAY;
+    const [smoothed] = smoothTrail([run("2020-01-01", positions)], 30);
+    const spike = smoothed[5].position;
+    // Near the spike rather than through it: off home, but well short of Dubai.
+    expect(greatCircleKm(spike, HOME)).toBeGreaterThan(100);
+    expect(greatCircleKm(spike, AWAY)).toBeGreaterThan(greatCircleKm(spike, HOME));
+    // Neighbours bend towards it a little, so the line is a curve, not a corner.
+    expect(greatCircleKm(smoothed[4].position, HOME)).toBeGreaterThan(1);
+    // Keeps dates and day counts, so colours and alignment with the dots hold.
+    expect(smoothed.map((p) => p.date)).toEqual(run("2020-01-01", positions).map((p) => p.date));
+  });
+
+  it("never smooths across a gap between runs", () => {
+    const [home, away] = smoothTrail([run("2020-01-01", Array(5).fill(HOME)), run("2020-06-01", Array(5).fill(AWAY))], 365);
+    for (const p of home) expect(greatCircleKm(p.position, HOME)).toBeLessThan(0.01);
+    for (const p of away) expect(greatCircleKm(p.position, AWAY)).toBeLessThan(0.01);
+  });
+
+  it("averages on the globe, so it stays put across the date line", () => {
+    const [smoothed] = smoothTrail([run("2020-01-01", [[179.5, -17], [-179.5, -17], [179.5, -17], [-179.5, -17]])], 30);
+    for (const p of smoothed) expect(Math.abs(p.position[0])).toBeGreaterThan(179);
   });
 });
