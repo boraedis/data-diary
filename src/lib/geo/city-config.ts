@@ -29,6 +29,38 @@ export type CityRootConfig = {
   sourceFile: string;
 };
 
+/**
+ * A region drawn on a city's map that has no catalog node of its own to
+ * root it (#281's DC suburbs). The catalog files these places straight
+ * under their state — USA/Virginia/Reston/..., USA/Maryland/Bethesda/... —
+ * alongside Richmond and Ocean City, so there's no subtree to walk the way
+ * CityRootConfig's roots are walked. Instead a place resolves to one of
+ * these regions by where its coordinates fall (resolveCitySuburbFeature),
+ * the same spatial join the US county map uses for the same reason (see
+ * us-counties.ts's header).
+ */
+export type CitySuburbConfig = {
+  /** The geometry features' `root` property, and this region's display
+   * name. Not a catalog name — nothing in places.namePath matches it. */
+  root: string;
+  /** places.id of the state the catalog files this region's places
+   * under. A point only resolves to this region when the place's idPath
+   * passes through it, so a mis-geocoded place from another state (an
+   * Illinois "Springfield" landing in Springfield, VA) can't be pulled
+   * onto the map by its coordinates alone. Same stability caveat as
+   * CityRootConfig.rootId. */
+  stateRootId: number;
+  /** 5-digit county FIPS (or independent city's) — build tooling only,
+   * read by scripts/geo-fetch-dc-suburbs.mjs to pick the Census places
+   * inside it. */
+  countyFips: string;
+  /** Filename under src/data/geo/sources/, as for CityRootConfig. */
+  sourceFile: string;
+  /** Set for an independent city drawn as one feature rather than split
+   * into Census places — the feature's own `name`. Build tooling only. */
+  singleFeatureName?: string;
+};
+
 export type CityConfig = {
   /** Display label for the city picker. */
   label: string;
@@ -36,6 +68,16 @@ export type CityConfig = {
    * that file and its own filename share this city's Record key, e.g.
    * "dc-metro" -> src/data/geo/dc-metro.topo.json's `objects["dc-metro"]`. */
   sources: CityRootConfig[];
+  /** Regions resolved by coordinates rather than catalog ancestry — see
+   * CitySuburbConfig. Checked only for places under none of `sources`'
+   * roots, so a catalog-rooted place never changes neighborhood because
+   * a suburb was added beside it. */
+  suburbs?: CitySuburbConfig[];
+  /** Roots (catalog or suburb) the map opens framed on, and returns to on
+   * a background click, when that should be less than everything drawn.
+   * Omit to frame the whole city. The rest stays drawn and reachable by
+   * zooming out, see CityHeatmapExplorer's zoom extent. */
+  homeRoots?: string[];
   /** Normalizes a catalog neighborhood name to this city's geometry
    * naming — see each root's own normalize<City>Name for the real,
    * documented aliases/gaps. Takes `root` even for single-root cities so
@@ -60,12 +102,44 @@ export const CITIES: Record<CityKey, CityConfig> = {
       { root: "Arlington", rootId: 83, sourceFile: "arlington.geojson" },
       { root: "Alexandria", rootId: 2000, sourceFile: "alexandria.geojson" },
     ],
+    // The suburbs (#281) quadruple the map's extent, which would open DC's
+    // neighborhoods — the ones logged most — as specks. So the map opens
+    // on DC and Arlington, and the suburbs are a zoom-out away.
+    homeRoots: ["Washington", "Arlington"],
+    // #281. Fairfax City and Falls Church are independent cities, not
+    // part of Fairfax County, so each is its own region. The counties are
+    // split into Census places (towns and CDPs), the grain the catalog
+    // logs them at — see scripts/geo-fetch-dc-suburbs.mjs.
+    suburbs: [
+      { root: "Fairfax County", stateRootId: 1828, countyFips: "51059", sourceFile: "fairfax-county.geojson" },
+      {
+        root: "Fairfax City",
+        stateRootId: 1828,
+        countyFips: "51600",
+        sourceFile: "fairfax-city.geojson",
+        singleFeatureName: "City of Fairfax",
+      },
+      {
+        root: "Falls Church",
+        stateRootId: 1828,
+        countyFips: "51610",
+        sourceFile: "falls-church.geojson",
+        singleFeatureName: "City of Falls Church",
+      },
+      { root: "Montgomery County", stateRootId: 1392, countyFips: "24031", sourceFile: "montgomery-county.geojson" },
+      {
+        root: "Prince George's County",
+        stateRootId: 1392,
+        countyFips: "24033",
+        sourceFile: "prince-georges-county.geojson",
+      },
+    ],
     // Cast, not a widened DcMetroRoot signature on normalizeDcMetroName
     // itself — every caller of *this* config only ever passes a `root`
-    // string that came from `sources[].root` above, which is always one
-    // of the 3 real DcMetroRoot values; the wider `string` type here
-    // exists only so every city can share one CityConfig["normalize"]
-    // shape.
+    // string that came from `sources[].root` or `suburbs[].root` above,
+    // which is always one of the real DcMetroRoot values; the wider
+    // `string` type here exists only so every city can share one
+    // CityConfig["normalize"] shape.
     normalize: normalizeDcMetroName as (root: string, name: string) => string,
   },
   dubai: {

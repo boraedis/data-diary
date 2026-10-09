@@ -23,7 +23,13 @@ import { isPlaceInCity, resolveCityFeatureName, type CityPlaceRow } from "./reso
  * map.
  */
 
-export type CityGeometryProperties = { root: string; name: string };
+export type CityGeometryProperties = {
+  root: string;
+  name: string;
+  /** Set on a suburban county's "Rest of <county>" backdrop (#281) — see
+   * scripts/geo-fetch-dc-suburbs.mjs. */
+  remainder?: boolean;
+};
 export type CityGeometryFeature = Feature<Geometry, CityGeometryProperties>;
 
 export type CityPlaceQaPlace = CityPlaceRow & { id: number; name: string; lat: number; lng: number };
@@ -99,11 +105,16 @@ export function findCityPlaceQaFindings(
     geometryNamesByRoot.get(root)!.add(name);
   }
 
+  // A suburban county's remainder (#281) overlaps every place inside it,
+  // so it only counts once no real feature contains the point.
   function actualFeatureFor(point: [number, number]): CityGeometryProperties | null {
+    let remainder: CityGeometryProperties | null = null;
     for (const f of geometryFeatures) {
-      if (geoContains(f, point)) return f.properties;
+      if (!geoContains(f, point)) continue;
+      if (!f.properties.remainder) return f.properties;
+      remainder ??= f.properties;
     }
-    return null;
+    return remainder;
   }
 
   const findings: CityPlaceQaFinding[] = [];

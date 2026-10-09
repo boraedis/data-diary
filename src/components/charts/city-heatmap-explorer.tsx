@@ -93,6 +93,26 @@ export function CityHeatmapExplorer({
     return feature(topo, topo.objects[city]);
   }, [city]);
 
+  // A city with `homeRoots` (DC metro, #281) opens framed on just those
+  // roots: InteractiveGeo fits its projection to `fitTo` and resets to
+  // that same frame on a background click, so one prop covers both. Its
+  // default zoom floor is 1 (the fitted frame), which would strand the
+  // rest of the map off-screen, so the floor drops to whatever fits
+  // everything back in. Measured in a throwaway fitted projection's
+  // pixels, not degrees, so Mercator's stretch is accounted for; the
+  // 0.9 leaves a margin, and taking the tighter axis means the whole map
+  // fits whatever the card's aspect ratio.
+  const { fitTo, zoomExtent } = useMemo(() => {
+    const homeRoots = CITIES[city].homeRoots;
+    if (!homeRoots) return { fitTo: undefined, zoomExtent: undefined };
+    const fitTo = { ...features, features: features.features.filter((f) => homeRoots.includes(f.properties.root)) };
+    const path = d3.geoPath(d3.geoMercator().fitSize([1000, 1000], fitTo));
+    const [[hx0, hy0], [hx1, hy1]] = path.bounds(fitTo);
+    const [[ax0, ay0], [ax1, ay1]] = path.bounds(features);
+    const floor = 0.9 * Math.min((hx1 - hx0) / (ax1 - ax0), (hy1 - hy0) / (ay1 - ay0));
+    return { fitTo, zoomExtent: [Math.min(1, floor), 128] as [number, number] };
+  }, [city, features]);
+
   // Water under the map (#286), lazy-loaded per city — see
   // src/lib/geo/water.ts for why it isn't statically imported like the
   // neighborhoods above. Stored with the city it belongs to, so for the
@@ -193,6 +213,8 @@ export function CityHeatmapExplorer({
           {({ width, height }) => (
             <InteractiveGeo<CityProperties>
               features={features}
+              fitTo={fitTo}
+              zoomExtent={zoomExtent}
               width={width}
               height={height}
               // geoMercator, not geoAzimuthalEqualArea — see

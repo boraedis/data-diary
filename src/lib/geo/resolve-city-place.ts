@@ -1,4 +1,4 @@
-import type { CityRootConfig } from "./city-config";
+import type { CityRootConfig, CitySuburbConfig } from "./city-config";
 
 export type CityPlaceRow = { idPath: string; namePath: string };
 
@@ -59,4 +59,84 @@ export function resolveCityFeatureName(
 export function isPlaceInCity(idPath: string, roots: CityRootConfig[]): boolean {
   const idSegments = idPath.split("/").filter(Boolean);
   return roots.some((r) => idSegments.includes(String(r.rootId)));
+}
+
+/** A drawn suburban feature, as resolveCitySuburbFeature needs it: its
+ * identity plus a point test. The test is injected (d3.geoContains in the
+ * app) so this module stays geometry-library-free and unit-testable, the
+ * same way city-place-qa.ts takes its `geoContains`. */
+export type CitySuburbFeature = {
+  root: string;
+  name: string;
+  /** The "Rest of <county>" backdrop — see scripts/geo-fetch-dc-suburbs.mjs.
+   * It contains every point in its county, so it's only a match once every
+   * real place has missed. */
+  remainder?: boolean;
+  contains: (point: [number, number]) => boolean;
+  /** [[minLng, minLat], [maxLng, maxLat]], checked before `contains` so a
+   * point in Istanbul costs four comparisons per feature, not a spherical
+   * containment test. */
+  bounds: [[number, number], [number, number]];
+};
+
+function inBounds(bounds: CitySuburbFeature["bounds"], [lng, lat]: [number, number]): boolean {
+  return lng >= bounds[0][0] && lng <= bounds[1][0] && lat >= bounds[0][1] && lat <= bounds[1][1];
+}
+
+/**
+ * Resolves a place to one of a city's suburban regions (#281) — see
+ * CitySuburbConfig for why these go by coordinates rather than catalog
+ * ancestry. Only for places under none of the city's catalog roots: the
+ * caller tries resolveCityFeatureName first.
+ *
+ * A place is eligible for a region only when its idPath passes through
+ * that region's `stateRootId`. Then:
+ *
+ * - **Geocoded**: the feature containing the point, places before the
+ *   county remainder. The point wins over whatever town the catalog files
+ *   it under, deliberately: suburban addresses use mailing-address towns,
+ *   which don't follow real boundaries. A "Falls Church" address is far
+ *   more often in Fairfax County (Idylwood, Lake Barcroft, Seven Corners)
+ *   than in the two square miles of the City of Falls Church, and the
+ *   catalog has no other way to say which.
+ * - **Not geocoded**: falls back to the catalog's own words, the first
+ *   namePath segment after the state that names a feature (via
+ *   `normalize`, so aliases and the QA modal's overrides apply). A
+ *   geocoded point that lands in no feature does *not* fall back: a point
+ *   outside all five regions is in Loudoun or Richmond, whatever the
+ *   catalog path says.
+ */
+export function resolveCitySuburbFeature(
+  place: CityPlaceRow & { lat: number | null; lng: number | null },
+  suburbs: readonly CitySuburbConfig[],
+  features: readonly CitySuburbFeature[],
+  normalize: (root: string, name: string) => string,
+): { root: string; featureName: string } | null {
+  const idSegments = place.idPath.split("/").filter(Boolean);
+  const eligibleRoots = new Set(suburbs.filter((s) => idSegments.includes(String(s.stateRootId))).map((s) => s.root));
+  if (eligibleRoots.size === 0) return null;
+  const candidates = features.filter((f) => eligibleRoots.has(f.root));
+
+  if (place.lat != null && place.lng != null) {
+    const point: [number, number] = [place.lng, place.lat];
+    let remainderHit: CitySuburbFeature | null = null;
+    for (const f of candidates) {
+      if (!inBounds(f.bounds, point) || !f.contains(point)) continue;
+      if (!f.remainder) return { root: f.root, featureName: f.name };
+      remainderHit ??= f;
+    }
+    return remainderHit ? { root: remainderHit.root, featureName: remainderHit.name } : null;
+  }
+
+  const nameSegments = place.namePath.split("/").filter(Boolean);
+  for (const suburb of suburbs) {
+    if (!eligibleRoots.has(suburb.root)) continue;
+    const stateIndex = idSegments.indexOf(String(suburb.stateRootId));
+    const names = new Set(candidates.filter((f) => f.root === suburb.root && !f.remainder).map((f) => f.name));
+    for (const segment of nameSegments.slice(stateIndex + 1)) {
+      const normalized = normalize(suburb.root, segment);
+      if (names.has(normalized)) return { root: suburb.root, featureName: normalized };
+    }
+  }
+  return null;
 }
