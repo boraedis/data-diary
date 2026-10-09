@@ -159,7 +159,8 @@ function hhmmToMinutes(hhmm: string): number | null {
   return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
 }
 
-/** "SLEEP 7H 20M · UP 7:05". Same duration rule as the sleep charts
+/** "SLEEP 7H 20M": duration only, no wake time (owner, #599). Same
+ * duration rule as the sleep charts
  * (src/lib/charts.ts getSleepNightsData): wake minus sleep, plus a day when
  * waking crossed midnight, and nothing for implausible values. */
 export function formatSleep(stats: Pick<HudDiaryStats, "sleepTime" | "wakeTime" | "wakeCrossedMidnight">): string | null {
@@ -171,8 +172,7 @@ export function formatSleep(stats: Pick<HudDiaryStats, "sleepTime" | "wakeTime" 
   if (minutes <= 0 || minutes > 20 * 60) return null;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  const up = `${Math.floor(wake / 60)}:${String(wake % 60).padStart(2, "0")}`;
-  return `SLEEP ${h}H ${String(m).padStart(2, "0")}M · UP ${up}`;
+  return `SLEEP ${h}H ${String(m).padStart(2, "0")}M`;
 }
 
 /** The stats lines that have something to say, in a fixed order. Missing

@@ -74,7 +74,7 @@ describe("countryDisplayName", () => {
 
 describe("formatSleep", () => {
   it("handles waking after midnight", () => {
-    expect(formatSleep(STATS)).toBe("SLEEP 7H 25M · UP 7:05");
+    expect(formatSleep(STATS)).toBe("SLEEP 7H 25M");
   });
 
   it("is null when incomplete or implausible", () => {
@@ -85,7 +85,7 @@ describe("formatSleep", () => {
 
 describe("diaryStatLines", () => {
   it("shows what's logged, in order", () => {
-    expect(diaryStatLines(STATS)).toEqual(["SLEEP 7H 25M · UP 7:05", "COFFEE 2", "HAPPINESS 74"]);
+    expect(diaryStatLines(STATS)).toEqual(["SLEEP 7H 25M", "COFFEE 2", "HAPPINESS 74"]);
   });
 
   it("hides what isn't logged yet", () => {
