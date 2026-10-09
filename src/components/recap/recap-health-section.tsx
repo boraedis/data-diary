@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { ChartCard } from "@/components/charts/chart-card";
-import { SeriesKey } from "@/components/charts/interactive/legend";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDate, formatDuration, formatHoursTotal } from "@/lib/viz/format";
@@ -221,7 +220,14 @@ function SleepLocations({ sleep, priorLabel }: { sleep: RecapSleep; priorLabel: 
               <tr key={row.label} className="border-t border-border">
                 <td className="py-1.5">
                   <span className="flex items-center gap-2">
-                    <SeriesKey color={categoricalColor(row.colorIndex)} />
+                    {/* SeriesKey's swatch, drawn inline: legend.tsx is a
+                        client module (useState) and this is a server
+                        component, so importing it breaks the build. */}
+                    <span
+                      aria-hidden
+                      className="inline-block size-2.5 shrink-0 rounded-[3px]"
+                      style={{ backgroundColor: categoricalColor(row.colorIndex) }}
+                    />
                     {row.label}
                   </span>
                 </td>
