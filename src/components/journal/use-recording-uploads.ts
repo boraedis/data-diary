@@ -82,6 +82,7 @@ export function useRecordingUploads({
                 durationMs: row.durationMs,
                 recordedAt: row.startedAt,
                 recordedTz: row.timeZone ?? null,
+                hud: row.hud ?? null,
                 blob,
               },
               { onProgress: (p) => setStatus(row.id, { kind: "uploading", ...p }) },

@@ -18,6 +18,9 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+// Relative, not "@/": drizzle-kit loads this file outside Next.js and does
+// not resolve tsconfig path aliases. (Type-only, so erased anyway.)
+import type { HudSnapshot } from "../lib/video-journal/hud";
 
 // --- Enums -------------------------------------------------------------
 // Fixed, small option sets carried over from the legacy app's entry forms.
@@ -1699,6 +1702,13 @@ export const videoLogs = pgTable(
     // the same step, so at most one row per day has this set, except
     // briefly when a deletion failed and Finalize needs retrying.
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    // The mission HUD's conditions at record time (#599): time, timezone,
+    // location (lat/lng + City, ST) and weather, captured once when
+    // recording starts and redrawn over the video on playback. The HUD is
+    // never burned into the file. Diary stats are deliberately not here:
+    // they're read live for the date at playback (owner's call on #599).
+    // Shape: HudSnapshot in src/lib/video-journal/hud.ts.
+    hudSnapshot: jsonb("hud_snapshot").$type<HudSnapshot>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

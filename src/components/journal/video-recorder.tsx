@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { HudVideoPlayer, playbackHudFor, VIEWFINDER, type PlaybackHud } from "@/components/journal/hud-video-player";
+import { MissionHud } from "@/components/journal/mission-hud";
 import { StoredRecordings } from "@/components/journal/stored-recordings";
+import { useHudContext } from "@/components/journal/use-hud-context";
 import { useRecordingUploads, type UploadStatus } from "@/components/journal/use-recording-uploads";
 import {
   AUDIO_BITS_PER_SECOND,
@@ -26,8 +29,10 @@ import {
   isLocalStoreAvailable,
   listLocalRecordings,
   loadLocalRecordingBlob,
+  updateLocalRecordingHud,
   type LocalRecording,
 } from "@/lib/video-journal/local-store";
+import type { HudDiaryStats, HudSnapshot } from "@/lib/video-journal/hud";
 import { UploadNotConfiguredError, uploadRecording } from "@/lib/video-journal/uploader";
 import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
 
@@ -62,6 +67,7 @@ type MemoryRecording = {
   startedAt: string;
   timeZone: string | null;
   durationMs: number;
+  hud: HudSnapshot | null;
 };
 
 const ERROR_ADVICE: Record<RecorderErrorKind, string> = {
@@ -83,6 +89,8 @@ export function VideoRecorder({
   transcriptionNotConfigured,
   journal,
   onBusyChange,
+  nextLogNumber,
+  diaryStats,
 }: {
   date: string;
   videoLogs: VideoLogSummary[];
@@ -96,6 +104,12 @@ export function VideoRecorder({
   /** Reports whether leaving now would lose or strand something, for the
    * Journal page's single leave-without-saving guard (journal-section.tsx). */
   onBusyChange: (busy: boolean) => void;
+  /** Provisional "LOG #N" for the live HUD (#599); numbers are really
+   * assigned at Finalize. */
+  nextLogNumber: number;
+  /** The day's diary numbers, read live (#599's split), for the HUD both
+   * while recording and on playback. */
+  diaryStats: HudDiaryStats | null;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -112,6 +126,16 @@ export function VideoRecorder({
   // The take in progress, so the list below doesn't badge it as an
   // interrupted leftover while it's still being written.
   const [activeId, setActiveId] = useState<string | null>(null);
+  // The live camera/mic stream, as state (not just the ref below) because
+  // the HUD's mic meter needs it during render.
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  // Mission HUD (#599): live location + weather, captured when the camera
+  // turns on and stamped into each recording at record start.
+  const hud = useHudContext();
+  // The snapshot for the take in progress, and the lookup still filling it
+  // in (if it hadn't finished when recording started).
+  const hudSnapshotRef = useRef<HudSnapshot | null>(null);
+  const hudPendingRef = useRef<Promise<void>>(Promise.resolve());
 
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -220,6 +244,7 @@ export function VideoRecorder({
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    setStream(null);
     if (liveVideoRef.current) liveVideoRef.current.srcObject = null;
   }, []);
 
@@ -262,6 +287,7 @@ export function VideoRecorder({
     try {
       const stream = await navigator.mediaDevices.getUserMedia(CAPTURE_CONSTRAINTS);
       streamRef.current = stream;
+      setStream(stream);
       const settings = stream.getVideoTracks()[0]?.getSettings();
       setResolution(
         settings?.width && settings?.height
@@ -280,6 +306,9 @@ export function VideoRecorder({
         });
       }
       setPhase({ kind: "ready" });
+      // Location + weather for the HUD. Asked now, alongside the camera,
+      // so a first-time location prompt doesn't interrupt a take.
+      void hud.capture();
     } catch (error) {
       setPhase({
         kind: "error",
@@ -314,6 +343,30 @@ export function VideoRecorder({
     // No local store at all: record into memory from the first chunk.
     writesFailedRef.current = localAvailable !== true;
 
+    // Mission HUD snapshot (#599): conditions as of record start. Reuse
+    // the capture from camera-on if it's recent; otherwise look again and
+    // fill the snapshot in when the answer arrives. Never waits.
+    const timeZone = deviceTimeZone();
+    const known = hud.latestRef.current;
+    const fresh = known !== null && startedAt - known.capturedAt < HUD_CONTEXT_MAX_AGE_MS;
+    const snapshot: HudSnapshot = {
+      capturedAt: new Date(startedAt).toISOString(),
+      timeZone,
+      location: fresh ? known.location : null,
+      weather: fresh ? known.weather : null,
+    };
+    hudSnapshotRef.current = snapshot;
+    hudPendingRef.current = fresh
+      ? Promise.resolve()
+      : hud
+          .capture()
+          .then(async (ctx) => {
+            const filled = { ...snapshot, location: ctx.location, weather: ctx.weather };
+            hudSnapshotRef.current = filled;
+            if (localAvailable) await updateLocalRecordingHud(id, filled);
+          })
+          .catch(() => {});
+
     if (localAvailable) {
       try {
         await createLocalRecording({
@@ -321,7 +374,8 @@ export function VideoRecorder({
           date,
           mimeType,
           startedAt: new Date(startedAt).toISOString(),
-          timeZone: deviceTimeZone() ?? undefined,
+          timeZone: timeZone ?? undefined,
+          hud: snapshot,
           endedAt: null,
           durationMs: 0,
           bytes: 0,
@@ -404,6 +458,10 @@ export function VideoRecorder({
     const startedAtIso = new Date(startedAtRef.current).toISOString();
     recorderRef.current = null;
     stopCamera();
+    // Give a still-running location/weather lookup a moment to land in the
+    // snapshot before the take is handed to the uploader, but never hold
+    // the recording hostage to it.
+    await Promise.race([hudPendingRef.current, new Promise((r) => setTimeout(r, HUD_FINISH_WAIT_MS))]);
 
     let storedLocally = false;
     if (localAvailable) {
@@ -433,6 +491,7 @@ export function VideoRecorder({
         startedAt: startedAtIso,
         timeZone: deviceTimeZone(),
         durationMs,
+        hud: hudSnapshotRef.current,
       });
       setPlayback({ id: "memory", url: URL.createObjectURL(blob) });
       // activeId stays set: it keeps the background queue away from the
@@ -442,7 +501,14 @@ export function VideoRecorder({
         "This recording couldn't be fully saved on this device (storage may be full). It's uploading straight from memory; download it too if you can, before leaving this page.",
       );
       void uploadFromMemory(
-        { blob, mimeType: mimeType ?? "video/mp4", startedAt: startedAtIso, timeZone: deviceTimeZone(), durationMs },
+        {
+          blob,
+          mimeType: mimeType ?? "video/mp4",
+          startedAt: startedAtIso,
+          timeZone: deviceTimeZone(),
+          durationMs,
+          hud: hudSnapshotRef.current,
+        },
         id,
       );
     } else {
@@ -473,6 +539,7 @@ export function VideoRecorder({
           durationMs: recording.durationMs,
           recordedAt: recording.startedAt,
           recordedTz: recording.timeZone,
+          hud: recording.hud,
           blob: recording.blob,
         },
         { onProgress: (p) => setMemoryUpload({ kind: "uploading", ...p }) },
@@ -535,10 +602,30 @@ export function VideoRecorder({
 
   const cameraOn = phase.kind === "ready" || phase.kind === "recording";
 
+  // What the playback HUD draws for whichever video is playing: a stored
+  // recording (its saved snapshot and log number), a take still on this
+  // device, or a memory-only take. Recordings from before the HUD existed
+  // have no snapshot and get the time from their recordedAt alone.
+  const playbackHud = ((): PlaybackHud | null => {
+    if (!playback) return null;
+    const stored = videoLogs.find((l) => l.id === playback.id);
+    if (stored) return playbackHudFor(stored.hud, stored.recordedAt, stored.logNumber);
+    const local = localRecordings.find((r) => r.id === playback.id);
+    if (local) return playbackHudFor(local.hud, local.startedAt, null);
+    if (playback.id === "memory" && memoryRecording) {
+      return playbackHudFor(memoryRecording.hud, memoryRecording.startedAt, null);
+    }
+    return null;
+  })();
+
   return (
     <div className="flex flex-col gap-4">
+      {/* A fixed viewfinder shape (3:4 on phones, 16:9 wider) with the
+          video centred inside, rather than a frame that hugs the video:
+          the HUD (#599) needs room for its four corners whatever the
+          video's own shape, so on a mismatch it sits over black bars. */}
       {cameraOn ? (
-        <div className="relative overflow-hidden rounded-xl bg-black">
+        <div className={VIEWFINDER}>
           {/* Mirrored like every selfie preview, so moving left moves
               left. The recorded file itself is not mirrored. */}
           <video
@@ -546,23 +633,23 @@ export function VideoRecorder({
             autoPlay
             muted
             playsInline
-            className="mx-auto max-h-[70vh] w-full -scale-x-100 object-contain"
+            className="absolute inset-0 h-full w-full -scale-x-100 object-contain"
           />
-          {recording ? (
-            <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/60 px-2.5 py-1 font-mono text-sm text-white">
-              <span className="size-2.5 animate-pulse rounded-full bg-red-500" aria-hidden />
-              REC {formatElapsed(elapsedMs)}
-            </div>
-          ) : null}
+          <MissionHud
+            mode="live"
+            logLabel={`LOG #${nextLogNumber}`}
+            startedAt={null}
+            timeZone={deviceTimeZone()}
+            elapsedMs={recording ? elapsedMs : 0}
+            recording={recording}
+            location={hud.location}
+            weather={hud.weather}
+            stats={diaryStats}
+            audioStream={stream}
+          />
         </div>
       ) : playback ? (
-        <video
-          key={playback.url}
-          src={playback.url}
-          controls
-          playsInline
-          className="mx-auto max-h-[70vh] w-full rounded-xl bg-black object-contain"
-        />
+        <HudVideoPlayer url={playback.url} hud={playbackHud} stats={diaryStats} />
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -740,6 +827,12 @@ export function VideoRecorder({
     </div>
   );
 }
+
+/** A location/weather capture older than this at record start is redone
+ * rather than stamped into the recording (#599). */
+const HUD_CONTEXT_MAX_AGE_MS = 5 * 60 * 1000;
+/** How long finishing a take waits for a lookup still in flight. */
+const HUD_FINISH_WAIT_MS = 4000;
 
 /** The device's IANA timezone ("America/New_York"), for the journal
  * header's local time (#341). Null if the browser won't say. */

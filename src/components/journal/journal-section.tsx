@@ -6,6 +6,7 @@ import { JournalWriteForm } from "@/components/journal/journal-write-form";
 import { useTranscriptionSync } from "@/components/journal/use-transcription-sync";
 import { VideoRecorder } from "@/components/journal/video-recorder";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import type { HudDiaryStats } from "@/lib/video-journal/hud";
 import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
 
 export type JournalMode = "write" | "record";
@@ -39,12 +40,16 @@ export function JournalSection({
   initialJournal,
   videoLogs,
   videoLogsError,
+  nextLogNumber,
+  diaryStats,
 }: {
   date: string;
   initialMode: JournalMode;
   initialJournal: string | null;
   videoLogs: VideoLogSummary[];
   videoLogsError: string | null;
+  nextLogNumber: number;
+  diaryStats: HudDiaryStats;
 }) {
   const [mode, setMode] = useState<JournalMode>(initialMode);
   const transcription = useTranscriptionSync(videoLogs);
@@ -114,6 +119,8 @@ export function JournalSection({
           transcriptionNotConfigured={transcription.notConfigured}
           journal={initialJournal}
           onBusyChange={onRecorderBusy}
+          nextLogNumber={nextLogNumber}
+          diaryStats={diaryStats}
         />
       </div>
     </div>

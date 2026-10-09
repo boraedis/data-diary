@@ -16,6 +16,7 @@ function source(sizeBytes: number): UploadSource {
     durationMs: 60_000,
     recordedAt: "2026-10-08T21:00:00.000Z",
     recordedTz: "America/New_York",
+    hud: null,
     blob: new Blob([new Uint8Array(sizeBytes)]),
   };
 }

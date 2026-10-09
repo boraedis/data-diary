@@ -22,6 +22,8 @@
 // Plain IndexedDB with a few promise helpers, no wrapper library. The
 // surface is two object stores, and a dependency for that isn't worth it.
 
+import type { HudSnapshot } from "@/lib/video-journal/hud";
+
 const DB_NAME = "data-diary-video-journal";
 const DB_VERSION = 1;
 const RECORDINGS = "recordings";
@@ -42,6 +44,10 @@ export type LocalRecording = {
    * header's local time (#341). Optional: recordings saved before this
    * field existed don't have it. */
   timeZone?: string;
+  /** Mission HUD conditions at record start (#599). Optional: filled in
+   * once the location/weather lookup finishes, and absent on recordings
+   * saved before the HUD existed. */
+  hud?: HudSnapshot;
   endedAt: string | null;
   /** Kept current as chunks arrive, so an interrupted recording still
    * knows roughly how long it is. */
@@ -153,6 +159,21 @@ export async function appendLocalChunk(
       chunkCount: current.chunkCount + 1,
       durationMs: Math.max(current.durationMs, elapsedMs),
     } satisfies LocalRecording);
+  };
+  await transactionDone(tx);
+}
+
+/** Fills in a recording's HUD snapshot after the fact: the location and
+ * weather lookup can finish after recording has started (#599). */
+export async function updateLocalRecordingHud(recordingId: string, hud: HudSnapshot): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(RECORDINGS, "readwrite");
+  const recordings = tx.objectStore(RECORDINGS);
+  const get = recordings.get(recordingId);
+  get.onsuccess = () => {
+    const current = get.result as LocalRecording | undefined;
+    if (!current) return;
+    recordings.put({ ...current, hud } satisfies LocalRecording);
   };
   await transactionDone(tx);
 }
