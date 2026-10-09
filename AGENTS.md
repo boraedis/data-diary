@@ -406,6 +406,20 @@ that don't exist as labels:
 - **Status** — `Backlog` → `Todo` → `In Progress` → `Done`. New issues land
   in `Backlog` by default; move to `Todo` once actually scoped/ready to
   pick up.
+  - **Set an issue to `In Progress` before writing any code for it**, as the
+    first step of picking it up, not when the PR opens. Several agent
+    sessions often work this repo in parallel, and the board is how they
+    tell what's already taken: an issue still sitting in `Backlog`/`Todo`
+    reads as free, and a second session will start on it too. Equally,
+    check the board before picking something up, and skip anything already
+    `In Progress`.
+  - **An epic with an open PR goes in `Todo`**, not `In Progress`. Its
+    sub-issues are the units an agent actually picks up, and they carry
+    `In Progress` individually; the epic itself just needs to read as live
+    work rather than `Backlog`.
+  - Move an issue to `Done` when it closes. Nothing automates this, and
+    closed issues left in `In Progress` make the board look busier than it
+    is.
 - **Priority** — `Urgent` / `High` / `Medium` / `Low`.
 - **LOE** — mirrors the `LOE: *` label (kept in sync manually, not by
   automation — set both when filing or triaging an issue).
