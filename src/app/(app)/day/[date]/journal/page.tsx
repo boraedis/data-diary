@@ -3,6 +3,8 @@ import { DayNav } from "@/components/day-nav";
 import { JournalSection, type JournalMode } from "@/components/journal/journal-section";
 import { isValidDateString } from "@/lib/date";
 import { loadDay } from "@/lib/days";
+import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
+import { listVideoLogsForDate } from "@/lib/video-journal/video-logs";
 
 export const dynamic = "force-dynamic";
 
@@ -21,14 +23,51 @@ export default async function JournalEntryPage({
     notFound();
   }
   const { mode } = await searchParams;
-  const initialMode: JournalMode = mode === "record" ? "record" : "write";
 
-  const day = await loadDay(date);
+  // Recordings load separately from the day itself, and a failure there
+  // (R2 misconfigured, the video_logs table missing from whatever database
+  // this deployment is pointed at) must not take the page down with it:
+  // writing has to keep working whatever state video storage is in. The
+  // message is shown in the Record pane rather than swallowed, because
+  // this is a single-user page and the error is the fastest diagnosis.
+  const [day, videoLogsResult] = await Promise.all([
+    loadDay(date),
+    listVideoLogsForDate(date).then(
+      (logs): { logs: VideoLogSummary[]; error: string | null } => ({ logs, error: null }),
+      (error: unknown) => {
+        console.error("[journal] Could not load video logs:", error);
+        return { logs: [], error: describeError(error) };
+      },
+    ),
+  ]);
+
+  // An explicit ?mode= always wins. Otherwise a day that has recordings
+  // opens on Record, where they're listed and playable, and any other day
+  // opens on Write. Only stored recordings count: takes still on a device
+  // aren't visible to the server.
+  const initialMode: JournalMode =
+    mode === "record" || mode === "write" ? mode : videoLogsResult.logs.length > 0 ? "record" : "write";
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 py-8 md:max-w-2xl md:gap-6 md:py-12">
       <DayNav date={date} category="journal" />
-      <JournalSection date={date} initialMode={initialMode} initialJournal={day.journal} />
+      <JournalSection
+        date={date}
+        initialMode={initialMode}         initialJournal={day.journal}
+        videoLogs={videoLogsResult.logs}
+        videoLogsError={videoLogsResult.error}
+      />
     </main>
   );
+}
+
+/** Drizzle wraps a failed query as "Failed query: <sql>" with the driver's
+ * actual reason (e.g. `relation "video_logs" does not exist`) on `cause`.
+ * The reason is the useful part. */
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = error.cause instanceof Error ? error.cause.message : null;
+    return cause ?? error.message;
+  }
+  return String(error);
 }

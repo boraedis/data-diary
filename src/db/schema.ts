@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   boolean,
   date,
   doublePrecision,
@@ -1574,6 +1575,78 @@ export const cityNeighborhoodOverrides = pgTable(
   (table) => [primaryKey({ columns: [table.cityKey, table.root, table.rawName] })]
 );
 
+// --- Video journal (#338) --------------------------------------------------
+// Where a video log is in its life (#339 for the upload half, #341 for
+// transcription):
+//   uploading    → row exists and an R2 multipart upload is open; parts may
+//                  still be arriving. Retrying resumes from R2's own record
+//                  of which parts landed (ListParts), not from this row.
+//   uploaded     → the complete file is in R2 and its size was verified.
+//                  Nothing has transcribed it yet.
+//   transcribing → handed to the transcription service (#341).
+//   ready        → transcript stored (#341).
+//   failed       → transcription failed (#341). An upload problem never sets
+//                  this: an unfinished upload stays `uploading` so it can be
+//                  resumed from the device's local copy.
+export const videoLogStatusEnum = pgEnum("video_log_status", [
+  "uploading",
+  "uploaded",
+  "transcribing",
+  "ready",
+  "failed",
+]);
+
+// One row per recorded video log (#339, epic #338). A day can have several;
+// which one's transcript reaches days.journal is #341's business, so
+// nothing here is unique per date.
+//
+// The video itself lives in a private Cloudflare R2 bucket, not Vercel
+// Blob. That's a deliberate exception to AGENTS.md's static-asset strategy,
+// decided on #338: R2 has no egress fees, and these get rewatched for
+// decades. Only the object key is stored; playback URLs are short-lived
+// presigned GETs minted per request (src/lib/video-journal/r2.ts).
+export const videoLogs = pgTable(
+  "video_logs",
+  {
+    // Generated on the recording device (crypto.randomUUID) and reused as
+    // the IndexedDB key there, so "start this upload" is idempotent: a
+    // retry after a dropped connection finds its own row instead of
+    // creating a second one.
+    id: text("id").primaryKey(),
+    // RESTRICT, not the CASCADE every other day satellite uses. A video
+    // log is meant to be permanent, and deleting its row would orphan the
+    // R2 object with nothing pointing at it. A day with recordings can't
+    // be deleted until they're dealt with explicitly.
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "restrict" }),
+    status: videoLogStatusEnum("status").notNull().default("uploading"),
+    // "video-journal/2026-10-08/<id>.mp4". Unique so two rows can never
+    // claim the same object.
+    storageKey: text("storage_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    // Expected size while uploading (what the device says it's sending),
+    // then the size R2 actually reports once verified. Bigint because a
+    // multi-hour take can pass 2GB.
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    // Measured by the recorder's clock. Chrome's WebM output carries no
+    // duration of its own, so the file can't be trusted for this.
+    durationMs: integer("duration_ms").notNull(),
+    // When filming started, from the device clock. Not the same as `date`:
+    // a log about Tuesday recorded just after midnight is still Tuesday's.
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    // R2's multipart upload id while `uploading`; cleared on completion.
+    uploadId: text("upload_id"),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("video_logs_date_idx").on(table.date),
+    uniqueIndex("video_logs_storage_key_idx").on(table.storageKey),
+  ]
+);
+
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
@@ -1581,6 +1654,7 @@ export type OccupationType = (typeof occupationTypeEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
+export type VideoLogStatus = (typeof videoLogStatusEnum.enumValues)[number];
 // EntertainmentKind (used to be derived from entertainmentKindEnum here)
 // is gone along with the enum — see the entertainmentKinds table comment
 // above `entertainmentCatalog`. A kind is now just a row (id, name), read

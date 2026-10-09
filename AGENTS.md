@@ -253,6 +253,14 @@ helps:
   allows `*.public.blob.vercel-storage.com` in `images.remotePatterns` so
   `next/image` can optimize blobs directly.
 
+- **Video journal recordings** (epic #338) are the one exception to Blob:
+  they go to a private **Cloudflare R2** bucket (`src/lib/video-journal/
+  r2.ts`), because R2 has no egress fees and these are long videos meant
+  to be rewatched for decades. Uploads go browser → R2 via presigned
+  multipart URLs, and playback via presigned GETs; the database only
+  stores the object key (`video_logs`). Setup is in the README's "Video
+  journal storage (R2)" section.
+
 Nothing here is public by default just because it's on Blob — the
 public/private split from #12 (`src/proxy.ts`'s `PUBLIC_PATHS`) still
 governs which *pages* are unauthenticated; a public Blob URL is only a
