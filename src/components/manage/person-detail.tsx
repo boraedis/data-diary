@@ -11,6 +11,7 @@ import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { TagPicker } from "@/components/tag-picker";
 import type { PersonCatalogItem, PersonUsage } from "@/lib/days";
 import type { TagCatalogItem } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 export function PersonDetail({
   person: initial,
@@ -197,6 +198,8 @@ export function PersonDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.dates} itemLabel={person.name} />
 
       <Card size="sm">
         <CardHeader>

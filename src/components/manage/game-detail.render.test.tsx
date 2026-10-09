@@ -9,6 +9,15 @@ import type { GameUsage } from "@/lib/days";
 // and that the card's total and empty state read as specified. jsdom: wiring,
 // not appearance.
 
+// The Over time chart (#590) measures its container before drawing.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }));
@@ -43,11 +52,16 @@ describe("GameDetail session history", () => {
     // nothing; past 10h `formatHoursTotal` rounds to whole hours.
     expect(screen.getByText("31h total")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy(); // the Logged sessions count
+    // The Over time chart's window picker shows once there's history.
+    expect(screen.getByRole("group", { name: "Window" })).toBeTruthy();
   });
 
   it("says nothing's logged when there are no sessions", () => {
     renderWith({ sessionCount: 0, sessions: [] });
     expect(screen.getByText("Nothing logged yet.")).toBeTruthy();
     expect(screen.queryByText(/total$/)).toBeNull();
+    // An empty state for the chart too, not a flat line, and no picker.
+    expect(screen.getByText(/nothing to chart/)).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Window" })).toBeNull();
   });
 });

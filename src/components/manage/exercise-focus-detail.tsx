@@ -17,6 +17,7 @@ import type {
   ExerciseSubfocusItem,
   ExerciseSubfocusUsage,
 } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 type SubfocusWithUsage = ExerciseSubfocusItem & { usage: ExerciseSubfocusUsage };
 
@@ -318,6 +319,8 @@ export function ExerciseFocusDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.workouts} itemLabel={focus.name} />
 
       <Card size="sm">
         <CardHeader>

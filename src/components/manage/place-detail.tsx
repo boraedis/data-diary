@@ -15,6 +15,7 @@ import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { comparePlacesByMentions } from "@/lib/place-sort";
 import type { PlaceAncestor, PlaceCatalogItem, PlaceMentionEntry, PlaceUsage } from "@/lib/days";
 import type { MetroItem, PlaceCategoryItem, PlaceSubcategoryItem } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 type ParentOption = { id: number; name: string; namePath: string | null };
 
@@ -626,6 +627,8 @@ export function PlaceDetail({
         </Card>
       ) : null}
       </div>
+
+      <PrevalenceChart entries={mentions} itemLabel={place.name} />
 
       <Card size="sm">
         <CardHeader>
