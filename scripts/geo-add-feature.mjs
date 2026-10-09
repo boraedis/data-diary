@@ -29,8 +29,9 @@
  *   --name   optional override for the feature's display name — if
  *            omitted, uses the input feature's own `properties.name`
  *            (or `NAME`/`name`-shaped equivalents from a raw GIS export)
- *   --root   required only for dc-metro (3 source files) — which of
- *            Washington/Arlington/Alexandria this feature belongs to
+ *   --root   required only for dc-metro (8 source files) — which of
+ *            its catalog roots (Washington/Arlington/Alexandria) or
+ *            suburbs ("Fairfax County", etc.) this feature belongs to
  *
  * After this, re-run `npm run geo:build` to regenerate the committed
  * .topo.json, then commit both the sources/ diff and the rebuilt
@@ -73,17 +74,20 @@ function main() {
     process.exit(1);
   }
 
+  // Suburbs (#281) have source files like any root, so they're editable
+  // the same way — a hand-redrawn CDP edge goes through here too.
+  const editable = [...city.sources, ...(city.suburbs ?? [])];
   let source;
-  if (city.sources.length === 1) {
-    source = city.sources[0];
+  if (editable.length === 1) {
+    source = editable[0];
   } else {
     if (!args.root) {
-      console.error(`"${args.city}" has multiple sources — pass --root=${city.sources.map((s) => s.root).join("|")}`);
+      console.error(`"${args.city}" has multiple sources — pass --root=${editable.map((s) => s.root).join("|")}`);
       process.exit(1);
     }
-    source = city.sources.find((s) => s.root === args.root);
+    source = editable.find((s) => s.root === args.root);
     if (!source) {
-      console.error(`"${args.root}" isn't one of ${args.city}'s roots: ${city.sources.map((s) => s.root).join(", ")}`);
+      console.error(`"${args.root}" isn't one of ${args.city}'s roots: ${editable.map((s) => s.root).join(", ")}`);
       process.exit(1);
     }
   }

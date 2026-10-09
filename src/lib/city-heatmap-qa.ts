@@ -5,6 +5,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { cityNeighborhoodOverrides, cityPlaceQaDismissals, places } from "@/db/schema";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import type { CitySuburbFeature } from "@/lib/geo/resolve-city-place";
 import {
   findCityPlaceQaFindings,
   withCityNeighborhoodOverrides,
@@ -44,6 +45,30 @@ export function loadCityGeometryFeatures(cityKey: CityKey): CityGeometryFeature[
   const collection = feature(topo, topo.objects[cityKey]);
   const features = collection.features as unknown as CityGeometryFeature[];
   featureCache.set(cityKey, features);
+  return features;
+}
+
+const suburbFeatureCache = new Map<CityKey, CitySuburbFeature[]>();
+
+/** The city's suburban features (#281) in the shape
+ * resolveCitySuburbFeature takes, with the point test and bounding box
+ * computed once per process. Empty for a city with no `suburbs`. */
+export function loadCitySuburbFeatures(cityKey: CityKey): CitySuburbFeature[] {
+  const cached = suburbFeatureCache.get(cityKey);
+  if (cached) return cached;
+  const suburbRoots = new Set((CITIES[cityKey].suburbs ?? []).map((s) => s.root));
+  const features = loadCityGeometryFeatures(cityKey)
+    .filter((f) => suburbRoots.has(f.properties.root))
+    .map(
+      (f): CitySuburbFeature => ({
+        root: f.properties.root,
+        name: f.properties.name,
+        remainder: f.properties.remainder === true,
+        contains: (point) => d3.geoContains(f, point),
+        bounds: d3.geoBounds(f),
+      }),
+    );
+  suburbFeatureCache.set(cityKey, features);
   return features;
 }
 

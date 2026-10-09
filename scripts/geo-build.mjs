@@ -37,15 +37,22 @@ import { presimplify, simplify } from "topojson-simplify";
 import { quantize } from "topojson-client";
 import { fixWinding } from "./lib/geo-winding.mjs";
 import { CITIES } from "../src/lib/geo/city-config.ts";
-import { resolveCityFeatureName } from "../src/lib/geo/resolve-city-place.ts";
+import * as d3 from "d3";
+import { isPlaceInCity, resolveCityFeatureName, resolveCitySuburbFeature } from "../src/lib/geo/resolve-city-place.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GEO_DIR = path.join(__dirname, "..", "src", "data", "geo");
 const SOURCES_DIR = path.join(GEO_DIR, "sources");
 
+// Catalog roots and coordinate-resolved suburbs (#281) both contribute
+// features keyed by `root`; only how a place finds them differs.
+function allSources(city) {
+  return [...city.sources, ...(city.suburbs ?? [])];
+}
+
 function loadCitySource(cityKey, city) {
   const features = [];
-  for (const source of city.sources) {
+  for (const source of allSources(city)) {
     const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, source.sourceFile), "utf8"));
     for (const feature of raw.features) {
       features.push({
@@ -76,12 +83,12 @@ async function checkCatalogCoverage(cityKey, city, pool) {
   // neighborhood satisfy a Washington-rooted place just because the
   // names happen to collide.
   const geometryNamesByRoot = new Map();
-  for (const source of city.sources) {
+  for (const source of allSources(city)) {
     const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, source.sourceFile), "utf8"));
     geometryNamesByRoot.set(source.root, new Set(raw.features.map((f) => f.properties.name)));
   }
 
-  const { rows: allPlaces } = await pool.query("SELECT id, parent_id, name_path, id_path FROM places");
+  const { rows: allPlaces } = await pool.query("SELECT id, parent_id, name_path, id_path, lat, lng FROM places");
   const hasChildren = new Set(allPlaces.map((p) => p.parent_id).filter((id) => id != null));
 
   let uncovered = 0;
@@ -111,11 +118,51 @@ async function checkCatalogCoverage(cityKey, city, pool) {
       uncovered++;
     }
   }
+  if (city.suburbs?.length) reportSuburbCoverage(cityKey, city, allPlaces);
   if (checked === 0) {
     console.log(`  [${cityKey}] no catalog entries found under ${[...rootNameById.values()].join("/")}`);
   } else if (uncovered === 0) {
     console.log(`  [${cityKey}] all ${checked} catalog entries under ${[...rootNameById.values()].join("/")} resolve`);
   }
+}
+
+// Suburbs can't be checked the way roots are: most Virginia and Maryland
+// places are *meant* to resolve to nothing (Richmond, Ocean City), so an
+// unresolved one isn't a gap. What's worth printing is how many landed,
+// and the ungeocoded ones, which can only resolve by catalog name.
+function reportSuburbCoverage(cityKey, city, allPlaces) {
+  const features = [];
+  for (const suburb of city.suburbs) {
+    const raw = JSON.parse(readFileSync(path.join(SOURCES_DIR, suburb.sourceFile), "utf8"));
+    for (const f of raw.features) {
+      const geo = { ...f, geometry: fixWinding(f.geometry) };
+      features.push({
+        root: suburb.root,
+        name: f.properties.name,
+        remainder: f.properties.remainder === true,
+        contains: (point) => d3.geoContains(geo, point),
+        bounds: d3.geoBounds(geo),
+      });
+    }
+  }
+  const byRoot = new Map();
+  const ungeocoded = [];
+  for (const place of allPlaces) {
+    if (!place.id_path || !place.name_path) continue;
+    if (isPlaceInCity(place.id_path, city.sources)) continue;
+    const resolved = resolveCitySuburbFeature(
+      { idPath: place.id_path, namePath: place.name_path, lat: place.lat, lng: place.lng },
+      city.suburbs,
+      features,
+      city.normalize,
+    );
+    if (!resolved) continue;
+    byRoot.set(resolved.root, (byRoot.get(resolved.root) ?? 0) + 1);
+    if (place.lat == null || place.lng == null) ungeocoded.push(`${place.name_path} -> ${resolved.featureName}`);
+  }
+  const summary = city.suburbs.map((s) => `${s.root} ${byRoot.get(s.root) ?? 0}`).join(", ");
+  console.log(`  [${cityKey}] suburb places: ${summary}`);
+  for (const line of ungeocoded) console.log(`  [${cityKey}]   ungeocoded, matched by name: ${line}`);
 }
 
 function buildCity(cityKey, city) {

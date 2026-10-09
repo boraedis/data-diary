@@ -30,9 +30,9 @@ import { hasAdminRegions, loadAdminRegionFeatures } from "@/lib/geo/admin-geomet
 import { resolveAdminRegion } from "@/lib/geo/admin-lookup";
 import { resolveCountryCode } from "@/lib/geo/country-lookup";
 import { CITIES, type CityKey } from "@/lib/geo/city-config";
-import { listCityNeighborhoodOverridesIfAvailable } from "@/lib/city-heatmap-qa";
+import { listCityNeighborhoodOverridesIfAvailable, loadCitySuburbFeatures } from "@/lib/city-heatmap-qa";
 import { withCityNeighborhoodOverrides } from "@/lib/geo/city-place-qa";
-import { resolveCityFeatureName, isPlaceInCity } from "@/lib/geo/resolve-city-place";
+import { resolveCityFeatureName, resolveCitySuburbFeature, isPlaceInCity } from "@/lib/geo/resolve-city-place";
 import atlantaTopo from "@/data/geo/atlanta.topo.json";
 import dcMetroTopo from "@/data/geo/dc-metro.topo.json";
 import dubaiTopo from "@/data/geo/dubai.topo.json";
@@ -1273,7 +1273,7 @@ export async function getAdminRegionVisitData(): Promise<AdminRegionVisitData> {
 // geometry import at all, since country names are globally unique) and its
 // own client-side world-atlas import. Duplicating the import isn't
 // duplicating logic: this file needs a name index; the chart needs paths.
-const CITY_TOPOLOGIES: Record<CityKey, { objects: Record<string, { geometries: { properties: { name: string; root: string } }[] }> }> = {
+const CITY_TOPOLOGIES: Record<CityKey, { objects: Record<string, { geometries: { properties: { name: string; root: string; remainder?: boolean } }[] }> }> = {
   atlanta: atlantaTopo,
   "dc-metro": dcMetroTopo,
   dubai: dubaiTopo,
@@ -1393,16 +1393,38 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
   // roots (e.g. Washington and Arlington) could share a neighborhood
   // name; see CityHeatmapNeighborhood's own comment.
   const resolvedByPlaceId = new Map<number, string>();
+  // Places that belong on this map. For a catalog root that's the whole
+  // subtree (isPlaceInCity), resolved or not; for a suburb (#281) there's
+  // no subtree to belong to, so a place is in the city exactly when it
+  // resolves to a suburban feature — and with each county's "Rest of"
+  // backdrop, every geocoded point inside the county does.
+  const inCityPlaceIds = new Set<number>();
+  const suburbs = city.suburbs ?? [];
+  const suburbFeatures = suburbs.length > 0 ? loadCitySuburbFeatures(cityKey) : [];
   for (const p of placeRows) {
     if (!p.idPath || !p.namePath) continue;
-    const resolved = resolveCityFeatureName({ idPath: p.idPath, namePath: p.namePath }, city.sources, geometryNamesByRoot, normalize);
-    if (resolved) resolvedByPlaceId.set(p.id, `${resolved.root}\0${resolved.featureName}`);
+    if (isPlaceInCity(p.idPath, city.sources)) {
+      inCityPlaceIds.add(p.id);
+      const resolved = resolveCityFeatureName({ idPath: p.idPath, namePath: p.namePath }, city.sources, geometryNamesByRoot, normalize);
+      if (resolved) resolvedByPlaceId.set(p.id, `${resolved.root}\0${resolved.featureName}`);
+    } else if (suburbs.length > 0) {
+      const resolved = resolveCitySuburbFeature(
+        { idPath: p.idPath, namePath: p.namePath, lat: p.lat, lng: p.lng },
+        suburbs,
+        suburbFeatures,
+        normalize,
+      );
+      if (resolved) {
+        inCityPlaceIds.add(p.id);
+        resolvedByPlaceId.set(p.id, `${resolved.root}\0${resolved.featureName}`);
+      }
+    }
   }
 
   // Two different membership tests, deliberately: the choropleth fill
   // only makes sense for a place that resolves to an actual drawn
   // feature (resolvedByPlaceId, the narrower test), but the destination
-  // dots use the broader isPlaceInCity — a place can genuinely be inside
+  // dots use the broader inCityPlaceIds — a place can genuinely be inside
   // the city with no matching neighborhood polygon (a real geometry/
   // alias gap, not a bug), and plotting it anyway is what lets that gap
   // be spotted on the map instead of the place just silently vanishing.
@@ -1410,9 +1432,7 @@ export async function getCityHeatmapData(cityKey: CityKey): Promise<CityHeatmapD
   const dayPlacePairs = new Set<string>();
   for (const row of dayRows) {
     for (const placeId of [row.place1Id, row.place2Id]) {
-      if (placeId === null) continue;
-      const place = placeById.get(placeId);
-      if (!place?.idPath || !isPlaceInCity(place.idPath, city.sources)) continue;
+      if (placeId === null || !inCityPlaceIds.has(placeId)) continue;
       dayPlacePairs.add(`${row.date}\0${placeId}`);
       const resolvedKey = resolvedByPlaceId.get(placeId);
       if (resolvedKey) dayNeighborhoodPairs.add(`${row.date}\0${resolvedKey}`);
