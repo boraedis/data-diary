@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
 import { JournalWriteForm } from "@/components/journal/journal-write-form";
-import { TranscriptChoice } from "@/components/journal/transcript-choice";
 import { useTranscriptionSync } from "@/components/journal/use-transcription-sync";
 import { VideoRecorder } from "@/components/journal/video-recorder";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
 
 export type JournalMode = "write" | "record";
@@ -48,11 +48,19 @@ export function JournalSection({
 }) {
   const [mode, setMode] = useState<JournalMode>(initialMode);
   const transcription = useTranscriptionSync(videoLogs);
-  // Latest wins for the prompt: only the newest transcript awaiting a
-  // choice is offered (the server marks older ones superseded anyway).
-  const pending = videoLogs
-    .filter((l) => l.journalOutcome === "pending")
-    .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
+
+  // One leave-without-saving guard for the whole page. The guard is a
+  // single shared flag (navigation-blocker.tsx), so two components each
+  // setting it would overwrite each other; the panes report up instead.
+  // Recordings that aren't finalized count too (owner decision on #613):
+  // leaving keeps everything, but the day's journal won't have the new
+  // take until it's finalized.
+  const [writeDirty, setWriteDirty] = useState(false);
+  const [recorderBusy, setRecorderBusy] = useState(false);
+  const unfinalized = videoLogs.some((l) => !l.finalized && l.status !== "uploading");
+  useUnsavedChangesGuard(writeDirty || recorderBusy || unfinalized);
+  const onWriteDirty = useCallback((dirty: boolean) => setWriteDirty(dirty), []);
+  const onRecorderBusy = useCallback((busy: boolean) => setRecorderBusy(busy), []);
 
   function choose(next: JournalMode) {
     setMode(next);
@@ -63,7 +71,6 @@ export function JournalSection({
 
   return (
     <div className="flex flex-col gap-4">
-      {pending ? <TranscriptChoice log={pending} shownJournal={initialJournal} /> : null}
       {transcription.error ? <p className="text-sm text-destructive">{transcription.error}</p> : null}
       <div role="tablist" aria-label="Journal mode" className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1">
         {MODES.map((m) => (
@@ -91,7 +98,7 @@ export function JournalSection({
         aria-labelledby="journal-tab-write"
         hidden={mode !== "write"}
       >
-        <JournalWriteForm date={date} initial={initialJournal} />
+        <JournalWriteForm date={date} initial={initialJournal} onDirtyChange={onWriteDirty} />
       </div>
       <div
         role="tabpanel"
@@ -105,6 +112,8 @@ export function JournalSection({
           videoLogsError={videoLogsError}
           onRetryTranscription={(id) => void transcription.retry(id)}
           transcriptionNotConfigured={transcription.notConfigured}
+          journal={initialJournal}
+          onBusyChange={onRecorderBusy}
         />
       </div>
     </div>

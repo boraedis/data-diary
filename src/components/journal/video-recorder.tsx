@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StoredRecordings } from "@/components/journal/stored-recordings";
 import { useRecordingUploads, type UploadStatus } from "@/components/journal/use-recording-uploads";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   AUDIO_BITS_PER_SECOND,
   CAPTURE_CONSTRAINTS,
@@ -82,6 +81,8 @@ export function VideoRecorder({
   videoLogsError,
   onRetryTranscription,
   transcriptionNotConfigured,
+  journal,
+  onBusyChange,
 }: {
   date: string;
   videoLogs: VideoLogSummary[];
@@ -90,6 +91,11 @@ export function VideoRecorder({
   videoLogsError: string | null;
   onRetryTranscription: (id: string) => void;
   transcriptionNotConfigured: boolean;
+  /** The day's journal as last rendered, for Finalize's stale check. */
+  journal: string | null;
+  /** Reports whether leaving now would lose or strand something, for the
+   * Journal page's single leave-without-saving guard (journal-section.tsx). */
+  onBusyChange: (busy: boolean) => void;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -123,9 +129,6 @@ export function VideoRecorder({
   const interruptedRef = useRef(false);
 
   const recording = phase.kind === "recording";
-  // Leaving mid-take stops the recording, and a memory-only recording is
-  // lost outright, so both are worth the same prompt as unsaved text.
-  useUnsavedChangesGuard(recording || memoryRecording !== null);
 
   const refreshLocal = useCallback(async () => {
     try {
@@ -134,6 +137,14 @@ export function VideoRecorder({
       setLocalRecordings([]);
     }
   }, [date]);
+
+  // Leaving mid-take stops the recording, a memory-only recording is lost
+  // outright, and a take still on this device hasn't been uploaded or
+  // finalized yet (#613): all worth the leave-without-saving prompt.
+  const busy = recording || memoryRecording !== null || localRecordings.length > 0;
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
 
   const onUploaded = useCallback(() => {
     void refreshLocal();
@@ -689,6 +700,8 @@ export function VideoRecorder({
       ) : null}
 
       <StoredRecordings
+        date={date}
+        journal={journal}
         recordings={videoLogs}
         onRetryTranscription={onRetryTranscription}
         transcriptionNotConfigured={transcriptionNotConfigured}
