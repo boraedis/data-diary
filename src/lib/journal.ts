@@ -1,6 +1,6 @@
 import { and, count, desc, gte, ilike, lte, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { days } from "@/db/schema";
+import { days, videoLogs } from "@/db/schema";
 
 // Reading surface for `days.journal` — the per-day long-form free text
 // (issue #288). Everything else in this app reads a day one date at a
@@ -21,6 +21,11 @@ export const JOURNAL_PAGE_SIZE = 25;
 export type JournalEntry = {
   date: string; // "YYYY-MM-DD"
   journal: string;
+  /** The day's finalized video log number (#343), or null for a day with
+   * no finalized recording. `hasVideo` covers a finalized log that somehow
+   * has no number. */
+  hasVideo: boolean;
+  videoLogNumber: number | null;
 };
 
 export type JournalYearFacet = {
@@ -43,6 +48,8 @@ export type JournalPage = {
 export type JournalQuery = {
   search?: string;
   year?: string;
+  /** Only days with a finalized video log (#343). */
+  video?: boolean;
   page?: number;
 };
 
@@ -105,6 +112,14 @@ const HAS_JOURNAL: SQL = sql`${days.journal} IS NOT NULL AND btrim(${days.journa
  * three clauses that have to agree. */
 const YEAR_EXPR = sql<string>`to_char(${days.date}, 'YYYY')`;
 
+/** A day "has video" once a recording is finalized for it (#613). Takes
+ * that were never finalized are drafts that Finalize deletes, so they
+ * don't count, and neither do their transcripts in search: a finalized
+ * transcript is already in days.journal, which is what search reads. */
+const FINALIZED_VIDEO_EXISTS: SQL = sql`EXISTS (SELECT 1 FROM ${videoLogs} WHERE ${videoLogs.date} = ${days.date} AND ${videoLogs.finalizedAt} IS NOT NULL)`;
+
+const FINALIZED_LOG_NUMBER = sql<number | null>`(SELECT ${videoLogs.logNumber} FROM ${videoLogs} WHERE ${videoLogs.date} = ${days.date} AND ${videoLogs.finalizedAt} IS NOT NULL ORDER BY ${videoLogs.finalizedAt} DESC LIMIT 1)`;
+
 function searchCondition(search: string | undefined): SQL | undefined {
   const term = search?.trim();
   if (!term) return undefined;
@@ -132,14 +147,16 @@ function yearCondition(year: string | undefined): SQL | undefined {
  * gets slow, and is why the search term is escaped/parameterised here
  * rather than interpolated.
  */
-export async function getJournalPage({ search, year, page = 1 }: JournalQuery = {}): Promise<JournalPage> {
+export async function getJournalPage({ search, year, video, page = 1 }: JournalQuery = {}): Promise<JournalPage> {
   const db = getDb();
 
   const searchWhere = searchCondition(search);
   const yearWhere = yearCondition(year);
-  const listWhere = and(HAS_JOURNAL, searchWhere, yearWhere);
-  // Facets intentionally skip `yearWhere` — see JournalPage.years.
-  const facetWhere = and(HAS_JOURNAL, searchWhere);
+  const videoWhere = video ? FINALIZED_VIDEO_EXISTS : undefined;
+  const listWhere = and(HAS_JOURNAL, searchWhere, yearWhere, videoWhere);
+  // Facets intentionally skip `yearWhere` — see JournalPage.years. They
+  // do respect the video filter, so the chips count what you'd see.
+  const facetWhere = and(HAS_JOURNAL, searchWhere, videoWhere);
 
   const [[totalRow], yearRows] = await Promise.all([
     db.select({ n: count() }).from(days).where(listWhere),
@@ -159,7 +176,12 @@ export async function getJournalPage({ search, year, page = 1 }: JournalQuery = 
   const safePage = Math.min(Math.max(1, Math.floor(page) || 1), pageCount);
 
   const rows = await db
-    .select({ date: days.date, journal: days.journal })
+    .select({
+      date: days.date,
+      journal: days.journal,
+      hasVideo: sql<boolean>`${FINALIZED_VIDEO_EXISTS}`,
+      videoLogNumber: FINALIZED_LOG_NUMBER,
+    })
     .from(days)
     .where(listWhere)
     .orderBy(desc(days.date))
@@ -167,7 +189,12 @@ export async function getJournalPage({ search, year, page = 1 }: JournalQuery = 
     .offset((safePage - 1) * JOURNAL_PAGE_SIZE);
 
   return {
-    entries: rows.map((r) => ({ date: r.date, journal: r.journal as string })),
+    entries: rows.map((r) => ({
+      date: r.date,
+      journal: r.journal as string,
+      hasVideo: Boolean(r.hasVideo),
+      videoLogNumber: r.videoLogNumber === null ? null : Number(r.videoLogNumber),
+    })),
     total,
     years: yearRows.map((r) => ({ year: r.year, entryCount: r.entryCount })),
     page: safePage,

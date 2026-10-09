@@ -13,16 +13,20 @@
 export function journalHref({
   search,
   year,
+  video,
   page,
 }: {
   search?: string;
   year?: string;
+  /** Only days with a finalized video log (#343). */
+  video?: boolean;
   page?: number;
 } = {}): string {
   const params = new URLSearchParams();
   const term = search?.trim();
   if (term) params.set("q", term);
   if (year) params.set("year", year);
+  if (video) params.set("video", "1");
   if (page && page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `/journal?${query}` : "/journal";
