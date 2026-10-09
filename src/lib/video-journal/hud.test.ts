@@ -85,13 +85,11 @@ describe("formatSleep", () => {
 
 describe("diaryStatLines", () => {
   it("shows what's logged, in order", () => {
-    expect(diaryStatLines(STATS)).toEqual(["SLEEP 7H 25M · UP 7:05", "COFFEE 2 · WALKED 6.4 KM", "HAPPINESS 74"]);
+    expect(diaryStatLines(STATS)).toEqual(["SLEEP 7H 25M · UP 7:05", "COFFEE 2", "HAPPINESS 74"]);
   });
 
   it("hides what isn't logged yet", () => {
-    expect(
-      diaryStatLines({ ...STATS, sleepTime: null, coffees: null, happiness: null }),
-    ).toEqual(["WALKED 6.4 KM"]);
+    expect(diaryStatLines({ ...STATS, sleepTime: null, happiness: null })).toEqual(["COFFEE 2"]);
     expect(diaryStatLines(null)).toEqual([]);
   });
 });
