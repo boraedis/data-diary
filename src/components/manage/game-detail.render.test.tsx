@@ -53,7 +53,7 @@ describe("GameDetail session history", () => {
     expect(screen.getByText("31h total")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy(); // the Logged sessions count
     // The Over time chart's window picker shows once there's history.
-    expect(screen.getByRole("group", { name: "Window" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Per" })).toBeTruthy();
   });
 
   it("says nothing's logged when there are no sessions", () => {
@@ -62,6 +62,6 @@ describe("GameDetail session history", () => {
     expect(screen.queryByText(/total$/)).toBeNull();
     // An empty state for the chart too, not a flat line, and no picker.
     expect(screen.getByText(/nothing to chart/)).toBeTruthy();
-    expect(screen.queryByRole("group", { name: "Window" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Per" })).toBeNull();
   });
 });

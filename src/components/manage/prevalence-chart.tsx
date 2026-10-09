@@ -5,47 +5,35 @@ import type * as d3 from "d3";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveLine } from "@/components/charts/interactive/interactive-line";
-import { RelativeRangePicker } from "@/components/charts/interactive/relative-range-picker";
+import { PeriodPicker } from "@/components/charts/interactive/period-picker";
 import { parseDate, todayDateString } from "@/lib/date";
 import { formatDuration } from "@/lib/viz/format";
-import type { DateFormatPreset } from "@/lib/viz/format";
 import {
   buildPrevalenceSeries,
-  prevalenceBucket,
   type PrevalenceEntry,
   type PrevalenceMeasure,
-  type PrevalenceWindow,
+  type PrevalencePeriod,
 } from "@/lib/viz/prevalence";
 
 // The small "how often does this show up" line on every manage detail page
-// that has a mentions/sessions list (#590). Deliberately barebones — no
-// legend, zoom, or point labels — so the page stays about the item and its
-// mentions; the hover crosshair InteractiveLine always has is the only
-// interaction. The standard chart height class is kept rather than a
-// smaller one, so it reads as the same kind of chart as everywhere else.
+// that has a mentions/sessions list (#590): days (or play time) per year,
+// month or week across the item's whole history. Deliberately barebones —
+// no legend, zoom, or point labels — so the page stays about the item and
+// its mentions; the hover crosshair InteractiveLine always has is the only
+// interaction.
+//
+// A fixed, short height rather than the chart pages' standard
+// `h-[min(62vh,640px)]`: at that size it pushed the mentions list below the
+// fold, and the list is what these pages are for (owner feedback on #624).
 //
 // Fed straight from whatever the page's usage list already holds (see
 // src/lib/viz/prevalence.ts for why that's re-bucketed here, not in SQL).
 
-const HEIGHT_CLASS = "h-[min(62vh,640px)] min-h-[320px]";
+const HEIGHT = 220;
 
-// Tooltip title per bucket: a month bucket sits on the 1st (a weekday there
-// is meaningless), a week bucket on its Monday.
-const DATE_FORMAT: Record<ReturnType<typeof prevalenceBucket>, DateFormatPreset> = {
-  day: "weekdayYear",
-  week: "dayYear",
-  month: "monthNameYear",
-  quarter: "monthNameYear",
-  year: "monthNameYear",
-};
+const PERIODS: PrevalencePeriod[] = ["year", "month", "week"];
 
-const BUCKET_NOUN: Record<ReturnType<typeof prevalenceBucket>, string> = {
-  day: "day",
-  week: "week",
-  month: "month",
-  quarter: "quarter",
-  year: "year",
-};
+const yearOf = (d: Date) => String(d.getFullYear());
 
 // Module-level so they're stable: InteractiveLine's useD3 rebuilds the
 // whole <svg> whenever one of these changes identity.
@@ -64,8 +52,8 @@ const FORMATS: Record<
   days: {
     y: (days) => days,
     value: (days) => `${days} ${days === 1 ? "day" : "days"}`,
-    // Whole days only: a short window's small counts would otherwise get
-    // "0.5 days" ticks.
+    // Whole days only: a quiet item's small weekly counts would otherwise
+    // get "0.5 days" ticks.
     tick: (v) => (Number.isInteger(Number(v)) ? String(v) : ""),
     label: "Days",
     aria: "days logged",
@@ -83,6 +71,7 @@ export function PrevalenceChart({
   entries,
   measure = "days",
   itemLabel,
+  color,
   title = "Over time",
 }: {
   /** Every appearance of the item, any order, duplicates fine — "days"
@@ -92,32 +81,42 @@ export function PrevalenceChart({
   measure?: PrevalenceMeasure;
   /** Names the item in the chart's accessible label. */
   itemLabel: string;
+  /** The item's own colour where it has one (a person's tag, a place's
+   * region/country, a team's), so the line matches how that item is
+   * drawn elsewhere. Falls back to the first categorical slot. */
+  color?: string | null;
   title?: string;
 }) {
-  const [range, setRange] = useState<PrevalenceWindow>("all");
-  const bucket = prevalenceBucket(range);
+  const [period, setPeriod] = useState<PrevalencePeriod>("month");
   const formats = FORMATS[measure];
 
   // "Today" is the viewer's local date (src/lib/date.ts). The server's
   // render may disagree near midnight, but nothing it computes here reaches
   // the HTML: ResponsiveChart draws only once it has measured, on the client.
+  const points = useMemo(
+    () => buildPrevalenceSeries(entries, period, measure, todayDateString()),
+    [entries, period, measure]
+  );
   const series = useMemo(
     () => [
       {
         id: "prevalence",
         label: formats.label,
-        // A week or month of days is a handful of 0s and 1s, which the
-        // primitive's smoothed curve draws as soft humps; the dots show
-        // each day is its own reading. Longer windows are dense enough
-        // that the line alone reads right.
-        markers: bucket === "day",
-        points: buildPrevalenceSeries(entries, range, measure, todayDateString()).map((p) => ({
-          x: parseDate(p.start),
-          y: formats.y(p.value),
-        })),
+        color: color ?? undefined,
+        // A handful of yearly points read better as dots on a line than
+        // as a bare curve; month and week runs are dense enough without.
+        markers: period === "year",
+        points: points.map((p) => ({ x: parseDate(p.start), y: formats.y(p.value) })),
       },
     ],
-    [entries, range, measure, formats, bucket]
+    [points, period, formats, color]
+  );
+  // Year buckets sit on Jan 1, so the default "January 2024"-style title
+  // would misread; name just the year, with one tick per point so d3 can't
+  // place two ticks inside the same year. Memoized: it's a useD3 dependency.
+  const yearLabels = useMemo(
+    () => (period === "year" ? { tick: yearOf, title: yearOf, tickValues: series[0].points.map((p) => p.x) } : undefined),
+    [period, series]
   );
 
   return (
@@ -125,14 +124,16 @@ export function PrevalenceChart({
       <CardHeader>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <CardTitle>{title}</CardTitle>
-          {entries.length > 0 ? <RelativeRangePicker value={range} onChange={setRange} /> : null}
+          {points.length > 0 ? (
+            <PeriodPicker<PrevalencePeriod> value={period} onChange={setPeriod} periods={PERIODS} label="Per" />
+          ) : null}
         </div>
       </CardHeader>
       <CardContent>
-        {entries.length === 0 ? (
+        {points.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing logged yet, so there&apos;s nothing to chart.</p>
         ) : (
-          <ResponsiveChart className={HEIGHT_CLASS}>
+          <ResponsiveChart height={HEIGHT}>
             {({ width, height }) => (
               <InteractiveLine
                 series={series}
@@ -143,10 +144,11 @@ export function PrevalenceChart({
                 showLegend={false}
                 lineLabels={false}
                 pointLabels={false}
-                dateFormat={DATE_FORMAT[bucket]}
+                dateFormat={period === "month" ? "monthNameYear" : "dayYear"}
+                xLabels={yearLabels}
                 valueFormat={formats.value}
                 yTickFormat={formats.tick}
-                ariaLabel={`${itemLabel}: ${formats.aria} per ${BUCKET_NOUN[bucket]}`}
+                ariaLabel={`${itemLabel}: ${formats.aria} per ${period}`}
               />
             )}
           </ResponsiveChart>

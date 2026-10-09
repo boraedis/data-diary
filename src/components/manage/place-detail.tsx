@@ -628,7 +628,7 @@ export function PlaceDetail({
       ) : null}
       </div>
 
-      <PrevalenceChart entries={mentions} itemLabel={place.name} />
+      <PrevalenceChart entries={mentions} itemLabel={place.name} color={viewColor} />
 
       <Card size="sm">
         <CardHeader>

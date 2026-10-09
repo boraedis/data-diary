@@ -199,7 +199,7 @@ export function PersonDetail({
         </CardContent>
       </Card>
 
-      <PrevalenceChart entries={usage.dates} itemLabel={person.name} />
+      <PrevalenceChart entries={usage.dates} itemLabel={person.name} color={person.tagColor} />
 
       <Card size="sm">
         <CardHeader>

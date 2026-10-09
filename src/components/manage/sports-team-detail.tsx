@@ -229,7 +229,7 @@ export function SportsTeamDetail({
         </CardContent>
       </Card>
 
-      <PrevalenceChart entries={usage.watches} itemLabel={team.name} />
+      <PrevalenceChart entries={usage.watches} itemLabel={team.name} color={team.color} />
 
       <Card size="sm">
         <CardHeader>
