@@ -160,3 +160,63 @@ export function sphericalGeometricMedian(points: WeightedPoint[]): LngLat | null
 
   return fromUnitVector(x);
 }
+
+/** The weighted median of `values`: the value where the cumulative weight,
+ * sorted ascending, first reaches half the total. When it lands exactly on
+ * half (an even count of equal weights), the midpoint of the two values
+ * either side, the usual median. Null for nothing with positive weight. */
+export function weightedMedian(values: readonly { value: number; weight: number }[]): number | null {
+  const sorted = values.filter((v) => v.weight > 0 && Number.isFinite(v.value)).sort((a, b) => a.value - b.value);
+  if (sorted.length === 0) return null;
+  const half = sorted.reduce((sum, v) => sum + v.weight, 0) / 2;
+  let cumulative = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    cumulative += sorted[i].weight;
+    if (Math.abs(cumulative - half) < 1e-9 && i + 1 < sorted.length) {
+      return (sorted[i].value + sorted[i + 1].value) / 2;
+    }
+    if (cumulative > half) return sorted[i].value;
+  }
+  return sorted[sorted.length - 1].value;
+}
+
+/**
+ * The Economist's "centre of gravity" (#512): the point with as many days
+ * to its north as its south and to its east as its west, i.e. the weighted
+ * median latitude and, separately, the weighted median longitude.
+ *
+ * Simpler to say than the geometric median above ("half my days were north
+ * of this line") and what the chart that inspired #215 used. Unlike it,
+ * it isn't rotation-invariant, and the two medians are taken independently,
+ * so the result can land where no day was: half the days north of a line
+ * and half east of another doesn't put anyone at the crossing.
+ *
+ * **Longitude is taken in a rotated frame.** Raw longitudes break at ±180°:
+ * days either side of the date line sort to opposite ends and the median
+ * lands on the far side of the planet. So every longitude is first measured
+ * from the points' weighted mean direction (wrapped into ±180° of it), the
+ * median taken there, and the result rotated back. That's correct for any
+ * set of points within a hemisphere of their mean, which is everything this
+ * app logs. Latitude has no wrap and is taken as-is.
+ */
+export function coordinateWiseMedian(points: WeightedPoint[]): LngLat | null {
+  const pts = points.filter(
+    (p) => p.weight > 0 && Number.isFinite(p.position[0]) && Number.isFinite(p.position[1]),
+  );
+  if (pts.length === 0) return null;
+
+  let sum: Vec3 = [0, 0, 0];
+  for (const { position, weight } of pts) {
+    const v = toUnitVector(position);
+    sum = [sum[0] + v[0] * weight, sum[1] + v[1] * weight, sum[2] + v[2] * weight];
+  }
+  // Inputs that cancel out have no mean direction; any frame is as good as
+  // another then, and 0° is the plain one.
+  const origin = fromUnitVector(sum)?.[0] ?? 0;
+  const wrap = (lng: number) => ((((lng + 180) % 360) + 360) % 360) - 180;
+
+  const lat = weightedMedian(pts.map((p) => ({ value: p.position[1], weight: p.weight })));
+  const relLng = weightedMedian(pts.map((p) => ({ value: wrap(p.position[0] - origin), weight: p.weight })));
+  if (lat === null || relLng === null) return null;
+  return [wrap(relLng + origin), lat];
+}

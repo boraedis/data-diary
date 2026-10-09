@@ -28,6 +28,7 @@ import {
   type CentreArea,
   type LocationCentreData,
   type AreaShare,
+  type CentreMethod,
   type TrailPoint,
   type WindowDetail,
 } from "@/lib/location-centre";
@@ -67,6 +68,14 @@ const WINDOW_OPTIONS: GroupByOption<WindowDays>[] = [
   { id: "1095", label: "3 years" },
   { id: "1826", label: "5 years" },
 ];
+/** On trial (#512): the shipped mean against The Economist's N/S/E/W
+ * median, compared on real data before one is kept. The picker goes once
+ * that's decided (see the issue), unless both turn out worth keeping. */
+const METHOD_OPTIONS: GroupByOption<CentreMethod>[] = [
+  { id: "mean", label: "Mean" },
+  { id: "median", label: "Median (N/S/E/W)" },
+];
+
 /** Days between samples, per window: a couple of weeks is already far
  * finer than a year-long average can move, and a longer window moves
  * slower still. */
@@ -130,6 +139,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   // One year reads month by month; more than one, year by year.
   const singleYear = fromYear === toYear;
   const [windowDays, setWindowDays] = useState<WindowDays>("365");
+  const [method, setMethod] = useState<CentreMethod>("mean");
   // The trail point whose detail panel is open, by marker id. Deliberately
   // not reset when the pickers change: an id that no longer exists simply
   // resolves to no panel below, and one that still does (the same point
@@ -142,7 +152,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   const index = useMemo(() => indexDaily(data.daily), [data]);
 
   const { runs, endDate } = useMemo(() => {
-    const all = rollingTrail(index, Number(windowDays), STEP[windowDays]);
+    const all = rollingTrail(index, Number(windowDays), STEP[windowDays], method);
     // The whole trail's last point, before any year filter — the only one
     // that gets the "Now" dot, so a range ending in the past never claims it.
     const endDate = all[all.length - 1]?.[all[all.length - 1].length - 1]?.date ?? null;
@@ -152,7 +162,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       runs: all.map((run) => run.filter((p) => p.date >= from && p.date <= to)).filter((run) => run.length > 0),
       endDate,
     };
-  }, [index, windowDays, wholeRecord, fromYear, toYear]);
+  }, [index, windowDays, method, wholeRecord, fromYear, toYear]);
 
   // Colour encodes time along the trail. The domain is whatever's on
   // screen, so a single year still spans the full ramp month by month.
@@ -396,6 +406,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         <>
           <YearRangePicker domain={yearDomain} value={[fromYear, toYear]} onChange={setPickedRange} />
           <GroupByPicker value={windowDays} onChange={setWindowDays} options={WINDOW_OPTIONS} label="Window" />
+          <GroupByPicker value={method} onChange={setMethod} options={METHOD_OPTIONS} label="Centre" />
           {current.placedDays > 0 ? (
             <p className="ml-auto text-xs text-muted-foreground">
               {formatThousandsNumber(current.locatedDays)} of {formatThousandsNumber(current.placedDays)} days with a
@@ -440,7 +451,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
                 getMarkerSecondaryValue={getMarkerSecondary}
                 getMarkerDetail={getMarkerDetail}
                 onMarkerClick={onMarkerClick}
-                ariaLabel={`World map. A line traces the centre of mass of where I spent my days${rangeText ? ` ${rangeText}` : ""}, each point averaging the ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} before it, coloured from earliest to latest, with a labelled dot where each ${singleYear ? "month" : "year"} begins and one marking now. Shaded circles are the areas I spent time in, sized by their share of days, the ten largest coloured and named. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
+                ariaLabel={`World map. A line traces the ${method === "median" ? "median centre (as many days north as south, east as west)" : "centre of mass"} of where I spent my days${rangeText ? ` ${rangeText}` : ""}, each point ${method === "median" ? "taken over" : "averaging"} the ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} before it, coloured from earliest to latest, with a labelled dot where each ${singleYear ? "month" : "year"} begins and one marking now. Shaded circles are the areas I spent time in, sized by their share of days, the ten largest coloured and named. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
               />
               {detail && selectedDate ? (
                 <DetailPanel

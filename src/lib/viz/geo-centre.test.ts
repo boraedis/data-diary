@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { greatCircleKm, sphericalGeometricMedian, type LngLat } from "@/lib/viz/geo-centre";
+import { coordinateWiseMedian, greatCircleKm, sphericalGeometricMedian, weightedMedian, type LngLat } from "@/lib/viz/geo-centre";
 
 const DC: LngLat = [-77.0369, 38.9072];
 const DUBAI: LngLat = [55.2708, 25.2048];
@@ -68,5 +68,56 @@ describe("sphericalGeometricMedian", () => {
       { position: [180, 10.5], weight: 1 },
     ])!;
     expect(Math.abs(m[0])).toBeGreaterThan(179);
+  });
+});
+
+describe("weightedMedian", () => {
+  it("is the usual median with equal weights", () => {
+    expect(weightedMedian([3, 1, 2].map((value) => ({ value, weight: 1 })))).toBe(2);
+    expect(weightedMedian([4, 1, 3, 2].map((value) => ({ value, weight: 1 })))).toBe(2.5);
+  });
+  it("lands on a value holding more than half the weight", () => {
+    expect(weightedMedian([{ value: 10, weight: 6 }, { value: 0, weight: 5 }])).toBe(10);
+  });
+  it("is null with nothing weighted", () => {
+    expect(weightedMedian([{ value: 1, weight: 0 }])).toBeNull();
+  });
+});
+
+describe("coordinateWiseMedian (#512)", () => {
+  it("sits exactly on a place holding a majority of the weight", () => {
+    const median = coordinateWiseMedian([
+      { position: DC, weight: 6 },
+      { position: DUBAI, weight: 5 },
+    ])!;
+    expect(greatCircleKm(median, DC)).toBeLessThan(0.001);
+  });
+
+  it("takes latitude and longitude separately, so it can land where no point was", () => {
+    // Three points: the median lat comes from one, the median lng from another.
+    const median = coordinateWiseMedian([
+      { position: [0, 0], weight: 1 },
+      { position: [10, 20], weight: 1 },
+      { position: [20, 10], weight: 1 },
+    ])!;
+    expect(median[0]).toBeCloseTo(10, 6);
+    expect(median[1]).toBeCloseTo(10, 6);
+  });
+
+  it("doesn't break across the antimeridian", () => {
+    // Fiji-ish and Samoa-ish, either side of ±180°: the median belongs near
+    // the date line, not near 0° on the far side of the planet.
+    const median = coordinateWiseMedian([
+      { position: [178, -18], weight: 1 },
+      { position: [179, -17], weight: 1 },
+      { position: [-172, -14], weight: 1 },
+    ])!;
+    expect(Math.abs(median[0])).toBeGreaterThan(170);
+    expect(median[0]).toBeCloseTo(179, 6);
+    expect(median[1]).toBeCloseTo(-17, 6);
+  });
+
+  it("is null for no points", () => {
+    expect(coordinateWiseMedian([])).toBeNull();
   });
 });

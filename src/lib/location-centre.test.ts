@@ -153,6 +153,20 @@ describe("rollingTrail", () => {
     expect(greatCircleKm(longRun.find((p) => p.date === "2020-02-24")!.position, HOME)).toBeLessThan(peak);
   });
 
+  it("with the median (#512), stays home through a minority trip and moves only once away holds most of the window", () => {
+    const trip = [...stay("2020-01-01", 45, HOME), ...stay("2020-02-15", 10, AWAY), ...stay("2020-02-25", 45, HOME)];
+    const [tripRun] = rollingTrail(indexDaily(trip), 30, 1, "median");
+    // A third of the window away is a minority: the median doesn't budge,
+    // where the mean above was pulled over 1,000 km.
+    for (const p of tripRun) expect(greatCircleKm(p.position, HOME)).toBeLessThan(0.01);
+
+    const move = [...stay("2020-01-01", 45, HOME), ...stay("2020-02-15", 45, AWAY)];
+    const [moveRun] = rollingTrail(indexDaily(move), 30, 1, "median");
+    const at = (date: string) => moveRun.find((p) => p.date === date)!.position;
+    expect(greatCircleKm(at("2020-02-28"), HOME)).toBeLessThan(0.01); // 14 of 30 days away
+    expect(greatCircleKm(at("2020-03-01"), AWAY)).toBeLessThan(0.01); // 16 of 30
+  });
+
   it("always ends on the last logged day, whatever the step", () => {
     const runs = rollingTrail(indexDaily(stay("2020-01-01", 100, HOME)), 30, 42);
     const last = runs[runs.length - 1];

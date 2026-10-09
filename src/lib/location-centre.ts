@@ -2,6 +2,7 @@ import { addDays, daysBetween } from "@/lib/date";
 import {
   fromUnitVector,
   greatCircleKm,
+  coordinateWiseMedian,
   sphericalGeometricMedian,
   toUnitVector,
   type LngLat,
@@ -367,6 +368,11 @@ export type DailyIndex = {
   py: Float64Array;
   pz: Float64Array;
   pn: Float64Array;
+  /** Each located day's own position, by offset, for the median trail
+   * (#512): the direction of its day vector. Exact for a one-place day.
+   * A day split between two places becomes the point between them, the
+   * only position its summed vector still carries. */
+  positions: (LngLat | null)[];
 };
 
 export function indexDaily(daily: DailyVector[]): DailyIndex | null {
@@ -387,7 +393,8 @@ export function indexDaily(daily: DailyVector[]): DailyIndex | null {
     pz[i + 1] = pz[i] + (d?.[3] ?? 0);
     pn[i + 1] = pn[i] + (d ? 1 : 0);
   }
-  return { first, span, byOffset, px, py, pz, pn };
+  const positions = byOffset.map((d) => (d ? fromUnitVector([d[1], d[2], d[3]]) : null));
+  return { first, span, byOffset, px, py, pz, pn, positions };
 }
 
 /** The offsets [lo, hi) of the window *ending* on offset `i` — the
@@ -426,7 +433,12 @@ export type TrailPoint = {
  * has less than MIN_WINDOW_COVERAGE of its days located — a stretch with
  * too little logged to say where the centre was.
  */
-export function rollingTrail(index: DailyIndex | null, windowDays: number, stepDays: number): TrailPoint[][] {
+export function rollingTrail(
+  index: DailyIndex | null,
+  windowDays: number,
+  stepDays: number,
+  method: CentreMethod = "mean",
+): TrailPoint[][] {
   if (!index) return [];
   const { px, py, pz, pn } = index;
   const minDays = Math.max(1, Math.ceil(windowDays * MIN_WINDOW_COVERAGE));
@@ -442,7 +454,12 @@ export function rollingTrail(index: DailyIndex | null, windowDays: number, stepD
   for (const i of offsets) {
     const [lo, hi] = windowBounds(index, i, windowDays);
     const n = pn[hi] - pn[lo];
-    const position = n >= minDays ? fromUnitVector([px[hi] - px[lo], py[hi] - py[lo], pz[hi] - pz[lo]]) : null;
+    const position =
+      n < minDays
+        ? null
+        : method === "median"
+          ? windowMedian(index, lo, hi)
+          : fromUnitVector([px[hi] - px[lo], py[hi] - py[lo], pz[hi] - pz[lo]]);
     if (!position) {
       if (run.length > 0) runs.push(run);
       run = [];
@@ -452,6 +469,31 @@ export function rollingTrail(index: DailyIndex | null, windowDays: number, stepD
   }
   if (run.length > 0) runs.push(run);
   return runs;
+}
+
+/**
+ * How a trail point's window is reduced to one position.
+ *
+ * - "mean" (the shipped trail): the direction of the summed day vectors,
+ *   a centre of mass. Sits between places in proportion to the days at
+ *   each, so a trip pulls it part of the way.
+ * - "median" (#512, on trial): The Economist's centre, as many days north
+ *   as south and east as west (`coordinateWiseMedian`). Every day pulls
+ *   equally whatever its distance, so it tends to stay on whichever place
+ *   holds most of the window, and only moves once another place takes over.
+ */
+export type CentreMethod = "mean" | "median";
+
+/** The coordinate-wise median of the located days in [lo, hi), each one
+ * vote. O(window log window) per point, against the mean's O(1), and fine
+ * for the few hundred points a trail samples. */
+function windowMedian(index: DailyIndex, lo: number, hi: number): LngLat | null {
+  const points: WeightedPoint[] = [];
+  for (let i = lo; i < hi; i++) {
+    const position = index.positions[i];
+    if (position) points.push({ position, weight: 1 });
+  }
+  return coordinateWiseMedian(points);
 }
 
 /** Per-area day totals within [lo, hi), and how many days were located. */
