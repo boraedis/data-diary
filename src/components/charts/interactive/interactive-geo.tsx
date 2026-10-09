@@ -337,6 +337,10 @@ export type GeoRoute = {
    * line split into pieces can carry a colour ramp along its length
    * (#215 colours its trail by time). */
   color?: string;
+  /** Stroke opacity, overriding the default (0.9 solid, 0.6 dashed) — for
+   * a reference line meant to sit far back, like the raw trail #609 draws
+   * faintly beneath its smoothed one. */
+  opacity?: number;
 };
 
 export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties> = {
@@ -1123,7 +1127,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .attr("d", (r) => path({ type: "LineString", coordinates: r.coordinates }))
           .attr("fill", "none")
           .attr("stroke", (r) => r.color ?? "var(--foreground)")
-          .attr("stroke-opacity", (r) => (r.dashed ? 0.6 : 0.9))
+          .attr("stroke-opacity", (r) => r.opacity ?? (r.dashed ? 0.6 : 0.9))
           .attr("stroke-width", 2)
           .attr("stroke-linecap", "round")
           .attr("stroke-linejoin", "round")

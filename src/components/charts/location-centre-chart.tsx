@@ -80,6 +80,8 @@ const SMOOTHING_OPTIONS: GroupByOption<Smoothing>[] = [
   { id: "smoother", label: "Smoother" },
 ];
 const SMOOTHING_SHARE: Record<Smoothing, number> = { none: 0, smooth: 1 / 6, smoother: 1 / 3 };
+/** The unsmoothed trail beneath a smoothed one: present but well back. */
+const RAW_TRAIL_OPACITY = 0.3;
 
 /** Days between samples, per window: a couple of weeks is already far
  * finer than a year-long average can move, and a longer window moves
@@ -144,9 +146,10 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   // One year reads month by month; more than one, year by year.
   const singleYear = fromYear === toYear;
   const [windowDays, setWindowDays] = useState<WindowDays>("365");
-  // Opens smoothed: the curve is the view the owner asked for (#609), and
-  // None is there to see the raw first-level trail it's drawn from.
-  const [smoothing, setSmoothing] = useState<Smoothing>("smooth");
+  // Opens unsmoothed (owner, 2026-10-08): the raw first-level trail, which
+  // goes through every dot, is the default. Smoothing is opt-in, and when
+  // it's on the raw line stays visible, faint and dashed, beneath the curve.
+  const [smoothing, setSmoothing] = useState<Smoothing>("none");
   // The trail point whose detail panel is open, by marker id. Deliberately
   // not reset when the pickers change: an id that no longer exists simply
   // resolves to no panel below, and one that still does (the same point
@@ -191,6 +194,25 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
     const total = lineRuns.reduce((n, r) => n + r.length, 0);
     const pieceSize = Math.max(2, Math.ceil(total / TARGET_PIECES));
     const out: GeoRoute[] = [];
+    // With smoothing on, the raw first-level trail stays on the map,
+    // faint and dashed, drawn first so the curve sits on top: it's the
+    // line the dots lie on, so it shows how far the curve has eased off
+    // them. Same time colours as the curve, which is what tells it apart
+    // from the grey gap bridges (also dashed).
+    if (smoothing !== "none") {
+      runs.forEach((run, r) => {
+        for (let i = 0; i < run.length - 1; i += pieceSize - 1) {
+          const piece = run.slice(i, i + pieceSize);
+          out.push({
+            id: `raw:${r}:${i}`,
+            coordinates: piece.map((p) => p.position),
+            color: colorOf(piece[Math.floor(piece.length / 2)].date),
+            dashed: true,
+            opacity: RAW_TRAIL_OPACITY,
+          });
+        }
+      });
+    }
     lineRuns.forEach((run, r) => {
       // Consecutive pieces share their boundary point, so the line has no
       // seams where the colour steps.
@@ -214,7 +236,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       }
     });
     return out;
-  }, [lineRuns, colorOf]);
+  }, [runs, lineRuns, smoothing, colorOf]);
 
   const { markers, valueById, secondaryById, mixById, dateById } = useMemo(() => {
     const dateById = new Map<string, string>();
