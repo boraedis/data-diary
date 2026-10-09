@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   days,
@@ -6,6 +6,7 @@ import {
   type VideoLogJournalOutcome as SchemaJournalOutcome,
   type VideoLogStatus as SchemaVideoLogStatus,
 } from "@/db/schema";
+import { buildJournalEntry } from "@/lib/video-journal/journal-entry";
 import { extensionForMimeType } from "@/lib/video-journal/recording";
 import { missingParts } from "@/lib/video-journal/upload-plan";
 import {
@@ -120,6 +121,7 @@ export async function startVideoLogUpload(input: StartUploadInput): Promise<Uplo
         sizeBytes: input.sizeBytes,
         durationMs: input.durationMs,
         recordedAt: new Date(input.recordedAt),
+        recordedTz: input.recordedTz,
         uploadId,
       })
       .onConflictDoNothing();
@@ -226,12 +228,38 @@ export async function completeVideoLogUpload(id: string): Promise<VideoLogSummar
     );
   }
 
-  const [updated] = await getDb()
+  await getDb()
     .update(videoLogs)
     .set({ status: "uploaded", uploadId: null, uploadedAt: new Date(), updatedAt: new Date() })
-    .where(eq(videoLogs.id, id))
-    .returning();
-  return toSummary(updated);
+    .where(eq(videoLogs.id, id));
+  await assignLogNumber(id);
+  const done = await findRow(id);
+  return toSummary(done!);
+}
+
+/**
+ * Gives a log the next "Video log #N" if it doesn't have one yet, and
+ * returns its number. Idempotent. The number is computed and set in one
+ * statement; if two logs finish at the same instant and pick the same N,
+ * the unique index rejects one and it simply tries again.
+ */
+export async function assignLogNumber(id: string): Promise<number | null> {
+  const db = getDb();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await db
+        .update(videoLogs)
+        .set({ logNumber: sql`(SELECT coalesce(max(${videoLogs.logNumber}), 0) + 1 FROM ${videoLogs})` })
+        .where(and(eq(videoLogs.id, id), isNull(videoLogs.logNumber)));
+      break;
+    } catch (error) {
+      // 23505 = unique_violation: lost the race for this number.
+      const code = (error as { cause?: { code?: string } })?.cause?.code;
+      if (code !== "23505" || attempt === 4) throw error;
+    }
+  }
+  const [row] = await db.select({ logNumber: videoLogs.logNumber }).from(videoLogs).where(eq(videoLogs.id, id)).limit(1);
+  return row?.logNumber ?? null;
 }
 
 async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
@@ -244,10 +272,25 @@ async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
     sizeBytes: row.sizeBytes,
     durationMs: row.durationMs,
     recordedAt: row.recordedAt.toISOString(),
+    logNumber: row.logNumber,
     playbackUrl: playable ? await presignGetObject(row.storageKey) : null,
     transcript: row.transcript,
     transcriptionError: row.transcriptionError,
     journalOutcome: row.journalOutcome,
+    // What a Replace/Append would write: the stored block if this log has
+    // already written one, otherwise a fresh render.
+    journalEntry:
+      row.status === "ready" && row.transcript?.trim()
+        ? (row.journalEntry ??
+          buildJournalEntry({
+            id: row.id,
+            logNumber: row.logNumber,
+            recordedAt: row.recordedAt,
+            recordedTz: row.recordedTz,
+            durationMs: row.durationMs,
+            transcript: row.transcript,
+          }))
+        : null,
     transcriptionStale:
       row.status === "transcribing" &&
       row.transcriptionStartedAt !== null &&

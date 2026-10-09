@@ -1656,6 +1656,16 @@ export const videoLogs = pgTable(
     // When filming started, from the device clock. Not the same as `date`:
     // a log about Tuesday recorded just after midnight is still Tuesday's.
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    // The recording device's IANA timezone ("America/New_York"), so the
+    // journal header can show the local time it was filmed at rather than
+    // the server's. Null for recordings made before this was captured.
+    recordedTz: text("recorded_tz"),
+    // "Video log #N": the HUD's log entry number (#599) and the journal
+    // header's. Assigned once, as the next in sequence, when the upload
+    // completes, and never renumbered. That's upload order, which matches
+    // recording order except for a take that sat offline on a device while
+    // newer ones uploaded.
+    logNumber: integer("log_number"),
     // R2's multipart upload id while `uploading`; cleared on completion.
     uploadId: text("upload_id"),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
@@ -1676,12 +1686,18 @@ export const videoLogs = pgTable(
     transcriptionStartedAt: timestamp("transcription_started_at", { withTimezone: true }),
     transcribedAt: timestamp("transcribed_at", { withTimezone: true }),
     journalOutcome: videoLogJournalOutcomeEnum("journal_outcome"),
+    // The exact text this log wrote into days.journal (header + transcript),
+    // if it wrote any. "Latest wins" recognises an untouched earlier entry by
+    // comparing against this stored text, not a re-rendered one, so a later
+    // change to the header format can't make old entries look edited.
+    journalEntry: text("journal_entry"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("video_logs_date_idx").on(table.date),
     uniqueIndex("video_logs_storage_key_idx").on(table.storageKey),
+    uniqueIndex("video_logs_log_number_idx").on(table.logNumber),
   ]
 );
 

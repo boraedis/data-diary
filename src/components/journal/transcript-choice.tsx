@@ -60,8 +60,12 @@ export function TranscriptChoice({ log, shownJournal }: { log: VideoLogSummary; 
         </p>
       </div>
       <details className="text-sm">
-        <summary className="cursor-pointer select-none text-muted-foreground">Read the transcript</summary>
-        <p className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed">{log.transcript}</p>
+        <summary className="cursor-pointer select-none text-muted-foreground">See what would be added</summary>
+        {/* The full log block (header + transcript), exactly as Replace or
+            Append would write it. */}
+        <p className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+          {log.journalEntry ?? log.transcript}
+        </p>
       </details>
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" disabled={busy} onClick={() => void choose("append")}>

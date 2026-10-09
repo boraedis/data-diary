@@ -19,6 +19,8 @@ export type UploadSource = {
   durationMs: number;
   /** ISO timestamp. */
   recordedAt: string;
+  /** IANA timezone of the recording device, if known. */
+  recordedTz: string | null;
   blob: Blob;
 };
 
@@ -121,6 +123,7 @@ export async function uploadRecording(
         sizeBytes: total,
         durationMs: Math.round(source.durationMs),
         recordedAt: source.recordedAt,
+        recordedTz: source.recordedTz,
       }),
     signal,
   );

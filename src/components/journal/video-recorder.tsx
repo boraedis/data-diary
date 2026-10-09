@@ -61,6 +61,7 @@ type MemoryRecording = {
   blob: Blob;
   mimeType: string;
   startedAt: string;
+  timeZone: string | null;
   durationMs: number;
 };
 
@@ -309,6 +310,7 @@ export function VideoRecorder({
           date,
           mimeType,
           startedAt: new Date(startedAt).toISOString(),
+          timeZone: deviceTimeZone() ?? undefined,
           endedAt: null,
           durationMs: 0,
           bytes: 0,
@@ -414,7 +416,13 @@ export function VideoRecorder({
       const tail = memoryChunksRef.current.sort((a, b) => a.seq - b.seq).map((c) => c.blob);
       const blob = new Blob(prefix ? [prefix, ...tail] : tail, { type: mimeType ?? "video/mp4" });
       memoryChunksRef.current = [];
-      setMemoryRecording({ blob, mimeType: mimeType ?? "video/mp4", startedAt: startedAtIso, durationMs });
+      setMemoryRecording({
+        blob,
+        mimeType: mimeType ?? "video/mp4",
+        startedAt: startedAtIso,
+        timeZone: deviceTimeZone(),
+        durationMs,
+      });
       setPlayback({ id: "memory", url: URL.createObjectURL(blob) });
       // activeId stays set: it keeps the background queue away from the
       // partial copy in IndexedDB, which shares this id but not its size,
@@ -422,7 +430,10 @@ export function VideoRecorder({
       setNotice(
         "This recording couldn't be fully saved on this device (storage may be full). It's uploading straight from memory; download it too if you can, before leaving this page.",
       );
-      void uploadFromMemory({ blob, mimeType: mimeType ?? "video/mp4", startedAt: startedAtIso, durationMs }, id);
+      void uploadFromMemory(
+        { blob, mimeType: mimeType ?? "video/mp4", startedAt: startedAtIso, timeZone: deviceTimeZone(), durationMs },
+        id,
+      );
     } else {
       setActiveId(null);
       void runUploads();
@@ -450,6 +461,7 @@ export function VideoRecorder({
           mimeType: recording.mimeType,
           durationMs: recording.durationMs,
           recordedAt: recording.startedAt,
+          recordedTz: recording.timeZone,
           blob: recording.blob,
         },
         { onProgress: (p) => setMemoryUpload({ kind: "uploading", ...p }) },
@@ -714,6 +726,16 @@ export function VideoRecorder({
       </details>
     </div>
   );
+}
+
+/** The device's IANA timezone ("America/New_York"), for the journal
+ * header's local time (#341). Null if the browser won't say. */
+function deviceTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
 }
 
 /** Wall-clock milliseconds. A module-level wrapper because the React

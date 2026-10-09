@@ -20,6 +20,9 @@ export type SiblingLog = {
   recordedAt: Date;
   status: string;
   transcript: string | null;
+  /** The exact block this log wrote into the journal, if it wrote one
+   * (header + transcript, journal-entry.ts). */
+  journalEntry: string | null;
 };
 
 export type JournalDecision =
@@ -58,9 +61,10 @@ export function decideJournalAction({
 
   if (isBlank(currentJournal)) return { kind: "apply", expected: "blank" };
 
-  // Exact match only: trimming or normalising here would treat a lightly
-  // edited transcript as untouched and overwrite the edit.
-  const untouched = siblings.find((s) => s.transcript !== null && s.transcript === currentJournal);
+  // Exact match against the block that log actually wrote, header
+  // included. Trimming or normalising here would treat a lightly edited
+  // entry as untouched and overwrite the edit.
+  const untouched = siblings.find((s) => s.journalEntry !== null && s.journalEntry === currentJournal);
   if (untouched) return { kind: "apply", expected: { text: currentJournal!, replacingId: untouched.id } };
 
   return { kind: "pending" };
@@ -68,13 +72,14 @@ export function decideJournalAction({
 
 export type JournalChoice = "replace" | "append" | "keep";
 
-/** The journal text after the user's choice for a pending transcript. */
-export function journalAfterChoice(choice: JournalChoice, currentJournal: string | null, transcript: string): string | null {
+/** The journal text after the user's choice for a pending transcript.
+ * `entry` is the log's full journal block (header + transcript). */
+export function journalAfterChoice(choice: JournalChoice, currentJournal: string | null, entry: string): string | null {
   switch (choice) {
     case "replace":
-      return transcript;
+      return entry;
     case "append":
-      return isBlank(currentJournal) ? transcript : `${currentJournal!.trimEnd()}\n\n${transcript}`;
+      return isBlank(currentJournal) ? entry : `${currentJournal!.trimEnd()}\n\n${entry}`;
     case "keep":
       return currentJournal;
   }

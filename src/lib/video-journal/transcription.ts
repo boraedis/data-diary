@@ -8,9 +8,10 @@ import {
   journalAfterChoice,
   type JournalChoice,
 } from "@/lib/video-journal/journal-rules";
+import { buildJournalEntry } from "@/lib/video-journal/journal-entry";
 import { presignGetObject } from "@/lib/video-journal/r2";
 import { TRANSCRIPTION_STALE_MS } from "@/lib/video-journal/video-log-types";
-import { VideoLogError } from "@/lib/video-journal/video-logs";
+import { assignLogNumber, VideoLogError } from "@/lib/video-journal/video-logs";
 
 // Transcription lifecycle for a stored video log (#341, epic #338):
 //   uploaded → transcribing → ready (transcript stored) | failed (reason
@@ -89,8 +90,31 @@ export async function runTranscription(row: VideoLogRow): Promise<void> {
   }
 }
 
-async function setOutcome(id: string, outcome: VideoLogRow["journalOutcome"]): Promise<void> {
-  await getDb().update(videoLogs).set({ journalOutcome: outcome, updatedAt: new Date() }).where(eq(videoLogs.id, id));
+async function setOutcome(
+  id: string,
+  outcome: VideoLogRow["journalOutcome"],
+  /** The block this log just wrote into the journal, when it wrote one. */
+  journalEntry?: string,
+): Promise<void> {
+  await getDb()
+    .update(videoLogs)
+    .set({ journalOutcome: outcome, ...(journalEntry !== undefined ? { journalEntry } : {}), updatedAt: new Date() })
+    .where(eq(videoLogs.id, id));
+}
+
+/** The header + transcript block for a log (journal-entry.ts), making sure
+ * it has its log number first. Logs that uploaded before numbering existed
+ * get one here. */
+async function entryFor(log: VideoLogRow): Promise<string> {
+  const logNumber = log.logNumber ?? (await assignLogNumber(log.id));
+  return buildJournalEntry({
+    id: log.id,
+    logNumber,
+    recordedAt: log.recordedAt,
+    recordedTz: log.recordedTz,
+    durationMs: log.durationMs,
+    transcript: log.transcript ?? "",
+  });
 }
 
 /** Writes `journal` only if the day's journal is still what the decision
@@ -132,6 +156,7 @@ export async function applyTranscriptToJournal(id: string): Promise<void> {
           recordedAt: videoLogs.recordedAt,
           status: videoLogs.status,
           transcript: videoLogs.transcript,
+          journalEntry: videoLogs.journalEntry,
         })
         .from(videoLogs)
         .where(and(eq(videoLogs.date, log.date), ne(videoLogs.id, log.id))),
@@ -159,8 +184,9 @@ export async function applyTranscriptToJournal(id: string): Promise<void> {
         return;
       case "apply": {
         const expected = decision.expected === "blank" ? "blank" : decision.expected.text;
-        if (await compareAndSetJournal(log.date, expected, log.transcript!)) {
-          await setOutcome(id, "applied");
+        const entry = await entryFor(log);
+        if (await compareAndSetJournal(log.date, expected, entry)) {
+          await setOutcome(id, "applied", entry);
           if (decision.expected !== "blank") await setOutcome(decision.expected.replacingId, "superseded");
           await supersedeOlderPending(log.date, log.recordedAt, id);
           return;
@@ -215,7 +241,8 @@ export async function resolveJournalChoice(
   if (stale && choice !== "keep") {
     throw new VideoLogError(409, "The journal changed since this page loaded. Reload and choose again.");
   }
-  const next = journalAfterChoice(choice, current, log.transcript!);
+  const entry = await entryFor(log);
+  const next = journalAfterChoice(choice, current, entry);
 
   if (choice !== "keep") {
     // And conditional at write time too, for an edit landing in between.
@@ -226,7 +253,11 @@ export async function resolveJournalChoice(
   }
 
   const outcome = choice === "replace" ? "replaced" : choice === "append" ? "appended" : "kept";
-  await setOutcome(id, outcome);
+  // Only a Replace leaves the journal equal to this log's block, which is
+  // what lets a later re-record recognise it as untouched. After an
+  // Append, the journal is writing + block, which correctly reads as
+  // writing; the block is still recorded as what this log contributed.
+  await setOutcome(id, outcome, choice === "keep" ? undefined : entry);
   await supersedeOlderPending(log.date, log.recordedAt, id);
   return choice === "keep" ? current : next;
 }

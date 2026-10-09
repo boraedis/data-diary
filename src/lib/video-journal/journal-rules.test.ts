@@ -7,6 +7,7 @@ const sibling = (overrides: Partial<SiblingLog>): SiblingLog => ({
   recordedAt: t("08:00"),
   status: "ready",
   transcript: "Earlier take.",
+  journalEntry: "VIDEO LOG #1\n\nEarlier take.",
   ...overrides,
 });
 
@@ -30,10 +31,10 @@ describe("decideJournalAction", () => {
       decideJournalAction({
         transcript: "Re-recorded.",
         recordedAt: t("09:00"),
-        currentJournal: "Earlier take.",
+        currentJournal: "VIDEO LOG #1\n\nEarlier take.",
         siblings: [sibling({})],
       }),
-    ).toEqual({ kind: "apply", expected: { text: "Earlier take.", replacingId: "older" } });
+    ).toEqual({ kind: "apply", expected: { text: "VIDEO LOG #1\n\nEarlier take.", replacingId: "older" } });
   });
 
   it("treats an edited transcript as writing", () => {
@@ -41,7 +42,7 @@ describe("decideJournalAction", () => {
       decideJournalAction({
         transcript: "Re-recorded.",
         recordedAt: t("09:00"),
-        currentJournal: "Earlier take. Plus a note I typed.",
+        currentJournal: "VIDEO LOG #1\n\nEarlier take. Plus a note I typed.",
         siblings: [sibling({})],
       }),
     ).toEqual({ kind: "pending" });
@@ -52,8 +53,19 @@ describe("decideJournalAction", () => {
       decideJournalAction({
         transcript: "Re-recorded.",
         recordedAt: t("09:00"),
-        currentJournal: "Earlier take.\n",
+        currentJournal: "VIDEO LOG #1\n\nEarlier take.\n",
         siblings: [sibling({})],
+      }).kind,
+    ).toBe("pending");
+  });
+
+  it("a sibling whose transcript matches but never wrote the journal doesn't count as untouched", () => {
+    expect(
+      decideJournalAction({
+        transcript: "Re-recorded.",
+        recordedAt: t("09:00"),
+        currentJournal: "Earlier take.",
+        siblings: [sibling({ journalEntry: null })],
       }).kind,
     ).toBe("pending");
   });

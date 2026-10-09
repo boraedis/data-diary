@@ -71,6 +71,7 @@ export function StoredRecordings({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-col">
                   <span className="font-mono text-sm">
+                    {log.logNumber !== null ? `#${log.logNumber} · ` : ""}
                     {new Date(log.recordedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
                     {formatElapsed(log.durationMs)} · {formatBytes(log.sizeBytes)}
                   </span>
