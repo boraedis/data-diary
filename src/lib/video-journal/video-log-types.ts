@@ -53,8 +53,10 @@ export type VideoLogSummary = {
   sizeBytes: number;
   durationMs: number;
   recordedAt: string;
-  /** "Video log #N", once assigned (at upload completion). */
+  /** "Video log #N", once assigned (at Finalize, #613). */
   logNumber: number | null;
+  /** True for the recording chosen as the day's primary at Finalize. */
+  finalized: boolean;
   playbackUrl: string | null;
   /** #341. Null until transcribed; "" when no speech was found. */
   transcript: string | null;

@@ -232,13 +232,13 @@ export async function completeVideoLogUpload(id: string): Promise<VideoLogSummar
     .update(videoLogs)
     .set({ status: "uploaded", uploadId: null, uploadedAt: new Date(), updatedAt: new Date() })
     .where(eq(videoLogs.id, id));
-  await assignLogNumber(id);
   const done = await findRow(id);
   return toSummary(done!);
 }
 
 /**
- * Gives a log the next "Video log #N" if it doesn't have one yet, and
+ * Gives a log the next "Video log #N" if it doesn't have one yet (called
+ * by Finalize, #613, for the chosen recording), and
  * returns its number. Idempotent. The number is computed and set in one
  * statement; if two logs finish at the same instant and pick the same N,
  * the unique index rejects one and it simply tries again.
@@ -273,6 +273,7 @@ async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
     durationMs: row.durationMs,
     recordedAt: row.recordedAt.toISOString(),
     logNumber: row.logNumber,
+    finalized: row.finalizedAt !== null,
     playbackUrl: playable ? await presignGetObject(row.storageKey) : null,
     transcript: row.transcript,
     transcriptionError: row.transcriptionError,

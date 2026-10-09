@@ -213,6 +213,18 @@ export async function headObject(key: string): Promise<{ size: number; contentTy
   return { size: Number(res.headers.get("Content-Length") ?? 0), contentType: res.headers.get("Content-Type") };
 }
 
+/** Permanently deletes an object (#613: Finalize clears the takes that
+ * weren't chosen). An already-missing object counts as deleted, so a
+ * retried Finalize doesn't fail on what the first attempt removed. */
+export async function deleteObject(key: string): Promise<void> {
+  const config = requireConfig();
+  const res = await client(config).fetch(objectUrl(config, key).toString(), { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    const body = await res.text().catch(() => "");
+    throw new R2RequestError(res.status, xmlTag(body, "Code") ?? null, xmlTag(body, "Message") ?? "DELETE failed");
+  }
+}
+
 /** A short-lived URL a `<video>` can play the object from. R2 serves range
  * requests on it, so seeking a long recording doesn't download the file. */
 export async function presignGetObject(key: string): Promise<string> {

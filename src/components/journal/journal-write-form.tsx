@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { DayPayload } from "@/lib/days";
 
 /** The "Write" half of the Journal section (#340). Same field and data as
@@ -13,7 +12,17 @@ import type { DayPayload } from "@/lib/days";
  * is paragraphs, not a one-line reason. Writing is a first-class way to
  * journal, not a fallback for days without a recording (#338, 2026-10-08
  * decisions). */
-export function JournalWriteForm({ date, initial }: { date: string; initial: string | null }) {
+export function JournalWriteForm({
+  date,
+  initial,
+  onDirtyChange,
+}: {
+  date: string;
+  initial: string | null;
+  /** Unsaved text, reported up to the Journal page's single leave guard
+   * (journal-section.tsx). */
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const router = useRouter();
   const [journal, setJournal] = useState(initial ?? "");
   const [saving, setSaving] = useState(false);
@@ -21,11 +30,13 @@ export function JournalWriteForm({ date, initial }: { date: string; initial: str
   const [savedAt, setSavedAt] = useState<number | null>(null);
   // Easy to lose a paragraph of writing to an accidental nav click (#143).
   const [dirty, setDirty] = useState(false);
-  useUnsavedChangesGuard(dirty);
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
-  // The journal can change on the server while this pane is open: a
-  // transcript filling an empty journal, or a Replace/Append choice
-  // (#341), arrive through router.refresh() as a new `initial`. Untouched
+  // The journal can change on the server while this pane is open:
+  // finalizing a recording (#613) in the Record pane writes it, and the
+  // result arrives through router.refresh() as a new `initial`. Untouched
   // text follows it. Text being edited is never replaced under the cursor;
   // instead, a note warns that saving will overwrite what arrived.
   // (Adjusting state while rendering, React's documented pattern for
@@ -92,7 +103,7 @@ export function JournalWriteForm({ date, initial }: { date: string; initial: str
 
       {changedUnderneath ? (
         <p className="text-sm text-amber-600 dark:text-amber-400">
-          This day&apos;s journal was updated while you were editing (a transcript, most likely). Saving will replace
+          This day&apos;s journal was updated while you were editing (by finalizing a recording, most likely). Saving will replace
           that update with what&apos;s in the box; reload the page first to see it.
         </p>
       ) : null}

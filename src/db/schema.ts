@@ -1597,17 +1597,19 @@ export const videoLogStatusEnum = pgEnum("video_log_status", [
   "failed",
 ]);
 
-// What happened to `days.journal` when a log's transcript was ready (#341).
-// The rule, from #338's 2026-10-08 decisions: a transcript never silently
-// replaces writing.
-//   applied    → filled an empty journal, or replaced an earlier transcript
-//                that was still sitting there unedited (latest wins).
-//   pending    → the journal holds writing (or an edited transcript); the
-//                user hasn't yet chosen Replace / Append / Keep.
-//   replaced / appended / kept → the user's choice for a pending one.
-//   superseded → a newer recording's transcript was already in place, or
-//                the user resolved a newer pending one first.
-// Null until the transcript exists.
+// What Finalize (#613) did to `days.journal` with the primary recording's
+// log block. A transcript never silently replaces writing (#338,
+// 2026-10-08).
+//   applied    → filled an empty journal, or replaced an earlier log block
+//                still sitting there unedited.
+//   replaced / appended / kept → the user's choice when the journal held
+//                writing.
+//   pending / superseded → from #341's first design, where transcripts
+//                reached the journal on their own. Nothing sets them since
+//                #613 moved all journal writing to Finalize. They stay in
+//                the enum because dropping enum values is a destructive
+//                migration drizzle-kit can't apply non-interactively in CI.
+// Null on a recording that hasn't been finalized.
 export const videoLogJournalOutcomeEnum = pgEnum("video_log_journal_outcome", [
   "applied",
   "pending",
@@ -1660,11 +1662,12 @@ export const videoLogs = pgTable(
     // journal header can show the local time it was filmed at rather than
     // the server's. Null for recordings made before this was captured.
     recordedTz: text("recorded_tz"),
-    // "Video log #N": the HUD's log entry number (#599) and the journal
-    // header's. Assigned once, as the next in sequence, when the upload
-    // completes, and never renumbered. That's upload order, which matches
-    // recording order except for a take that sat offline on a device while
-    // newer ones uploaded.
+    // "Video log #N": the journal header's number, and what the HUD (#599)
+    // shows as the log entry number. Assigned at Finalize (#613), to the
+    // chosen recording only, as the next in sequence, and never renumbered.
+    // Takes deleted at Finalize never get one, so the sequence has no gaps
+    // from discarded takes (owner's call on #613: aesthetic, pick what
+    // makes sense).
     logNumber: integer("log_number"),
     // R2's multipart upload id while `uploading`; cleared on completion.
     uploadId: text("upload_id"),
@@ -1691,6 +1694,11 @@ export const videoLogs = pgTable(
     // comparing against this stored text, not a re-rendered one, so a later
     // change to the header format can't make old entries look edited.
     journalEntry: text("journal_entry"),
+    // Set on the recording chosen as the day's primary at Finalize (#613).
+    // Every other recording for the day is deleted (R2 object and row) in
+    // the same step, so at most one row per day has this set, except
+    // briefly when a deletion failed and Finalize needs retrying.
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
