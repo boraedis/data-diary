@@ -19,7 +19,10 @@ category, each showing an at-a-glance "N/total filled" progress badge:
 - Health (distance walked, coffees, sick day, workouts)
 - Sleep (sleep/wake time, location, naps)
 - Weight (weight, body fat %, muscle mass)
-- Happiness (0–100 score, reason, journal entry, day type)
+- Happiness (0–100 score, reason, day type)
+- Journal — written, or recorded as a video log in the browser (video journal
+  epic #338; recordings currently stay on the device, upload and
+  transcription are in progress)
 - Work (productivity score, duration, location, commute)
 - Technology & social media (phone/laptop usage minutes, Instagram followers/usage)
 - Subs — a fixed set of personal subscores tracked daily

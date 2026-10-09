@@ -72,8 +72,18 @@ function summarize(day: DayPayload): CategorySummary[] {
       key: "happiness",
       label: "Happiness",
       kind: "progress",
-      filled: present([day.happiness, day.happinessReason, day.journal, day.dayType]),
-      total: 4,
+      filled: present([day.happiness, day.happinessReason, day.dayType]),
+      total: 3,
+    },
+    // Its own section since the video journal epic (#338/#340): written or
+    // recorded, a day either has an entry or it doesn't, so a 0/1 bar.
+    // Recordings get counted here once they're stored (#339/#342).
+    {
+      key: "journal",
+      label: "Journal",
+      kind: "progress",
+      filled: day.journal?.trim() ? 1 : 0,
+      total: 1,
     },
     { key: "subs", label: "Subs", kind: "progress", filled: day.subs.length, total: SUB_NAMES.length },
     {

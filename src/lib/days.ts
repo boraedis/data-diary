@@ -191,8 +191,16 @@ export type SleepPayload = {
 export type HappinessPayload = {
   happiness: number | null;
   happinessReason: string | null;
-  journal: string | null;
   dayType: DayType | null;
+};
+
+/** The journal used to ride along in HappinessPayload. It moved to its own
+ * section (/day/[date]/journal, #340) when the video journal epic (#338)
+ * made it a first-class way of logging a day, written or recorded. It's
+ * also why it needs its own save: a happiness save must never write
+ * `journal`, or saving a happiness score would null out a day's entry. */
+export type JournalPayload = {
+  journal: string | null;
 };
 
 export type WorkPayload = {
@@ -1020,10 +1028,24 @@ export function validateHappinessPayload(body: unknown): Result<HappinessPayload
       happiness: typeof b.happiness === "number" ? b.happiness : null,
       happinessReason:
         typeof b.happinessReason === "string" && b.happinessReason ? b.happinessReason : null,
-      journal: typeof b.journal === "string" && b.journal ? b.journal : null,
       dayType: (b.dayType as DayType) || null,
     },
   };
+}
+
+export function validateJournalPayload(body: unknown): Result<JournalPayload> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request body" };
+  }
+  const b = body as Record<string, unknown>;
+  if (b.journal !== null && b.journal !== undefined && typeof b.journal !== "string") {
+    return { ok: false, error: "Journal must be text" };
+  }
+  // Whitespace-only counts as empty, the same rule /journal's HAS_JOURNAL
+  // uses to decide what's an entry, so the two can't disagree about
+  // whether a day has one.
+  const journal = typeof b.journal === "string" && b.journal.trim() ? b.journal : null;
+  return { ok: true, value: { journal } };
 }
 
 export function validateWorkPayload(body: unknown): Result<WorkPayload> {
@@ -1752,7 +1774,6 @@ export async function saveHappiness(date: string, value: HappinessPayload): Prom
       date,
       happiness: value.happiness,
       happinessReason: value.happinessReason,
-      journal: value.journal,
       dayType: value.dayType,
       updatedAt: new Date(),
     })
@@ -1761,10 +1782,23 @@ export async function saveHappiness(date: string, value: HappinessPayload): Prom
       set: {
         happiness: value.happiness,
         happinessReason: value.happinessReason,
-        journal: value.journal,
         dayType: value.dayType,
         updatedAt: new Date(),
       },
+    });
+
+  return loadDay(date);
+}
+
+export async function saveJournal(date: string, value: JournalPayload): Promise<DayPayload> {
+  const db = getDb();
+
+  await db
+    .insert(days)
+    .values({ date, journal: value.journal, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: days.date,
+      set: { journal: value.journal, updatedAt: new Date() },
     });
 
   return loadDay(date);
