@@ -40,16 +40,28 @@ function EntryCard({ entry, query }: { entry: JournalEntry; query: string }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-2 py-4">
-        {/* Links to the day as a whole rather than straight to the
-            journal section that owns the field: reading an old
-            entry, the usual next question is what the rest of that day
-            looked like, and the day hub is one hop from the editor. */}
-        <Link
-          href={`/day/${entry.date}`}
-          className="text-xs font-medium uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
-        >
-          {formatDate(entry.date, "weekdayYear")}
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          {/* Links to the day as a whole rather than straight to the
+              journal section that owns the field: reading an old
+              entry, the usual next question is what the rest of that day
+              looked like, and the day hub is one hop from the editor. */}
+          <Link
+            href={`/day/${entry.date}`}
+            className="text-xs font-medium uppercase tracking-widest text-muted-foreground transition-colors hover:text-primary"
+          >
+            {formatDate(entry.date, "weekdayYear")}
+          </Link>
+          {/* The day's finalized video log (#343). Straight to the Record
+              pane, where it plays; the date link above goes to the day hub. */}
+          {entry.hasVideo ? (
+            <Link
+              href={`/day/${entry.date}/journal?mode=record`}
+              className="shrink-0 rounded-full border border-primary/40 px-2.5 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+            >
+              ▶ {entry.videoLogNumber !== null ? `Video log #${entry.videoLogNumber}` : "Video log"}
+            </Link>
+          ) : null}
+        </div>
         <Highlighted text={entry.journal} query={query} />
       </CardContent>
     </Card>
@@ -65,10 +77,12 @@ export default async function JournalPage({
   const query = first(params.q);
   const year = first(params.year);
   const requestedPage = Number.parseInt(first(params.page), 10);
+  const video = first(params.video) === "1";
 
   const data = await getJournalPage({
     search: query,
     year,
+    video,
     page: Number.isNaN(requestedPage) ? 1 : requestedPage,
   });
 
@@ -85,26 +99,39 @@ export default async function JournalPage({
         </p>
       </div>
 
-      <JournalSearch search={query.trim()} year={year} />
+      <JournalSearch search={query.trim()} year={year} video={video} />
 
-      {data.years.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          <YearChip label="All years" href={journalHref({ search: query })} active={!year} />
-          {data.years.map((facet) => (
-            <YearChip
-              key={facet.year}
-              label={`${facet.year} (${facet.entryCount})`}
-              href={journalHref({ search: query, year: facet.year })}
-              active={year === facet.year}
-            />
-          ))}
-        </div>
-      ) : null}
+      <div className="flex flex-wrap gap-1.5">
+        {/* Days with a finalized video log only (#343). A toggle, kept
+            across year changes and searches. */}
+        <YearChip
+          label="▶ With video"
+          href={journalHref({ search: query, year, video: !video })}
+          active={video}
+        />
+        {data.years.length > 0 ? (
+          <>
+            <YearChip label="All years" href={journalHref({ search: query, video })} active={!year} />
+            {data.years.map((facet) => (
+              <YearChip
+                key={facet.year}
+                label={`${facet.year} (${facet.entryCount})`}
+                href={journalHref({ search: query, year: facet.year, video })}
+                active={year === facet.year}
+              />
+            ))}
+          </>
+        ) : null}
+      </div>
 
       {data.entries.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            {searching ? `No entries matching “${query.trim()}”.` : "No journal entries yet."}
+            {searching
+              ? `No entries matching “${query.trim()}”${video ? " with a video log" : ""}.`
+              : video
+                ? "No entries with a video log yet."
+                : "No journal entries yet."}
           </CardContent>
         </Card>
       ) : (
@@ -119,7 +146,7 @@ export default async function JournalPage({
         <div className="flex items-center justify-between gap-4">
           <PageLink
             label="← Newer"
-            href={journalHref({ search: query, year, page: data.page - 1 })}
+            href={journalHref({ search: query, year, video, page: data.page - 1 })}
             disabled={data.page <= 1}
           />
           <span className="text-sm text-muted-foreground">
@@ -127,7 +154,7 @@ export default async function JournalPage({
           </span>
           <PageLink
             label="Older →"
-            href={journalHref({ search: query, year, page: data.page + 1 })}
+            href={journalHref({ search: query, year, video, page: data.page + 1 })}
             disabled={data.page >= data.pageCount}
           />
         </div>
