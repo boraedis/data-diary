@@ -2,7 +2,7 @@
 // uploader (#339). Free of DB and R2 imports so client code can use it.
 
 import { isValidDateString } from "@/lib/date";
-import { sanitizeHudSnapshot, type HudSnapshot } from "@/lib/video-journal/hud";
+import { sanitizeHudSnapshot, type HudDiaryStats, type HudSnapshot } from "@/lib/video-journal/hud";
 import { MAX_RECORDING_BYTES, MAX_UPLOAD_PARTS, partCount } from "@/lib/video-journal/upload-plan";
 
 export type VideoLogStatus = "uploading" | "uploaded" | "transcribing" | "ready" | "failed";
@@ -73,6 +73,19 @@ export type VideoLogSummary = {
   /** True for a `transcribing` log that's been at it long enough to count
    * as abandoned, so the UI offers Retry instead of waiting forever. */
   transcriptionStale: boolean;
+};
+
+/** A day's finalized video log as /journal plays it inline (#619). */
+export type JournalVideo = {
+  id: string;
+  date: string;
+  logNumber: number | null;
+  recordedAt: string;
+  /** Presigned GET, valid for an hour; null if R2 isn't configured here. */
+  playbackUrl: string | null;
+  hud: HudSnapshot | null;
+  /** That day's diary numbers, read now (#599's live split). */
+  stats: HudDiaryStats;
 };
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };

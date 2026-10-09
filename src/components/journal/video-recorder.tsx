@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { MissionHud, type HudLocationState } from "@/components/journal/mission-hud";
+import { HudVideoPlayer, playbackHudFor, VIEWFINDER, type PlaybackHud } from "@/components/journal/hud-video-player";
+import { MissionHud } from "@/components/journal/mission-hud";
 import { StoredRecordings } from "@/components/journal/stored-recordings";
 import { useHudContext } from "@/components/journal/use-hud-context";
 import { useRecordingUploads, type UploadStatus } from "@/components/journal/use-recording-uploads";
@@ -128,9 +129,6 @@ export function VideoRecorder({
   // The live camera/mic stream, as state (not just the ref below) because
   // the HUD's mic meter needs it during render.
   const [stream, setStream] = useState<MediaStream | null>(null);
-  // Playback position for the playback HUD, tagged with the URL it
-  // belongs to so switching videos starts from 0 without a reset effect.
-  const [position, setPosition] = useState<{ url: string; ms: number } | null>(null);
   // Mission HUD (#599): live location + weather, captured when the camera
   // turns on and stamped into each recording at record start.
   const hud = useHudContext();
@@ -608,29 +606,14 @@ export function VideoRecorder({
   // recording (its saved snapshot and log number), a take still on this
   // device, or a memory-only take. Recordings from before the HUD existed
   // have no snapshot and get the time from their recordedAt alone.
-  const playbackHud = ((): {
-    logLabel: string;
-    startedAt: Date;
-    timeZone: string | null;
-    location: HudLocationState;
-    weather: HudSnapshot["weather"];
-  } | null => {
+  const playbackHud = ((): PlaybackHud | null => {
     if (!playback) return null;
-    const fromSnapshot = (snap: HudSnapshot | null | undefined, startedAtIso: string, logNumber: number | null) => ({
-      logLabel: logNumber !== null ? `LOG #${logNumber}` : "LOG —",
-      startedAt: new Date(snap?.capturedAt ?? startedAtIso),
-      timeZone: snap?.timeZone ?? null,
-      location: snap?.location
-        ? ({ kind: "ok", location: snap.location } as const)
-        : ({ kind: "unavailable" } as const),
-      weather: snap?.weather ?? null,
-    });
     const stored = videoLogs.find((l) => l.id === playback.id);
-    if (stored) return fromSnapshot(stored.hud, stored.recordedAt, stored.logNumber);
+    if (stored) return playbackHudFor(stored.hud, stored.recordedAt, stored.logNumber);
     const local = localRecordings.find((r) => r.id === playback.id);
-    if (local) return fromSnapshot(local.hud, local.startedAt, null);
+    if (local) return playbackHudFor(local.hud, local.startedAt, null);
     if (playback.id === "memory" && memoryRecording) {
-      return fromSnapshot(memoryRecording.hud, memoryRecording.startedAt, null);
+      return playbackHudFor(memoryRecording.hud, memoryRecording.startedAt, null);
     }
     return null;
   })();
@@ -666,29 +649,7 @@ export function VideoRecorder({
           />
         </div>
       ) : playback ? (
-        <div className={VIEWFINDER}>
-          <video
-            key={playback.url}
-            src={playback.url}
-            controls
-            playsInline
-            onTimeUpdate={(e) => setPosition({ url: playback.url, ms: e.currentTarget.currentTime * 1000 })}
-            className="absolute inset-0 h-full w-full object-contain"
-          />
-          {playbackHud ? (
-            <MissionHud
-              mode="playback"
-              logLabel={playbackHud.logLabel}
-              startedAt={playbackHud.startedAt}
-              timeZone={playbackHud.timeZone}
-              elapsedMs={position?.url === playback.url ? position.ms : 0}
-              recording={false}
-              location={playbackHud.location}
-              weather={playbackHud.weather}
-              stats={diaryStats}
-            />
-          ) : null}
-        </div>
+        <HudVideoPlayer url={playback.url} hud={playbackHud} stats={diaryStats} />
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -866,8 +827,6 @@ export function VideoRecorder({
     </div>
   );
 }
-
-const VIEWFINDER = "relative mx-auto aspect-[3/4] max-h-[75vh] w-full overflow-hidden rounded-xl bg-black sm:aspect-video";
 
 /** A location/weather capture older than this at record start is redone
  * rather than stamped into the recording (#599). */

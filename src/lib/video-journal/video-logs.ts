@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   days,
@@ -23,6 +23,7 @@ import {
 } from "@/lib/video-journal/r2";
 import {
   type JournalOutcome,
+  type JournalVideo,
   type PresignedPart,
   type StartUploadInput,
   type UploadState,
@@ -334,4 +335,59 @@ export async function nextLogNumber(): Promise<number> {
     .select({ max: sql<number | null>`max(${videoLogs.logNumber})` })
     .from(videoLogs);
   return Number(row?.max ?? 0) + 1;
+}
+
+/**
+ * The finalized video log for each of `dates` that has one, keyed by date,
+ * for /journal's inline player (#619). One query for the whole page, joined
+ * with each day's diary numbers for the playback HUD. Playback URLs are
+ * presigned here; signing is local crypto, so a page of 25 costs no network
+ * round trips.
+ */
+export async function getFinalizedVideosForDates(dates: string[]): Promise<Record<string, JournalVideo>> {
+  if (dates.length === 0) return {};
+  const rows = await getDb()
+    .select({
+      id: videoLogs.id,
+      date: videoLogs.date,
+      logNumber: videoLogs.logNumber,
+      recordedAt: videoLogs.recordedAt,
+      storageKey: videoLogs.storageKey,
+      hud: videoLogs.hudSnapshot,
+      finalizedAt: videoLogs.finalizedAt,
+      sleepTime: days.sleepTime,
+      wakeTime: days.wakeTime,
+      wakeCrossedMidnight: days.wakeCrossedMidnight,
+      coffees: days.coffees,
+      distanceWalkedKm: days.distanceWalkedKm,
+      happiness: days.happiness,
+    })
+    .from(videoLogs)
+    .innerJoin(days, eq(days.date, videoLogs.date))
+    .where(and(inArray(videoLogs.date, dates), isNotNull(videoLogs.finalizedAt)))
+    .orderBy(asc(videoLogs.finalizedAt));
+
+  const canPlay = getR2Config() !== null;
+  const out: Record<string, JournalVideo> = {};
+  // Ordered oldest-finalized first, so if a day briefly has two (a
+  // deletion that needs retrying, see finalize.ts), the latest wins.
+  for (const r of rows) {
+    out[r.date] = {
+      id: r.id,
+      date: r.date,
+      logNumber: r.logNumber,
+      recordedAt: r.recordedAt.toISOString(),
+      playbackUrl: canPlay ? await presignGetObject(r.storageKey) : null,
+      hud: r.hud ?? null,
+      stats: {
+        sleepTime: r.sleepTime,
+        wakeTime: r.wakeTime,
+        wakeCrossedMidnight: r.wakeCrossedMidnight,
+        coffees: r.coffees,
+        distanceWalkedKm: r.distanceWalkedKm,
+        happiness: r.happiness,
+      },
+    };
+  }
+  return out;
 }
