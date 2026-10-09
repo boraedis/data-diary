@@ -73,6 +73,11 @@ export type CityConfig = {
    * roots, so a catalog-rooted place never changes neighborhood because
    * a suburb was added beside it. */
   suburbs?: CitySuburbConfig[];
+  /** Roots (catalog or suburb) the map opens framed on, and returns to on
+   * a background click, when that should be less than everything drawn.
+   * Omit to frame the whole city. The rest stays drawn and reachable by
+   * zooming out, see CityHeatmapExplorer's zoom extent. */
+  homeRoots?: string[];
   /** Normalizes a catalog neighborhood name to this city's geometry
    * naming — see each root's own normalize<City>Name for the real,
    * documented aliases/gaps. Takes `root` even for single-root cities so
@@ -97,6 +102,10 @@ export const CITIES: Record<CityKey, CityConfig> = {
       { root: "Arlington", rootId: 83, sourceFile: "arlington.geojson" },
       { root: "Alexandria", rootId: 2000, sourceFile: "alexandria.geojson" },
     ],
+    // The suburbs (#281) quadruple the map's extent, which would open DC's
+    // neighborhoods — the ones logged most — as specks. So the map opens
+    // on DC and Arlington, and the suburbs are a zoom-out away.
+    homeRoots: ["Washington", "Arlington"],
     // #281. Fairfax City and Falls Church are independent cities, not
     // part of Fairfax County, so each is its own region. The counties are
     // split into Census places (towns and CDPs), the grain the catalog
