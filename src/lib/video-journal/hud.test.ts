@@ -22,7 +22,7 @@ const STATS = {
 
 describe("formatting", () => {
   it("weather", () => {
-    expect(formatWeather({ tempC: 18.4, code: 2, windKph: 9.2, isDay: true })).toBe("18°C PARTLY CLOUDY · WIND 9 KM/H");
+    expect(formatWeather({ tempC: 18.4, code: 2, windKph: 9.2, isDay: true })).toBe("18°C PARTLY CLOUDY");
     expect(weatherLabel(1234)).toBe("WEATHER");
   });
 

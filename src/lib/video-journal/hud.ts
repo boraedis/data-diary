@@ -100,9 +100,10 @@ export function weatherLabel(code: number): string {
   return WMO[code] ?? "WEATHER";
 }
 
-/** "18°C PARTLY CLOUDY · WIND 9 KM/H" */
+/** "18°C PARTLY CLOUDY". Wind isn't shown (owner's call on #599); it's
+ * still captured in the snapshot in case that changes. */
 export function formatWeather(w: HudWeather): string {
-  return `${Math.round(w.tempC)}°C ${weatherLabel(w.code)} · WIND ${Math.round(w.windKph)} KM/H`;
+  return `${Math.round(w.tempC)}°C ${weatherLabel(w.code)}`;
 }
 
 /** "40.7128°N 74.0060°W": four decimals is ~11m, finer than a phone's fix. */

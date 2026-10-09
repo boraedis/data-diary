@@ -74,10 +74,11 @@ export type JournalEntryInput = {
   hud?: HudSnapshot | null;
 };
 
-/** "18°C, partly cloudy, wind 9 km/h": the HUD's readout in sentence
- * case, which reads better as journal prose than the HUD's caps. */
+/** "18°C, partly cloudy": the HUD's readout in sentence case, which reads
+ * better as journal prose than the HUD's caps. No wind (owner's call on
+ * #599). */
 export function formatWeatherSentence(w: NonNullable<HudSnapshot["weather"]>): string {
-  return `${Math.round(w.tempC)}°C, ${weatherLabel(w.code).toLowerCase()}, wind ${Math.round(w.windKph)} km/h`;
+  return `${Math.round(w.tempC)}°C, ${weatherLabel(w.code).toLowerCase()}`;
 }
 
 export function buildJournalEntry(log: JournalEntryInput): string {
