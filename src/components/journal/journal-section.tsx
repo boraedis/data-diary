@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { JournalWriteForm } from "@/components/journal/journal-write-form";
 import { VideoRecorder } from "@/components/journal/video-recorder";
+import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
 
 export type JournalMode = "write" | "record";
 
@@ -30,10 +31,12 @@ export function JournalSection({
   date,
   initialMode,
   initialJournal,
+  videoLogs,
 }: {
   date: string;
   initialMode: JournalMode;
   initialJournal: string | null;
+  videoLogs: VideoLogSummary[];
 }) {
   const [mode, setMode] = useState<JournalMode>(initialMode);
 
@@ -81,7 +84,7 @@ export function JournalSection({
         aria-labelledby="journal-tab-record"
         hidden={mode !== "record"}
       >
-        <VideoRecorder date={date} />
+        <VideoRecorder date={date} videoLogs={videoLogs} />
       </div>
     </div>
   );

@@ -1,0 +1,111 @@
+// Shapes and validation shared by the video-log API routes and the browser
+// uploader (#339). Free of DB and R2 imports so client code can use it.
+
+import { isValidDateString } from "@/lib/date";
+import { MAX_RECORDING_BYTES, MAX_UPLOAD_PARTS, partCount } from "@/lib/video-journal/upload-plan";
+
+export type VideoLogStatus = "uploading" | "uploaded" | "transcribing" | "ready" | "failed";
+
+/** What the device tells the server when it starts (or resumes) an upload.
+ * `id` is the recording's local IndexedDB id, which makes starting
+ * idempotent. */
+export type StartUploadInput = {
+  id: string;
+  date: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  recordedAt: string;
+};
+
+/** Where an upload stands, from R2's point of view. `uploadedParts` comes
+ * from R2's ListParts, so a resumed upload only sends what's missing. */
+export type UploadState = {
+  id: string;
+  status: VideoLogStatus;
+  sizeBytes: number;
+  uploadedParts: number[];
+};
+
+export type PresignedPart = { partNumber: number; url: string };
+
+/** A stored recording as the Journal section lists it. `playbackUrl` is a
+ * presigned GET valid for an hour, or null while still uploading (or if R2
+ * isn't configured on this deployment). */
+export type VideoLogSummary = {
+  id: string;
+  date: string;
+  status: VideoLogStatus;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  recordedAt: string;
+  playbackUrl: string | null;
+};
+
+type Result<T> = { ok: true; value: T } | { ok: false; error: string };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Only the two containers the recorder can produce. The type ends up as
+ * the stored object's Content-Type, so it shouldn't be arbitrary text. */
+const ALLOWED_MIME = /^video\/(mp4|webm)(\s*;[\w\s.,=+-]*)?$/i;
+
+export function isVideoLogId(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+export function validateStartUpload(body: unknown): Result<StartUploadInput> {
+  if (typeof body !== "object" || body === null) return { ok: false, error: "Invalid request body" };
+  const b = body as Record<string, unknown>;
+
+  if (!isVideoLogId(b.id)) return { ok: false, error: "id must be a UUID" };
+  if (typeof b.date !== "string" || !isValidDateString(b.date)) return { ok: false, error: "Invalid date" };
+  if (typeof b.mimeType !== "string" || !ALLOWED_MIME.test(b.mimeType)) {
+    return { ok: false, error: "mimeType must be video/mp4 or video/webm" };
+  }
+  if (typeof b.sizeBytes !== "number" || !Number.isInteger(b.sizeBytes) || b.sizeBytes <= 0) {
+    return { ok: false, error: "sizeBytes must be a positive integer" };
+  }
+  if (b.sizeBytes > MAX_RECORDING_BYTES || partCount(b.sizeBytes) > MAX_UPLOAD_PARTS) {
+    return { ok: false, error: "Recording is too large" };
+  }
+  if (typeof b.durationMs !== "number" || !Number.isInteger(b.durationMs) || b.durationMs < 0) {
+    return { ok: false, error: "durationMs must be a non-negative integer" };
+  }
+  if (typeof b.recordedAt !== "string" || Number.isNaN(Date.parse(b.recordedAt))) {
+    return { ok: false, error: "recordedAt must be an ISO timestamp" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      id: b.id.toLowerCase(),
+      date: b.date,
+      mimeType: b.mimeType,
+      sizeBytes: b.sizeBytes,
+      durationMs: b.durationMs,
+      recordedAt: new Date(b.recordedAt).toISOString(),
+    },
+  };
+}
+
+/** Part numbers to presign: a non-empty list of distinct in-range
+ * integers, at most 100 per request so one call can't mint thousands of
+ * URLs. */
+export function validatePartNumbers(body: unknown, sizeBytes: number): Result<number[]> {
+  if (typeof body !== "object" || body === null) return { ok: false, error: "Invalid request body" };
+  const raw = (body as Record<string, unknown>).partNumbers;
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 100) {
+    return { ok: false, error: "partNumbers must be a list of 1–100 part numbers" };
+  }
+  const max = partCount(sizeBytes);
+  const numbers = new Set<number>();
+  for (const n of raw) {
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > max) {
+      return { ok: false, error: `Part numbers must be between 1 and ${max}` };
+    }
+    numbers.add(n);
+  }
+  return { ok: true, value: [...numbers].sort((a, b) => a - b) };
+}

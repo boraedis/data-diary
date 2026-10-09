@@ -13,11 +13,11 @@
 //   IndexedDB are disk-backed, so assembling the finished file doesn't
 //   need it all in RAM.
 //
-// A recording stays here until something explicitly deletes it. Once the
-// upload path exists (#339), "R2 confirmed the upload" is that something;
-// until then it's the Discard button. This module is the hand-off seam
-// between the recorder and the uploader: the recorder only ever writes
-// here, and the uploader will only ever read from here.
+// A recording stays here until something explicitly deletes it: either
+// R2 confirming the upload (src/components/journal/use-recording-uploads.ts,
+// #339) or the Discard button. This module is the hand-off seam between
+// the recorder and the uploader: the recorder only ever writes here, and
+// the uploader only ever reads from here.
 //
 // Plain IndexedDB with a few promise helpers, no wrapper library. The
 // surface is two object stores, and a dependency for that isn't worth it.
@@ -172,6 +172,16 @@ export async function listLocalRecordings(date: string): Promise<LocalRecording[
   const tx = db.transaction(RECORDINGS, "readonly");
   const rows = await requestResult(tx.objectStore(RECORDINGS).index("date").getAll(date) as IDBRequest<LocalRecording[]>);
   return rows.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/** Every recording on this device, any day, oldest first: the upload
+ * queue's view, since a take recorded on one day's page still has to
+ * upload if you next open a different day. */
+export async function listAllLocalRecordings(): Promise<LocalRecording[]> {
+  const db = await openDb();
+  const tx = db.transaction(RECORDINGS, "readonly");
+  const rows = await requestResult(tx.objectStore(RECORDINGS).getAll() as IDBRequest<LocalRecording[]>);
+  return rows.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 
 /** Reassembles a recording's chunks into one playable file. Works for an

@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { StoredRecordings } from "@/components/journal/stored-recordings";
+import { useRecordingUploads, type UploadStatus } from "@/components/journal/use-recording-uploads";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   AUDIO_BITS_PER_SECOND,
@@ -26,14 +29,16 @@ import {
   loadLocalRecordingBlob,
   type LocalRecording,
 } from "@/lib/video-journal/local-store";
+import { UploadNotConfiguredError, uploadRecording } from "@/lib/video-journal/uploader";
+import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
 
 // In-browser video journal recorder (#340, epic #338). Records the front
 // camera + mic with MediaRecorder and writes each chunk to IndexedDB as it
 // arrives (src/lib/video-journal/local-store.ts), so a long take survives
-// a crashed tab. Uploading to R2 (#339), transcription (#341) and the
-// mission HUD overlay (#599) build on top of this; none of them exist
-// yet, so a finished recording here stays on the device, where it can be
-// played back, downloaded or discarded.
+// a crashed tab. Finished takes then upload to R2 in the background
+// (use-recording-uploads.ts, #339) and leave the device only once the
+// server has verified the stored copy. Transcription (#341) and the
+// mission HUD overlay (#599) build on top of this.
 //
 // The camera is never requested on page load. Opening the Journal section
 // to write shouldn't light up the camera or throw a permission prompt;
@@ -70,7 +75,8 @@ const ERROR_ADVICE: Record<RecorderErrorKind, string> = {
   unknown: "Something went wrong starting the camera.",
 };
 
-export function VideoRecorder({ date }: { date: string }) {
+export function VideoRecorder({ date, videoLogs }: { date: string; videoLogs: VideoLogSummary[] }) {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [elapsedMs, setElapsedMs] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,6 +86,7 @@ export function VideoRecorder({ date }: { date: string }) {
   const [localRecordings, setLocalRecordings] = useState<LocalRecording[]>([]);
   const [localAvailable, setLocalAvailable] = useState<boolean | null>(null);
   const [memoryRecording, setMemoryRecording] = useState<MemoryRecording | null>(null);
+  const [memoryUpload, setMemoryUpload] = useState<UploadStatus | null>(null);
   const [playback, setPlayback] = useState<{ id: string; url: string } | null>(null);
   // The take in progress, so the list below doesn't badge it as an
   // interrupted leftover while it's still being written.
@@ -112,6 +119,19 @@ export function VideoRecorder({ date }: { date: string }) {
       setLocalRecordings([]);
     }
   }, [date]);
+
+  const onUploaded = useCallback(() => {
+    void refreshLocal();
+    // Re-render the server half of the page so the stored list picks up
+    // the new row (and a fresh playback URL).
+    router.refresh();
+  }, [refreshLocal, router]);
+
+  const { statuses: uploadStatuses, runUploads } = useRecordingUploads({
+    enabled: localAvailable === true,
+    activeId,
+    onUploaded,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -190,7 +210,9 @@ export function VideoRecorder({ date }: { date: string }) {
 
   useEffect(() => {
     return () => {
-      if (playback) URL.revokeObjectURL(playback.url);
+      // Only object URLs need releasing; a stored recording plays from a
+      // presigned R2 URL.
+      if (playback?.url.startsWith("blob:")) URL.revokeObjectURL(playback.url);
     };
   }, [playback]);
 
@@ -380,12 +402,16 @@ export function VideoRecorder({ date }: { date: string }) {
       memoryChunksRef.current = [];
       setMemoryRecording({ blob, mimeType: mimeType ?? "video/mp4", startedAt: startedAtIso, durationMs });
       setPlayback({ id: "memory", url: URL.createObjectURL(blob) });
-      setActiveId(null);
+      // activeId stays set: it keeps the background queue away from the
+      // partial copy in IndexedDB, which shares this id but not its size,
+      // while the complete in-memory file uploads.
       setNotice(
-        "This recording couldn't be fully saved on this device (storage may be full). Download it before leaving this page.",
+        "This recording couldn't be fully saved on this device (storage may be full). It's uploading straight from memory; download it too if you can, before leaving this page.",
       );
+      void uploadFromMemory({ blob, mimeType: mimeType ?? "video/mp4", startedAt: startedAtIso, durationMs }, id);
     } else {
       setActiveId(null);
+      void runUploads();
       await refreshLocal();
       await openPlayback(id);
       if (interruptedRef.current) {
@@ -395,6 +421,40 @@ export function VideoRecorder({ date }: { date: string }) {
       }
     }
     setPhase({ kind: "idle" });
+  }
+
+  /** Upload for a take that never fully reached IndexedDB. Same server
+   * flow, but there's no local copy to resume from, so a failure here is
+   * only recoverable by downloading the file. */
+  async function uploadFromMemory(recording: MemoryRecording, id: string) {
+    setMemoryUpload({ kind: "uploading", sentBytes: 0, totalBytes: recording.blob.size });
+    try {
+      await uploadRecording(
+        {
+          id,
+          date,
+          mimeType: recording.mimeType,
+          durationMs: recording.durationMs,
+          recordedAt: recording.startedAt,
+          blob: recording.blob,
+        },
+        { onProgress: (p) => setMemoryUpload({ kind: "uploading", ...p }) },
+      );
+      // The partial prefix in IndexedDB (if any) is superseded by the
+      // complete upload.
+      await deleteLocalRecording(id).catch(() => {});
+      setActiveId((current) => (current === id ? null : current));
+      setMemoryUpload(null);
+      setMemoryRecording(null);
+      setNotice(null);
+      onUploaded();
+    } catch (error) {
+      setMemoryUpload(
+        error instanceof UploadNotConfiguredError
+          ? { kind: "not-configured" }
+          : { kind: "failed", message: error instanceof Error ? error.message : "Upload failed" },
+      );
+    }
   }
 
   async function openPlayback(id: string) {
@@ -419,7 +479,7 @@ export function VideoRecorder({ date }: { date: string }) {
 
   async function discardLocal(row: LocalRecording) {
     const label = `${formatElapsed(row.durationMs)} recording from ${formatTime(row.startedAt)}`;
-    if (!window.confirm(`Delete the ${label} from this device? Nothing has been uploaded yet, so this can't be undone.`)) {
+    if (!window.confirm(`Delete the ${label} from this device? It hasn't finished uploading, so this can't be undone.`)) {
       return;
     }
     await deleteLocalRecording(row.id).catch(() => {});
@@ -550,9 +610,9 @@ export function VideoRecorder({ date }: { date: string }) {
 
       {localRecordings.length > 0 ? (
         <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium">Saved on this device</h3>
+          <h3 className="text-sm font-medium">On this device</h3>
           <p className="text-xs text-muted-foreground">
-            Not uploaded anywhere yet: recordings stay on this device until uploading is added.
+            Kept here until the upload is confirmed, then removed from the device automatically.
           </p>
           <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
             {localRecordings.map((row) => {
@@ -568,8 +628,14 @@ export function VideoRecorder({ date }: { date: string }) {
                         Interrupted, recovered up to the last saved second
                       </span>
                     ) : null}
+                    <UploadStatusLine status={uploadStatuses[row.id]} />
                   </div>
                   <div className="flex gap-1.5">
+                    {uploadStatuses[row.id]?.kind === "failed" ? (
+                      <Button type="button" size="sm" onClick={() => void runUploads()}>
+                        Retry
+                      </Button>
+                    ) : null}
                     <Button type="button" size="sm" variant="outline" onClick={() => void openPlayback(row.id)}>
                       Play
                     </Button>
@@ -586,6 +652,16 @@ export function VideoRecorder({ date }: { date: string }) {
           </ul>
         </div>
       ) : null}
+
+      {memoryUpload ? <UploadStatusLine status={memoryUpload} /> : null}
+
+      <StoredRecordings
+        recordings={videoLogs}
+        playingId={playback?.id ?? null}
+        onPlay={(log) => {
+          if (log.playbackUrl) setPlayback({ id: log.id, url: log.playbackUrl });
+        }}
+      />
 
       {/* Device test readout for #340's matrix (iPhone Safari, Mac Safari,
           Mac Chrome): what this browser actually negotiated, so a test can
@@ -623,6 +699,32 @@ export function VideoRecorder({ date }: { date: string }) {
  * flags a bare `Date.now()` in them. Nothing calls this during render. */
 function nowMs(): number {
   return Date.now();
+}
+
+function UploadStatusLine({ status }: { status: UploadStatus | undefined }) {
+  if (!status) return <span className="text-xs text-muted-foreground">Waiting to upload</span>;
+  switch (status.kind) {
+    case "uploading": {
+      const pct = status.totalBytes > 0 ? Math.floor((status.sentBytes / status.totalBytes) * 100) : 0;
+      return (
+        <span className="text-xs text-muted-foreground">
+          Uploading… {pct}% ({formatBytes(status.sentBytes)} of {formatBytes(status.totalBytes)})
+        </span>
+      );
+    }
+    case "failed":
+      return (
+        <span className="text-xs text-destructive">
+          Upload failed: {status.message}. It&apos;s still safe on this device.
+        </span>
+      );
+    case "not-configured":
+      return (
+        <span className="text-xs text-muted-foreground">
+          Video storage isn&apos;t set up on this deployment yet, so this stays on the device.
+        </span>
+      );
+  }
 }
 
 function formatTime(iso: string): string {
