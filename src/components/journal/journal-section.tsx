@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { JournalWriteForm } from "@/components/journal/journal-write-form";
-import { TranscriptChoice } from "@/components/journal/transcript-choice";
 import { useTranscriptionSync } from "@/components/journal/use-transcription-sync";
 import { VideoRecorder } from "@/components/journal/video-recorder";
 import type { VideoLogSummary } from "@/lib/video-journal/video-log-types";
@@ -48,11 +47,6 @@ export function JournalSection({
 }) {
   const [mode, setMode] = useState<JournalMode>(initialMode);
   const transcription = useTranscriptionSync(videoLogs);
-  // Latest wins for the prompt: only the newest transcript awaiting a
-  // choice is offered (the server marks older ones superseded anyway).
-  const pending = videoLogs
-    .filter((l) => l.journalOutcome === "pending")
-    .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
 
   function choose(next: JournalMode) {
     setMode(next);
@@ -63,7 +57,6 @@ export function JournalSection({
 
   return (
     <div className="flex flex-col gap-4">
-      {pending ? <TranscriptChoice log={pending} shownJournal={initialJournal} /> : null}
       {transcription.error ? <p className="text-sm text-destructive">{transcription.error}</p> : null}
       <div role="tablist" aria-label="Journal mode" className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1">
         {MODES.map((m) => (

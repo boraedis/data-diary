@@ -1,11 +1,15 @@
-// What a finished transcript does to `days.journal` (#341), as pure
+// What a transcript's log block may do to `days.journal` (#341), as pure
 // functions so the rules can be tested without a database. The rules come
 // from #338's 2026-10-08 decisions, which revised the epic's original
-// "transcript overwrites the journal outright":
+// "transcript overwrites the journal outright".
+//
+// Since #613's decisions (also 2026-10-08), none of this runs when a
+// transcript finishes: the journal is only written when the day's
+// recordings are finalized. These are the rules that write follows.
 //
 // 1. Every transcript is kept on its own video_logs row, whatever happens
 //    here, so nothing a recording said is ever lost.
-// 2. An empty journal is filled automatically.
+// 2. An empty journal is filled.
 // 3. Latest wins: a newer recording's transcript replaces an older one,
 //    but only while the older one is still sitting in the journal
 //    *unedited*. That's what lets a re-record "just work".
