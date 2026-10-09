@@ -41,6 +41,18 @@ describe("validateStartUpload", () => {
   });
 });
 
+describe("validateStartUpload recordedTz", () => {
+  it("keeps a real IANA timezone", () => {
+    const result = validateStartUpload({ ...valid, recordedTz: "America/New_York" });
+    expect(result.ok && result.value.recordedTz).toBe("America/New_York");
+  });
+
+  it.each([[undefined], [null], ["Not/AZone"], [42]])("drops %j rather than rejecting the upload", (recordedTz) => {
+    const result = validateStartUpload({ ...valid, recordedTz });
+    expect(result.ok && result.value.recordedTz).toBeNull();
+  });
+});
+
 describe("validatePartNumbers", () => {
   const size = 3 * UPLOAD_PART_SIZE;
 

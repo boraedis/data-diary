@@ -15,6 +15,7 @@ function source(sizeBytes: number): UploadSource {
     mimeType: "video/mp4",
     durationMs: 60_000,
     recordedAt: "2026-10-08T21:00:00.000Z",
+    recordedTz: "America/New_York",
     blob: new Blob([new Uint8Array(sizeBytes)]),
   };
 }

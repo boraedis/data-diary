@@ -7,6 +7,7 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -1596,6 +1597,26 @@ export const videoLogStatusEnum = pgEnum("video_log_status", [
   "failed",
 ]);
 
+// What happened to `days.journal` when a log's transcript was ready (#341).
+// The rule, from #338's 2026-10-08 decisions: a transcript never silently
+// replaces writing.
+//   applied    → filled an empty journal, or replaced an earlier transcript
+//                that was still sitting there unedited (latest wins).
+//   pending    → the journal holds writing (or an edited transcript); the
+//                user hasn't yet chosen Replace / Append / Keep.
+//   replaced / appended / kept → the user's choice for a pending one.
+//   superseded → a newer recording's transcript was already in place, or
+//                the user resolved a newer pending one first.
+// Null until the transcript exists.
+export const videoLogJournalOutcomeEnum = pgEnum("video_log_journal_outcome", [
+  "applied",
+  "pending",
+  "replaced",
+  "appended",
+  "kept",
+  "superseded",
+]);
+
 // One row per recorded video log (#339, epic #338). A day can have several;
 // which one's transcript reaches days.journal is #341's business, so
 // nothing here is unique per date.
@@ -1635,15 +1656,48 @@ export const videoLogs = pgTable(
     // When filming started, from the device clock. Not the same as `date`:
     // a log about Tuesday recorded just after midnight is still Tuesday's.
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    // The recording device's IANA timezone ("America/New_York"), so the
+    // journal header can show the local time it was filmed at rather than
+    // the server's. Null for recordings made before this was captured.
+    recordedTz: text("recorded_tz"),
+    // "Video log #N": the HUD's log entry number (#599) and the journal
+    // header's. Assigned once, as the next in sequence, when the upload
+    // completes, and never renumbered. That's upload order, which matches
+    // recording order except for a take that sat offline on a device while
+    // newer ones uploaded.
+    logNumber: integer("log_number"),
     // R2's multipart upload id while `uploading`; cleared on completion.
     uploadId: text("upload_id"),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+    // --- Transcription (#341) ---
+    // Always stored here, whatever happens to days.journal, so a transcript
+    // the user chose not to use is never lost and stays searchable.
+    transcript: text("transcript"),
+    // Word timings as [startSeconds, endSeconds, word] tuples, for jumping
+    // from a search hit to that moment in the video later. Tuples rather
+    // than objects: an hour-long log is ~9k words.
+    transcriptWords: jsonb("transcript_words").$type<[number, number, string][]>(),
+    // Language the transcription service detected, e.g. "en".
+    transcriptLanguage: text("transcript_language"),
+    transcriptionError: text("transcription_error"),
+    // When the current/last attempt started. A `transcribing` row whose
+    // attempt is old enough was abandoned (the function running it was
+    // killed) and may be claimed again.
+    transcriptionStartedAt: timestamp("transcription_started_at", { withTimezone: true }),
+    transcribedAt: timestamp("transcribed_at", { withTimezone: true }),
+    journalOutcome: videoLogJournalOutcomeEnum("journal_outcome"),
+    // The exact text this log wrote into days.journal (header + transcript),
+    // if it wrote any. "Latest wins" recognises an untouched earlier entry by
+    // comparing against this stored text, not a re-rendered one, so a later
+    // change to the header format can't make old entries look edited.
+    journalEntry: text("journal_entry"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("video_logs_date_idx").on(table.date),
     uniqueIndex("video_logs_storage_key_idx").on(table.storageKey),
+    uniqueIndex("video_logs_log_number_idx").on(table.logNumber),
   ]
 );
 
@@ -1655,6 +1709,7 @@ export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
 export type VideoLogStatus = (typeof videoLogStatusEnum.enumValues)[number];
+export type VideoLogJournalOutcome = (typeof videoLogJournalOutcomeEnum.enumValues)[number];
 // EntertainmentKind (used to be derived from entertainmentKindEnum here)
 // is gone along with the enum — see the entertainmentKinds table comment
 // above `entertainmentCatalog`. A kind is now just a row (id, name), read

@@ -38,6 +38,10 @@ export type LocalRecording = {
   mimeType: string;
   /** ISO timestamp, from the device clock. */
   startedAt: string;
+  /** The device's IANA timezone when recording started, for the journal
+   * header's local time (#341). Optional: recordings saved before this
+   * field existed don't have it. */
+  timeZone?: string;
   endedAt: string | null;
   /** Kept current as chunks arrive, so an interrupted recording still
    * knows roughly how long it is. */

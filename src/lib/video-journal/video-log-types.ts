@@ -16,6 +16,9 @@ export type StartUploadInput = {
   sizeBytes: number;
   durationMs: number;
   recordedAt: string;
+  /** The device's IANA timezone, for the journal header's local time.
+   * Null when the device didn't report one. */
+  recordedTz: string | null;
 };
 
 /** Where an upload stands, from R2's point of view. `uploadedParts` comes
@@ -29,6 +32,16 @@ export type UploadState = {
 
 export type PresignedPart = { partNumber: number; url: string };
 
+/** See transcription.ts's journal-outcome notes and the schema enum. */
+export type JournalOutcome = "applied" | "pending" | "replaced" | "appended" | "kept" | "superseded";
+
+/** A `transcribing` log whose attempt started longer ago than this was
+ * abandoned (the function running it was killed) and may be retried. Well
+ * past the transcription route's 300s budget, so a live attempt is never
+ * mistaken for a dead one. Shared so the UI and server agree on when to
+ * offer Retry. */
+export const TRANSCRIPTION_STALE_MS = 15 * 60 * 1000;
+
 /** A stored recording as the Journal section lists it. `playbackUrl` is a
  * presigned GET valid for an hour, or null while still uploading (or if R2
  * isn't configured on this deployment). */
@@ -40,7 +53,19 @@ export type VideoLogSummary = {
   sizeBytes: number;
   durationMs: number;
   recordedAt: string;
+  /** "Video log #N", once assigned (at upload completion). */
+  logNumber: number | null;
   playbackUrl: string | null;
+  /** #341. Null until transcribed; "" when no speech was found. */
+  transcript: string | null;
+  transcriptionError: string | null;
+  journalOutcome: JournalOutcome | null;
+  /** The header + transcript block this log puts in the journal, for the
+   * Replace/Append prompt's preview. Null until there's a transcript. */
+  journalEntry: string | null;
+  /** True for a `transcribing` log that's been at it long enough to count
+   * as abandoned, so the UI offers Retry instead of waiting forever. */
+  transcriptionStale: boolean;
 };
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -77,9 +102,15 @@ export function validateStartUpload(body: unknown): Result<StartUploadInput> {
     return { ok: false, error: "recordedAt must be an ISO timestamp" };
   }
 
+  // Optional, and a bad value is dropped rather than rejected: the
+  // timezone only affects how the journal header prints the time, which
+  // falls back to UTC.
+  const recordedTz = typeof b.recordedTz === "string" && isValidTimeZone(b.recordedTz) ? b.recordedTz : null;
+
   return {
     ok: true,
     value: {
+      recordedTz,
       id: b.id.toLowerCase(),
       date: b.date,
       mimeType: b.mimeType,
@@ -88,6 +119,16 @@ export function validateStartUpload(body: unknown): Result<StartUploadInput> {
       recordedAt: new Date(b.recordedAt).toISOString(),
     },
   };
+}
+
+function isValidTimeZone(tz: string): boolean {
+  if (tz.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Part numbers to presign: a non-empty list of distinct in-range
