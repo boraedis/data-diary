@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { SportsWatchHistoryList } from "@/components/manage/sports-watch-history-list";
 import type { SportsGameTypeItem, SportsGameTypeUsage } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 export function SportsGameTypeDetail({
   gameType: initial,
@@ -122,6 +123,8 @@ export function SportsGameTypeDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.watches} itemLabel={gameType.name} />
 
       <Card size="sm">
         <CardHeader>

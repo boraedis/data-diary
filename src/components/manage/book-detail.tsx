@@ -5,6 +5,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type { BookCatalogItem, BookProgress, BookUsage } from "@/lib/days";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 // No edit mode here (unlike every other catalog) — every field is Google
 // Books metadata, refreshed by re-adding rather than typed in. This is just
@@ -117,6 +118,8 @@ export function BookDetail({
           />
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.sessions} itemLabel={book.title} />
     </>
   );
 }

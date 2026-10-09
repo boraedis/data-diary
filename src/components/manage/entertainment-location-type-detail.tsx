@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import type { EntertainmentLocationTypeItem, EntertainmentLocationTypeUsage } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 export function EntertainmentLocationTypeDetail({
   type: initial,
@@ -127,6 +128,8 @@ export function EntertainmentLocationTypeDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.history} itemLabel={type.name} />
 
       <Card size="sm">
         <CardHeader>

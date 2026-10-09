@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import type { GameDeviceTypeItem, GameDeviceTypeUsage } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 export function GameDeviceTypeDetail({
   deviceType: initial,
@@ -124,6 +125,8 @@ export function GameDeviceTypeDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.sessions} itemLabel={deviceType.name} />
 
       <Card size="sm">
         <CardHeader>

@@ -16,6 +16,7 @@ import type {
   GameSubcategoryItem,
   GameSubcategoryUsage,
 } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 type SubcategoryWithUsage = GameSubcategoryItem & { usage: GameSubcategoryUsage };
 
@@ -299,6 +300,8 @@ export function GameCategoryDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.sessions} itemLabel={category.name} />
 
       <Card size="sm">
         <CardHeader>

@@ -12,6 +12,7 @@ import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import { formatDuration, formatHoursTotal } from "@/lib/viz/format";
 import type { GameCatalogItem, GameUsage } from "@/lib/days";
 import type { GameCategoryItem, GameSubcategoryItem } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 export function GameDetail({
   game: initial,
@@ -157,6 +158,8 @@ export function GameDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.sessions} itemLabel={game.name} measure="minutes" />
 
       <Card size="sm">
         <CardHeader>

@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { DeleteCatalogItem } from "@/components/manage/delete-catalog-item";
 import type { EntertainmentCatalogItem, EntertainmentUsage } from "@/lib/days";
 import type { EntertainmentKindItem } from "@/lib/catalog-admin";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 // Unlike the two "+ New entertainment" modals, editing an EXISTING catalog
 // item offers every kind, system ones included — this is managing
@@ -155,6 +156,8 @@ export function EntertainmentDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.dates} itemLabel={item.title} />
 
       <Card size="sm">
         <CardHeader>

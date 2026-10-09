@@ -13,6 +13,7 @@ import { CatalogUsageHistory } from "@/components/manage/catalog-usage-history";
 import { EXERCISE_CATEGORY_LABELS } from "@/components/manage/new-exercise-modal";
 import type { ExerciseSubtypeItem, ExerciseSubtypeUsage } from "@/lib/catalog-admin";
 import type { ExerciseCategory } from "@/db/schema";
+import { PrevalenceChart } from "@/components/manage/prevalence-chart";
 
 export function ExerciseSubtypeDetail({
   subtype: initial,
@@ -140,6 +141,8 @@ export function ExerciseSubtypeDetail({
           )}
         </CardContent>
       </Card>
+
+      <PrevalenceChart entries={usage.workouts} itemLabel={subtype.name} />
 
       <Card size="sm">
         <CardHeader>
