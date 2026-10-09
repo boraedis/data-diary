@@ -9,6 +9,7 @@
 // as the device still has its local copy, which it keeps until the
 // complete call succeeds.
 
+import type { HudSnapshot } from "@/lib/video-journal/hud";
 import { missingParts, partRange } from "@/lib/video-journal/upload-plan";
 import type { PresignedPart, UploadState, VideoLogSummary } from "@/lib/video-journal/video-log-types";
 
@@ -21,6 +22,8 @@ export type UploadSource = {
   recordedAt: string;
   /** IANA timezone of the recording device, if known. */
   recordedTz: string | null;
+  /** Mission HUD conditions at record start (#599), if captured. */
+  hud: HudSnapshot | null;
   blob: Blob;
 };
 
@@ -124,6 +127,7 @@ export async function uploadRecording(
         durationMs: Math.round(source.durationMs),
         recordedAt: source.recordedAt,
         recordedTz: source.recordedTz,
+        hud: source.hud,
       }),
     signal,
   );

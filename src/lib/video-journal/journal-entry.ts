@@ -1,3 +1,4 @@
+import { formatCoords, formatPlace, weatherLabel, type HudSnapshot } from "@/lib/video-journal/hud";
 import { formatElapsed } from "@/lib/video-journal/recording";
 
 // The block a transcript becomes in days.journal (#341): a mission-log
@@ -17,11 +18,12 @@ import { formatElapsed } from "@/lib/video-journal/recording";
 // (video-journal/<date>/<id>.<ext>) and for the Journal page to match it
 // to a recording.
 //
-// #599 (the mission HUD) will add `Location:` (City, State + lat/lng) and
-// `Weather:` lines once those are captured at record time. Old entries
-// keep their old header: each log stores the exact block it wrote
+// The mission HUD (#599) adds `Location:` (City, Country + coordinates, from
+// the device's live GPS fix) and `Weather:` lines when those were captured
+// at record time, and leaves them out when they weren't. Old entries keep
+// their old header: each log stores the exact block it wrote
 // (video_logs.journal_entry), and that stored text, not a re-render, is
-// what "latest wins" compares against.
+// what Finalize compares against.
 
 /** Labels padded to one width so values line up in a monospace view. */
 const LABEL_WIDTH = 10;
@@ -68,14 +70,29 @@ export type JournalEntryInput = {
   recordedTz: string | null;
   durationMs: number;
   transcript: string;
+  /** Conditions at record time (#599), if captured. */
+  hud?: HudSnapshot | null;
 };
+
+/** "18°C, partly cloudy, wind 9 km/h": the HUD's readout in sentence
+ * case, which reads better as journal prose than the HUD's caps. */
+export function formatWeatherSentence(w: NonNullable<HudSnapshot["weather"]>): string {
+  return `${Math.round(w.tempC)}°C, ${weatherLabel(w.code).toLowerCase()}, wind ${Math.round(w.windKph)} km/h`;
+}
 
 export function buildJournalEntry(log: JournalEntryInput): string {
   const header = [
     log.logNumber !== null ? `VIDEO LOG #${log.logNumber}` : "VIDEO LOG",
     line("Date", formatRecordedAt(log.recordedAt, log.recordedTz)),
     line("Length", formatElapsed(log.durationMs)),
-    line("Ref", log.id.slice(0, 8)),
   ];
+  const loc = log.hud?.location;
+  if (loc) {
+    const place = formatPlace(loc);
+    const coords = formatCoords(loc.lat, loc.lng);
+    header.push(line("Location", place ? `${place} (${coords})` : coords));
+  }
+  if (log.hud?.weather) header.push(line("Weather", formatWeatherSentence(log.hud.weather)));
+  header.push(line("Ref", log.id.slice(0, 8)));
   return `${header.join("\n")}\n\n${log.transcript.trim()}`;
 }

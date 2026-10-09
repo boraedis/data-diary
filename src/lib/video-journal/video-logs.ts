@@ -122,6 +122,7 @@ export async function startVideoLogUpload(input: StartUploadInput): Promise<Uplo
         durationMs: input.durationMs,
         recordedAt: new Date(input.recordedAt),
         recordedTz: input.recordedTz,
+        hudSnapshot: input.hud,
         uploadId,
       })
       .onConflictDoNothing();
@@ -274,6 +275,7 @@ async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
     recordedAt: row.recordedAt.toISOString(),
     logNumber: row.logNumber,
     finalized: row.finalizedAt !== null,
+    hud: row.hudSnapshot ?? null,
     playbackUrl: playable ? await presignGetObject(row.storageKey) : null,
     transcript: row.transcript,
     transcriptionError: row.transcriptionError,
@@ -290,6 +292,7 @@ async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
             recordedTz: row.recordedTz,
             durationMs: row.durationMs,
             transcript: row.transcript,
+            hud: row.hudSnapshot,
           }))
         : null,
     transcriptionStale: isTranscriptionStale(row, Date.now()),
@@ -321,4 +324,14 @@ export async function listVideoLogStatesForDate(date: string): Promise<DayVideoR
     .from(videoLogs)
     .where(eq(videoLogs.date, date))
     .orderBy(asc(videoLogs.recordedAt));
+}
+
+/** The number the next finalized log will get, for the HUD's "LOG #N"
+ * while recording (#599). Provisional: numbers are only assigned at
+ * Finalize (#613), so a take that's never finalized never uses it. */
+export async function nextLogNumber(): Promise<number> {
+  const [row] = await getDb()
+    .select({ max: sql<number | null>`max(${videoLogs.logNumber})` })
+    .from(videoLogs);
+  return Number(row?.max ?? 0) + 1;
 }

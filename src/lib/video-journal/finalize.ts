@@ -99,6 +99,7 @@ export async function finalizeDay({ date, primaryId, choice, shownJournal }: Fin
     recordedTz: primary.recordedTz,
     durationMs: primary.durationMs,
     transcript: isBlank(primary.transcript) ? NO_SPEECH : primary.transcript!,
+    hud: primary.hudSnapshot,
   });
 
   const decision = decideFinalizeJournal({

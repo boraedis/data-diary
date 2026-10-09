@@ -2,6 +2,7 @@
 // uploader (#339). Free of DB and R2 imports so client code can use it.
 
 import { isValidDateString } from "@/lib/date";
+import { sanitizeHudSnapshot, type HudSnapshot } from "@/lib/video-journal/hud";
 import { MAX_RECORDING_BYTES, MAX_UPLOAD_PARTS, partCount } from "@/lib/video-journal/upload-plan";
 
 export type VideoLogStatus = "uploading" | "uploaded" | "transcribing" | "ready" | "failed";
@@ -19,6 +20,8 @@ export type StartUploadInput = {
   /** The device's IANA timezone, for the journal header's local time.
    * Null when the device didn't report one. */
   recordedTz: string | null;
+  /** The mission HUD's conditions at record time (#599). */
+  hud: HudSnapshot | null;
 };
 
 /** Where an upload stands, from R2's point of view. `uploadedParts` comes
@@ -57,6 +60,8 @@ export type VideoLogSummary = {
   logNumber: number | null;
   /** True for the recording chosen as the day's primary at Finalize. */
   finalized: boolean;
+  /** Conditions at record time, for the playback HUD (#599). */
+  hud: HudSnapshot | null;
   playbackUrl: string | null;
   /** #341. Null until transcribed; "" when no speech was found. */
   transcript: string | null;
@@ -113,6 +118,9 @@ export function validateStartUpload(body: unknown): Result<StartUploadInput> {
     ok: true,
     value: {
       recordedTz,
+      // Same leniency as the timezone: a garbled snapshot is dropped,
+      // never a reason to refuse the recording.
+      hud: sanitizeHudSnapshot(b.hud),
       id: b.id.toLowerCase(),
       date: b.date,
       mimeType: b.mimeType,

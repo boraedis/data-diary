@@ -38,6 +38,39 @@ describe("buildJournalEntry", () => {
     );
   });
 
+  it("adds Location and Weather lines from the HUD snapshot", () => {
+    const entry = buildJournalEntry({
+      id: "5cea423f-df7d-4994-b90e-7b110c6bdd72",
+      logNumber: 12,
+      recordedAt: AT,
+      recordedTz: "America/New_York",
+      durationMs: 125_000,
+      transcript: "Hi.",
+      hud: {
+        capturedAt: AT.toISOString(),
+        timeZone: "America/New_York",
+        location: {
+          lat: 40.712776,
+          lng: -74.005974,
+          accuracyM: 10,
+          city: "New York",
+          region: "NY",
+          country: "US",
+          countryName: "United States",
+        },
+        weather: { tempC: 18.4, code: 2, windKph: 9.2, isDay: false },
+      },
+    });
+    expect(entry.split("\n").slice(0, 6)).toEqual([
+      "VIDEO LOG #12",
+      "Date:     Thu 8 Oct 2026, 9:47 PM EDT",
+      "Length:   2:05",
+      "Location: New York, USA (40.7128°N 74.0060°W)",
+      "Weather:  18°C, partly cloudy, wind 9 km/h",
+      "Ref:      5cea423f",
+    ]);
+  });
+
   it("omits the number when one hasn't been assigned", () => {
     const entry = buildJournalEntry({
       id: "5cea423f-df7d-4994-b90e-7b110c6bdd72",
