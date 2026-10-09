@@ -34,7 +34,14 @@ describe("formatting", () => {
   it("place", () => {
     const base = { lat: 0, lng: 0, accuracyM: null };
     expect(formatPlace({ ...base, city: "New York", region: "NY", country: "US", countryName: "United States" })).toBe(
-      "New York, USA",
+      "New York, NY, USA",
+    );
+    // A region that isn't a two-letter code (or a non-US region) is left out.
+    expect(formatPlace({ ...base, city: "Seattle", region: "Washington", country: "US", countryName: null })).toBe(
+      "Seattle, USA",
+    );
+    expect(formatPlace({ ...base, city: "Toronto", region: "ON", country: "CA", countryName: "Canada" })).toBe(
+      "Toronto, Canada",
     );
     expect(formatPlace({ ...base, city: "Prague", region: null, country: "CZ", countryName: "Czechia" })).toBe(
       "Prague, Czechia",

@@ -24,8 +24,8 @@ export type HudLocation = {
   accuracyM: number | null;
   /** From reverse geocoding; null when it failed or isn't configured. */
   city: string | null;
-  /** State/province ("NY"). Stored, but not shown: the owner chose City,
-   * Country for the HUD (#599). */
+  /** State/province ("NY"). Shown only for the US, as the two-letter
+   * state code (owner's call on #599); stored for everywhere. */
   region: string | null;
   /** ISO 3166 alpha-2 ("US"). */
   country: string | null;
@@ -135,12 +135,20 @@ export function countryDisplayName(code: string | null, name: string | null): st
   return name ?? code;
 }
 
-/** "New York, USA": City, Country (owner's call on #599). Falls back to
- * whichever half is known, or null. */
+/** Google's short_name for a US state is its two-letter postal code. */
+const US_STATE_CODE = /^[A-Z]{2}$/;
+
+/**
+ * City, Country (owner's call on #599), with the two-letter state code in
+ * between for the US: "New York, NY, USA", but "Prague, Czechia". Falls
+ * back to whichever parts are known, or null.
+ */
 export function formatPlace(loc: HudLocation): string | null {
   const country = countryDisplayName(loc.country, loc.countryName);
-  if (!loc.city) return country ?? null;
-  return country ? `${loc.city}, ${country}` : loc.city;
+  const state =
+    loc.country?.toUpperCase() === "US" && loc.region && US_STATE_CODE.test(loc.region) ? loc.region : null;
+  const parts = [loc.city, state, country].filter((p): p is string => Boolean(p));
+  return parts.length > 0 ? parts.join(", ") : null;
 }
 
 function hhmmToMinutes(hhmm: string): number | null {

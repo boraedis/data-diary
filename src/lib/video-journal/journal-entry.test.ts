@@ -65,7 +65,7 @@ describe("buildJournalEntry", () => {
       "VIDEO LOG #12",
       "Date:     Thu 8 Oct 2026, 9:47 PM EDT",
       "Length:   2:05",
-      "Location: New York, USA (40.7128°N 74.0060°W)",
+      "Location: New York, NY, USA (40.7128°N 74.0060°W)",
       "Weather:  18°C, partly cloudy",
       "Ref:      5cea423f",
     ]);
