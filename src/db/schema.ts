@@ -1,11 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   boolean,
   date,
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -16,6 +18,9 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+// Relative, not "@/": drizzle-kit loads this file outside Next.js and does
+// not resolve tsconfig path aliases. (Type-only, so erased anyway.)
+import type { HudSnapshot } from "../lib/video-journal/hud";
 
 // --- Enums -------------------------------------------------------------
 // Fixed, small option sets carried over from the legacy app's entry forms.
@@ -1574,6 +1579,146 @@ export const cityNeighborhoodOverrides = pgTable(
   (table) => [primaryKey({ columns: [table.cityKey, table.root, table.rawName] })]
 );
 
+// --- Video journal (#338) --------------------------------------------------
+// Where a video log is in its life (#339 for the upload half, #341 for
+// transcription):
+//   uploading    → row exists and an R2 multipart upload is open; parts may
+//                  still be arriving. Retrying resumes from R2's own record
+//                  of which parts landed (ListParts), not from this row.
+//   uploaded     → the complete file is in R2 and its size was verified.
+//                  Nothing has transcribed it yet.
+//   transcribing → handed to the transcription service (#341).
+//   ready        → transcript stored (#341).
+//   failed       → transcription failed (#341). An upload problem never sets
+//                  this: an unfinished upload stays `uploading` so it can be
+//                  resumed from the device's local copy.
+export const videoLogStatusEnum = pgEnum("video_log_status", [
+  "uploading",
+  "uploaded",
+  "transcribing",
+  "ready",
+  "failed",
+]);
+
+// What Finalize (#613) did to `days.journal` with the primary recording's
+// log block. A transcript never silently replaces writing (#338,
+// 2026-10-08).
+//   applied    → filled an empty journal, or replaced an earlier log block
+//                still sitting there unedited.
+//   replaced / appended / kept → the user's choice when the journal held
+//                writing.
+//   pending / superseded → from #341's first design, where transcripts
+//                reached the journal on their own. Nothing sets them since
+//                #613 moved all journal writing to Finalize. They stay in
+//                the enum because dropping enum values is a destructive
+//                migration drizzle-kit can't apply non-interactively in CI.
+// Null on a recording that hasn't been finalized.
+export const videoLogJournalOutcomeEnum = pgEnum("video_log_journal_outcome", [
+  "applied",
+  "pending",
+  "replaced",
+  "appended",
+  "kept",
+  "superseded",
+]);
+
+// One row per recorded video log (#339, epic #338). A day can have several;
+// which one's transcript reaches days.journal is #341's business, so
+// nothing here is unique per date.
+//
+// The video itself lives in a private Cloudflare R2 bucket, not Vercel
+// Blob. That's a deliberate exception to AGENTS.md's static-asset strategy,
+// decided on #338: R2 has no egress fees, and these get rewatched for
+// decades. Only the object key is stored; playback URLs are short-lived
+// presigned GETs minted per request (src/lib/video-journal/r2.ts).
+export const videoLogs = pgTable(
+  "video_logs",
+  {
+    // Generated on the recording device (crypto.randomUUID) and reused as
+    // the IndexedDB key there, so "start this upload" is idempotent: a
+    // retry after a dropped connection finds its own row instead of
+    // creating a second one.
+    id: text("id").primaryKey(),
+    // RESTRICT, not the CASCADE every other day satellite uses. A video
+    // log is meant to be permanent, and deleting its row would orphan the
+    // R2 object with nothing pointing at it. A day with recordings can't
+    // be deleted until they're dealt with explicitly.
+    date: date("date", { mode: "string" })
+      .notNull()
+      .references(() => days.date, { onDelete: "restrict" }),
+    status: videoLogStatusEnum("status").notNull().default("uploading"),
+    // "video-journal/2026-10-08/<id>.mp4". Unique so two rows can never
+    // claim the same object.
+    storageKey: text("storage_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    // Expected size while uploading (what the device says it's sending),
+    // then the size R2 actually reports once verified. Bigint because a
+    // multi-hour take can pass 2GB.
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    // Measured by the recorder's clock. Chrome's WebM output carries no
+    // duration of its own, so the file can't be trusted for this.
+    durationMs: integer("duration_ms").notNull(),
+    // When filming started, from the device clock. Not the same as `date`:
+    // a log about Tuesday recorded just after midnight is still Tuesday's.
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    // The recording device's IANA timezone ("America/New_York"), so the
+    // journal header can show the local time it was filmed at rather than
+    // the server's. Null for recordings made before this was captured.
+    recordedTz: text("recorded_tz"),
+    // "Video log #N": the journal header's number, and what the HUD (#599)
+    // shows as the log entry number. Assigned at Finalize (#613), to the
+    // chosen recording only, as the next in sequence, and never renumbered.
+    // Takes deleted at Finalize never get one, so the sequence has no gaps
+    // from discarded takes (owner's call on #613: aesthetic, pick what
+    // makes sense).
+    logNumber: integer("log_number"),
+    // R2's multipart upload id while `uploading`; cleared on completion.
+    uploadId: text("upload_id"),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+    // --- Transcription (#341) ---
+    // Always stored here, whatever happens to days.journal, so a transcript
+    // the user chose not to use is never lost and stays searchable.
+    transcript: text("transcript"),
+    // Word timings as [startSeconds, endSeconds, word] tuples, for jumping
+    // from a search hit to that moment in the video later. Tuples rather
+    // than objects: an hour-long log is ~9k words.
+    transcriptWords: jsonb("transcript_words").$type<[number, number, string][]>(),
+    // Language the transcription service detected, e.g. "en".
+    transcriptLanguage: text("transcript_language"),
+    transcriptionError: text("transcription_error"),
+    // When the current/last attempt started. A `transcribing` row whose
+    // attempt is old enough was abandoned (the function running it was
+    // killed) and may be claimed again.
+    transcriptionStartedAt: timestamp("transcription_started_at", { withTimezone: true }),
+    transcribedAt: timestamp("transcribed_at", { withTimezone: true }),
+    journalOutcome: videoLogJournalOutcomeEnum("journal_outcome"),
+    // The exact text this log wrote into days.journal (header + transcript),
+    // if it wrote any. "Latest wins" recognises an untouched earlier entry by
+    // comparing against this stored text, not a re-rendered one, so a later
+    // change to the header format can't make old entries look edited.
+    journalEntry: text("journal_entry"),
+    // Set on the recording chosen as the day's primary at Finalize (#613).
+    // Every other recording for the day is deleted (R2 object and row) in
+    // the same step, so at most one row per day has this set, except
+    // briefly when a deletion failed and Finalize needs retrying.
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    // The mission HUD's conditions at record time (#599): time, timezone,
+    // location (lat/lng + City, ST) and weather, captured once when
+    // recording starts and redrawn over the video on playback. The HUD is
+    // never burned into the file. Diary stats are deliberately not here:
+    // they're read live for the date at playback (owner's call on #599).
+    // Shape: HudSnapshot in src/lib/video-journal/hud.ts.
+    hudSnapshot: jsonb("hud_snapshot").$type<HudSnapshot>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("video_logs_date_idx").on(table.date),
+    uniqueIndex("video_logs_storage_key_idx").on(table.storageKey),
+    uniqueIndex("video_logs_log_number_idx").on(table.logNumber),
+  ]
+);
+
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
@@ -1581,6 +1726,8 @@ export type OccupationType = (typeof occupationTypeEnum.enumValues)[number];
 export type CommuteOption = (typeof commuteEnum.enumValues)[number];
 export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number];
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
+export type VideoLogStatus = (typeof videoLogStatusEnum.enumValues)[number];
+export type VideoLogJournalOutcome = (typeof videoLogJournalOutcomeEnum.enumValues)[number];
 // EntertainmentKind (used to be derived from entertainmentKindEnum here)
 // is gone along with the enum — see the entertainmentKinds table comment
 // above `entertainmentCatalog`. A kind is now just a row (id, name), read

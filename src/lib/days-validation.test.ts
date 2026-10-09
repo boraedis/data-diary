@@ -4,7 +4,9 @@ import {
   validateBooksPayload,
   validateEntertainmentPayload,
   validateGamesPayload,
+  validateHappinessPayload,
   validateHealthPayload,
+  validateJournalPayload,
   validateMoviesPayload,
   validatePeoplePayload,
   validatePlacesPayload,
@@ -498,5 +500,33 @@ describe("duration limits (#588)", () => {
       ok: false,
       error: "Workouts on this day add up to 25h, more than the 24h in a day.",
     });
+  });
+});
+
+// The journal moved out of the happiness payload into its own section
+// (#340). These pin the split: a happiness save must not carry `journal`,
+// or saving a score would wipe the day's entry.
+describe("validateHappinessPayload / validateJournalPayload split", () => {
+  it("drops a journal field sent to the happiness payload", () => {
+    const result = validateHappinessPayload({ happiness: 70, journal: "should be ignored" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).not.toHaveProperty("journal");
+  });
+
+  it("keeps journal text as written, including surrounding whitespace", () => {
+    const result = validateJournalPayload({ journal: "  First line.\n\nSecond.  " });
+    expect(result).toEqual({ ok: true, value: { journal: "  First line.\n\nSecond.  " } });
+  });
+
+  it.each([[null], [undefined], [""], ["   \n  "]])("treats %j as no entry", (journal) => {
+    expect(validateJournalPayload({ journal })).toEqual({ ok: true, value: { journal: null } });
+  });
+
+  it("rejects a non-string journal", () => {
+    expect(validateJournalPayload({ journal: 42 }).ok).toBe(false);
+  });
+
+  it("rejects a non-object body", () => {
+    expect(validateJournalPayload("text").ok).toBe(false);
   });
 });

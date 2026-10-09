@@ -17,7 +17,7 @@ import { journalHref } from "@/lib/journal-href";
  * `useSearchParams`, so this component stays a leaf with no dependency on
  * the request's own search params.
  */
-export function JournalSearch({ search, year }: { search: string; year: string }) {
+export function JournalSearch({ search, year, video }: { search: string; year: string; video: boolean }) {
   const router = useRouter();
   const [value, setValue] = useState(search);
 
@@ -29,10 +29,10 @@ export function JournalSearch({ search, year }: { search: string; year: string }
       // Deliberately drops the page param: a changed search means the
       // old page number points into a different result set. `replace`
       // rather than `push` so back doesn't walk through every keystroke.
-      router.replace(journalHref({ search: value, year }));
+      router.replace(journalHref({ search: value, year, video }));
     }, 250);
     return () => clearTimeout(timer);
-  }, [value, search, year, router]);
+  }, [value, search, year, video, router]);
 
   return (
     <Input

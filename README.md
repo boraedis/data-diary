@@ -19,7 +19,10 @@ category, each showing an at-a-glance "N/total filled" progress badge:
 - Health (distance walked, coffees, sick day, workouts)
 - Sleep (sleep/wake time, location, naps)
 - Weight (weight, body fat %, muscle mass)
-- Happiness (0–100 score, reason, journal entry, day type)
+- Happiness (0–100 score, reason, day type)
+- Journal — written, or recorded as a video log in the browser, stored in
+  Cloudflare R2 and transcribed by Deepgram into the journal text (video
+  journal epic #338)
 - Work (productivity score, duration, location, commute)
 - Technology & social media (phone/laptop usage minutes, Instagram followers/usage)
 - Subs — a fixed set of personal subscores tracked daily
@@ -154,6 +157,8 @@ All of these are documented inline in `.env.example`; summarized here:
 | `GOOGLE_BOOKS_API_KEY` | For book metadata lookup | Google Books API key, used by `/api/google-books/*`. |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | For artist genre lookup on music import | Spotify [Client Credentials](https://developer.spotify.com/documentation/web-api/tutorials/client-credentials-flow) app keys, used by `/api/music/import` to resolve a newly-seen artist's genre tags. Without these, import still works — new artists just get no genres. |
 | `BLOB_READ_WRITE_TOKEN` | For serving binary media | [Vercel Blob](https://vercel.com/docs/vercel-blob) read/write token, used to store images and video (see `AGENTS.md`'s static asset strategy section for what goes here vs. what's committed to the repo). Auto-populated on Vercel once a Blob store is connected to the project; for local dev, pull it with `vercel env pull`. |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | For video journal uploads | Cloudflare R2 bucket + API token for video journal recordings (#338/#339). See [Video journal storage (R2)](#video-journal-storage-r2). Without these, recording still works: takes stay on the device and the upload API answers 503. |
+| `DEEPGRAM_API_KEY` | For video journal transcription | [Deepgram](https://deepgram.com) API key (#341). Stored recordings are transcribed with Nova-3; transcripts are kept on each recording and reach the day's journal when its recordings are finalized (#613), never silently replacing writing. Without it, recordings are stored but stay untranscribed until a key is added; the Journal page then starts them automatically. |
 
 ### Scripts
 
@@ -304,6 +309,56 @@ scripts/                  Standalone maintenance/migration scripts (see Scripts 
 See `AGENTS.md` for a fuller walkthrough of the chart toolkit's architecture
 and the conventions this codebase follows (issue/PR workflow, color rules,
 verification expectations) — worth reading before picking up any chart work.
+
+## Video journal storage (R2)
+
+Video journal recordings (epic #338) go to a private **Cloudflare R2**
+bucket rather than Vercel Blob. R2 has no egress fees, and these get
+rewatched for decades; see `AGENTS.md`'s static asset strategy. The
+browser uploads straight to R2 with short-lived presigned URLs: Vercel's
+4.5MB request-body limit rules out sending video through an API route.
+The app only ever holds the object key; playback uses presigned GETs.
+
+One-time setup, in the Cloudflare dashboard:
+
+1. **Two buckets**: one for production (e.g. `data-diary-video`) and one
+   for everything else (e.g. `data-diary-video-dev`). Preview deployments
+   and local dev run against disposable PR databases (fixture data), so
+   their uploads shouldn't share a bucket with the real recordings.
+   Leave both private (no public access, no r2.dev URL).
+2. **An API token** (R2 → Manage API tokens) with **Object Read & Write**,
+   scoped to those two buckets. That gives `R2_ACCESS_KEY_ID` and
+   `R2_SECRET_ACCESS_KEY`. `R2_ACCOUNT_ID` is on the R2 overview page.
+3. **CORS on each bucket** (bucket → Settings → CORS policy). The browser
+   PUTs upload parts cross-origin, so R2 must allow it. Playback needs no
+   CORS (a plain `<video src>` isn't a CORS request), and the app reads
+   part ETags server-side with ListParts, so no headers need exposing.
+
+   Production bucket, with your production origin:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://your-production-domain"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["content-type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+   Dev bucket: the same, with `"AllowedOrigins": ["*"]`. Preview URLs change
+   per deployment, and the presigned URL, not the origin, is what
+   authorises an upload; the bucket only ever holds test recordings.
+4. **Environment variables in Vercel**: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`
+   and `R2_SECRET_ACCESS_KEY` for all environments; `R2_BUCKET` set to the
+   production bucket for Production and the dev bucket for Preview and
+   Development. Locally, put the dev bucket's values in `.env.local`.
+
+R2 aborts multipart uploads left incomplete for 7 days by default (bucket
+→ Settings → Object lifecycle rules), which cleans up after abandoned
+attempts. That's fine: a device keeps its local copy until an upload is
+verified, and starting over is automatic.
 
 ## Deployment
 
