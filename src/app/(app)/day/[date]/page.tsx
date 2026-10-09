@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DayNav } from "@/components/day-nav";
+import { RefreshWhile } from "@/components/refresh-while";
 import { isValidDateString } from "@/lib/date";
 import {
   loadDay,
@@ -11,6 +12,8 @@ import {
   SUB_NAMES,
   type DayPayload,
 } from "@/lib/days";
+import { summarizeDayVideoNow, type DayVideoNote } from "@/lib/video-journal/day-status";
+import { listVideoLogStatesForDate } from "@/lib/video-journal/video-logs";
 
 // Always a live DB read for the given date — never statically cached.
 export const dynamic = "force-dynamic";
@@ -21,15 +24,27 @@ export const dynamic = "force-dynamic";
 // genuinely open-ended list, so it shows a simple "N logged" badge instead —
 // same "at a glance, not exact" spirit, just without a manufactured
 // denominator.
-type CategorySummary =
+type CategorySummary = (
   | { key: string; label: string; kind: "progress"; filled: number; total: number }
-  | { key: string; label: string; kind: "count"; count: number };
+  | { key: string; label: string; kind: "count"; count: number }
+) & {
+  /** One extra status line under the bar. Only the Journal card uses it,
+   * for the day's video recordings (#342). */
+  note?: DayVideoNote | null;
+};
+
+const NOTE_TONE: Record<DayVideoNote["tone"], string> = {
+  error: "text-destructive",
+  attention: "text-amber-600 dark:text-amber-400",
+  progress: "text-muted-foreground",
+  muted: "text-muted-foreground",
+};
 
 // "Filled" is a simple presence count per section, not a judgment about
 // whether the day is "complete" — it's just enough to show at a glance
 // which sections you haven't touched yet, same idea as the legacy app's
 // per-category progress bars on its day dashboard.
-function summarize(day: DayPayload): CategorySummary[] {
+function summarize(day: DayPayload, videoNote: DayVideoNote | null): CategorySummary[] {
   const present = (values: unknown[]) => values.filter((v) => v !== null && v !== undefined).length;
 
   return [
@@ -84,6 +99,9 @@ function summarize(day: DayPayload): CategorySummary[] {
       kind: "progress",
       filled: day.journal?.trim() ? 1 : 0,
       total: 1,
+      // Recordings reach the journal only at Finalize (#613), so the bar
+      // alone can't say "transcribing" or "recorded but not finalized".
+      note: videoNote,
     },
     { key: "subs", label: "Subs", kind: "progress", filled: day.subs.length, total: SUB_NAMES.length },
     {
@@ -131,12 +149,24 @@ export default async function DaySummaryPage({
     notFound();
   }
 
-  const day = await loadDay(date);
-  const categories = summarize(day);
+  const [day, videoRows] = await Promise.all([
+    loadDay(date),
+    // A video-side failure must not take the day summary down with it;
+    // the card just loses its status line.
+    listVideoLogStatesForDate(date).catch((error: unknown) => {
+      console.error("[day summary] Could not load video log states:", error);
+      return [];
+    }),
+  ]);
+  const videoNote = summarizeDayVideoNow(videoRows);
+  const categories = summarize(day, videoNote);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:py-12">
       <DayNav date={date} />
+      {/* Re-render while a recording is still uploading or transcribing,
+          so its status line moves on without a manual reload. */}
+      <RefreshWhile active={videoNote?.tone === "progress"} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
         {categories.map((cat) => (
           <Link key={cat.key} href={`/day/${date}/${cat.key}`}>
@@ -157,6 +187,7 @@ export default async function DaySummaryPage({
                       style={{ width: `${(cat.filled / cat.total) * 100}%` }}
                     />
                   </div>
+                  {cat.note ? <p className={`mt-2 text-xs ${NOTE_TONE[cat.note.tone]}`}>{cat.note.text}</p> : null}
                 </CardContent>
               ) : (
                 <CardContent>

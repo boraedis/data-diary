@@ -6,6 +6,7 @@ import {
   type VideoLogJournalOutcome as SchemaJournalOutcome,
   type VideoLogStatus as SchemaVideoLogStatus,
 } from "@/db/schema";
+import { isTranscriptionStale, type DayVideoRow } from "@/lib/video-journal/day-status";
 import { buildJournalEntry } from "@/lib/video-journal/journal-entry";
 import { extensionForMimeType } from "@/lib/video-journal/recording";
 import { missingParts } from "@/lib/video-journal/upload-plan";
@@ -21,7 +22,6 @@ import {
   type UploadedPart,
 } from "@/lib/video-journal/r2";
 import {
-  TRANSCRIPTION_STALE_MS,
   type JournalOutcome,
   type PresignedPart,
   type StartUploadInput,
@@ -292,10 +292,7 @@ async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
             transcript: row.transcript,
           }))
         : null,
-    transcriptionStale:
-      row.status === "transcribing" &&
-      row.transcriptionStartedAt !== null &&
-      Date.now() - row.transcriptionStartedAt.getTime() > TRANSCRIPTION_STALE_MS,
+    transcriptionStale: isTranscriptionStale(row, Date.now()),
   };
 }
 
@@ -308,4 +305,20 @@ export async function listVideoLogsForDate(date: string): Promise<VideoLogSummar
     .where(eq(videoLogs.date, date))
     .orderBy(asc(videoLogs.recordedAt));
   return Promise.all(rows.map(toSummary));
+}
+
+/** Just enough about a day's recordings for the day summary's status line
+ * (#342, day-status.ts). No presigned URLs or transcripts: the summary
+ * page doesn't play anything, it links to the Journal section that does. */
+export async function listVideoLogStatesForDate(date: string): Promise<DayVideoRow[]> {
+  return getDb()
+    .select({
+      status: videoLogs.status,
+      finalized: sql<boolean>`${videoLogs.finalizedAt} IS NOT NULL`,
+      logNumber: videoLogs.logNumber,
+      transcriptionStartedAt: videoLogs.transcriptionStartedAt,
+    })
+    .from(videoLogs)
+    .where(eq(videoLogs.date, date))
+    .orderBy(asc(videoLogs.recordedAt));
 }
