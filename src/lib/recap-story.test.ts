@@ -52,6 +52,8 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         priorNightsLogged: 0,
         longest: null,
         shortest: null,
+        locations: { rows: [], locatedNights: 0, priorLocatedNights: 0 },
+        naps: { totalMinutes: 0, daysWithNap: 0, priorTotalMinutes: 0, priorDaysWithNap: 0 },
       },
       exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [] },
     },
@@ -126,6 +128,8 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         priorNightsLogged: 270,
         longest: null,
         shortest: null,
+        locations: { rows: [], locatedNights: 0, priorLocatedNights: 0 },
+        naps: { totalMinutes: 0, daysWithNap: 0, priorTotalMinutes: 0, priorDaysWithNap: 0 },
       },
       exercise: { daysTrained: 120, priorDaysTrained: 90, exercisesLogged: 400, mix: [] },
     },
@@ -462,5 +466,40 @@ describe("buildRecapStory for a chapter", () => {
     expect(buildRecapStory(flat).find((card) => card.id === "days-logged")?.detail).toBe(
       "Same as the 2 years before.",
     );
+  });
+});
+
+// #531: the sleep-location card is dealt only past the located-night
+// threshold, never for "Other".
+describe("sleep-location card", () => {
+  // A sparse year (overview + happiness + sleep locations), so the cap
+  // never squeezes the card out and its presence is down to its own gate.
+  const withLocations = (locatedNights: number): RecapStoryInput => {
+    const input = emptyInput({ loggedDays: 300, priorLoggedDays: 280 });
+    input.health = {
+      ...input.health,
+      happiness: fullInput().health.happiness,
+      sleep: {
+        ...input.health.sleep,
+        locations: {
+          locatedNights,
+          priorLocatedNights: 0,
+          rows: [
+            { label: "Home", other: false, colorIndex: 0, nights: locatedNights - 2, averageMinutes: 430, priorNights: 0, priorAverageMinutes: null },
+            { label: "Hotel", other: false, colorIndex: 1, nights: 2, averageMinutes: 400, priorNights: 0, priorAverageMinutes: null },
+          ],
+        },
+      },
+    };
+    return input;
+  };
+
+  it("names the top location once enough nights have one", () => {
+    const card = buildRecapStory(withLocations(20)).find((c) => c.id === "sleep-location");
+    expect(card).toMatchObject({ value: "Home", headline: "18 of 20 nights with a location recorded.", items: ["Hotel"] });
+  });
+
+  it("isn't dealt below the threshold", () => {
+    expect(idsOf(withLocations(13))).not.toContain("sleep-location");
   });
 });

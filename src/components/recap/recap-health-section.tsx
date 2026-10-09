@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { ChartCard } from "@/components/charts/chart-card";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
-import { formatDate, formatDuration } from "@/lib/viz/format";
+import { categoricalColor } from "@/lib/viz/color";
+import { formatDate, formatDuration, formatHoursTotal } from "@/lib/viz/format";
 import { MIN_DAYS_FOR_AVERAGE, MIN_DAYS_FOR_TOTAL, toRecapStat } from "@/lib/recap";
-import { GOOD_DAY_THRESHOLD, type RecapHealth } from "@/lib/recap-health";
+import { GOOD_DAY_THRESHOLD, type RecapHealth, type RecapSleep } from "@/lib/recap-health";
 import { RecapExerciseMix, RecapHappinessTrend } from "@/components/recap/recap-health-charts";
 
 // The health & wellness section of the recap report (issue #201, epic
@@ -111,9 +113,30 @@ export function RecapHealthSection({
               priorLoggedDays: happiness.priorDaysLogged,
             })}
           />
+          {/* Naps (#531): their own figure, never folded into nights. A
+              total, so it shows from the first logged nap. */}
+          <RecapStatCard
+            label="Nap time"
+            format={(minutes) => formatHoursTotal(minutes / 60)}
+            priorLabel={priorLabel}
+            detail={
+              sleep.naps.daysWithNap > 0
+                ? `${sleep.naps.daysWithNap} day${sleep.naps.daysWithNap === 1 ? "" : "s"} with a nap`
+                : undefined
+            }
+            stat={toRecapStat({
+              value: sleep.naps.totalMinutes,
+              loggedDays: sleep.naps.daysWithNap,
+              requiredDays: MIN_DAYS_FOR_TOTAL,
+              prior: sleep.naps.priorTotalMinutes,
+              priorLoggedDays: sleep.naps.priorDaysWithNap,
+            })}
+          />
         </div>
 
         <Highlights health={health} />
+
+        {sleep.nightsLogged > 0 ? <SleepLocations sleep={sleep} priorLabel={priorLabel} /> : null}
 
         {showTrend ? (
           <section className="flex flex-col gap-2">
@@ -134,6 +157,96 @@ export function RecapHealthSection({
         ) : null}
       </div>
     </ChartCard>
+  );
+}
+
+/**
+ * Where the period's nights were slept (#531): nights and average duration
+ * per location type, this period beside the prior one. Ranked rows and the
+ * "Other" fold come from `summarizeSleepLocations`. The subtype drill-down
+ * lives on the Sleep Locations chart, linked rather than repeated.
+ *
+ * An average per location, so the breakdown needs `MIN_DAYS_FOR_AVERAGE`
+ * nights *with a location*: most nights don't have one recorded, so the
+ * period's night count alone would pass the gate on rows too thin to mean
+ * anything.
+ */
+function SleepLocations({ sleep, priorLabel }: { sleep: RecapSleep; priorLabel: string }) {
+  const { rows, locatedNights, priorLocatedNights } = sleep.locations;
+  const enough = locatedNights >= MIN_DAYS_FOR_AVERAGE;
+  // The prior columns only when the prior period has enough located nights
+  // of its own to compare against.
+  const showPrior = priorLocatedNights >= MIN_DAYS_FOR_AVERAGE;
+  const nights = (n: number) => `${n} night${n === 1 ? "" : "s"}`;
+  const average = (m: number | null) => (m === null ? "—" : formatDuration(m / 60));
+
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">Where you slept</h3>
+        <Link
+          href="/charts/sleep-locations"
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          By subtype in Sleep Locations
+        </Link>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {locatedNights} of {nights(sleep.nightsLogged)} have a location recorded.
+      </p>
+      {!enough ? (
+        <p className="py-2 text-sm text-muted-foreground">
+          {locatedNights === 0
+            ? "No locations recorded this period."
+            : `Only ${nights(locatedNights)} with a location — needs ${MIN_DAYS_FOR_AVERAGE}.`}
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground">
+              <th className="py-1 font-normal">Location</th>
+              <th className="py-1 text-right font-normal">Nights</th>
+              <th className="py-1 text-right font-normal">Average</th>
+              {showPrior ? (
+                <>
+                  <th className="py-1 pl-4 text-right font-normal">{priorLabel}</th>
+                  <th className="py-1 text-right font-normal">Average</th>
+                </>
+              ) : null}
+            </tr>
+          </thead>
+          <tbody className="tabular-nums">
+            {rows.map((row) => (
+              <tr key={row.label} className="border-t border-border">
+                <td className="py-1.5">
+                  <span className="flex items-center gap-2">
+                    {/* SeriesKey's swatch, drawn inline: legend.tsx is a
+                        client module (useState) and this is a server
+                        component, so importing it breaks the build. */}
+                    <span
+                      aria-hidden
+                      className="inline-block size-2.5 shrink-0 rounded-[3px]"
+                      style={{ backgroundColor: categoricalColor(row.colorIndex) }}
+                    />
+                    {row.label}
+                  </span>
+                </td>
+                <td className="py-1.5 text-right">{row.nights}</td>
+                <td className="py-1.5 text-right">{average(row.averageMinutes)}</td>
+                {showPrior ? (
+                  <>
+                    <td className="py-1.5 pl-4 text-right text-muted-foreground">{row.priorNights}</td>
+                    <td className="py-1.5 text-right text-muted-foreground">
+                      {average(row.priorAverageMinutes)}
+                    </td>
+                  </>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }
 

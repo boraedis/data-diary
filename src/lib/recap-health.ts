@@ -1,6 +1,6 @@
 import { and, asc, gte, isNotNull, lte } from "drizzle-orm";
 import { days, workouts } from "@/db/schema";
-import { getExerciseWorkoutRows, getSleepCalendarData, type ExerciseWorkoutRow, type SleepDay } from "@/lib/charts";
+import { getExerciseWorkoutRows, getSleepNightsData, type ExerciseWorkoutRow, type SleepDay } from "@/lib/charts";
 import { addDays } from "@/lib/date";
 import { getDb } from "@/lib/db";
 import type { RecapPeriod } from "@/lib/recap";
@@ -62,7 +62,64 @@ export type RecapSleep = {
   priorNightsLogged: number;
   longest: SleepDay | null;
   shortest: SleepDay | null;
+  /** Where the nights were slept (#531). See `summarizeSleepLocations`. */
+  locations: RecapSleepLocations;
+  /** Naps, reported apart from nights (#531). See `summarizeNaps`. */
+  naps: RecapNaps;
 };
+
+/**
+ * A night as the recap reads it: the public chart's narrow `SleepDay`, plus
+ * where it was slept and that day's nap. Its own type rather than a widened
+ * `SleepDay`, which the public sleep chart renders and which mustn't learn
+ * where anyone sleeps (see `SleepNight`'s comment in charts.ts). The two
+ * extra fields are optional so a plain `SleepDay` still reads as a night
+ * with neither recorded.
+ */
+export type RecapSleepNight = SleepDay & {
+  locationType?: string | null;
+  napMinutes?: number | null;
+};
+
+/** One location type's nights in each period. A period with no nights
+ * there has `nights: 0` and a null average. */
+export type RecapSleepLocationRow = {
+  /** The `sleepLocationType` value, or "Other" for the folded tail. */
+  label: string;
+  /** True for the folded tail row, which always sorts last. */
+  other: boolean;
+  /** Fixed categorical slot: rank order among the named rows, so the
+   * colours never cycle and the "Other" row gets the slot past the five
+   * real ones (the muted grey). */
+  colorIndex: number;
+  nights: number;
+  averageMinutes: number | null;
+  priorNights: number;
+  priorAverageMinutes: number | null;
+};
+
+export type RecapSleepLocations = {
+  /** Ranked by nights this period, then prior-period nights, then name.
+   * Only nights with a recorded location. An unrecorded night is coverage,
+   * never a location to rank. */
+  rows: RecapSleepLocationRow[];
+  /** Nights this period with a recorded location, out of `nightsLogged`. */
+  locatedNights: number;
+  priorLocatedNights: number;
+};
+
+export type RecapNaps = {
+  totalMinutes: number;
+  /** Days with a nap of more than zero minutes. */
+  daysWithNap: number;
+  priorTotalMinutes: number;
+  priorDaysWithNap: number;
+};
+
+/** Named location rows before the rest fold into "Other". Five is the
+ * number of real categorical slots, so every named row has its own hue and
+ * "Other" takes the shared grey past them. */
+export const SLEEP_LOCATION_SLOTS = 5;
 
 export type RecapExercise = {
   /** Days with at least one workout logged — see the note on the fetcher
@@ -180,7 +237,9 @@ export function summarizeHappiness(
 /**
  * Sleep for both periods.
  *
- * Reuses `getSleepCalendarData` rather than re-deriving duration from
+ * Reuses `getSleepNightsData` (the private chart's derivation, which also
+ * carries each night's location and nap for #531) rather than re-deriving
+ * duration from
  * `sleepTime`/`wakeTime`/`wakeCrossedMidnight`. That derivation carries
  * real subtlety — the across-midnight flag, and a guard that drops
  * impossible durations — and it lives in one place on purpose (#201 says
@@ -191,11 +250,18 @@ export function summarizeHappiness(
  * correct twice.
  */
 async function getSleep(period: RecapPeriod, prior: RecapPeriod): Promise<RecapSleep> {
-  return summarizeSleep(await getSleepCalendarData(), period, prior);
+  return summarizeSleep(await getSleepNightsData(), period, prior);
 }
 
+/**
+ * Sleep for both periods.
+ *
+ * **A night belongs to the period holding its `days` row date**, for its
+ * duration, its location and its nap alike, so all three always agree on
+ * which nights a period has.
+ */
 export function summarizeSleep(
-  nights: SleepDay[],
+  nights: RecapSleepNight[],
   period: RecapPeriod,
   prior: RecapPeriod
 ): RecapSleep {
@@ -214,8 +280,111 @@ export function summarizeSleep(
     priorAverageMinutes: mean(previous.map((n) => n.durationMinutes)),
     nightsLogged: current.length,
     priorNightsLogged: previous.length,
-    longest,
-    shortest,
+    // Date and duration only, whatever extra fields the input carried: these
+    // two are rendered as-is, and a night's location has its own card.
+    longest: longest && { date: longest.date, durationMinutes: longest.durationMinutes },
+    shortest: shortest && { date: shortest.date, durationMinutes: shortest.durationMinutes },
+    locations: summarizeSleepLocations(current, previous),
+    naps: summarizeNaps(current, previous),
+  };
+}
+
+/**
+ * Nights and average duration per sleep location type, this period beside
+ * the prior one.
+ *
+ * A null `locationType` is "not recorded" and is counted only in coverage
+ * (`locatedNights` out of `nightsLogged`), never ranked: it isn't a place,
+ * and ranking it would put "unknown" at the top of most years. The ranking
+ * is by this period's nights. A location only slept at in the prior period
+ * still gets a row (0 nights now), since its absence is part of the
+ * comparison. Past `SLEEP_LOCATION_SLOTS` named rows, the rest fold into
+ * one "Other" row whose average is taken over its own nights, not averaged
+ * from the rows it replaced.
+ *
+ * The subtype drill-down isn't repeated here; the report links to
+ * `/charts/sleep-locations` for it.
+ */
+export function summarizeSleepLocations(
+  current: RecapSleepNight[],
+  previous: RecapSleepNight[]
+): RecapSleepLocations {
+  const located = (list: RecapSleepNight[]) =>
+    list.filter((n): n is RecapSleepNight & { locationType: string } => typeof n.locationType === "string");
+  const now = located(current);
+  const before = located(previous);
+
+  const group = (list: { locationType: string; durationMinutes: number }[]) => {
+    const map = new Map<string, number[]>();
+    for (const n of list) map.set(n.locationType, [...(map.get(n.locationType) ?? []), n.durationMinutes]);
+    return map;
+  };
+  const nowBy = group(now);
+  const beforeBy = group(before);
+
+  const labels = [...new Set([...nowBy.keys(), ...beforeBy.keys()])].sort(
+    (a, b) =>
+      (nowBy.get(b)?.length ?? 0) - (nowBy.get(a)?.length ?? 0) ||
+      (beforeBy.get(b)?.length ?? 0) - (beforeBy.get(a)?.length ?? 0) ||
+      a.localeCompare(b)
+  );
+
+  // A tail of one isn't worth folding: it would only rename that location
+  // "Other". So fold only when at least two rows would go into it.
+  const foldFrom = labels.length > SLEEP_LOCATION_SLOTS + 1 ? SLEEP_LOCATION_SLOTS : labels.length;
+  const named = labels.slice(0, foldFrom);
+  const tail = new Set(labels.slice(foldFrom));
+
+  const row = (label: string, other: boolean, colorIndex: number, nowMinutes: number[], beforeMinutes: number[]) => ({
+    label,
+    other,
+    colorIndex,
+    nights: nowMinutes.length,
+    averageMinutes: mean(nowMinutes),
+    priorNights: beforeMinutes.length,
+    priorAverageMinutes: mean(beforeMinutes),
+  });
+
+  const rows: RecapSleepLocationRow[] = named.map((label, i) =>
+    row(label, false, i, nowBy.get(label) ?? [], beforeBy.get(label) ?? [])
+  );
+  if (tail.size > 0) {
+    rows.push(
+      row(
+        "Other",
+        true,
+        SLEEP_LOCATION_SLOTS,
+        now.filter((n) => tail.has(n.locationType)).map((n) => n.durationMinutes),
+        before.filter((n) => tail.has(n.locationType)).map((n) => n.durationMinutes)
+      )
+    );
+  }
+
+  return { rows, locatedNights: now.length, priorLocatedNights: before.length };
+}
+
+/**
+ * Nap time and days napped, per period.
+ *
+ * **A nap never counts as a night** and never changes a night's duration:
+ * it only adds to this total. It's attributed by its own row's date, like
+ * everything else here.
+ *
+ * Known gap: naps arrive through `getSleepNightsData`, which keeps only
+ * rows with both a sleep and a wake time. A nap logged on a day whose
+ * night wasn't is missed. That's rare in practice, and #531 chose reuse of
+ * the one sleep derivation over a second query.
+ */
+export function summarizeNaps(current: RecapSleepNight[], previous: RecapSleepNight[]): RecapNaps {
+  const napped = (list: RecapSleepNight[]) => list.map((n) => n.napMinutes ?? 0).filter((m) => m > 0);
+  const now = napped(current);
+  const before = napped(previous);
+  const sum = (values: number[]) => values.reduce((total, v) => total + v, 0);
+  return {
+    totalMinutes: sum(now),
+    daysWithNap: now.length,
+    priorTotalMinutes: sum(before),
+    priorDaysWithNap: before.length,
   };
 }
 
