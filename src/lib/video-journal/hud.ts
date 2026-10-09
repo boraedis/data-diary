@@ -8,8 +8,11 @@
 // - Split sources. Conditions that can't change afterwards (time,
 //   timezone, location, weather) are captured once when recording starts
 //   and stored with the recording (video_logs.hud_snapshot). Diary stats
-//   (sleep, coffees, distance walked, happiness) are read live for that
-//   date at playback, so things logged later in the day still show up.
+//   (sleep, coffees, happiness) are read live for that date at playback,
+//   so things logged later in the day still show up.
+// - Distance walked was dropped (owner, #599) so both bottom corners are
+//   three lines: place / coordinates / weather, and sleep / coffee /
+//   happiness. The field stays in HudDiaryStats; it just isn't drawn.
 // - Stats not logged yet are hidden, not shown as blanks.
 // - No "SOL" count, no compass, no streak.
 // - Look: mission terminal (monospace, uppercase, corner brackets).
@@ -179,10 +182,7 @@ export function diaryStatLines(stats: HudDiaryStats | null): string[] {
   const lines: string[] = [];
   const sleep = formatSleep(stats);
   if (sleep) lines.push(sleep);
-  const intake: string[] = [];
-  if (stats.coffees !== null) intake.push(`COFFEE ${stats.coffees}`);
-  if (stats.distanceWalkedKm !== null) intake.push(`WALKED ${stats.distanceWalkedKm.toFixed(1)} KM`);
-  if (intake.length) lines.push(intake.join(" · "));
+  if (stats.coffees !== null) lines.push(`COFFEE ${stats.coffees}`);
   if (stats.happiness !== null) lines.push(`HAPPINESS ${stats.happiness}`);
   return lines;
 }

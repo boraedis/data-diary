@@ -70,14 +70,19 @@ export function MissionHud(props: Props) {
 
       <Corner position="top-right">
         {mode === "live" ? (
-          recording ? (
-            <div className="flex items-center justify-end gap-1.5 font-semibold">
-              <span className="size-2 animate-pulse rounded-full bg-red-500" />
-              REC {formatElapsed(elapsedMs)}
-            </div>
-          ) : (
-            <div className="opacity-80">STANDBY</div>
-          )
+          <>
+            {recording ? (
+              <div className="flex items-center justify-end gap-1.5 font-semibold">
+                <span className="size-2 animate-pulse rounded-full bg-red-500" />
+                REC {formatElapsed(elapsedMs)}
+              </div>
+            ) : (
+              <div className="opacity-80">STANDBY</div>
+            )}
+            {/* Up here rather than under the stats, so both bottom corners
+                stay three lines (#599). */}
+            {audioStream ? <AudioMeter stream={audioStream} /> : null}
+          </>
         ) : (
           <div className="font-semibold">▶ {formatElapsed(elapsedMs)}</div>
         )}
@@ -101,7 +106,6 @@ export function MissionHud(props: Props) {
         {statLines.map((l) => (
           <div key={l}>{l}</div>
         ))}
-        {mode === "live" && audioStream ? <AudioMeter stream={audioStream} /> : null}
       </Corner>
     </div>
   );
