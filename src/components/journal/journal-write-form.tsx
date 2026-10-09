@@ -23,6 +23,21 @@ export function JournalWriteForm({ date, initial }: { date: string; initial: str
   const [dirty, setDirty] = useState(false);
   useUnsavedChangesGuard(dirty);
 
+  // The journal can change on the server while this pane is open: a
+  // transcript filling an empty journal, or a Replace/Append choice
+  // (#341), arrive through router.refresh() as a new `initial`. Untouched
+  // text follows it. Text being edited is never replaced under the cursor;
+  // instead, a note warns that saving will overwrite what arrived.
+  // (Adjusting state while rendering, React's documented pattern for
+  // reacting to a prop change without an effect.)
+  const [syncedInitial, setSyncedInitial] = useState(initial);
+  const [changedUnderneath, setChangedUnderneath] = useState(false);
+  if (initial !== syncedInitial) {
+    setSyncedInitial(initial);
+    if (dirty) setChangedUnderneath(true);
+    else setJournal(initial ?? "");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -41,7 +56,12 @@ export function JournalWriteForm({ date, initial }: { date: string; initial: str
         return;
       }
 
-      setJournal((body as DayPayload).journal ?? "");
+      const savedJournal = (body as DayPayload).journal;
+      setJournal(savedJournal ?? "");
+      // Saved text is now the baseline, so the refresh below doesn't read
+      // as an outside change.
+      setSyncedInitial(savedJournal);
+      setChangedUnderneath(false);
       setDirty(false);
       setSavedAt(Date.now());
       router.refresh();
@@ -69,6 +89,13 @@ export function JournalWriteForm({ date, initial }: { date: string; initial: str
           setDirty(true);
         }}
       />
+
+      {changedUnderneath ? (
+        <p className="text-sm text-amber-600 dark:text-amber-400">
+          This day&apos;s journal was updated while you were editing (a transcript, most likely). Saving will replace
+          that update with what&apos;s in the box; reload the page first to see it.
+        </p>
+      ) : null}
 
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 md:max-w-2xl">

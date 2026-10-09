@@ -29,6 +29,16 @@ export type UploadState = {
 
 export type PresignedPart = { partNumber: number; url: string };
 
+/** See transcription.ts's journal-outcome notes and the schema enum. */
+export type JournalOutcome = "applied" | "pending" | "replaced" | "appended" | "kept" | "superseded";
+
+/** A `transcribing` log whose attempt started longer ago than this was
+ * abandoned (the function running it was killed) and may be retried. Well
+ * past the transcription route's 300s budget, so a live attempt is never
+ * mistaken for a dead one. Shared so the UI and server agree on when to
+ * offer Retry. */
+export const TRANSCRIPTION_STALE_MS = 15 * 60 * 1000;
+
 /** A stored recording as the Journal section lists it. `playbackUrl` is a
  * presigned GET valid for an hour, or null while still uploading (or if R2
  * isn't configured on this deployment). */
@@ -41,6 +51,13 @@ export type VideoLogSummary = {
   durationMs: number;
   recordedAt: string;
   playbackUrl: string | null;
+  /** #341. Null until transcribed; "" when no speech was found. */
+  transcript: string | null;
+  transcriptionError: string | null;
+  journalOutcome: JournalOutcome | null;
+  /** True for a `transcribing` log that's been at it long enough to count
+   * as abandoned, so the UI offers Retry instead of waiting forever. */
+  transcriptionStale: boolean;
 };
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };

@@ -79,12 +79,16 @@ export function VideoRecorder({
   date,
   videoLogs,
   videoLogsError,
+  onRetryTranscription,
+  transcriptionNotConfigured,
 }: {
   date: string;
   videoLogs: VideoLogSummary[];
   /** Why the day's stored recordings couldn't be listed, if they
    * couldn't. Recording and on-device storage still work. */
   videoLogsError: string | null;
+  onRetryTranscription: (id: string) => void;
+  transcriptionNotConfigured: boolean;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -674,6 +678,8 @@ export function VideoRecorder({
 
       <StoredRecordings
         recordings={videoLogs}
+        onRetryTranscription={onRetryTranscription}
+        transcriptionNotConfigured={transcriptionNotConfigured}
         playingId={playback?.id ?? null}
         onPlay={(log) => {
           if (log.playbackUrl) setPlayback({ id: log.id, url: log.playbackUrl });

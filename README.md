@@ -20,8 +20,9 @@ category, each showing an at-a-glance "N/total filled" progress badge:
 - Sleep (sleep/wake time, location, naps)
 - Weight (weight, body fat %, muscle mass)
 - Happiness (0–100 score, reason, day type)
-- Journal — written, or recorded as a video log in the browser and stored in
-  Cloudflare R2 (video journal epic #338; transcription is in progress)
+- Journal — written, or recorded as a video log in the browser, stored in
+  Cloudflare R2 and transcribed by Deepgram into the journal text (video
+  journal epic #338)
 - Work (productivity score, duration, location, commute)
 - Technology & social media (phone/laptop usage minutes, Instagram followers/usage)
 - Subs — a fixed set of personal subscores tracked daily
@@ -157,6 +158,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | For artist genre lookup on music import | Spotify [Client Credentials](https://developer.spotify.com/documentation/web-api/tutorials/client-credentials-flow) app keys, used by `/api/music/import` to resolve a newly-seen artist's genre tags. Without these, import still works — new artists just get no genres. |
 | `BLOB_READ_WRITE_TOKEN` | For serving binary media | [Vercel Blob](https://vercel.com/docs/vercel-blob) read/write token, used to store images and video (see `AGENTS.md`'s static asset strategy section for what goes here vs. what's committed to the repo). Auto-populated on Vercel once a Blob store is connected to the project; for local dev, pull it with `vercel env pull`. |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | For video journal uploads | Cloudflare R2 bucket + API token for video journal recordings (#338/#339). See [Video journal storage (R2)](#video-journal-storage-r2). Without these, recording still works: takes stay on the device and the upload API answers 503. |
+| `DEEPGRAM_API_KEY` | For video journal transcription | [Deepgram](https://deepgram.com) API key (#341). Stored recordings are transcribed with Nova-3 and the transcript fills the day's journal (never silently replacing writing). Without it, recordings are stored but stay untranscribed until a key is added; the Journal page then starts them automatically. |
 
 ### Scripts
 

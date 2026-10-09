@@ -1,6 +1,11 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { days, videoLogs, type VideoLogStatus as SchemaVideoLogStatus } from "@/db/schema";
+import {
+  days,
+  videoLogs,
+  type VideoLogJournalOutcome as SchemaJournalOutcome,
+  type VideoLogStatus as SchemaVideoLogStatus,
+} from "@/db/schema";
 import { extensionForMimeType } from "@/lib/video-journal/recording";
 import { missingParts } from "@/lib/video-journal/upload-plan";
 import {
@@ -14,12 +19,14 @@ import {
   R2RequestError,
   type UploadedPart,
 } from "@/lib/video-journal/r2";
-import type {
-  PresignedPart,
-  StartUploadInput,
-  UploadState,
-  VideoLogStatus,
-  VideoLogSummary,
+import {
+  TRANSCRIPTION_STALE_MS,
+  type JournalOutcome,
+  type PresignedPart,
+  type StartUploadInput,
+  type UploadState,
+  type VideoLogStatus,
+  type VideoLogSummary,
 } from "@/lib/video-journal/video-log-types";
 
 // Server-side lifecycle of a video log's upload (#339, epic #338): open an
@@ -29,7 +36,7 @@ import type {
 //
 // Transcription (#341) picks up rows once they reach `uploaded`.
 
-// The client-safe union in video-log-types.ts must match the DB enum.
+// The client-safe unions in video-log-types.ts must match the DB enums.
 // This fails to compile if either side gains or loses a value.
 type SameStatuses = [VideoLogStatus] extends [SchemaVideoLogStatus]
   ? [SchemaVideoLogStatus] extends [VideoLogStatus]
@@ -37,6 +44,12 @@ type SameStatuses = [VideoLogStatus] extends [SchemaVideoLogStatus]
     : false
   : false;
 export const VIDEO_LOG_STATUSES_MATCH: SameStatuses = true;
+type SameOutcomes = [JournalOutcome] extends [SchemaJournalOutcome]
+  ? [SchemaJournalOutcome] extends [JournalOutcome]
+    ? true
+    : false
+  : false;
+export const VIDEO_LOG_OUTCOMES_MATCH: SameOutcomes = true;
 
 /** An API-mappable failure: `status` is the HTTP status the route returns. */
 export class VideoLogError extends Error {
@@ -232,6 +245,13 @@ async function toSummary(row: VideoLogRow): Promise<VideoLogSummary> {
     durationMs: row.durationMs,
     recordedAt: row.recordedAt.toISOString(),
     playbackUrl: playable ? await presignGetObject(row.storageKey) : null,
+    transcript: row.transcript,
+    transcriptionError: row.transcriptionError,
+    journalOutcome: row.journalOutcome,
+    transcriptionStale:
+      row.status === "transcribing" &&
+      row.transcriptionStartedAt !== null &&
+      Date.now() - row.transcriptionStartedAt.getTime() > TRANSCRIPTION_STALE_MS,
   };
 }
 
