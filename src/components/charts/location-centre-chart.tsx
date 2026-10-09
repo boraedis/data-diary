@@ -23,6 +23,7 @@ import {
   mergeNearbyLabels,
   rangeSummary,
   rollingTrail,
+  smoothTrail,
   windowDetail,
   windowMix,
   type CentreArea,
@@ -67,6 +68,21 @@ const WINDOW_OPTIONS: GroupByOption<WindowDays>[] = [
   { id: "1095", label: "3 years" },
   { id: "1826", label: "5 years" },
 ];
+/** The second-level averager (#609): how widely `smoothTrail` averages
+ * the trail into a curve, as a fraction of the window so it feels the same
+ * at 1 year and at 5. The value is one standard deviation of the bell
+ * curve. "Smooth" at a 1-year window is about two months either side,
+ * "Smoother" about four. */
+type Smoothing = "none" | "smooth" | "smoother";
+const SMOOTHING_OPTIONS: GroupByOption<Smoothing>[] = [
+  { id: "none", label: "None" },
+  { id: "smooth", label: "Smooth" },
+  { id: "smoother", label: "Smoother" },
+];
+const SMOOTHING_SHARE: Record<Smoothing, number> = { none: 0, smooth: 1 / 6, smoother: 1 / 3 };
+/** The unsmoothed trail beneath a smoothed one: present but well back. */
+const RAW_TRAIL_OPACITY = 0.3;
+
 /** Days between samples, per window: a couple of weeks is already far
  * finer than a year-long average can move, and a longer window moves
  * slower still. */
@@ -130,6 +146,10 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   // One year reads month by month; more than one, year by year.
   const singleYear = fromYear === toYear;
   const [windowDays, setWindowDays] = useState<WindowDays>("365");
+  // Opens unsmoothed (owner, 2026-10-08): the raw first-level trail, which
+  // goes through every dot, is the default. Smoothing is opt-in, and when
+  // it's on the raw line stays visible, faint and dashed, beneath the curve.
+  const [smoothing, setSmoothing] = useState<Smoothing>("none");
   // The trail point whose detail panel is open, by marker id. Deliberately
   // not reset when the pickers change: an id that no longer exists simply
   // resolves to no panel below, and one that still does (the same point
@@ -141,18 +161,23 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
 
   const index = useMemo(() => indexDaily(data.daily), [data]);
 
-  const { runs, endDate } = useMemo(() => {
+  // `runs` is the first-level trail, which the dots, tooltips and detail
+  // panel describe. `lineRuns` is what's drawn: the same trail through the
+  // second-level averager (#609), or the same runs when smoothing is off.
+  // Smoothed over the whole record *before* the year filter, so a narrow
+  // range isn't pulled in at its own edges as if the trail ended there.
+  const { runs, lineRuns, endDate } = useMemo(() => {
     const all = rollingTrail(index, Number(windowDays), STEP[windowDays]);
+    const smoothed = smoothTrail(all, Number(windowDays) * SMOOTHING_SHARE[smoothing]);
     // The whole trail's last point, before any year filter — the only one
     // that gets the "Now" dot, so a range ending in the past never claims it.
     const endDate = all[all.length - 1]?.[all[all.length - 1].length - 1]?.date ?? null;
-    if (wholeRecord) return { runs: all, endDate };
+    if (wholeRecord) return { runs: all, lineRuns: smoothed, endDate };
     const [from, to] = [`${fromYear}-01-01`, `${toYear}-12-31`];
-    return {
-      runs: all.map((run) => run.filter((p) => p.date >= from && p.date <= to)).filter((run) => run.length > 0),
-      endDate,
-    };
-  }, [index, windowDays, wholeRecord, fromYear, toYear]);
+    const inRange = (list: TrailPoint[][]) =>
+      list.map((run) => run.filter((p) => p.date >= from && p.date <= to)).filter((run) => run.length > 0);
+    return { runs: inRange(all), lineRuns: inRange(smoothed), endDate };
+  }, [index, windowDays, smoothing, wholeRecord, fromYear, toYear]);
 
   // Colour encodes time along the trail. The domain is whatever's on
   // screen, so a single year still spans the full ramp month by month.
@@ -166,10 +191,29 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
   }, [runs]);
 
   const routes = useMemo<GeoRoute[]>(() => {
-    const total = runs.reduce((n, r) => n + r.length, 0);
+    const total = lineRuns.reduce((n, r) => n + r.length, 0);
     const pieceSize = Math.max(2, Math.ceil(total / TARGET_PIECES));
     const out: GeoRoute[] = [];
-    runs.forEach((run, r) => {
+    // With smoothing on, the raw first-level trail stays on the map,
+    // faint and dashed, drawn first so the curve sits on top: it's the
+    // line the dots lie on, so it shows how far the curve has eased off
+    // them. Same time colours as the curve, which is what tells it apart
+    // from the grey gap bridges (also dashed).
+    if (smoothing !== "none") {
+      runs.forEach((run, r) => {
+        for (let i = 0; i < run.length - 1; i += pieceSize - 1) {
+          const piece = run.slice(i, i + pieceSize);
+          out.push({
+            id: `raw:${r}:${i}`,
+            coordinates: piece.map((p) => p.position),
+            color: colorOf(piece[Math.floor(piece.length / 2)].date),
+            dashed: true,
+            opacity: RAW_TRAIL_OPACITY,
+          });
+        }
+      });
+    }
+    lineRuns.forEach((run, r) => {
       // Consecutive pieces share their boundary point, so the line has no
       // seams where the colour steps.
       for (let i = 0; i < run.length - 1; i += pieceSize - 1) {
@@ -181,7 +225,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         });
       }
       // A dashed bridge over a stretch with too little logged to place.
-      const next = runs[r + 1];
+      const next = lineRuns[r + 1];
       if (next) {
         out.push({
           id: `gap:${r}`,
@@ -192,7 +236,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
       }
     });
     return out;
-  }, [runs, colorOf]);
+  }, [runs, lineRuns, smoothing, colorOf]);
 
   const { markers, valueById, secondaryById, mixById, dateById } = useMemo(() => {
     const dateById = new Map<string, string>();
@@ -396,6 +440,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
         <>
           <YearRangePicker domain={yearDomain} value={[fromYear, toYear]} onChange={setPickedRange} />
           <GroupByPicker value={windowDays} onChange={setWindowDays} options={WINDOW_OPTIONS} label="Window" />
+          <GroupByPicker value={smoothing} onChange={setSmoothing} options={SMOOTHING_OPTIONS} label="Smoothing" />
           {current.placedDays > 0 ? (
             <p className="ml-auto text-xs text-muted-foreground">
               {formatThousandsNumber(current.locatedDays)} of {formatThousandsNumber(current.placedDays)} days with a
@@ -440,7 +485,7 @@ export function LocationCentreChart({ data }: { data: LocationCentreData }) {
                 getMarkerSecondaryValue={getMarkerSecondary}
                 getMarkerDetail={getMarkerDetail}
                 onMarkerClick={onMarkerClick}
-                ariaLabel={`World map. A line traces the centre of mass of where I spent my days${rangeText ? ` ${rangeText}` : ""}, each point averaging the ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} before it, coloured from earliest to latest, with a labelled dot where each ${singleYear ? "month" : "year"} begins and one marking now. Shaded circles are the areas I spent time in, sized by their share of days, the ten largest coloured and named. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
+                ariaLabel={`World map. A line traces the centre of mass of where I spent my days${rangeText ? ` ${rangeText}` : ""}, each point averaging the ${WINDOW_OPTIONS.find((o) => o.id === windowDays)!.label} before it${smoothing === "none" ? "" : ", the line smoothed into a curve near the points"}, coloured from earliest to latest, with a labelled dot where each ${singleYear ? "month" : "year"} begins and one marking now. Shaded circles are the areas I spent time in, sized by their share of days, the ten largest coloured and named. Scroll or pinch to zoom, drag to pan. Hover a dot or circle for details; click a dot for a full breakdown.`}
               />
               {detail && selectedDate ? (
                 <DetailPanel

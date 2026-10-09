@@ -454,6 +454,57 @@ export function rollingTrail(index: DailyIndex | null, windowDays: number, stepD
   return runs;
 }
 
+/**
+ * The second-level averager (#609): each trail point replaced by a
+ * Gaussian-weighted mean of the trail points around it, so the line runs
+ * as a smooth curve *near* the dots rather than through each one.
+ *
+ * It's the same algorithm as the first level, a mean on the globe: unit
+ * vectors summed with weights and turned back into a direction, so it's
+ * right across the date line. Weights fall off with calendar distance
+ * (`sigmaDays` is one standard deviation), and points past 3σ are skipped.
+ *
+ * **Within a run only.** A gap is a stretch too thin to place, and
+ * smoothing across it would invent a path through it. Each run is smoothed
+ * on its own, and the chart's dashed bridge still joins them.
+ *
+ * **Ends are pulled in.** A run's first and last points have neighbours on
+ * one side only, so they shift towards the run's interior. That's why the
+ * smoothed line can stop short of the Now dot, which stays at the real
+ * latest position. Only the line is smoothed. The dots, tooltips and
+ * breakdowns keep describing the first-level windows.
+ *
+ * `sigmaDays <= 0` returns the trail unchanged.
+ */
+export function smoothTrail(runs: TrailPoint[][], sigmaDays: number): TrailPoint[][] {
+  if (!(sigmaDays > 0)) return runs;
+  const reach = 3 * sigmaDays;
+  return runs.map((run) => {
+    const offsets = run.map((p) => daysBetween(run[0].date, p.date));
+    const vectors = run.map((p) => toUnitVector(p.position));
+    return run.map((p, i) => {
+      let x = 0;
+      let y = 0;
+      let z = 0;
+      // Walk outwards both ways while still within reach; the run is in
+      // date order, so this stops at the first point past 3σ each side.
+      for (let j = i; j >= 0 && offsets[i] - offsets[j] <= reach; j--) {
+        const w = Math.exp(-((offsets[i] - offsets[j]) ** 2) / (2 * sigmaDays * sigmaDays));
+        x += vectors[j][0] * w;
+        y += vectors[j][1] * w;
+        z += vectors[j][2] * w;
+      }
+      for (let j = i + 1; j < run.length && offsets[j] - offsets[i] <= reach; j++) {
+        const w = Math.exp(-((offsets[j] - offsets[i]) ** 2) / (2 * sigmaDays * sigmaDays));
+        x += vectors[j][0] * w;
+        y += vectors[j][1] * w;
+        z += vectors[j][2] * w;
+      }
+      return { ...p, position: fromUnitVector([x, y, z]) ?? p.position };
+    });
+  });
+}
+
 /** Per-area day totals within [lo, hi), and how many days were located. */
 function windowTotals(index: DailyIndex, lo: number, hi: number): { totals: Map<number, number>; located: number } {
   const totals = new Map<number, number>();
