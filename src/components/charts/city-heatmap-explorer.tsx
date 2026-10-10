@@ -57,6 +57,13 @@ type CityProperties = {
 // county's "Rest of ..." backdrop gets no label at all, since it sits
 // under the towns drawn on top of it and its name would be written across
 // them. Module-level because InteractiveGeo takes it as a useD3 dependency.
+// Water is drawn over a city's suburban regions (Census land, which runs out
+// across rivers and bays) but under its own neighborhoods. Built per city in
+// the explorer, since which roots are suburbs is per-city config.
+function suburbRootsOf(city: CityKey): Set<string> {
+  return new Set((CITIES[city].suburbs ?? []).map((s) => s.root));
+}
+
 function regionLabel(f: { properties: CityProperties }): string | null {
   const { name, district, remainder } = f.properties;
   if (remainder) return null;
@@ -174,6 +181,10 @@ export function CityHeatmapExplorer({
     return feature(topo, topo.objects.outline).features;
   }, [city]);
   const primaryName = CITIES[city].primary?.name;
+  const waterOverRegion = useMemo(() => {
+    const suburbs = suburbRootsOf(city);
+    return suburbs.size > 0 ? (f: { properties: CityProperties }) => suburbs.has(f.properties.root) : undefined;
+  }, [city]);
 
   // A city with `homeRoots` (DC metro, #281) opens framed on just those
   // roots: InteractiveGeo fits its projection to `fitTo` and resets to
@@ -335,6 +346,7 @@ export function CityHeatmapExplorer({
                 return date ? formatFirstVisited(date, diaryStartDate) : null;
               }}
               contextFeatures={water}
+              waterOverRegion={waterOverRegion}
               outlines={outlines}
               getRegionLabel={regionLabel}
               markers={visibleMarkers}

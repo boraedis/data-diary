@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 import { useD3 } from "@/hooks/use-d3";
@@ -542,6 +542,15 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * Pass a stable reference (module-level or memoized) — it's a useD3
    * dependency, same caveat as `markers`. */
   contextFeatures?: FeatureCollection<Geometry, GeoJsonProperties>;
+  /** Regions that water is drawn *over* instead of under (#286 follow-up):
+   * the water in `contextFeatures` is painted a second time above the
+   * regions this accepts, clipped to them, so a county backdrop or a
+   * suburb shows its rivers and lakes instead of Census land that runs out
+   * across them. Everything else keeps the water beneath, for the reason
+   * `contextFeatures` gives: the primary city's polygons come from an
+   * independent source and are the chart, so the water must never paint
+   * over them. Pass a stable reference — it's a useD3 dependency. */
+  waterOverRegion?: (feature: Feature<Geometry, P>) => boolean;
   /** Lines between markers, drawn above the regions and beneath the
    * markers, panning/zooming with both. Non-interactive — hover the
    * markers they join. Stable reference, same useD3 caveat as `markers`. */
@@ -620,8 +629,12 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   showRegionLabels = true,
   getRegionLabel,
   outlines,
+  waterOverRegion,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
+  // Unique per instance for the clip path below; React's ids contain colons,
+  // which don't survive inside `url(#...)`.
+  const clipId = `geo-water-clip-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   // The one region currently shown as its own subdivisions, together with
   // the key of the base feature it replaced — or null when the map is
   // whole.
@@ -1048,6 +1061,38 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         placeLabels(carriedTransform.k);
       }
 
+      // Water over the regions `waterOverRegion` picks, clipped to them —
+      // see that prop. The clip is built from those regions' own paths, so
+      // it follows them exactly; the beneath-layer above still draws the
+      // water everywhere else.
+      if (waterOverRegion && contextFeatures && contextFeatures.features.length > 0) {
+        const clipped = drawn.filter((d) => waterOverRegion(d.feature as Feature<Geometry, P>));
+        if (clipped.length > 0) {
+          g.append("clipPath")
+            .attr("id", clipId)
+            .selectAll("path")
+            .data(clipped)
+            .join("path")
+            .attr("d", (d) => path(d.feature));
+          const isLine = (f: GeoFeature) => f.geometry?.type === "LineString" || f.geometry?.type === "MultiLineString";
+          g.append("g")
+            .attr("class", "geo-water-over")
+            .attr("aria-hidden", "true")
+            .attr("clip-path", `url(#${clipId})`)
+            .style("pointer-events", "none")
+            .selectAll<SVGPathElement, GeoFeature>("path")
+            .data(contextFeatures.features)
+            .join("path")
+            .attr("d", (f) => path(f))
+            .attr("fill", (f) => (isLine(f) ? "none" : waterFill()))
+            .attr("stroke", (f) => (isLine(f) ? waterLine() : "none"))
+            .attr("stroke-width", 1.5)
+            .attr("stroke-linejoin", "round")
+            .attr("stroke-linecap", "round")
+            .attr("vector-effect", "non-scaling-stroke");
+        }
+      }
+
       // Outlines (see `outlines`) go above the fills and beneath the names.
       if (outlines && outlines.length > 0) {
         g.append("g")
@@ -1061,7 +1106,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .attr("fill", "none")
           .attr("stroke", "var(--foreground)")
           .attr("stroke-opacity", 0.9)
-          .attr("stroke-width", 2)
+          // Thinner than the hover outline (2.5), so a hovered region on the
+          // primary city's edge doesn't look like part of the outline.
+          .attr("stroke-width", 1.5)
           .attr("stroke-linejoin", "round")
           .attr("vector-effect", "non-scaling-stroke");
         // Names read above the outline, not struck through by it.
@@ -1083,7 +1130,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .attr("aria-hidden", "true")
           .attr("fill", "none")
           .attr("stroke", "var(--foreground)")
-          .attr("stroke-width", 2)
+          .attr("stroke-width", 2.5)
           .attr("stroke-linejoin", "round")
           .attr("vector-effect", "non-scaling-stroke")
           .style("pointer-events", "none")
@@ -1416,6 +1463,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       showRegionLabels,
       getRegionLabel,
       outlines,
+      waterOverRegion,
+      clipId,
     ],
   );
 

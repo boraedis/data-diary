@@ -5,13 +5,13 @@
     "licenseSource": "https://docs.overturemaps.org/attribution/",
     "release": "2026-09-23.1",
     "clipBox": [
-      -84.6815,
-      33.5174,
-      -84.159,
-      34.0175
+      -85.3772,
+      32.8264,
+      -83.2731,
+      34.7123
     ],
-    "waterBodies": 31,
-    "pointsKept": 1
+    "waterBodies": 595,
+    "pointsKept": 0.025
   },
   "dc-metro": {
     "source": "Overture Maps base/water (OpenStreetMap)",
@@ -52,7 +52,7 @@
       30.9528,
       42.5773
     ],
-    "waterBodies": 117,
+    "waterBodies": 137,
     "pointsKept": 0.05
   },
   "nyc": {
