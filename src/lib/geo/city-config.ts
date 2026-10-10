@@ -38,9 +38,12 @@ export type CityRootConfig = {
  * under their state — USA/Virginia/Reston/..., USA/Maryland/Bethesda/... —
  * alongside Richmond and Ocean City, so there's no subtree to walk the way
  * CityRootConfig's roots are walked. Instead a place resolves to one of
- * these regions by where its coordinates fall (resolveCitySuburbFeature),
- * the same spatial join the US county map uses for the same reason (see
- * us-counties.ts's header).
+ * these regions by matching the municipality its catalog path names, and
+ * only failing that by where its coordinates fall
+ * (resolveCitySuburbFeature) — the spatial join the US county map uses
+ * for the same reason (see us-counties.ts's header). Name first, so a
+ * wrong coordinate shows as a misplaced dot instead of quietly moving
+ * the place into another polygon.
  */
 export type CitySuburbConfig = {
   /** The geometry features' `root` property, and this region's display
@@ -76,7 +79,7 @@ export type CityConfig = {
    * that file and its own filename share this city's Record key, e.g.
    * "dc-metro" -> src/data/geo/dc-metro.topo.json's `objects["dc-metro"]`. */
   sources: CityRootConfig[];
-  /** Regions resolved by coordinates rather than catalog ancestry — see
+  /** Regions resolved by catalog name, then coordinates, rather than catalog ancestry — see
    * CitySuburbConfig. Checked only for places under none of `sources`'
    * roots, so a catalog-rooted place never changes neighborhood because
    * a suburb was added beside it. */
@@ -145,8 +148,8 @@ export const CITIES: Record<CityKey, CityConfig> = {
       { root: "Gwinnett County", stateRootId: 741, countyFips: "13135", sourceFile: "gwinnett-county.geojson" },
     ],
     // The alias table is for the city's own neighborhood layer; the county
-    // regions match Census place names exactly (and resolve by coordinates
-    // first anyway).
+    // regions match Census place names exactly, with coordinates as the
+    // fallback for a catalog name that isn't a Census place.
     normalize: (root, name) => (root === "Atlanta" ? normalizeAtlantaName(name) : name),
   },
   "dc-metro": {

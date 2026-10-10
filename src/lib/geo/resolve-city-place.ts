@@ -95,26 +95,32 @@ function inBounds(bounds: CitySuburbFeature["bounds"], [lng, lat]: [number, numb
 
 /**
  * Resolves a place to one of a city's suburban regions (#281) — see
- * CitySuburbConfig for why these go by coordinates rather than catalog
- * ancestry. Only for places under none of the city's catalog roots: the
- * caller tries resolveCityFeatureName first.
+ * CitySuburbConfig for why these have no catalog subtree. Only for places
+ * under none of the city's catalog roots: the caller tries
+ * resolveCityFeatureName first.
  *
- * A place is eligible for a region only when its idPath passes through
- * that region's `stateRootId`. Then:
+ * A place is eligible for a region only when its idPath passes through that
+ * region's `stateRootId`. Then, in order:
  *
- * - **Geocoded**: the feature containing the point, places before the
- *   county remainder. The point wins over whatever town the catalog files
- *   it under, deliberately: suburban addresses use mailing-address towns,
- *   which don't follow real boundaries. A "Falls Church" address is far
- *   more often in Fairfax County (Idylwood, Lake Barcroft, Seven Corners)
- *   than in the two square miles of the City of Falls Church, and the
- *   catalog has no other way to say which.
- * - **Not geocoded**: falls back to the catalog's own words, the first
- *   namePath segment after the state that names a feature (via
- *   `normalize`, so aliases and the QA modal's overrides apply). A
- *   geocoded point that lands in no feature does *not* fall back: a point
- *   outside all five regions is in Loudoun or Richmond, whatever the
- *   catalog path says.
+ * 1. **The catalog's own words.** The first namePath segment after the
+ *    state that names a feature (via `normalize`, so aliases and the QA
+ *    modal's overrides apply) is the answer, geocoded or not. This is the
+ *    same rule the city's own neighborhoods follow, and deliberately so: a
+ *    place is credited to the municipality or neighborhood the catalog says
+ *    it is in, so a wrong coordinate shows up as a dot sitting in the wrong
+ *    place against the right polygon's colour, instead of quietly moving the
+ *    place into whichever polygon the bad coordinate lands in. (This used
+ *    to go the other way, point first, on the theory that suburban mailing
+ *    towns don't follow real boundaries. They don't, but hiding the
+ *    disagreement was worse than showing it.) When one name belongs to
+ *    several regions (Mountain Park is a town in both Fulton and Gwinnett
+ *    counties), the point picks between *those*, falling back to the first.
+ * 2. **The point**, when no segment names a feature (a mailing-address town
+ *    that isn't a Census place, or an area like Cumberland): the feature
+ *    containing it, places before the county remainder. A geocoded point
+ *    that lands in no feature does *not* fall back to anything: a point
+ *    outside every region is in another county, whatever the catalog path
+ *    says.
  */
 export function resolveCitySuburbFeature(
   place: CityPlaceRow & { lat: number | null; lng: number | null },
@@ -123,30 +129,28 @@ export function resolveCitySuburbFeature(
   normalize: (root: string, name: string) => string,
 ): { root: string; featureName: string } | null {
   const idSegments = place.idPath.split("/").filter(Boolean);
-  const eligibleRoots = new Set(suburbs.filter((s) => idSegments.includes(String(s.stateRootId))).map((s) => s.root));
-  if (eligibleRoots.size === 0) return null;
+  const eligible = suburbs.filter((s) => idSegments.includes(String(s.stateRootId)));
+  if (eligible.length === 0) return null;
+  const eligibleRoots = new Set(eligible.map((s) => s.root));
   const candidates = features.filter((f) => eligibleRoots.has(f.root));
-
-  if (place.lat != null && place.lng != null) {
-    const point: [number, number] = [place.lng, place.lat];
-    let remainderHit: CitySuburbFeature | null = null;
-    for (const f of candidates) {
-      if (!inBounds(f.bounds, point) || !f.contains(point)) continue;
-      if (!f.remainder) return { root: f.root, featureName: f.name };
-      remainderHit ??= f;
-    }
-    return remainderHit ? { root: remainderHit.root, featureName: remainderHit.name } : null;
-  }
+  const hasPoint = place.lat != null && place.lng != null;
+  const point: [number, number] = [place.lng ?? 0, place.lat ?? 0];
 
   const nameSegments = place.namePath.split("/").filter(Boolean);
-  for (const suburb of suburbs) {
-    if (!eligibleRoots.has(suburb.root)) continue;
-    const stateIndex = idSegments.indexOf(String(suburb.stateRootId));
-    const names = new Set(candidates.filter((f) => f.root === suburb.root && !f.remainder).map((f) => f.name));
-    for (const segment of nameSegments.slice(stateIndex + 1)) {
-      const normalized = normalize(suburb.root, segment);
-      if (names.has(normalized)) return { root: suburb.root, featureName: normalized };
-    }
+  const stateIndex = Math.min(...eligible.map((s) => idSegments.indexOf(String(s.stateRootId))));
+  for (const segment of nameSegments.slice(stateIndex + 1)) {
+    const named = candidates.filter((f) => !f.remainder && f.name === normalize(f.root, segment));
+    if (named.length === 0) continue;
+    const pick = (hasPoint ? named.find((f) => inBounds(f.bounds, point) && f.contains(point)) : undefined) ?? named[0];
+    return { root: pick.root, featureName: pick.name };
   }
-  return null;
+
+  if (!hasPoint) return null;
+  let remainderHit: CitySuburbFeature | null = null;
+  for (const f of candidates) {
+    if (!inBounds(f.bounds, point) || !f.contains(point)) continue;
+    if (!f.remainder) return { root: f.root, featureName: f.name };
+    remainderHit ??= f;
+  }
+  return remainderHit ? { root: remainderHit.root, featureName: remainderHit.name } : null;
 }
