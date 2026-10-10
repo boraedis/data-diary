@@ -45,7 +45,7 @@ function place(idPath: string, namePath: string, lat: number | null = null, lng:
 }
 
 describe("resolveCitySuburbFeature", () => {
-  it("credits a geocoded place to the place polygon containing it, ahead of the county remainder", () => {
+  it("with no town name to go on, credits a geocoded place to the polygon containing it, ahead of the county remainder", () => {
     expect(resolveCitySuburbFeature(place("1/1828/9/", "USA/Virginia/Somewhere/", 2, 2), SUBURBS, FEATURES, identity)).toEqual({
       root: "County A",
       featureName: "Townville",
@@ -59,16 +59,42 @@ describe("resolveCitySuburbFeature", () => {
     });
   });
 
-  it("trusts the point over the town the catalog files it under", () => {
-    // Filed under Hamlet, geocoded inside Townville: a mailing-address town.
+  it("trusts the catalog's town over the point, so a wrong coordinate stays visible", () => {
+    // Filed under Hamlet, geocoded inside Townville: credited to Hamlet. The
+    // dot lands in Townville on the map, against Hamlet's colour.
     expect(resolveCitySuburbFeature(place("1/1828/9/10/", "USA/Virginia/Hamlet/Cafe/", 2, 2), SUBURBS, FEATURES, identity)).toEqual({
       root: "County A",
-      featureName: "Townville",
+      featureName: "Hamlet",
     });
   });
 
-  it("ignores a point outside every region, even when the catalog names a town in one", () => {
-    expect(resolveCitySuburbFeature(place("1/1828/9/10/", "USA/Virginia/Hamlet/Cafe/", 50, 50), SUBURBS, FEATURES, identity)).toBeNull();
+  it("credits a named town even when the point is outside every region", () => {
+    expect(resolveCitySuburbFeature(place("1/1828/9/10/", "USA/Virginia/Hamlet/Cafe/", 50, 50), SUBURBS, FEATURES, identity)).toEqual({
+      root: "County A",
+      featureName: "Hamlet",
+    });
+  });
+
+  it("falls back to the point when no segment names a feature, and ignores a point outside every region", () => {
+    expect(resolveCitySuburbFeature(place("1/1828/9/10/", "USA/Virginia/Elsewhere/Cafe/", 2, 2), SUBURBS, FEATURES, identity)).toEqual({
+      root: "County A",
+      featureName: "Townville",
+    });
+    expect(resolveCitySuburbFeature(place("1/1828/9/10/", "USA/Virginia/Elsewhere/Cafe/", 50, 50), SUBURBS, FEATURES, identity)).toBeNull();
+  });
+
+  it("lets the point choose between regions that share a name", () => {
+    const both: CitySuburbConfig[] = [
+      { root: "County A", stateRootId: VIRGINIA, countyFips: "51000", sourceFile: "a.geojson" },
+      { root: "County C", stateRootId: VIRGINIA, countyFips: "51001", sourceFile: "c.geojson" },
+    ];
+    const shared = [square("County A", "Twin", [0, 0, 2, 2]), square("County C", "Twin", [10, 0, 12, 2])];
+    const path = place("1/1828/9/", "USA/Virginia/Twin/", 1, 11);
+    expect(resolveCitySuburbFeature(path, both, shared, identity)).toEqual({ root: "County C", featureName: "Twin" });
+    expect(resolveCitySuburbFeature(place("1/1828/9/", "USA/Virginia/Twin/"), both, shared, identity)).toEqual({
+      root: "County A",
+      featureName: "Twin",
+    });
   });
 
   it("only considers regions in the state the catalog files the place under", () => {

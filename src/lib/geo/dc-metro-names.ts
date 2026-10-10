@@ -33,9 +33,10 @@ const ARLINGTON_NAME_ALIASES: Record<string, string> = {
 // this file's shape.
 const ALEXANDRIA_NAME_ALIASES: Record<string, string> = {};
 
-// The suburban regions (#281) resolve by coordinates first, so these
-// tables only matter for an ungeocoded place, matched by the town its
-// catalog path names (see resolveCitySuburbFeature). Keys are the
+// The suburban regions (#281) resolve by the town the catalog path names
+// first, falling back to coordinates only when no segment names a region
+// (see resolveCitySuburbFeature), so these tables decide where a place
+// lands whether or not it is geocoded. Keys are the
 // catalog spellings from the Virginia/Maryland entries listed on #281;
 // values are Census place names from the region's own source file.
 const FAIRFAX_COUNTY_NAME_ALIASES: Record<string, string> = {
