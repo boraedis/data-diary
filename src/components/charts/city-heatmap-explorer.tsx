@@ -22,9 +22,10 @@ import { GroupByPicker, type GroupByOption } from "@/components/charts/interacti
 import { CITIES, DEFAULT_CITY, type CityKey } from "@/lib/geo/city-config";
 import { loadCityWater, type WaterProperties } from "@/lib/geo/water";
 import { loadCityRoads, type RoadProperties } from "@/lib/geo/roads";
+import { loadCityTransit, type TransitProperties } from "@/lib/geo/transit";
 import type { CityHeatmapData } from "@/lib/charts";
 import { formatFirstVisited } from "@/lib/viz/first-visited";
-import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
+import { CITY_HEATMAP_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
 import { CITY_HEATMAP_METHODOLOGY } from "@/lib/viz/methodology";
 import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 
@@ -95,6 +96,13 @@ const DESTINATION_OPTIONS: GroupByOption<"shown" | "hidden">[] = [
   { id: "hidden", label: "Hide" },
 ];
 
+// One switch for the roads and the metro together (#639): both are the map's
+// orientation layer, so they're shown or hidden as a pair.
+const OVERLAY_OPTIONS: GroupByOption<"shown" | "hidden">[] = [
+  { id: "shown", label: "Show" },
+  { id: "hidden", label: "Hide" },
+];
+
 // Composite (root, name) key — matches CityHeatmapNeighborhood's own
 // comment in src/lib/charts.ts on why two different roots (e.g.
 // Washington and Arlington) can't be keyed by name alone.
@@ -118,6 +126,7 @@ export function CityHeatmapExplorer({
 }) {
   const [city, setCity] = useState<CityKey>(initialCity);
   const [destinations, setDestinations] = useState<"shown" | "hidden">("shown");
+  const [overlays, setOverlays] = useState<"shown" | "hidden">("shown");
   const [qaOpen, setQaOpen] = useState(false);
   const router = useRouter();
   const cityData = data[city];
@@ -253,6 +262,28 @@ export function CityHeatmapExplorer({
   }, [city]);
   const roads = loadedRoads?.city === city ? loadedRoads.features : undefined;
 
+  // Metro lines and stations (#639), lazy-loaded per city exactly like the
+  // roads above.
+  const [loadedTransit, setLoadedTransit] = useState<{
+    city: CityKey;
+    features: FeatureCollection<Geometry, TransitProperties>;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadCityTransit(city)
+      .then((features) => {
+        if (!cancelled) setLoadedTransit({ city, features });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [city]);
+  const transit = loadedTransit?.city === city ? loadedTransit.features : undefined;
+  // Undefined rather than a `[]`-style fallback, so the primitive's useD3
+  // deps see one stable value per switch position.
+  const overlaysShown = overlays === "shown";
+
   const daysByFeature = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of cityData.neighborhoods) map.set(neighborhoodKey(n.root, n.name), n.days);
@@ -298,13 +329,19 @@ export function CityHeatmapExplorer({
       title="City Heatmap"
       description="A heatmap of the neighborhoods of Atlanta, DC, Dubai, NYC, and Istanbul describing where I have visited and spent time in."
       info={{
-        interactionGuide: GEO_INTERACTION_GUIDE,
+        interactionGuide: CITY_HEATMAP_INTERACTION_GUIDE,
         methodology: CITY_HEATMAP_METHODOLOGY,
         trackingSpan: PLACES_TRACKING_SPAN,
       }}
       filters={
         <>
           <GroupByPicker value={city} onChange={selectCity} options={CITY_OPTIONS} label="City" />
+          <GroupByPicker
+            value={overlays}
+            onChange={setOverlays}
+            options={OVERLAY_OPTIONS}
+            label="Roads & metro"
+          />
           <GroupByPicker
             value={destinations}
             onChange={setDestinations}
@@ -368,7 +405,8 @@ export function CityHeatmapExplorer({
               }}
               contextFeatures={water}
               waterOverRegion={waterOverRegion}
-              roads={roads}
+              roads={overlaysShown ? roads : undefined}
+              transit={overlaysShown ? transit : undefined}
               outlines={outlines}
               getRegionLabel={regionLabel}
               markers={visibleMarkers}

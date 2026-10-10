@@ -176,6 +176,17 @@ function roadOpacity(k: number): number {
   return ROAD_OPACITY_AT_MIN + (ROAD_OPACITY_AT_MAX - ROAD_OPACITY_AT_MIN) * t;
 }
 
+// Metro overlay (#639). The lines are drawn at every zoom, each in its own
+// colour, so they don't read as roads. Stations are rings that appear only
+// once the map is zoomed in close enough to place one (STATION_MIN_ZOOM):
+// at city scale a station per block would crowd the choropleth. Their radius
+// and stroke are counter-scaled by the zoom, as the markers' are.
+const TRANSIT_LINE_WIDTH = 1.8;
+const TRANSIT_LINE_OPACITY = 0.75;
+const STATION_MIN_ZOOM = 8;
+const STATION_RADIUS = 3.2;
+const STATION_STROKE = 1.2;
+
 // Smaller than interactive-network.tsx's own [3, 16] node range — a geo
 // marker sits on top of an already-busy choropleth fill + legend, where
 // network's nodes are the entire drawing; keeping the range modest here
@@ -567,6 +578,12 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * interactive, constant on-screen width. Pass a stable reference — it's a
    * useD3 dependency. */
   roads?: FeatureCollection<Geometry, { rank: number }>;
+  /** Metro lines and stations drawn over the roads (#639): `kind: "line"`
+   * features are drawn at every zoom in their own `colour` (the accent colour
+   * when absent), `kind: "station"` points only once zoomed in close
+   * (STATION_MIN_ZOOM). Not interactive, constant on-screen size. Pass a
+   * stable reference — it's a useD3 dependency. */
+  transit?: FeatureCollection<Geometry, { kind: "line" | "station"; ref?: string; colour?: string; name?: string }>;
   /** Regions that water is drawn *over* instead of under (#286 follow-up):
    * the water in `contextFeatures` is painted a second time above the
    * regions this accepts, clipped to them, so a county backdrop or a
@@ -656,6 +673,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   outlines,
   waterOverRegion,
   roads,
+  transit,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // Unique per instance for the clip path below; React's ids contain colons,
@@ -1143,6 +1161,68 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .attr("vector-effect", "non-scaling-stroke");
       }
 
+      // Metro (see `transit`): the lines above the roads, the stations above
+      // the lines. The station group is hidden until the zoom handler finds
+      // the map zoomed in past STATION_MIN_ZOOM.
+      let stationGroup: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
+      let stationNodes: d3.Selection<SVGCircleElement, Feature<Geometry, { kind: "line" | "station"; ref?: string; colour?: string; name?: string }>, SVGGElement, unknown> | null = null;
+      if (transit && transit.features.length > 0) {
+        const transitGroup = g.append("g").attr("class", "geo-transit").attr("aria-hidden", "true").style("pointer-events", "none");
+        transitGroup
+          .append("g")
+          .attr("class", "geo-transit-lines")
+          .attr("fill", "none")
+          .attr("stroke-opacity", TRANSIT_LINE_OPACITY)
+          .attr("stroke-linecap", "round")
+          .attr("stroke-linejoin", "round")
+          .selectAll<SVGPathElement, Feature<Geometry, { kind: "line" | "station"; ref?: string; colour?: string; name?: string }>>("path")
+          .data(transit.features.filter((f) => f.properties.kind === "line"))
+          .join("path")
+          .attr("d", (f) => path(f))
+          .attr("stroke", (f) => f.properties.colour ?? "var(--primary)")
+          .attr("stroke-width", TRANSIT_LINE_WIDTH)
+          .attr("vector-effect", "non-scaling-stroke");
+        stationGroup = transitGroup
+          .append("g")
+          .attr("class", "geo-transit-stations")
+          .attr("fill", "var(--background)")
+          .attr("stroke", "var(--primary)")
+          .attr("display", carriedTransform.k >= STATION_MIN_ZOOM ? null : "none");
+        stationNodes = stationGroup
+          .selectAll<SVGCircleElement, Feature<Geometry, { kind: "line" | "station"; ref?: string; colour?: string; name?: string }>>("circle")
+          .data(transit.features.filter((f) => f.properties.kind === "station"))
+          .join("circle")
+          .attr("cx", (f) => path.centroid(f)[0])
+          .attr("cy", (f) => path.centroid(f)[1])
+          .attr("r", STATION_RADIUS / carriedTransform.k)
+          .attr("stroke-width", STATION_STROKE / carriedTransform.k);
+
+      // TEMP (#639 review): hover a metro line or station for its ref or name,
+      // so the wrong ones can be reported. Remove once the metro data is settled.
+      // The line hit-area is a wider transparent copy, since a 1.8px stroke is
+      // hard to land on.
+      transitGroup
+        .append("g")
+        .attr("class", "geo-transit-hit")
+        .attr("fill", "none")
+        .attr("stroke", "transparent")
+        .selectAll<SVGPathElement, Feature<Geometry, { kind: "line" | "station"; ref?: string; colour?: string; name?: string }>>("path")
+        .data(transit.features.filter((f) => f.properties.kind === "line"))
+        .join("path")
+        .attr("d", (f) => path(f))
+        .attr("stroke-width", 10)
+        .attr("vector-effect", "non-scaling-stroke")
+        .style("pointer-events", "stroke")
+        .each(function (f) {
+          d3.select(this)
+            .append("title")
+            .text(`Line ${f.properties.ref ?? "?"}${f.properties.colour ? ` (${f.properties.colour})` : ""}`);
+        });
+      stationNodes?.style("pointer-events", "all").each(function (f) {
+        d3.select(this).append("title").text(`Station ${f.properties.name ?? "(unnamed)"}`);
+      });
+      }
+
       // Outlines (see `outlines`) go above the fills and beneath the names.
       if (outlines && outlines.length > 0) {
         g.append("g")
@@ -1223,6 +1303,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           placeAnnotations(k);
           placeLabels(k);
           roadGroup?.attr("stroke-opacity", roadOpacity(k));
+          stationGroup?.attr("display", k >= STATION_MIN_ZOOM ? null : "none");
+          stationNodes?.attr("r", STATION_RADIUS / k).attr("stroke-width", STATION_STROKE / k);
         });
 
       /** Zoom to any GeoJSON object's bounds — a single feature, or a
@@ -1517,6 +1599,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       waterOverRegion,
       clipId,
       roads,
+      transit,
     ],
   );
 
