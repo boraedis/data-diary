@@ -21,6 +21,7 @@ import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
 import { CITIES, DEFAULT_CITY, type CityKey } from "@/lib/geo/city-config";
 import { loadCityWater, type WaterProperties } from "@/lib/geo/water";
+import { loadCityRoads, type RoadProperties } from "@/lib/geo/roads";
 import type { CityHeatmapData } from "@/lib/charts";
 import { formatFirstVisited } from "@/lib/viz/first-visited";
 import { GEO_INTERACTION_GUIDE } from "@/lib/viz/interaction-guides";
@@ -232,6 +233,26 @@ export function CityHeatmapExplorer({
   }, [city]);
   const water = loadedWater?.city === city ? loadedWater.features : undefined;
 
+  // Roads (#631), lazy-loaded per city exactly like the water above, and for
+  // the same reasons (stored with its city, no loading state, a failed load
+  // just leaves the map without them).
+  const [loadedRoads, setLoadedRoads] = useState<{
+    city: CityKey;
+    features: FeatureCollection<Geometry, RoadProperties>;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadCityRoads(city)
+      .then((features) => {
+        if (!cancelled) setLoadedRoads({ city, features });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [city]);
+  const roads = loadedRoads?.city === city ? loadedRoads.features : undefined;
+
   const daysByFeature = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of cityData.neighborhoods) map.set(neighborhoodKey(n.root, n.name), n.days);
@@ -347,6 +368,7 @@ export function CityHeatmapExplorer({
               }}
               contextFeatures={water}
               waterOverRegion={waterOverRegion}
+              roads={roads}
               outlines={outlines}
               getRegionLabel={regionLabel}
               markers={visibleMarkers}

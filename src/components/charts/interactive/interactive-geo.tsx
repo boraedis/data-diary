@@ -159,6 +159,23 @@ const DEFAULT_PROJECTION = () => d3.geoMercator();
 // the transform's own k on every zoom tick.
 const DEFAULT_ZOOM_EXTENT: [number, number] = [1, 128];
 
+// Road opacity as a function of zoom scale k (#631): ROAD_OPACITY_AT_MIN at
+// the map's opening view, rising to ROAD_OPACITY_AT_MAX by ROAD_FULL_ZOOM.
+// Interpolated in log k, since zoom is multiplicative: a doubling should
+// look like the same step wherever you are. Low at the bottom end on
+// purpose: at city scale the roads are orientation, not content, and the
+// choropleth fill is what the chart is about.
+const ROAD_OPACITY_AT_MIN = 0.1;
+const ROAD_OPACITY_AT_MAX = 0.6;
+const ROAD_FULL_ZOOM = 12;
+// On-screen stroke width in px by road rank (1 = highway).
+const ROAD_WIDTH_BY_RANK: Record<number, number> = { 1: 1.4, 2: 1.1, 3: 0.8 };
+
+function roadOpacity(k: number): number {
+  const t = Math.min(1, Math.max(0, Math.log(Math.max(1, k)) / Math.log(ROAD_FULL_ZOOM)));
+  return ROAD_OPACITY_AT_MIN + (ROAD_OPACITY_AT_MAX - ROAD_OPACITY_AT_MIN) * t;
+}
+
 // Smaller than interactive-network.tsx's own [3, 16] node range — a geo
 // marker sits on top of an already-busy choropleth fill + legend, where
 // network's nodes are the entire drawing; keeping the range modest here
@@ -542,6 +559,14 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * Pass a stable reference (module-level or memoized) — it's a useD3
    * dependency, same caveat as `markers`. */
   contextFeatures?: FeatureCollection<Geometry, GeoJsonProperties>;
+  /** A road network drawn above the regions and beneath the names and
+   * outlines (#631): thin, neutral lines whose opacity rises as you zoom,
+   * so they stay out of the way of the fill at city scale and are legible
+   * once you're down at neighborhood level. Each feature's `rank` property
+   * (1 = highway, bigger = smaller road) picks its stroke width. Not
+   * interactive, constant on-screen width. Pass a stable reference — it's a
+   * useD3 dependency. */
+  roads?: FeatureCollection<Geometry, { rank: number }>;
   /** Regions that water is drawn *over* instead of under (#286 follow-up):
    * the water in `contextFeatures` is painted a second time above the
    * regions this accepts, clipped to them, so a county backdrop or a
@@ -630,6 +655,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   getRegionLabel,
   outlines,
   waterOverRegion,
+  roads,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // Unique per instance for the clip path below; React's ids contain colons,
@@ -1093,6 +1119,30 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         }
       }
 
+      // Roads (see `roads`): above the water, beneath outlines and names.
+      // One <g> carries the opacity, so a zoom tick rewrites a single
+      // attribute however many roads there are.
+      let roadGroup: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
+      if (roads && roads.features.length > 0) {
+        roadGroup = g
+          .append("g")
+          .attr("class", "geo-roads-network")
+          .attr("aria-hidden", "true")
+          .style("pointer-events", "none")
+          .attr("fill", "none")
+          .attr("stroke", "var(--foreground)")
+          .attr("stroke-linecap", "round")
+          .attr("stroke-linejoin", "round")
+          .attr("stroke-opacity", roadOpacity(carriedTransform.k));
+        roadGroup
+          .selectAll<SVGPathElement, Feature<Geometry, { rank: number }>>("path")
+          .data(roads.features)
+          .join("path")
+          .attr("d", (f) => path(f))
+          .attr("stroke-width", (f) => ROAD_WIDTH_BY_RANK[f.properties.rank] ?? 0.8)
+          .attr("vector-effect", "non-scaling-stroke");
+      }
+
       // Outlines (see `outlines`) go above the fills and beneath the names.
       if (outlines && outlines.length > 0) {
         g.append("g")
@@ -1172,6 +1222,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           markerNodes?.attr("r", (d) => markerRadius(d) / k).attr("stroke-width", (d) => markerStrokeWidth(d) / k);
           placeAnnotations(k);
           placeLabels(k);
+          roadGroup?.attr("stroke-opacity", roadOpacity(k));
         });
 
       /** Zoom to any GeoJSON object's bounds — a single feature, or a
@@ -1465,6 +1516,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       outlines,
       waterOverRegion,
       clipId,
+      roads,
     ],
   );
 

@@ -48,7 +48,7 @@ export const TREEMAP_INTERACTION_GUIDE =
   "Each tile's area is its share of the whole. Click a tile to zoom into the group it belongs to; click a step in the path above the chart (or press Escape) to zoom back out. Hover or focus a tile for its exact value and its share of its group and of the whole. Tiles too small for a name show initials or nothing — zoom in, or hover, to read them. Where there's a Play control, it plays the treemap month by month from the first logged day, each tile growing or shrinking in place rather than jumping around — drag the scrubber to see it as it stood at any month, and pick a speed.";
 
 export const GEO_INTERACTION_GUIDE =
-  "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show. A region's name is written on it once it is large enough on screen to hold it, so zooming in names more of them. On a city map, a white outline marks the central city of a metro area.";
+  "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show. A region's name is written on it once it is large enough on screen to hold it, so zooming in names more of them. On a city map, a white outline marks the central city of a metro area. Highways and major roads are drawn faintly and grow clearer as you zoom in.";
 
 /** The Centre of Gravity map (#215) — built on `InteractiveGeo`, but its
  * content is all markers and a path, with no choropleth or drill-down,
