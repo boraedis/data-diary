@@ -1068,8 +1068,8 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         labelGroup?.raise();
       }
 
-      // Hover highlight: a separate unfilled path traced over the hovered
-      // region, rather than restyling the region itself. attachMarkHover's
+      // Hover highlight: the region's fill is darkened, and a separate unfilled
+      // path is traced over it, rather than raising it. attachMarkHover's
       // own hover effect is a fill-opacity lift, which reads as nothing on
       // a flat choropleth fill, and raising the region to give it a stroke
       // would reorder the DOM and put it above the outlines and names. The
@@ -1089,10 +1089,21 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           .style("pointer-events", "none")
           .attr("display", "none");
         regions
-          .on("pointerenter.hl focus.hl", (_event, d) => {
+          .on("pointerenter.hl focus.hl", function (_event, d) {
             hover.attr("d", path(d.feature)).attr("display", null);
+            // Darkens whatever the fill is (any ramp step, the travelled
+            // tint, no-data). The fill itself is rewritten rather than a
+            // CSS `filter` applied: filters on SVG children inside a
+            // transformed group are unreliable (Safari), and the region
+            // that did darken in testing was the one big enough to hide
+            // the failure on the rest.
+            const darker = d3.color(resolveFill(d).color)?.darker(0.7);
+            d3.select(this).attr("fill", darker ? darker.formatHex() : resolveFill(d).color);
           })
-          .on("pointerleave.hl blur.hl", () => hover.attr("display", "none"));
+          .on("pointerleave.hl blur.hl", function (_event, d) {
+            hover.attr("display", "none");
+            d3.select(this).attr("fill", resolveFill(d).color);
+          });
         // Names stay readable above the outline.
         labelGroup?.raise();
       }
