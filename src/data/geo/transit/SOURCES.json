@@ -1,0 +1,169 @@
+{
+  "atlanta": {
+    "release": "2026-09-23.1",
+    "lineClasses": [
+      "subway",
+      "light_rail",
+      "monorail",
+      "tram"
+    ],
+    "stationCategories": [
+      "metro_station",
+      "light_rail_and_subway_station"
+    ],
+    "lines": {
+      "licences": [
+        "OpenStreetMap (ODbL-1.0)"
+      ]
+    },
+    "stations": {
+      "count": 5,
+      "licences": [
+        "BrightQuery (CDLA-Permissive-2.0)",
+        "Foursquare (Apache-2.0)",
+        "Overture (CDLA-Permissive-2.0)",
+        "Overture-signals (CDLA-Permissive-2.0)"
+      ]
+    },
+    "clipBox": [
+      -84.9564,
+      33.2473,
+      -83.6939,
+      34.2915
+    ],
+    "pointsKept": 1
+  },
+  "dc-metro": {
+    "release": "2026-09-23.1",
+    "lineClasses": [
+      "subway",
+      "light_rail",
+      "monorail",
+      "tram"
+    ],
+    "stationCategories": [
+      "metro_station",
+      "light_rail_and_subway_station"
+    ],
+    "lines": {
+      "licences": [
+        "OpenStreetMap (ODbL-1.0)"
+      ]
+    },
+    "stations": {
+      "count": 33,
+      "licences": [
+        "BrightQuery (CDLA-Permissive-2.0)",
+        "Foursquare (Apache-2.0)",
+        "Overture (CDLA-Permissive-2.0)",
+        "Overture-signals (CDLA-Permissive-2.0)"
+      ]
+    },
+    "clipBox": [
+      -77.6238,
+      38.4486,
+      -76.5828,
+      39.4402
+    ],
+    "pointsKept": 1
+  },
+  "dubai": {
+    "release": "2026-09-23.1",
+    "lineClasses": [
+      "subway",
+      "light_rail",
+      "monorail",
+      "tram"
+    ],
+    "stationCategories": [
+      "metro_station",
+      "light_rail_and_subway_station"
+    ],
+    "lines": {
+      "licences": [
+        "OpenStreetMap (ODbL-1.0)"
+      ]
+    },
+    "stations": {
+      "count": 13,
+      "licences": [
+        "Foursquare (Apache-2.0)",
+        "Overture (CDLA-Permissive-2.0)"
+      ]
+    },
+    "clipBox": [
+      54.7579,
+      24.4914,
+      56.3375,
+      25.4882
+    ],
+    "pointsKept": 1
+  },
+  "istanbul": {
+    "release": "2026-09-23.1",
+    "lineClasses": [
+      "subway",
+      "light_rail",
+      "monorail",
+      "tram"
+    ],
+    "stationCategories": [
+      "metro_station",
+      "light_rail_and_subway_station"
+    ],
+    "lines": {
+      "licences": [
+        "OpenStreetMap (ODbL-1.0)"
+      ]
+    },
+    "stations": {
+      "count": 27,
+      "licences": [
+        "Foursquare (Apache-2.0)",
+        "Microsoft (CDLA-Permissive-2.0)",
+        "Overture (CDLA-Permissive-2.0)"
+      ]
+    },
+    "clipBox": [
+      27.7721,
+      40.6039,
+      30.1576,
+      41.7821
+    ],
+    "pointsKept": 1
+  },
+  "nyc": {
+    "release": "2026-09-23.1",
+    "lineClasses": [
+      "subway",
+      "light_rail",
+      "monorail",
+      "tram"
+    ],
+    "stationCategories": [
+      "metro_station",
+      "light_rail_and_subway_station"
+    ],
+    "lines": {
+      "licences": [
+        "OpenStreetMap (ODbL-1.0)"
+      ]
+    },
+    "stations": {
+      "count": 196,
+      "licences": [
+        "BrightQuery (CDLA-Permissive-2.0)",
+        "Foursquare (Apache-2.0)",
+        "Overture (CDLA-Permissive-2.0)",
+        "Overture-signals (CDLA-Permissive-2.0)"
+      ]
+    },
+    "clipBox": [
+      -74.3111,
+      40.4406,
+      -73.6445,
+      40.9711
+    ],
+    "pointsKept": 0.2
+  }
+}
