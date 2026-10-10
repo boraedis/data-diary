@@ -22,6 +22,7 @@
     "geo:add-feature": "tsx scripts/geo-add-feature.mjs",
     "geo:build-admin": "tsx scripts/geo-build-admin.mjs",
     "geo:build-water": "tsx scripts/geo-build-water.mjs",
+    "geo:build-roads": "tsx scripts/geo-build-roads.mjs",
     "geo:fetch-suburbs": "tsx scripts/geo-fetch-suburbs.mjs",
     "geo:fetch-istanbul-mahalles": "tsx scripts/geo-fetch-istanbul-mahalles.mjs",
     "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs",
