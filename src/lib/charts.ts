@@ -1273,7 +1273,10 @@ export async function getAdminRegionVisitData(): Promise<AdminRegionVisitData> {
 // geometry import at all, since country names are globally unique) and its
 // own client-side world-atlas import. Duplicating the import isn't
 // duplicating logic: this file needs a name index; the chart needs paths.
-const CITY_TOPOLOGIES: Record<CityKey, { objects: Record<string, { geometries: { properties: { name: string; root: string; remainder?: boolean } }[] }> }> = {
+// `root` is optional in the type because a city with a `primary` also carries
+// an `outline` object (one Census ring, no root); only objects[cityKey] is
+// read here, and its features always have one.
+const CITY_TOPOLOGIES: Record<CityKey, { objects: Record<string, { geometries: { properties: { name: string; root?: string; remainder?: boolean } }[] }> }> = {
   atlanta: atlantaTopo,
   "dc-metro": dcMetroTopo,
   dubai: dubaiTopo,
@@ -1285,6 +1288,7 @@ function loadCityGeometryNames(cityKey: CityKey): Map<string, Set<string>> {
   const byRoot = new Map<string, Set<string>>();
   for (const geometry of CITY_TOPOLOGIES[cityKey].objects[cityKey].geometries) {
     const { name, root } = geometry.properties;
+    if (!root) continue;
     if (!byRoot.has(root)) byRoot.set(root, new Set());
     byRoot.get(root)!.add(name);
   }

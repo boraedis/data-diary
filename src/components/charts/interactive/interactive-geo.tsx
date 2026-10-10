@@ -17,6 +17,7 @@ import {
   type ColorMode,
 } from "@/lib/viz/color";
 import { formatThousandsNumber } from "@/lib/viz/format";
+import { labelMinZoom, REGION_LABEL_FONT_PX } from "@/lib/viz/region-labels";
 
 // InteractiveGeo (#24) — the shared choropleth primitive. Generic over any
 // GeoJSON FeatureCollection (a caller decodes its own topojson via
@@ -552,6 +553,24 @@ export type InteractiveGeoProps<P extends GeoJsonProperties = GeoJsonProperties>
    * reads as a claim about countries the chart isn't making. Click-to-zoom
    * still works; `getValue` is ignored. */
   regionsAsBasemap?: boolean;
+  /** Writes each region's name on its polygon once the polygon is big
+   * enough on screen to hold it — default true for a choropleth. Zooming
+   * in reveals more names (a label appears at the zoom where it fits, see
+   * `labelMinZoom`), zooming out hides them again, and they stay a
+   * constant size throughout. Always off for `regionsAsBasemap`, which
+   * deliberately names nothing. */
+  showRegionLabels?: boolean;
+  /** The text drawn on a region, if not `getLabel` — return null for a
+   * region that shouldn't carry one (a backdrop that sits beneath other
+   * regions, like the city heatmaps' "Rest of <county>", whose name would
+   * be written across the places drawn on top of it). Pass a stable
+   * reference — it's a useD3 dependency. */
+  getRegionLabel?: (feature: Feature<Geometry, P>) => string | null;
+  /** Unfilled outlines drawn over the regions, for marking a group of them
+   * — the city heatmaps outline the primary city of a metro area against
+   * its suburbs. Non-interactive, constant on-screen width. Pass a stable
+   * reference — it's a useD3 dependency. */
+  outlines?: Feature<Geometry, GeoJsonProperties>[];
 };
 
 /** Discriminated union so one hover state serves both layers — a marker
@@ -598,6 +617,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
   contextFeatures,
   routes,
   regionsAsBasemap = false,
+  showRegionLabels = true,
+  getRegionLabel,
+  outlines,
 }: InteractiveGeoProps<P>) {
   const [hovered, setHovered] = useState<Hovered | null>(null);
   // The one region currently shown as its own subdivisions, together with
@@ -948,6 +970,104 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         .attr("vector-effect", "non-scaling-stroke")
         .style("pointer-events", "none");
 
+      // Region names (see `showRegionLabels`). Each polygon works out once,
+      // here, the zoom at which its name fits (`labelMinZoom`); a zoom tick
+      // then only compares k against that, and touches the DOM just for the
+      // labels that crossed their threshold. The font size and halo width
+      // sit on the wrapping <g> and are inherited, so counter-scaling them
+      // is two attribute writes however many labels there are.
+      //
+      // Anchored to the polygon's *largest ring*, not the whole feature:
+      // the centroid and box of a multipolygon (a coast with islands, a
+      // county with an exclave) land in the water between its parts.
+      type RegionLabelDatum = { text: string; xy: [number, number]; minK: number; shown: boolean };
+      let labelGroup: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
+      let labelNodes: d3.Selection<SVGTextElement, RegionLabelDatum, SVGGElement, unknown> | null = null;
+      function placeLabels(k: number) {
+        if (!labelGroup || !labelNodes) return;
+        labelNodes.each(function (d) {
+          const show = k >= d.minK;
+          if (show === d.shown) return;
+          d.shown = show;
+          if (show) this.removeAttribute("display");
+          else this.setAttribute("display", "none");
+        });
+        labelGroup.attr("font-size", REGION_LABEL_FONT_PX / k).attr("stroke-width", 3 / k);
+      }
+      if (showRegionLabels && !regionsAsBasemap) {
+        const data: RegionLabelDatum[] = [];
+        for (const d of drawn) {
+          const text = getRegionLabel ? getRegionLabel(d.feature as Feature<Geometry, P>) : d.getLabel(d.feature);
+          if (!text) continue;
+          const geometry = d.feature.geometry;
+          let target: Parameters<typeof path.bounds>[0] = d.feature;
+          if (geometry?.type === "MultiPolygon") {
+            let best = -1;
+            for (const coordinates of geometry.coordinates) {
+              const polygon = { type: "Polygon" as const, coordinates };
+              const area = path.area(polygon);
+              if (area > best) {
+                best = area;
+                target = polygon;
+              }
+            }
+          }
+          const [[x0, y0], [x1, y1]] = path.bounds(target);
+          const xy = path.centroid(target);
+          if (!Number.isFinite(xy[0]) || !Number.isFinite(xy[1])) continue;
+          const minK = labelMinZoom(text, { width: x1 - x0, height: y1 - y0, area: path.area(target) });
+          // Never reachable inside the zoom range: skip the node entirely.
+          if (minK > zoomExtent[1]) continue;
+          data.push({ text, xy, minK, shown: true });
+        }
+        labelGroup = g
+          .append("g")
+          .attr("class", "geo-region-labels")
+          .attr("aria-hidden", "true")
+          .style("pointer-events", "none")
+          .attr("fill", "var(--foreground)")
+          // The halo: a stroke in the card colour painted under the fill,
+          // so a name stays readable across any fill step and across the
+          // borders it sits on — the same device the marker annotations use.
+          .attr("stroke", "var(--card)")
+          .attr("stroke-linejoin", "round")
+          .attr("paint-order", "stroke")
+          // The page's own face: an SVG <text> otherwise falls back to the
+          // browser's default serif.
+          .style("font-family", "inherit")
+          .attr("font-weight", 500)
+          .attr("text-anchor", "middle")
+          .attr("dominant-baseline", "central");
+        labelNodes = labelGroup
+          .selectAll<SVGTextElement, RegionLabelDatum>("text")
+          .data(data)
+          .join("text")
+          .attr("x", (d) => d.xy[0])
+          .attr("y", (d) => d.xy[1])
+          .text((d) => d.text);
+        placeLabels(carriedTransform.k);
+      }
+
+      // Outlines (see `outlines`) go above the fills and beneath the names.
+      if (outlines && outlines.length > 0) {
+        g.append("g")
+          .attr("class", "geo-outlines")
+          .attr("aria-hidden", "true")
+          .style("pointer-events", "none")
+          .selectAll<SVGPathElement, Feature<Geometry, GeoJsonProperties>>("path")
+          .data(outlines)
+          .join("path")
+          .attr("d", (f) => path(f))
+          .attr("fill", "none")
+          .attr("stroke", "var(--foreground)")
+          .attr("stroke-opacity", 0.9)
+          .attr("stroke-width", 2)
+          .attr("stroke-linejoin", "round")
+          .attr("vector-effect", "non-scaling-stroke");
+        // Names read above the outline, not struck through by it.
+        labelGroup?.raise();
+      }
+
       // Click a region to zoom to its own bounds; click the background to
       // reset back to the origin view. zoomBehavior is a variable (not
       // inlined into svg.call() the way InteractiveNetwork's zoom is)
@@ -964,6 +1084,7 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
           const k = event.transform.k;
           markerNodes?.attr("r", (d) => markerRadius(d) / k).attr("stroke-width", (d) => markerStrokeWidth(d) / k);
           placeAnnotations(k);
+          placeLabels(k);
         });
 
       /** Zoom to any GeoJSON object's bounds — a single feature, or a
@@ -1252,6 +1373,9 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
       regionsAsBasemap,
       noDataColor,
       onMarkerClick,
+      showRegionLabels,
+      getRegionLabel,
+      outlines,
     ],
   );
 

@@ -14,6 +14,9 @@ import { normalizeIstanbulName } from "./istanbul-names";
 // city/root config any more than the resolution logic itself.
 export type CityKey = "atlanta" | "dc-metro" | "dubai" | "nyc" | "istanbul";
 
+/** The city the heatmap opens on when the URL names none. */
+export const DEFAULT_CITY: CityKey = "dc-metro";
+
 export type CityRootConfig = {
   /** Catalog root name — places.namePath's segment at `rootId`. */
   root: string;
@@ -51,7 +54,7 @@ export type CitySuburbConfig = {
    * CityRootConfig.rootId. */
   stateRootId: number;
   /** 5-digit county FIPS (or independent city's) — build tooling only,
-   * read by scripts/geo-fetch-dc-suburbs.mjs to pick the Census places
+   * read by scripts/geo-fetch-suburbs.mjs to pick the Census places
    * inside it. */
   countyFips: string;
   /** Filename under src/data/geo/sources/, as for CityRootConfig. */
@@ -59,6 +62,11 @@ export type CitySuburbConfig = {
   /** Set for an independent city drawn as one feature rather than split
    * into Census places — the feature's own `name`. Build tooling only. */
   singleFeatureName?: string;
+  /** Census place GEOIDs to leave out of this region. For a place that is
+   * already drawn finer elsewhere on the same map — Atlanta, whose own
+   * neighborhood layer sits where the Census's Atlanta place would.
+   * Build tooling only. */
+  excludeGeoids?: string[];
 };
 
 export type CityConfig = {
@@ -78,6 +86,25 @@ export type CityConfig = {
    * Omit to frame the whole city. The rest stays drawn and reachable by
    * zooming out, see CityHeatmapExplorer's zoom extent. */
   homeRoots?: string[];
+  /** The metro's central city, outlined on the map so it stays findable
+   * against the suburbs and neighbours drawn around it. Omit for a city
+   * with no surroundings, where an outline would only trace the whole map.
+   *
+   * Its own boundary, not the neighborhoods dissolved into one: two
+   * adjacent neighborhood polygons from a city GIS layer rarely share
+   * their edge exactly, so merging them leaves every near-miss as a white
+   * line through the middle of the city. The Census place boundary is one
+   * clean ring. Fetched by scripts/geo-fetch-suburbs.mjs, and carried in
+   * the city's topology as its `outline` object. */
+  primary?: {
+    /** Display name, for the chart's caption. */
+    name: string;
+    /** Census place GEOID of the city (7 digits: state + place). Build
+     * tooling only. */
+    geoid: string;
+    /** Filename under src/data/geo/sources/, as for CityRootConfig. */
+    sourceFile: string;
+  };
   /** Normalizes a catalog neighborhood name to this city's geometry
    * naming — see each root's own normalize<City>Name for the real,
    * documented aliases/gaps. Takes `root` even for single-root cities so
@@ -89,7 +116,38 @@ export const CITIES: Record<CityKey, CityConfig> = {
   atlanta: {
     label: "Atlanta",
     sources: [{ root: "Atlanta", rootId: 701, sourceFile: "atlanta.geojson" }],
-    normalize: (_root, name) => normalizeAtlantaName(name),
+    // Opens on the city itself; the metro's counties are a zoom-out away,
+    // as for DC (see below).
+    homeRoots: ["Atlanta"],
+    primary: { name: "Atlanta", geoid: "1304000", sourceFile: "atlanta-outline.geojson" },
+    // The five core counties, split into Census places the same way as the
+    // DC suburbs and for the same reason (the catalog files Brookhaven,
+    // Sandy Springs, Hapeville, College Park... straight under Georgia, with
+    // no Atlanta ancestor). The Census's own Atlanta place is excluded:
+    // the city is drawn from its neighborhood layer instead.
+    suburbs: [
+      {
+        root: "Fulton County",
+        stateRootId: 741,
+        countyFips: "13121",
+        sourceFile: "fulton-county.geojson",
+        excludeGeoids: ["1304000"],
+      },
+      {
+        root: "DeKalb County",
+        stateRootId: 741,
+        countyFips: "13089",
+        sourceFile: "dekalb-county.geojson",
+        excludeGeoids: ["1304000"],
+      },
+      { root: "Cobb County", stateRootId: 741, countyFips: "13067", sourceFile: "cobb-county.geojson" },
+      { root: "Clayton County", stateRootId: 741, countyFips: "13063", sourceFile: "clayton-county.geojson" },
+      { root: "Gwinnett County", stateRootId: 741, countyFips: "13135", sourceFile: "gwinnett-county.geojson" },
+    ],
+    // The alias table is for the city's own neighborhood layer; the county
+    // regions match Census place names exactly (and resolve by coordinates
+    // first anyway).
+    normalize: (root, name) => (root === "Atlanta" ? normalizeAtlantaName(name) : name),
   },
   "dc-metro": {
     label: "DC Metro",
@@ -106,10 +164,11 @@ export const CITIES: Record<CityKey, CityConfig> = {
     // neighborhoods — the ones logged most — as specks. So the map opens
     // on DC and Arlington, and the suburbs are a zoom-out away.
     homeRoots: ["Washington", "Arlington"],
+    primary: { name: "Washington, DC", geoid: "1150000", sourceFile: "washington-dc-outline.geojson" },
     // #281. Fairfax City and Falls Church are independent cities, not
     // part of Fairfax County, so each is its own region. The counties are
     // split into Census places (towns and CDPs), the grain the catalog
-    // logs them at — see scripts/geo-fetch-dc-suburbs.mjs.
+    // logs them at — see scripts/geo-fetch-suburbs.mjs.
     suburbs: [
       { root: "Fairfax County", stateRootId: 1828, countyFips: "51059", sourceFile: "fairfax-county.geojson" },
       {

@@ -27,7 +27,7 @@ export type CityGeometryProperties = {
   root: string;
   name: string;
   /** Set on a suburban county's "Rest of <county>" backdrop (#281) — see
-   * scripts/geo-fetch-dc-suburbs.mjs. */
+   * scripts/geo-fetch-suburbs.mjs. */
   remainder?: boolean;
 };
 export type CityGeometryFeature = Feature<Geometry, CityGeometryProperties>;
@@ -107,9 +107,20 @@ export function findCityPlaceQaFindings(
 
   // A suburban county's remainder (#281) overlaps every place inside it,
   // so it only counts once no real feature contains the point.
+  //
+  // The city's own roots are searched before its suburbs. A suburb's Census
+  // boundary can overlap the city's neighborhood layer by a sliver (Atlanta
+  // beside Brookhaven or Druid Hills), and a place the catalog files under
+  // the city should be judged against the city's polygons first; only a
+  // point outside all of them is "in" a suburb.
+  const rootNames = new Set(roots.map((r) => r.root));
+  const ordered = [
+    ...geometryFeatures.filter((f) => rootNames.has(f.properties.root)),
+    ...geometryFeatures.filter((f) => !rootNames.has(f.properties.root)),
+  ];
   function actualFeatureFor(point: [number, number]): CityGeometryProperties | null {
     let remainder: CityGeometryProperties | null = null;
-    for (const f of geometryFeatures) {
+    for (const f of ordered) {
       if (!geoContains(f, point)) continue;
       if (!f.properties.remainder) return f.properties;
       remainder ??= f.properties;
