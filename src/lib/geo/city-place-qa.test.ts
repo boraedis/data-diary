@@ -116,3 +116,59 @@ describe("parseCityPlaceQaKind", () => {
     expect(parseCityPlaceQaKind(3)).toBeNull();
   });
 });
+
+// Suburb places (#281): declared by the town their catalog path names, so
+// they can disagree with their point like a catalog-rooted place.
+describe("findCityPlaceQaFindings for suburb places", () => {
+  const suburbConfigs = [{ root: "County A", stateRootId: 41, countyFips: "51000", sourceFile: "a.geojson" }];
+  const sq = (name: string, x0: number, y0: number, x1: number, y1: number, remainder = false) => ({
+    root: "County A",
+    name,
+    remainder,
+    bounds: [[x0, y0], [x1, y1]] as [[number, number], [number, number]],
+    contains: ([x, y]: [number, number]) => x >= x0 && x <= x1 && y >= y0 && y <= y1,
+  });
+  const suburbFeatures = [sq("Rest of County A", 100, 0, 140, 10, true), sq("Townville", 101, 1, 103, 3), sq("Hamlet", 111, 1, 113, 3)];
+  const geometry: CityGeometryFeature[] = [
+    ...FEATURES,
+    ...suburbFeatures.map((f) => ({
+      type: "Feature" as const,
+      properties: { root: f.root, name: f.name, remainder: f.remainder },
+      geometry: { type: "Polygon" as const, coordinates: [[[f.bounds[0][0], f.bounds[0][1]], [f.bounds[1][0], f.bounds[0][1]], [f.bounds[1][0], f.bounds[1][1]], [f.bounds[0][0], f.bounds[1][1]], [f.bounds[0][0], f.bounds[0][1]]]] },
+    })),
+  ];
+  const contains = (f: CityGeometryFeature, [x, y]: [number, number]) => {
+    const ring = (f.geometry as { coordinates: number[][][] }).coordinates[0];
+    return x >= ring[0][0] && x <= ring[1][0] && y >= ring[0][1] && y <= ring[2][1];
+  };
+  const runSuburbs = (places: CityPlaceQaPlace[]) =>
+    findCityPlaceQaFindings(places, ROOTS, geometry, contains, identity, { configs: suburbConfigs, features: suburbFeatures });
+  const sp = (id: number, namePath: string, lng: number, lat: number) => place(id, namePath, lng, lat, "41/9000");
+
+  it("reports nothing when the named town contains the point", () => {
+    expect(runSuburbs([sp(1, "USA/Virginia/Townville/Cafe", 102, 2)])).toEqual([]);
+  });
+
+  it("flags a named town whose point is in a different region as a suburb mismatch", () => {
+    const [f] = runSuburbs([sp(1, "USA/Virginia/Hamlet/Cafe", 102, 2)]);
+    expect(f).toMatchObject({ kind: "mismatch", suburb: true, declared: { root: "County A", featureName: "Hamlet" }, actual: { root: "County A", name: "Townville" } });
+  });
+
+  it("flags a named town whose point is in the county's remainder", () => {
+    const [f] = runSuburbs([sp(1, "USA/Virginia/Hamlet/Cafe", 130, 5)]);
+    expect(f).toMatchObject({ kind: "mismatch", suburb: true, actual: { name: "Rest of County A" } });
+  });
+
+  it("flags a named town whose point is in no region as outside", () => {
+    const [f] = runSuburbs([sp(1, "USA/Virginia/Hamlet/Cafe", 900, 900)]);
+    expect(f).toMatchObject({ kind: "outside", suburb: true, actual: null });
+  });
+
+  it("says nothing about a suburb place no catalog segment names a region for", () => {
+    expect(runSuburbs([sp(1, "USA/Virginia/Elsewhere/Cafe", 102, 2)])).toEqual([]);
+  });
+
+  it("ignores suburb places for a city with no suburbs", () => {
+    expect(run([sp(1, "USA/Virginia/Hamlet/Cafe", 102, 2)])).toEqual([]);
+  });
+});

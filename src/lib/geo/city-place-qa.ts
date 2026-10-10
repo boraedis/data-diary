@@ -1,6 +1,12 @@
 import type { Feature, Geometry } from "geojson";
-import type { CityRootConfig } from "./city-config";
-import { isPlaceInCity, resolveCityFeatureName, type CityPlaceRow } from "./resolve-city-place";
+import type { CityRootConfig, CitySuburbConfig } from "./city-config";
+import {
+  isPlaceInCity,
+  resolveCityFeatureName,
+  resolveCitySuburbByName,
+  type CityPlaceRow,
+  type CitySuburbFeature,
+} from "./resolve-city-place";
 
 /**
  * The shared QA-check core behind #293's diagnostic script
@@ -48,6 +54,12 @@ export type CityPlaceQaFinding = {
   placeName: string;
   namePath: string;
   kind: CityPlaceQaFindingKind;
+  /** True for a place under one of the city's suburban regions (#281)
+   * rather than one of its catalog roots. The two are fixed differently: a
+   * name override only takes effect under the root it is saved against, so
+   * the modal offers "Map name" for a suburb finding only when `actual` is
+   * a suburb region, and for a root finding only when it is a catalog root. */
+  suburb?: boolean;
   /** What the catalog's own hierarchy says, when it resolves at all. */
   declared: { root: string; featureName: string } | null;
   /** What the point actually falls inside, when it falls inside anything. */
@@ -97,6 +109,13 @@ export function findCityPlaceQaFindings(
   geometryFeatures: readonly CityGeometryFeature[],
   geoContains: (feature: CityGeometryFeature, point: [number, number]) => boolean,
   normalize: (root: string, name: string) => string,
+  /** The city's suburban regions, if it has any (#281). A suburb place is
+   * credited to the municipality its catalog path names, so it can disagree
+   * with its point exactly like a catalog-rooted one, and gets the same
+   * "mismatch"/"outside" findings. Only those two kinds: a suburb place
+   * with no catalog name matching a region falls back to its point, which
+   * agrees with itself by construction. */
+  suburbs?: { configs: readonly CitySuburbConfig[]; features: readonly CitySuburbFeature[] },
 ): CityPlaceQaFinding[] {
   const geometryNamesByRoot = new Map<string, Set<string>>();
   for (const f of geometryFeatures) {
@@ -130,8 +149,28 @@ export function findCityPlaceQaFindings(
 
   const findings: CityPlaceQaFinding[] = [];
 
+  function pushSuburbFinding(place: CityPlaceQaPlace) {
+    const declared = resolveCitySuburbByName(place, suburbs!.configs, suburbs!.features, normalize);
+    if (!declared) return; // resolved by point (or not at all): nothing declared to disagree with
+    const actual = actualFeatureFor([place.lng, place.lat]);
+    if (actual && actual.root === declared.root && actual.name === declared.featureName) return;
+    findings.push({
+      placeId: place.id,
+      placeName: place.name,
+      namePath: place.namePath,
+      kind: actual ? "mismatch" : "outside",
+      suburb: true,
+      declared,
+      actual: actual ? { root: actual.root, name: actual.name } : null,
+      suggestedAlias: null,
+    });
+  }
+
   for (const place of places) {
-    if (!isPlaceInCity(place.idPath, roots)) continue;
+    if (!isPlaceInCity(place.idPath, roots)) {
+      if (suburbs) pushSuburbFinding(place);
+      continue;
+    }
 
     const declared = resolveCityFeatureName(place, roots, geometryNamesByRoot, normalize);
     const point: [number, number] = [place.lng, place.lat];

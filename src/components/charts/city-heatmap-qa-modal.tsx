@@ -247,9 +247,20 @@ function FindingRow({
 }) {
   const [mapping, setMapping] = useState(false);
   // A naming fix only makes sense where the point landed in a polygon
-  // (`actual`) but the name didn't resolve to it — mismatch/outside are
-  // coordinate problems, fixed in the place editor instead.
-  const canMap = (finding.kind === "spelling" || finding.kind === "unmapped") && finding.actual !== null;
+  // (`actual`) but the name didn't resolve to it. For a catalog-rooted place
+  // mismatch/outside are coordinate problems, fixed in the place editor
+  // instead; for a suburb place a mismatch can also be a catalog town whose
+  // Census polygon just doesn't cover the address (mapping it to the polygon
+  // the point is in, "Rest of <county>" included, accepts that).
+  // The override only takes effect under the root it is saved against, so
+  // the target polygon has to be in the same kind of region as the place: a
+  // catalog-rooted place resolves against its own root's polygons, a suburb
+  // place against the suburb regions. Offering the other kind would save a
+  // mapping that silently does nothing.
+  const actualIsSuburb = finding.actual ? report.suburbRoots.includes(finding.actual.root) : false;
+  const canMap = finding.suburb
+    ? finding.actual !== null && actualIsSuburb
+    : (finding.kind === "spelling" || finding.kind === "unmapped") && finding.actual !== null && !actualIsSuburb;
 
   return (
     <li className="flex flex-col gap-2 px-3 py-2">

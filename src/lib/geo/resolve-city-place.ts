@@ -122,7 +122,19 @@ function inBounds(bounds: CitySuburbFeature["bounds"], [lng, lat]: [number, numb
  *    outside every region is in another county, whatever the catalog path
  *    says.
  */
-export function resolveCitySuburbFeature(
+/**
+ * The first step of resolveCitySuburbFeature on its own: the region the
+ * place's catalog path names, ignoring coordinates entirely (apart from
+ * choosing between same-named regions when it has any). Split out because
+ * the place check needs to know what the catalog *declares* separately from
+ * where the point lands, to tell the two apart.
+ *
+ * A county's "Rest of ..." backdrop never matches a bare catalog segment,
+ * but does when `normalize` actually changed the segment: an alias or a QA
+ * override pointing a name at it is an explicit choice (the place check's
+ * "Map name" does exactly that), not a coincidence.
+ */
+export function resolveCitySuburbByName(
   place: CityPlaceRow & { lat: number | null; lng: number | null },
   suburbs: readonly CitySuburbConfig[],
   features: readonly CitySuburbFeature[],
@@ -139,11 +151,33 @@ export function resolveCitySuburbFeature(
   const nameSegments = place.namePath.split("/").filter(Boolean);
   const stateIndex = Math.min(...eligible.map((s) => idSegments.indexOf(String(s.stateRootId))));
   for (const segment of nameSegments.slice(stateIndex + 1)) {
-    const named = candidates.filter((f) => !f.remainder && f.name === normalize(f.root, segment));
+    const named = candidates.filter((f) => {
+      const normalized = normalize(f.root, segment);
+      return f.name === normalized && (!f.remainder || normalized !== segment);
+    });
     if (named.length === 0) continue;
     const pick = (hasPoint ? named.find((f) => inBounds(f.bounds, point) && f.contains(point)) : undefined) ?? named[0];
     return { root: pick.root, featureName: pick.name };
   }
+  return null;
+}
+
+export function resolveCitySuburbFeature(
+  place: CityPlaceRow & { lat: number | null; lng: number | null },
+  suburbs: readonly CitySuburbConfig[],
+  features: readonly CitySuburbFeature[],
+  normalize: (root: string, name: string) => string,
+): { root: string; featureName: string } | null {
+  const idSegments = place.idPath.split("/").filter(Boolean);
+  const eligible = suburbs.filter((s) => idSegments.includes(String(s.stateRootId)));
+  if (eligible.length === 0) return null;
+  const eligibleRoots = new Set(eligible.map((s) => s.root));
+  const candidates = features.filter((f) => eligibleRoots.has(f.root));
+  const hasPoint = place.lat != null && place.lng != null;
+  const point: [number, number] = [place.lng ?? 0, place.lat ?? 0];
+
+  const byName = resolveCitySuburbByName(place, suburbs, features, normalize);
+  if (byName) return byName;
 
   if (!hasPoint) return null;
   let remainderHit: CitySuburbFeature | null = null;
