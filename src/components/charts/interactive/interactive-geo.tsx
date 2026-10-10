@@ -1068,6 +1068,35 @@ export function InteractiveGeo<P extends GeoJsonProperties = GeoJsonProperties>(
         labelGroup?.raise();
       }
 
+      // Hover highlight: a separate unfilled path traced over the hovered
+      // region, rather than restyling the region itself. attachMarkHover's
+      // own hover effect is a fill-opacity lift, which reads as nothing on
+      // a flat choropleth fill, and raising the region to give it a stroke
+      // would reorder the DOM and put it above the outlines and names. The
+      // overlay is moved by direct DOM writes (no React state), per
+      // use-d3's rule for per-pointer-move state, and namespaced (`.hl`) so
+      // it coexists with attachMarkHover's handlers on the same nodes.
+      if (!regionsAsBasemap) {
+        const hover = g
+          .append("path")
+          .attr("class", "geo-hover-outline")
+          .attr("aria-hidden", "true")
+          .attr("fill", "none")
+          .attr("stroke", "var(--foreground)")
+          .attr("stroke-width", 2)
+          .attr("stroke-linejoin", "round")
+          .attr("vector-effect", "non-scaling-stroke")
+          .style("pointer-events", "none")
+          .attr("display", "none");
+        regions
+          .on("pointerenter.hl focus.hl", (_event, d) => {
+            hover.attr("d", path(d.feature)).attr("display", null);
+          })
+          .on("pointerleave.hl blur.hl", () => hover.attr("display", "none"));
+        // Names stay readable above the outline.
+        labelGroup?.raise();
+      }
+
       // Click a region to zoom to its own bounds; click the background to
       // reset back to the origin view. zoomBehavior is a variable (not
       // inlined into svg.call() the way InteractiveNetwork's zoom is)
