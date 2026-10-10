@@ -148,6 +148,9 @@ export type CityPlaceQaReport = {
   /** Every polygon name per root, for the modal's "map to polygon"
    * picker. */
   geometryNames: { root: string; names: string[] }[];
+  /** Which of those roots are the city's suburban regions rather than its
+   * catalog roots — see CityPlaceQaFinding.suburb. */
+  suburbRoots: string[];
 };
 
 export async function getCityPlaceQaReport(cityKey: CityKey): Promise<CityPlaceQaReport> {
@@ -176,6 +179,7 @@ export async function getCityPlaceQaReport(cityKey: CityKey): Promise<CityPlaceQ
     geometryFeatures,
     (f, point) => d3.geoContains(f, point),
     withCityNeighborhoodOverrides(city.normalize, overrides),
+    city.suburbs?.length ? { configs: city.suburbs, features: loadCitySuburbFeatures(cityKey) } : undefined,
   );
 
   const dismissedKeys = new Set(dismissalRows.map((d) => `${d.placeId}:${d.kind}`));
@@ -193,7 +197,7 @@ export async function getCityPlaceQaReport(cityKey: CityKey): Promise<CityPlaceQ
   }
   const geometryNames = [...namesByRoot.entries()].map(([root, names]) => ({ root, names: names.sort((a, b) => a.localeCompare(b)) }));
 
-  return { cityKey, open, dismissed, overrides, geometryNames };
+  return { cityKey, open, dismissed, overrides, geometryNames, suburbRoots: (city.suburbs ?? []).map((s) => s.root) };
 }
 
 export async function dismissCityPlaceQaFinding(placeId: number, kind: CityPlaceQaFindingKind): Promise<void> {
@@ -226,7 +230,10 @@ export async function addCityNeighborhoodOverride(input: {
 }): Promise<AddOverrideResult> {
   const rawName = input.rawName.trim().toLowerCase();
   if (!rawName) return { ok: false, error: "Catalog name is required" };
-  if (!CITIES[input.cityKey].sources.some((s) => s.root === input.root)) {
+  // A suburban region's root is as valid a target as a catalog root: the
+  // suburb resolver reads overrides keyed by the region it is matching.
+  const { sources, suburbs = [] } = CITIES[input.cityKey];
+  if (![...sources, ...suburbs].some((s) => s.root === input.root)) {
     return { ok: false, error: `Unknown root "${input.root}" for ${CITIES[input.cityKey].label}` };
   }
   const exists = loadCityGeometryFeatures(input.cityKey).some(

@@ -123,6 +123,15 @@ describe("resolveCitySuburbFeature", () => {
     });
     expect(resolveCitySuburbFeature(place("1/1828/9/", "USA/Virginia/Rest of County A/"), SUBURBS, FEATURES, identity)).toBeNull();
   });
+
+  it("does match a remainder when an alias or QA override points a name at it", () => {
+    // The place check's "Map name" saves exactly this kind of override.
+    const override = (root: string, name: string) => (root === "County A" && name === "Hamlet" ? "Rest of County A" : name);
+    expect(resolveCitySuburbFeature(place("1/1828/9/", "USA/Virginia/Hamlet/Cafe/", 2, 2), SUBURBS, FEATURES, override)).toEqual({
+      root: "County A",
+      featureName: "Rest of County A",
+    });
+  });
 });
 
 // The same rules against the committed geometry, at points whose answer is
