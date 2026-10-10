@@ -44,6 +44,7 @@ export function CityHeatmapQaModal({
   onClose,
   cityKey,
   onChanged,
+  onOpenCount,
 }: {
   open: boolean;
   onClose: () => void;
@@ -51,13 +52,16 @@ export function CityHeatmapQaModal({
   /** Called after any change that can affect the heatmap's own
    * colouring (adding/removing a mapping), so the page can refetch. */
   onChanged: () => void;
+  /** Called with the number of open findings every time a check lands, so
+   * the button that opens this modal can keep its warning current. */
+  onOpenCount?: (count: number) => void;
 }) {
   return (
     <Modal open={open} onClose={onClose} title={`${CITIES[cityKey].label}: place coordinate check`} wide>
       {/* The body owns the fetch and its state, so it is mounted only while
           the modal is open: closing throws the report away, and reopening
           (or switching city) always starts from a fresh check. */}
-      <QaBody cityKey={cityKey} onChanged={onChanged} />
+      <QaBody cityKey={cityKey} onChanged={onChanged} onOpenCount={onOpenCount} />
     </Modal>
   );
 }
@@ -80,7 +84,15 @@ function failureMessage(res: Response, body: { error?: unknown } | null): string
   return typeof body?.error === "string" ? body.error : `Request failed (${res.status})`;
 }
 
-function QaBody({ cityKey, onChanged }: { cityKey: CityKey; onChanged: () => void }) {
+function QaBody({
+  cityKey,
+  onChanged,
+  onOpenCount,
+}: {
+  cityKey: CityKey;
+  onChanged: () => void;
+  onOpenCount?: (count: number) => void;
+}) {
   const [report, setReport] = useState<CityPlaceQaReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showDismissed, setShowDismissed] = useState(false);
@@ -96,8 +108,10 @@ function QaBody({ cityKey, onChanged }: { cityKey: CityKey; onChanged: () => voi
         const body = await readJson(res);
         if (!res.ok || !body) throw new Error(failureMessage(res, body));
         if (!cancelled) {
-          setReport(body as unknown as CityPlaceQaReport);
+          const next = body as unknown as CityPlaceQaReport;
+          setReport(next);
           setError(null);
+          onOpenCount?.(next.open.length);
         }
       })
       .catch((e) => {
@@ -106,7 +120,7 @@ function QaBody({ cityKey, onChanged }: { cityKey: CityKey; onChanged: () => voi
     return () => {
       cancelled = true;
     };
-  }, [cityKey, version]);
+  }, [cityKey, version, onOpenCount]);
 
   async function send(url: string, method: "POST" | "DELETE", payload: unknown, affectsChart: boolean) {
     setError(null);

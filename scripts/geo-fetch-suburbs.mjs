@@ -1,10 +1,15 @@
 /**
- * Fetches the DC-metro heatmap's five suburban regions (#281) from the
- * Census Bureau's TIGERweb service and writes them as editable sources:
- * src/data/geo/sources/{fairfax-county,fairfax-city,falls-church,
- * montgomery-county,prince-georges-county}.geojson. Run
- * `npm run geo:build dc-metro` afterwards to fold them into the committed
- * dc-metro.topo.json, same as any hand edit under sources/.
+ * Fetches a metro heatmap's suburban regions from the Census Bureau's
+ * TIGERweb service and writes them as editable sources under
+ * src/data/geo/sources/ — DC metro's five (#281: fairfax-county,
+ * fairfax-city, falls-church, montgomery-county, prince-georges-county)
+ * and Atlanta's five counties. Run `npm run geo:build <city>` afterwards
+ * to fold them into the committed <city>.topo.json, same as any hand edit
+ * under sources/.
+ *
+ * Every city whose config has `suburbs` is a candidate; name cities on the
+ * command line to fetch just those. The rest of this comment was written
+ * for DC and holds for every metro.
  *
  * ## Why Census places, for all five
  *
@@ -57,8 +62,25 @@
  * Census data is public domain; no attribution is required, though the
  * chart's methodology text names it anyway.
  *
+ * ## The primary city's outline
+ *
+ * The same run fetches the central city's own Census place (`primary` in
+ * the city config) and writes it as a single-feature source, which
+ * geo-build carries into the topology as its `outline` object. It is only
+ * ever drawn as a line; see CityConfig.primary for why that isn't just the
+ * neighborhoods dissolved.
+ *
+ * ## The primary city is left out
+ *
+ * A region's `excludeGeoids` drops Census places from it. Atlanta uses
+ * this for the Census's own "Atlanta" place, which spans Fulton and DeKalb:
+ * the city is already drawn, finer, from its neighborhood layer, and a
+ * second Atlanta-shaped polygon beneath it would only be a rival
+ * definition of the same ground.
+ *
  * Usage:
- *   npm run geo:fetch-dc-suburbs
+ *   npm run geo:fetch-suburbs            # every city with suburbs
+ *   npm run geo:fetch-suburbs atlanta    # just one
  *
  * Network only, no database.
  *
@@ -136,9 +158,10 @@ function toSourceFeature(f, name) {
   return { type: "Feature", properties: { name, geoid: f.properties.GEOID }, geometry: f.geometry };
 }
 
-async function main() {
-  const regions = CITIES["dc-metro"].suburbs ?? [];
+async function fetchCity(cityKey) {
+  const regions = CITIES[cityKey].suburbs ?? [];
   const states = [...new Set(regions.map((r) => r.countyFips.slice(0, 2)))];
+  console.log(`${cityKey}:`);
 
   const counties = new Map();
   for (const f of await query(COUNTIES_LAYER, `GEOID IN (${regions.map((r) => `'${r.countyFips}'`).join(",")})`)) {
@@ -159,6 +182,7 @@ async function main() {
     const members = places.filter(
       (p) =>
         p.properties.GEOID.startsWith(region.countyFips.slice(0, 2)) &&
+        !(region.excludeGeoids ?? []).includes(p.properties.GEOID) &&
         d3.geoContains(county, [Number(p.properties.INTPTLON), Number(p.properties.INTPTLAT)]),
     );
 
@@ -201,6 +225,24 @@ async function main() {
   topo = simplify(topo, SIMPLIFY_WEIGHT);
   const simplified = feature(topo, topo.objects.suburbs).features;
 
+  const primary = CITIES[cityKey].primary;
+  if (primary) {
+    const [place] = (
+      await Promise.all(PLACE_LAYERS.map((layer) => query(layer, `GEOID = '${primary.geoid}'`)))
+    ).flat();
+    if (!place) throw new Error(`${primary.name}: Census place ${primary.geoid} not returned by TIGERweb`);
+    let outlineTopo = presimplify(
+      topology({ outline: { type: "FeatureCollection", features: [toSourceFeature(place, primary.name)] } }, 1e6),
+    );
+    outlineTopo = simplify(outlineTopo, SIMPLIFY_WEIGHT);
+    const outline = feature(outlineTopo, outlineTopo.objects.outline).features;
+    writeFileSync(
+      path.join(SOURCES_DIR, primary.sourceFile),
+      JSON.stringify({ type: "FeatureCollection", features: outline }, null, 1) + "\n",
+    );
+    console.log(`  -> ${primary.sourceFile} (${primary.name} outline)`);
+  }
+
   for (const [regionIndex, region] of regions.entries()) {
     const features = simplified
       .filter((f) => f.properties.region === regionIndex)
@@ -211,6 +253,18 @@ async function main() {
     );
     console.log(`  -> ${region.sourceFile}`);
   }
+}
+
+async function main() {
+  const requested = process.argv.slice(2);
+  const withSuburbs = Object.keys(CITIES).filter((key) => (CITIES[key].suburbs ?? []).length > 0);
+  for (const key of requested) {
+    if (!withSuburbs.includes(key)) {
+      console.error(`"${key}" has no suburbs configured. Cities with suburbs: ${withSuburbs.join(", ")}`);
+      process.exit(1);
+    }
+  }
+  for (const key of requested.length > 0 ? requested : withSuburbs) await fetchCity(key);
 }
 
 main().catch((err) => {

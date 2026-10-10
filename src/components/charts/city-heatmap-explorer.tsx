@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as d3 from "d3";
+import { TriangleAlert } from "lucide-react";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { FeatureCollection, Geometry } from "geojson";
@@ -18,7 +19,7 @@ import { ChartCard } from "@/components/charts/chart-card";
 import { CHART_HEIGHT_CLASS, ResponsiveChart } from "@/components/charts/responsive-chart";
 import { InteractiveGeo, type GeoMarker } from "@/components/charts/interactive/interactive-geo";
 import { GroupByPicker, type GroupByOption } from "@/components/charts/interactive/group-by-picker";
-import { CITIES, type CityKey } from "@/lib/geo/city-config";
+import { CITIES, DEFAULT_CITY, type CityKey } from "@/lib/geo/city-config";
 import { loadCityWater, type WaterProperties } from "@/lib/geo/water";
 import type { CityHeatmapData } from "@/lib/charts";
 import { formatFirstVisited } from "@/lib/viz/first-visited";
@@ -40,7 +41,34 @@ import { PLACES_TRACKING_SPAN } from "@/lib/viz/tracking-span";
 // this app already works (client-side re-slicing of one server fetch,
 // not a fetch per filter change).
 
-type CityProperties = { name: string; root: string };
+type CityProperties = {
+  name: string;
+  root: string;
+  /** Istanbul's mahalles: the district they belong to. */
+  district?: string;
+  /** A suburban county's "Rest of <county>" backdrop — see
+   * scripts/geo-fetch-suburbs.mjs. */
+  remainder?: boolean;
+};
+
+// The name written on a polygon. Not `properties.name` as-is: a mahalle
+// whose name repeats across Istanbul is stored "Cumhuriyet (Beşiktaş)" to
+// keep it unique, which is the tooltip's job to say, not the polygon's. A
+// county's "Rest of ..." backdrop gets no label at all, since it sits
+// under the towns drawn on top of it and its name would be written across
+// them. Module-level because InteractiveGeo takes it as a useD3 dependency.
+// Water is drawn over a city's suburban regions (Census land, which runs out
+// across rivers and bays) but under its own neighborhoods. Built per city in
+// the explorer, since which roots are suburbs is per-city config.
+function suburbRootsOf(city: CityKey): Set<string> {
+  return new Set((CITIES[city].suburbs ?? []).map((s) => s.root));
+}
+
+function regionLabel(f: { properties: CityProperties }): string | null {
+  const { name, district, remainder } = f.properties;
+  if (remainder) return null;
+  return district ? name.replace(/ \([^)]*\)$/, "") : name;
+}
 
 const CITY_TOPOLOGIES: Record<CityKey, Topology<{ [key: string]: GeometryCollection<CityProperties> }>> = {
   atlanta: atlantaTopoRaw as unknown as Topology<{ atlanta: GeometryCollection<CityProperties> }>,
@@ -76,21 +104,86 @@ function neighborhoodKey(root: string, name: string): string {
 export function CityHeatmapExplorer({
   data,
   diaryStartDate = null,
+  initialCity = DEFAULT_CITY,
 }: {
   data: Record<CityKey, CityHeatmapData>;
+  /** The city the URL named (`?city=`), already validated by the page.
+   * Read once for the initial state; after that the component owns the
+   * choice and writes it back to the URL itself — see `selectCity`. */
+  initialCity?: CityKey;
   /** `profileSettings.diaryStartDate` — see WorldVisitsChart's own prop
    * of the same name (#370). */
   diaryStartDate?: string | null;
 }) {
-  const [city, setCity] = useState<CityKey>("atlanta");
+  const [city, setCity] = useState<CityKey>(initialCity);
   const [destinations, setDestinations] = useState<"shown" | "hidden">("shown");
   const [qaOpen, setQaOpen] = useState(false);
   const router = useRouter();
   const cityData = data[city];
 
+  // The picked city lives in the URL so a refresh (or a shared link) lands
+  // back on it. `history.replaceState` rather than `router.replace`: the
+  // page is force-dynamic and already holds every city's data, so a
+  // navigation would only re-run the server fetch to learn what this
+  // component already knows. Next.js folds a native replaceState into its
+  // own router state, so `router.refresh()` after a QA change keeps the
+  // param. Replace, not push, so flipping between cities doesn't fill the
+  // back button with tab changes.
+  const selectCity = useCallback((next: CityKey) => {
+    setCity(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("city", next);
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
+
+  // Open-item count per city, for the check button's warning. Fetched the
+  // first time a city is shown (the check reads every geocoded place, so
+  // not all five up front), then kept current by the modal itself, which
+  // reports the count each time it re-runs the check after a dismissal or
+  // mapping. `undefined` means "not checked yet", which shows no warning
+  // rather than a false all-clear.
+  const [openCounts, setOpenCounts] = useState<Partial<Record<CityKey, number>>>({});
+  useEffect(() => {
+    if (openCounts[city] !== undefined) return;
+    let cancelled = false;
+    fetch(`/api/city-heatmap-qa?city=${encodeURIComponent(city)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((report: { open?: unknown[] } | null) => {
+        if (!cancelled && report && Array.isArray(report.open)) {
+          const count = report.open.length;
+          setOpenCounts((prev) => ({ ...prev, [city]: count }));
+        }
+      })
+      // A failed background check just means no warning; the modal reports
+      // its own error when opened.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [city, openCounts]);
+  const reportOpenCount = useCallback(
+    (count: number) => setOpenCounts((prev) => (prev[city] === count ? prev : { ...prev, [city]: count })),
+    [city],
+  );
+  const openCount = openCounts[city] ?? 0;
+
   const features = useMemo(() => {
     const topo = CITY_TOPOLOGIES[city];
     return feature(topo, topo.objects[city]);
+  }, [city]);
+
+  // The primary city's outline (`primary` in the city config): one clean
+  // boundary ring, carried in the topology as its own `outline` object —
+  // see CityConfig.primary for why it isn't the neighborhoods dissolved.
+  const outlines = useMemo(() => {
+    const topo = CITY_TOPOLOGIES[city];
+    if (!CITIES[city].primary || !topo.objects.outline) return undefined;
+    return feature(topo, topo.objects.outline).features;
+  }, [city]);
+  const primaryName = CITIES[city].primary?.name;
+  const waterOverRegion = useMemo(() => {
+    const suburbs = suburbRootsOf(city);
+    return suburbs.size > 0 ? (f: { properties: CityProperties }) => suburbs.has(f.properties.root) : undefined;
   }, [city]);
 
   // A city with `homeRoots` (DC metro, #281) opens framed on just those
@@ -190,7 +283,7 @@ export function CityHeatmapExplorer({
       }}
       filters={
         <>
-          <GroupByPicker value={city} onChange={setCity} options={CITY_OPTIONS} label="City" />
+          <GroupByPicker value={city} onChange={selectCity} options={CITY_OPTIONS} label="City" />
           <GroupByPicker
             value={destinations}
             onChange={setDestinations}
@@ -198,8 +291,23 @@ export function CityHeatmapExplorer({
             label="Destinations"
             className="ml-auto"
           />
-          <Button type="button" variant="outline" size="sm" onClick={() => setQaOpen(true)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setQaOpen(true)}
+            aria-label={openCount > 0 ? `Check places: ${openCount} outstanding` : "Check places"}
+            className={openCount > 0 ? "border-amber-500/60 text-amber-400" : undefined}
+          >
+            {openCount > 0 ? (
+              // Blinks (a pulse a touch faster than Tailwind's default) so
+              // an outstanding item is noticed without opening the modal;
+              // motion-safe so a reduced-motion reader gets the same icon
+              // and count, held still.
+              <TriangleAlert aria-hidden className="motion-safe:animate-[pulse_1.2s_ease-in-out_infinite]" />
+            ) : null}
             Check places
+            {openCount > 0 ? <span className="tabular-nums">({openCount})</span> : null}
           </Button>
         </>
       }
@@ -207,7 +315,13 @@ export function CityHeatmapExplorer({
       {/* #293's coordinate check. onChanged refetches the server data,
           since adding or removing a neighborhood mapping changes which
           polygon a place colours. */}
-      <CityHeatmapQaModal open={qaOpen} onClose={() => setQaOpen(false)} cityKey={city} onChanged={() => router.refresh()} />
+      <CityHeatmapQaModal
+        open={qaOpen}
+        onClose={() => setQaOpen(false)}
+        cityKey={city}
+        onChanged={() => router.refresh()}
+        onOpenCount={reportOpenCount}
+      />
       <ChartCard empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
           {({ width, height }) => (
@@ -232,6 +346,9 @@ export function CityHeatmapExplorer({
                 return date ? formatFirstVisited(date, diaryStartDate) : null;
               }}
               contextFeatures={water}
+              waterOverRegion={waterOverRegion}
+              outlines={outlines}
+              getRegionLabel={regionLabel}
               markers={visibleMarkers}
               getMarkerValue={(m) => daysByMarkerId.get(m.id) ?? null}
               markerValueLabel="days"
@@ -246,11 +363,16 @@ export function CityHeatmapExplorer({
               // that dots no longer balloon on zoom (below) and can be
               // hidden entirely via the toggle above when they crowd a
               // small neighborhood.
-              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there, with surrounding water shown in blue; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
+              ariaLabel={`${CITIES[city].label} map. Neighborhoods colored by days logged there and named once they are large enough, with surrounding water shown in blue; dot size shows how often you've visited. Scroll or pinch to zoom, drag to pan. Click a neighborhood to zoom into it, click the background to reset. Hover a neighborhood or dot to see its value.`}
             />
           )}
         </ResponsiveChart>
       </ChartCard>
+      {primaryName ? (
+        <p className="text-xs text-muted-foreground">
+          The outline marks {primaryName}, the central city; the towns and counties around it are drawn for context.
+        </p>
+      ) : null}
     </ChartPage>
   );
 }

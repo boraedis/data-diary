@@ -46,8 +46,14 @@ const SOURCES_DIR = path.join(GEO_DIR, "sources");
 
 // Catalog roots and coordinate-resolved suburbs (#281) both contribute
 // features keyed by `root`; only how a place finds them differs.
+//
+// Suburbs come *first*, and the order is load-bearing: a map paints its
+// features in file order, so the catalog roots (the city itself) land on
+// top. Where a suburb's Census boundary and the city's own neighborhood
+// layer disagree by a sliver (Atlanta's, against Brookhaven's and
+// Druid Hills'), the city's polygon wins, and so does its hover.
 function allSources(city) {
-  return [...city.sources, ...(city.suburbs ?? [])];
+  return [...(city.suburbs ?? []), ...city.sources];
 }
 
 function loadCitySource(cityKey, city) {
@@ -175,7 +181,13 @@ function buildCity(cityKey, city) {
   // class of bug doesn't show up in tsc/eslint). 1e6 is fine-grained
   // enough that no city-scale neighborhood boundary visibly snaps to a
   // grid.
-  let topo = topology({ [cityKey]: collection }, 1e6);
+  // A city with a `primary` also carries its outline as a second object, in
+  // the same topology so it is quantized and delta-encoded with the rest.
+  const objects = { [cityKey]: collection };
+  if (city.primary) {
+    objects.outline = JSON.parse(readFileSync(path.join(SOURCES_DIR, city.primary.sourceFile), "utf8"));
+  }
+  let topo = topology(objects, 1e6);
   topo = presimplify(topo);
   // Deliberately conservative threshold — coordinates are raw lon/lat
   // degrees (unprojected), so this is only dropping near-collinear

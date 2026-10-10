@@ -11,7 +11,8 @@ export type CityPlaceRow = { idPath: string; namePath: string };
  * first-path-segment-only version.
  *
  * A place resolves to whichever of its namePath segments *after* a
- * matching root (once normalized) matches a real geometry feature name —
+ * matching root (once normalized) matches a real geometry feature name
+ * (or "Name (Parent segment)", for a name qualified by the one above it) —
  * every segment gets checked, not just the first, because #177's cities
  * don't all sit one level below their root: NYC is root -> borough ->
  * neighborhood, every other city is root -> neighborhood directly.
@@ -36,8 +37,17 @@ export function resolveCityFeatureName(
     const localSegments = nameSegments.slice(rootIndex + 1);
     const geometryNames = geometryNamesByRoot.get(root);
     if (!geometryNames) continue;
-    for (const segment of localSegments) {
+    for (const [i, segment] of localSegments.entries()) {
       const normalized = normalize(root, segment);
+      // A name that repeats within a root is stored qualified by the
+      // segment above it, "Name (Parent)" — Istanbul's mahalles, where
+      // "Cumhuriyet" is a neighborhood of dozens of districts. Tried
+      // before the bare name, and the bare name is not a feature at all
+      // for such a name, so a mahalle can't land in a namesake elsewhere.
+      if (i > 0) {
+        const qualified = `${normalized} (${normalize(root, localSegments[i - 1])})`;
+        if (geometryNames.has(qualified)) return { root, featureName: qualified };
+      }
       if (geometryNames.has(normalized)) return { root, featureName: normalized };
     }
     return null; // this place's idPath passes through `root` but resolves to no feature
@@ -68,7 +78,7 @@ export function isPlaceInCity(idPath: string, roots: CityRootConfig[]): boolean 
 export type CitySuburbFeature = {
   root: string;
   name: string;
-  /** The "Rest of <county>" backdrop — see scripts/geo-fetch-dc-suburbs.mjs.
+  /** The "Rest of <county>" backdrop — see scripts/geo-fetch-suburbs.mjs.
    * It contains every point in its county, so it's only a match once every
    * real place has missed. */
   remainder?: boolean;
