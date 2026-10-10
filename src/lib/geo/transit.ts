@@ -3,20 +3,21 @@ import type { Topology, GeometryCollection } from "topojson-specification";
 import type { FeatureCollection, Geometry } from "geojson";
 import type { CityKey } from "@/lib/geo/city-config";
 
-// The city heatmaps' metro overlay (#639): urban rail lines and metro
-// station points, drawn over the same maps as the road network — shared by
+// The city heatmaps' metro overlay (#639): each city's metro lines, drawn in
+// their own colours, and its metro stations — shared by
 // scripts/geo-build-transit.mjs, which writes src/data/geo/transit/*.topo.json,
 // and city-heatmap-explorer.tsx, which lazy-loads them. See the build
-// script's header for where the geometry comes from (Overture/OSM) and which
-// rail classes are kept.
+// script's header for where the geometry comes from (OpenStreetMap route
+// relations) and why it isn't Overture's rail data.
 
 /** The TopoJSON object name every committed transit file uses, same
  * convention as ROADS_TOPOLOGY_OBJECT. */
 export const TRANSIT_TOPOLOGY_OBJECT = "transit";
 
-/** `line` for a rail alignment, `station` for a metro station point. Lines
- * are one MultiLineString per city; stations are one Point per station. */
-export type TransitProperties = { kind: "line" | "station" };
+/** `line` for one metro line (`ref` is its route number or letter, `colour`
+ * its OSM `colour` tag as `#rrggbb`, absent when the line has none), `station`
+ * for a station point. */
+export type TransitProperties = { kind: "line" | "station"; ref?: string; colour?: string; name?: string };
 
 type TransitTopology = Topology<{ [TRANSIT_TOPOLOGY_OBJECT]: GeometryCollection<TransitProperties> }>;
 

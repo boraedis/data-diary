@@ -53,7 +53,7 @@ export const GEO_INTERACTION_GUIDE =
 // The city heatmaps' guide (#639): the shared geo guide above, plus the
 // Roads & metro switch and what the metro looks like. The world and US-state
 // maps have neither, so they keep the shared text alone.
-export const CITY_HEATMAP_INTERACTION_GUIDE = `${GEO_INTERACTION_GUIDE} The Roads & metro switch shows or hides the road network and the metro lines together. Metro lines are drawn in the accent colour, and metro stations appear as rings once you zoom in close enough to place them.`;
+export const CITY_HEATMAP_INTERACTION_GUIDE = `${GEO_INTERACTION_GUIDE} The Roads & metro switch shows or hides the road network and the metro lines together. Each metro line is drawn in its own colour, and metro stations appear as rings once you zoom in close enough to place them.`;
 
 /** The Centre of Gravity map (#215) — built on `InteractiveGeo`, but its
  * content is all markers and a path, with no choropleth or drill-down,

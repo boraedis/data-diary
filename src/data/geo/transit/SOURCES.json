@@ -100,30 +100,23 @@
     "pointsKept": 1
   },
   "istanbul": {
-    "release": "2026-09-23.1",
-    "lineClasses": [
+    "source": "OpenStreetMap route relations and station nodes, via the Overpass API",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://www.openstreetmap.org/copyright",
+    "fetchedAt": "2026-10-10",
+    "routeTypes": [
       "subway",
       "light_rail",
       "monorail",
       "tram"
     ],
-    "stationCategories": [
-      "metro_station",
-      "light_rail_and_subway_station"
+    "stationTypes": [
+      "subway",
+      "light_rail",
+      "monorail"
     ],
-    "lines": {
-      "licences": [
-        "OpenStreetMap (ODbL-1.0)"
-      ]
-    },
-    "stations": {
-      "count": 27,
-      "licences": [
-        "Foursquare (Apache-2.0)",
-        "Microsoft (CDLA-Permissive-2.0)",
-        "Overture (CDLA-Permissive-2.0)"
-      ]
-    },
+    "lines": 25,
+    "stations": 178,
     "clipBox": [
       27.7721,
       40.6039,
@@ -133,37 +126,29 @@
     "pointsKept": 1
   },
   "nyc": {
-    "release": "2026-09-23.1",
-    "lineClasses": [
+    "source": "OpenStreetMap route relations and station nodes, via the Overpass API",
+    "license": "ODbL 1.0",
+    "licenseSource": "https://www.openstreetmap.org/copyright",
+    "fetchedAt": "2026-10-10",
+    "routeTypes": [
       "subway",
       "light_rail",
       "monorail",
       "tram"
     ],
-    "stationCategories": [
-      "metro_station",
-      "light_rail_and_subway_station"
+    "stationTypes": [
+      "subway",
+      "light_rail",
+      "monorail"
     ],
-    "lines": {
-      "licences": [
-        "OpenStreetMap (ODbL-1.0)"
-      ]
-    },
-    "stations": {
-      "count": 196,
-      "licences": [
-        "BrightQuery (CDLA-Permissive-2.0)",
-        "Foursquare (Apache-2.0)",
-        "Overture (CDLA-Permissive-2.0)",
-        "Overture-signals (CDLA-Permissive-2.0)"
-      ]
-    },
+    "lines": 39,
+    "stations": 543,
     "clipBox": [
       -74.3111,
       40.4406,
       -73.6445,
       40.9711
     ],
-    "pointsKept": 0.2
+    "pointsKept": 0.5
   }
 }
