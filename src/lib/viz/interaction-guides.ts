@@ -50,6 +50,11 @@ export const TREEMAP_INTERACTION_GUIDE =
 export const GEO_INTERACTION_GUIDE =
   "Scroll or pinch to zoom, drag to pan. Click a region to drill into it where that's available; hover a region or marker for its exact value, or for what's known about it where there's no figure to show. A region's name is written on it once it is large enough on screen to hold it, so zooming in names more of them. On a city map, a white outline marks the central city of a metro area. Highways and major roads are drawn faintly and grow clearer as you zoom in.";
 
+// The city heatmaps' guide (#639): the shared geo guide above, plus the
+// Roads & metro switch and what the metro looks like. The world and US-state
+// maps have neither, so they keep the shared text alone.
+export const CITY_HEATMAP_INTERACTION_GUIDE = `${GEO_INTERACTION_GUIDE} The Roads & metro switch shows or hides the road network and the metro lines together. Each metro line is drawn in its own colour, and metro stations appear as rings once you zoom in close enough to place them.`;
+
 /** The Centre of Gravity map (#215) — built on `InteractiveGeo`, but its
  * content is all markers and a path, with no choropleth or drill-down,
  * so the generic geo paragraph above would promise things it doesn't do. */
