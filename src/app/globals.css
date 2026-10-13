@@ -34,6 +34,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -71,6 +72,10 @@
   --accent: oklch(0.92 0.03 65);
   --accent-foreground: oklch(0.28 0.03 40);
   --destructive: oklch(0.577 0.22 27);
+  /* Amber, for a "heads up, nothing's wrong" cue (issue #641) — not an error,
+     so it stays clearly apart from --destructive's red. Dark enough on the
+     light background to read as text. */
+  --warning: oklch(0.55 0.15 55);
   --border: oklch(0.88 0.015 55);
   --input: oklch(0.88 0.015 55);
   --ring: oklch(0.58 0.15 40 / 50%);
@@ -209,6 +214,7 @@
   --accent: oklch(0.29 0.03 55);
   --accent-foreground: oklch(0.96 0.012 70);
   --destructive: oklch(0.7 0.19 25);
+  --warning: oklch(0.8 0.15 75);
   --border: oklch(0.92 0.02 60 / 13%);
   --input: oklch(0.92 0.02 60 / 17%);
   --ring: oklch(0.72 0.16 40 / 55%);
