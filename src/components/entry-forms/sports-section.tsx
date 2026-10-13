@@ -13,6 +13,7 @@ import { usePendingOpenMatch, type PendingOpen } from "@/lib/use-pending-open";
 import type { EntertainmentLocationTypeItem, SportsDivisionItem, SportsGameTypeItem, SportsSeasonItem } from "@/lib/catalog-admin";
 import type { SportCatalogItem, SportsLeagueItem, SportsTeamItem } from "@/lib/days";
 import { formatMatchup } from "@/lib/sports-matchup";
+import { compareSeasonsNewestFirst, latestSeasonName } from "@/lib/sports-season";
 
 // The nested shape GET /api/sports actually returns — leagues and teams
 // hydrated onto each sport so the picker cascade (sport -> league -> team)
@@ -485,6 +486,12 @@ function NewSeasonModal({
   );
 }
 
+/** The season a new watch in this league should start on: its most recent. */
+function defaultSeasonFor(seasonsByLeague: Record<number, SportsSeasonItem[]>, leagueId: number | null): string {
+  if (leagueId === null) return "";
+  return latestSeasonName((seasonsByLeague[leagueId] ?? []).map((s) => s.name)) ?? "";
+}
+
 /** The "log this watch" modal — opens the moment a league is picked (from
  * the unified search) or the sport-only "+ New sport" fallback, and is also
  * how an already-logged watch gets edited. Season is scoped to whichever
@@ -526,9 +533,12 @@ function SportsWatchDetailModal({
   const [leagueId, setLeagueId] = useState<number | null>(initial?.leagueId ?? initialLeagueId);
   const [homeTeamId, setHomeTeamId] = useState<number | null>(initial?.homeTeamId ?? null);
   const [awayTeamId, setAwayTeamId] = useState<number | null>(initial?.awayTeamId ?? null);
-  const [season, setSeason] = useState(initial?.season ?? "");
+  // A new watch starts on its league's most recent season and watched live
+  // (issue #641) — the two defaults most watches land on. An existing watch
+  // keeps exactly what was saved, including an empty season.
+  const [season, setSeason] = useState(initial ? (initial.season ?? "") : defaultSeasonFor(seasonsByLeague, initialLeagueId));
   const [gameType, setGameType] = useState(initial?.gameType ?? "");
-  const [watchedLive, setWatchedLive] = useState(initial?.watchedLive ?? false);
+  const [watchedLive, setWatchedLive] = useState(initial?.watchedLive ?? true);
   const [durationMinutes, setDurationMinutes] = useState<number | null>(initial?.durationMinutes ?? null);
   const [locationType, setLocationType] = useState(initial?.locationType ?? "");
   const [newLeagueOpen, setNewLeagueOpen] = useState(false);
@@ -568,8 +578,17 @@ function SportsWatchDetailModal({
 
   if (!sport) return null;
 
-  const seasonOptions = leagueId !== null ? (seasonsByLeague[leagueId] ?? []) : [];
+  // Newest first, so the season a new watch defaults to is the top entry.
+  const seasonOptions = (leagueId !== null ? (seasonsByLeague[leagueId] ?? []) : [])
+    .slice()
+    .sort((a, b) => compareSeasonsNewestFirst(a.name, b.name));
   const hasUnlistedSeason = season.trim() !== "" && !seasonOptions.some((s) => s.name === season);
+  // The warning colour (issue #641, --warning) marks the most recent season
+  // so it catches the eye — a heads-up, not an error, so it stays amber
+  // rather than red. The option colour is a bonus: iOS Safari ignores it, so
+  // the select itself also takes the colour when the latest season is picked.
+  const latestSeason = seasonOptions[0]?.name;
+  const seasonIsLatest = season !== "" && season === latestSeason;
 
   return (
     <>
@@ -586,8 +605,12 @@ function SportsWatchDetailModal({
               id="sports-detail-league"
               value={leagueId ?? ""}
               onChange={(e) => {
+                const nextLeagueId = e.target.value ? Number(e.target.value) : null;
                 setDirty(true);
-                setLeagueId(e.target.value ? Number(e.target.value) : null);
+                setLeagueId(nextLeagueId);
+                // A new watch follows its league: seasons are per league, so
+                // the previous league's season wouldn't be in this list.
+                if (!initial) setSeason(defaultSeasonFor(seasonsByLeague, nextLeagueId));
               }}
             >
               <option value="">None</option>
@@ -648,6 +671,7 @@ function SportsWatchDetailModal({
             </div>
             <Select
               id="sports-detail-season"
+              className={seasonIsLatest ? "font-medium text-warning" : undefined}
               value={season}
               onChange={(e) => {
                 setDirty(true);
@@ -657,11 +681,14 @@ function SportsWatchDetailModal({
             >
               <option value="">None</option>
               {hasUnlistedSeason ? <option value={season}>{season}</option> : null}
-              {seasonOptions.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
+              {seasonOptions.map((s) => {
+                const isLatest = s.name === latestSeason;
+                return (
+                  <option key={s.id} value={s.name} className={isLatest ? "font-medium text-warning" : undefined}>
+                    {isLatest ? `${s.name} (latest)` : s.name}
+                  </option>
+                );
+              })}
             </Select>
             {leagueId === null ? <p className="text-xs text-muted-foreground">Pick a league to set a season.</p> : null}
           </div>

@@ -345,6 +345,10 @@ export function EntertainmentDayForm({
             placeholder="Search movies, TV shows, sports leagues, books…"
             emptyMessage={'No matches — use a section\'s own "+ New"/"+ Add" button below.'}
             autoFocus
+            // Sports keeps the query after a pick (issue #641): one league
+            // often has several games in a day, so the next pick is one tap
+            // away instead of a retype. Every other kind clears as before.
+            clearQueryOnSelect={(id) => decodeSearchId(id).kind !== "sports"}
           />
         </CardContent>
       </Card>

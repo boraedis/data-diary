@@ -73,11 +73,12 @@
   --accent: oklch(0.92 0.03 65);
   --accent-foreground: oklch(0.28 0.03 40);
   --destructive: oklch(0.577 0.22 27);
-  /* Status hues for "how recent is this" cues (issues #641, #643). Warning
-     is amber, a heads-up rather than an error, so it stays apart from
-     --destructive's red. Both are dark enough on the light background to
-     read as text. */
+  /* Amber, for a "heads up, nothing's wrong" cue (issue #641) — not an error,
+     so it stays clearly apart from --destructive's red. Dark enough on the
+     light background to read as text. */
   --warning: oklch(0.55 0.15 55);
+  /* Green for "recent enough" (issue #643). Same readable-on-light tuning
+     as --warning. */
   --success: oklch(0.5 0.13 150);
   --border: oklch(0.88 0.015 55);
   --input: oklch(0.88 0.015 55);

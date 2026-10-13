@@ -57,6 +57,7 @@ export function SearchPanel({
   autoFocus,
   trailingAction,
   refocusOnSelect = true,
+  clearQueryOnSelect = () => true,
 }: {
   items: SearchItem[];
   onSelect: (id: number) => void;
@@ -77,6 +78,11 @@ export function SearchPanel({
    * closes the panel on select (`SearchCombobox`) turns this off and returns
    * focus to its own trigger instead. */
   refocusOnSelect?: boolean;
+  /** Whether a pick clears the query, decided per picked id. Default: always.
+   * A host that expects repeat picks from the same results can keep it — the
+   * sports picker does (issue #641), since one league often has several
+   * games logged in a day. */
+  clearQueryOnSelect?: (id: number) => boolean;
 }) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,7 +93,7 @@ export function SearchPanel({
   // concern: there, closing should hand focus back to the trigger instead.
   function pick(run: (id: number) => void, id: number) {
     run(id);
-    setQuery("");
+    if (clearQueryOnSelect(id)) setQuery("");
     if (refocusOnSelect) inputRef.current?.focus();
   }
 
