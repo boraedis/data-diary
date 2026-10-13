@@ -10,6 +10,17 @@ jobs:
   reset-branch:
     runs-on: ubuntu-latest
     steps:
+      # neonctl isn't on the ubuntu-latest image, so the reset step failed
+      # with "command not found" every night from 2026-10-08 (#647). Pinned
+      # so a bad release can't change this job's behaviour unannounced; bump
+      # it on purpose. Node 22 matches the other workflows, and neonctl needs
+      # Node 20.19 or newer.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install neonctl
+        run: npm install -g neonctl@8.3.4
+
       - name: Reset QA branch to production parent
         run: |
           neonctl branches reset qa \
