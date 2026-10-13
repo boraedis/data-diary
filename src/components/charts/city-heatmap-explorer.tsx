@@ -380,7 +380,11 @@ export function CityHeatmapExplorer({
         onChanged={() => router.refresh()}
         onOpenCount={reportOpenCount}
       />
-      <ChartCard empty={cityData.neighborhoods.length === 0 && cityData.destinations.length === 0}>
+      {/* No `empty` fallback here, unlike other charts: the map's shapes come
+          from the bundled geometry, not the database, so a city with nothing
+          logged yet still shows its outline, roads and metro (#639 review).
+          Its neighbourhoods just draw in the no-data colour. */}
+      <ChartCard>
         <ResponsiveChart className={CHART_HEIGHT_CLASS} fillViewport minWidth={360}>
           {({ width, height }) => (
             <InteractiveGeo<CityProperties>
