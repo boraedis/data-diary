@@ -57,6 +57,20 @@ const USER_AGENT = "data-diary-geo-build/1.0";
 const ROUTE_TYPES = "subway|light_rail|monorail|tram";
 const STATION_TYPES = "subway|light_rail|monorail";
 
+/** Lines dropped from a city's overlay by their OSM `ref`, after review.
+ * DC's Capitol subway (the Senate and House lines) is not part of the
+ * metro the chart is about. */
+const EXCLUDED_LINES = {
+  "dc-metro": [
+    "Dirksen-Hart Line Northbound",
+    "Dirksen-Hart Line Southbound",
+    "Rayburn Line Northbound",
+    "Rayburn Line Southbound",
+    "Russell Line Northbound",
+    "Russell Line Southbound",
+  ],
+};
+
 /** Member roles that are the line's own track. Platforms, stops and
  * entrances have other roles and are left out. */
 const TRACK_ROLES = new Set(["", "forward", "backward"]);
@@ -112,7 +126,7 @@ function normaliseColour(value) {
 
 /** Route relations -> one line per network+ref, as a MultiLineString clipped
  * to `box`. */
-function toLines(relations, box) {
+function toLines(relations, box, excluded = []) {
   const byLine = new Map();
   for (const rel of relations) {
     const tags = rel.tags ?? {};
@@ -128,6 +142,7 @@ function toLines(relations, box) {
   }
   const features = [];
   for (const line of byLine.values()) {
+    if (excluded.includes(line.ref)) continue;
     const clipped = clipGeometry({ type: "MultiLineString", coordinates: [...line.ways.values()] }, box);
     if (!clipped || clipped.type !== "MultiLineString") continue;
     features.push({
@@ -187,7 +202,8 @@ async function main() {
       `[out:json][timeout:180];node["railway"="station"]["station"~"^(${STATION_TYPES})$"](${bbox});out body;`,
       `${cityKey} stations`,
     );
-    const lines = toLines(routes.elements, box);
+    const excluded = EXCLUDED_LINES[cityKey] ?? [];
+    const lines = toLines(routes.elements, box, excluded);
     const stations = toStations(stationNodes.elements, box);
     const features = [...lines, ...stations];
     const { json, kept } = buildTopology(features, TARGET_BYTES, TRANSIT_TOPOLOGY_OBJECT);
@@ -201,6 +217,7 @@ async function main() {
       stationTypes: STATION_TYPES.split("|"),
       lines: lines.length,
       stations: stations.length,
+      excludedLines: excluded,
       clipBox: box.map((v) => Number(v.toFixed(4))),
       pointsKept: kept,
     };
