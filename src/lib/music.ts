@@ -22,6 +22,15 @@ export type MusicListenStats = {
   latestPlayedAt: string | null;
 };
 
+/** The newest listen's timestamp, or null when nothing has been imported.
+ * Home calls this on every load (#651), so it's one indexed max() on
+ * played_at rather than getMusicListenStats's full-table count. */
+export async function getLatestMusicListenAt(): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db.select({ latest: max(musicListens.playedAt) }).from(musicListens);
+  return row?.latest?.toISOString() ?? null;
+}
+
 export async function getMusicListenStats(): Promise<MusicListenStats> {
   const db = getDb();
   const [row] = await db

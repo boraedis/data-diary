@@ -79,6 +79,16 @@ export default async function ManageMusicPage() {
           <p className="col-span-full text-xs text-muted-foreground">
             Aim for a Spotify export about monthly. Green under 30 days, amber 30–59, red 60+.
           </p>
+          {/* Spotify's privacy page is where the GDPR export is requested
+              (#651). It opens in a new tab, so the upload page stays put. */}
+          <a
+            href="https://www.spotify.com/us/account/privacy/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${buttonVariants({ variant: "outline", size: "sm" })} col-span-full w-fit`}
+          >
+            Request a Spotify export
+          </a>
         </CardContent>
       </Card>
 
