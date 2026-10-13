@@ -5,6 +5,8 @@ import { RecentDaysScroller } from "@/components/recent-days-scroller";
 import { OnThisDayCard } from "@/components/on-this-day-card";
 import { todayDateString } from "@/lib/date";
 import { getHomeDashboardData, type BirthdayEntry } from "@/lib/home";
+import { getLatestMusicListenAt } from "@/lib/music";
+import { daysSinceLatestListen, importFreshness } from "@/lib/music-staleness";
 import { getOnThisDayForHome } from "@/lib/on-this-day";
 import { countUnseen, getUnseenRecaps } from "@/lib/recap-seen";
 
@@ -50,12 +52,19 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 export default async function HomePage() {
-  const [data, unseenRecaps, onThisDay] = await Promise.all([
+  const [data, unseenRecaps, onThisDay, latestMusicListenAt] = await Promise.all([
     getHomeDashboardData(),
     getUnseenRecaps(),
     getOnThisDayForHome(todayDateString()),
+    getLatestMusicListenAt(),
   ]);
   const newRecaps = countUnseen(unseenRecaps);
+  // The Spotify export reminder (#651): shown on the Manage tile only once
+  // the newest listen is 60+ days old. The 30–59 band lives on the music
+  // page, so Home stays quiet most of the time.
+  const musicDaysSince = daysSinceLatestListen(latestMusicListenAt, todayDateString());
+  const musicOverdueDays =
+    musicDaysSince !== null && importFreshness(musicDaysSince) === "overdue" ? musicDaysSince : null;
   const todayDate = data.recentDays[data.recentDays.length - 1]?.date ?? "";
 
   return (
@@ -129,6 +138,14 @@ export default async function HomePage() {
                     {href === "/recap" && newRecaps > 0 ? (
                       <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
                         {newRecaps} new
+                      </span>
+                    ) : null}
+                    {href === "/manage" && musicOverdueDays !== null ? (
+                      // Outlined rather than filled: red text on a red fill
+                      // is unreadable in dark mode, and an outline carries
+                      // the same alarm without that problem.
+                      <span className="rounded-full border border-destructive px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-destructive">
+                        Music export {musicOverdueDays}d old
                       </span>
                     ) : null}
                   </CardContent>
