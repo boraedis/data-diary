@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MusicUploadPanel } from "@/components/manage/music-upload-panel";
 import { ReviewProgressRow } from "@/components/manage/review-progress-row";
 import { getMusicCurationStats, getMusicListenStats } from "@/lib/music";
+import { todayDateString } from "@/lib/date";
+import { daysSinceLatestListen, importFreshness, type ImportFreshness } from "@/lib/music-staleness";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +14,22 @@ function formatDate(value: string | null): string {
   return new Date(value).toLocaleDateString();
 }
 
+// Colour for the newest-listen date and its "N days ago" line (issue #643).
+// The rule is a heads-up, not a nag: amber and red only ask for a fresh
+// export, and nothing here changes behaviour.
+const FRESHNESS_TEXT: Record<ImportFreshness, string> = {
+  fresh: "text-success",
+  due: "text-warning",
+  overdue: "text-destructive",
+};
+
 export default async function ManageMusicPage() {
   const [stats, curation] = await Promise.all([getMusicListenStats(), getMusicCurationStats()]);
+  // Computed on the server, so "today" is the server's calendar date. The
+  // app runs on Vercel (UTC), so near local midnight this can read one day
+  // behind, which is harmless against 30- and 60-day bands.
+  const daysSince = daysSinceLatestListen(stats.latestPlayedAt, todayDateString());
+  const freshnessClass = daysSince === null ? "" : FRESHNESS_TEXT[importFreshness(daysSince)];
 
   const needsReview =
     curation.totalGenres -
@@ -52,9 +68,17 @@ export default async function ManageMusicPage() {
           <div>
             <span className="text-muted-foreground">Date range</span>
             <div className="font-mono text-xs">
-              {formatDate(stats.earliestPlayedAt)} – {formatDate(stats.latestPlayedAt)}
+              {formatDate(stats.earliestPlayedAt)} – <span className={freshnessClass}>{formatDate(stats.latestPlayedAt)}</span>
             </div>
+            {daysSince !== null && (
+              <div className={`text-xs ${freshnessClass}`}>
+                {daysSince === 0 ? "newest listen today" : `newest listen ${daysSince} ${daysSince === 1 ? "day" : "days"} ago`}
+              </div>
+            )}
           </div>
+          <p className="col-span-full text-xs text-muted-foreground">
+            Aim for a Spotify export about monthly. Green under 30 days, amber 30–59, red 60+.
+          </p>
         </CardContent>
       </Card>
 
