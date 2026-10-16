@@ -319,6 +319,19 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
     });
   }
 
+  const topExercise = exercise.top[0];
+  if (topExercise) {
+    add({
+      id: "top-exercise",
+      domain: "health",
+      kicker: "Your most-trained exercise",
+      value: topExercise.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topExercise.value * 60))} across ${topExercise.count} ${plural(topExercise.count, "session")}.`,
+      detail: null,
+      weight: 58,
+    });
+  }
   if (exercise.daysTrained > 0) {
     add({
       id: "days-trained",

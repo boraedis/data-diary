@@ -3,7 +3,10 @@ import { days, workouts } from "@/db/schema";
 import { getExerciseWorkoutRows, getSleepNightsData, type ExerciseWorkoutRow, type SleepDay } from "@/lib/charts";
 import { addDays } from "@/lib/date";
 import { getDb } from "@/lib/db";
+import { buildExerciseLeaderboard } from "@/lib/leaderboards/exercise";
+import type { LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { RecapPeriod } from "@/lib/recap";
+import { toRecapPicks } from "@/lib/recap-entertainment";
 
 // The recap's health & wellness section (issue #201, epic #130).
 //
@@ -132,6 +135,14 @@ export type RecapExercise = {
   /** The period's workouts in the exact shape the Exercise Mix chart takes
    * (hours per exercise, oldest first). */
   mix: ExerciseWorkoutRow[];
+  /** The period's most-trained exercises (#659), the exercise leaderboard's
+   * own ranking cut to the top five by `toRecapPicks`. Ranked by training
+   * *time* — workout duration, or its sets' when it has none, which
+   * `getExerciseWorkoutRows` already resolves — and a session is one
+   * logged workout of that exercise. Time rather than session count so the
+   * recap agrees with the leaderboard page and the mix chart above it.
+   * Empty when nothing was trained. */
+  top: LeaderboardRow[];
 };
 
 export type RecapHealth = {
@@ -460,6 +471,8 @@ export function summarizeExercise(
     priorDaysTrained: new Set(previous.map((row) => row.date)).size,
     exercisesLogged: current.length,
     mix,
+    // The "exercise" mode needs no focus links, so the map is empty.
+    top: toRecapPicks(buildExerciseLeaderboard(mix, new Map(), "exercise")),
   };
 }
 
