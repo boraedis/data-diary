@@ -513,7 +513,9 @@ export function VideoRecorder({
       );
     } else {
       setActiveId(null);
-      void runUploads();
+      // Nothing is recording now, so say so to the queue directly rather
+      // than waiting for activeId to reach it (see use-recording-uploads).
+      void runUploads(null);
       await refreshLocal();
       await openPlayback(id);
       if (interruptedRef.current) {
