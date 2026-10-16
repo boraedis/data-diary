@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, gte, isNotNull, lt, lte, min, sum } from "drizzle-orm";
+import { getRecapRankings, type RecapRankings } from "@/lib/recap-ranking";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   artistGenres,
@@ -430,13 +431,15 @@ export type RecapEntertainment = {
   topGenre: RecapListenPick | null;
   firsts: RecapFirsts;
   picks: RecapTopPicks;
+  /** How the movie and book rankings moved in the period (#660). */
+  rankings: RecapRankings;
 };
 
 export async function getRecapEntertainment(
   period: RecapPeriod,
   prior: RecapPeriod
 ): Promise<RecapEntertainment> {
-  const [current, previous, movie, book, artist, genre, firstTimes, picks] = await Promise.all([
+  const [current, previous, movie, book, artist, genre, firstTimes, picks, rankings] = await Promise.all([
     countsFor(period),
     countsFor(prior),
     topRankedMovie(period),
@@ -445,6 +448,7 @@ export async function getRecapEntertainment(
     topGenre(period),
     firsts(period),
     topPicks(period),
+    getRecapRankings(period),
   ]);
 
   const totals = (Object.keys(MEDIUM_LABELS) as RecapMediumKey[]).map((key) => ({
@@ -462,5 +466,6 @@ export async function getRecapEntertainment(
     topGenre: genre,
     firsts: firstTimes,
     picks,
+    rankings,
   };
 }

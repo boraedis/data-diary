@@ -84,6 +84,7 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       topGenre: null,
       firsts: { newArtists: { total: 0, examples: [] }, newMovieGenres: [] },
       picks: { songs: [], podcasts: [], games: [], sports: [], sportsMode: "team" },
+      rankings: { movie: { status: "unavailable", since: null }, book: { status: "unavailable", since: null } },
     },
     peoplePlaces: {
       topPerson: null,
@@ -144,6 +145,7 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       topGenre: { name: "art rock", minutes: 2000 },
       firsts: { newArtists: { total: 30, examples: ["Alvvays", "Bicep"] }, newMovieGenres: [] },
       picks: { songs: [], podcasts: [], games: [], sports: [], sportsMode: "team" },
+      rankings: { movie: { status: "unavailable", since: null }, book: { status: "unavailable", since: null } },
     },
     peoplePlaces: {
       topPerson: { name: "Sam", days: 140, priorDays: 120 },
