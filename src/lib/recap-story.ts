@@ -520,6 +520,19 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
       weight: 62,
     });
   }
+  const topShow = picks.shows[0];
+  if (topShow) {
+    add({
+      id: "top-show",
+      domain: "entertainment",
+      kicker: "Your top show",
+      value: topShow.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topShow.value * 60))} watched across ${topShow.count} ${plural(topShow.count, "episode")}.`,
+      detail: null,
+      weight: 61,
+    });
+  }
   const topSports = picks.sports[0];
   if (topSports) {
     add({

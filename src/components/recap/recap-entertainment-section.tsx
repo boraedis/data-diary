@@ -34,6 +34,8 @@ const GAME_COLUMNS: LeaderboardColumns = {
   contextDescription: undefined,
 };
 
+const SHOW_COLUMNS: LeaderboardColumns = { ...GAME_COLUMNS, nameHeader: "Show" };
+
 export function RecapEntertainmentSection({
   entertainment,
   periodLabel,
@@ -48,6 +50,7 @@ export function RecapEntertainmentSection({
     { title: "Top songs", rows: picks.songs, columns: SONG_COLUMNS },
     { title: "Top podcasts", rows: picks.podcasts, columns: PODCAST_COLUMNS },
     { title: "Top games", rows: picks.games, columns: GAME_COLUMNS },
+    { title: "Top shows", rows: picks.shows, columns: SHOW_COLUMNS },
     { title: picks.sportsMode === "team" ? "Top teams" : "Top leagues", rows: picks.sports, columns: sportsColumns(picks.sportsMode) },
   ].filter((table) => table.rows.length > 0);
   // A medium with nothing in either period isn't a gap worth a tile — it's
