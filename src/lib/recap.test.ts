@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  TRAILING_DECADE_SEGMENT,
+  decadeCoverageNote,
+  decadePeriod,
+  parseDecadeSegment,
+  summarizeDecades,
+  trailingDecadePeriod,
   MIN_DAYS_FOR_AVERAGE,
   PUBLISH_GRACE_DAYS,
   firstSeenInPeriod,
@@ -334,5 +340,90 @@ describe("monthsInRange with a publish date", () => {
   it("adds September once its grace window has passed", () => {
     const months = monthsInRange(2026, { first: "2015-06-12", last: "2026-10-04" }, new Map(), "2026-10-04");
     expect(months.map((m) => m.month)).toContain(9);
+  });
+});
+
+describe("decadePeriod / trailingDecadePeriod (#520)", () => {
+  it("spans ten whole calendar years, leap days included", () => {
+    expect(decadePeriod(2010)).toEqual({ start: "2010-01-01", end: "2019-12-31", label: "2010s" });
+    // 2012 and 2016 are leap years, so 3,652 days — not 3,650.
+    expect(periodLengthDays(decadePeriod(2010))).toBe(3652);
+    expect(periodUnit(decadePeriod(2020))).toBe("decade");
+  });
+
+  it("steps a calendar decade back to the named decade before it", () => {
+    expect(previousPeriod(decadePeriod(2020))).toEqual(decadePeriod(2010));
+    expect(previousPeriod(decadePeriod(2010))).toEqual(decadePeriod(2000));
+  });
+
+  it("ends the trailing window at the last completed year", () => {
+    // 2025 is published from 2026-01-05, so mid-October 2026 ends at 2025...
+    expect(trailingDecadePeriod("2026-10-16")).toEqual({
+      start: "2016-01-01",
+      end: "2025-12-31",
+      label: "2016–2025",
+    });
+    // ...but early January 2026 is inside the grace window, so it ends at 2024.
+    expect(trailingDecadePeriod("2026-01-02").end).toBe("2024-12-31");
+    expect(trailingDecadePeriod("2026-01-05").end).toBe("2025-12-31");
+  });
+
+  it("is still a decade, and compares against the ten calendar years before", () => {
+    const trailing = trailingDecadePeriod("2026-10-16");
+    expect(periodUnit(trailing)).toBe("decade");
+    expect(previousPeriod(trailing)).toEqual({
+      start: "2006-01-01",
+      end: "2015-12-31",
+      label: "the 10 years before",
+    });
+  });
+
+  it("is not confused with a ten-year window that isn't Jan-Dec", () => {
+    expect(periodUnit({ start: "2010-02-01", end: "2020-01-31", label: "x" })).toBeNull();
+  });
+});
+
+describe("decadeCoverageNote (#520)", () => {
+  const range = { first: "2016-03-02", last: "2026-10-15" };
+  it("says what the diary covers of a partial decade", () => {
+    expect(decadeCoverageNote(decadePeriod(2010), range)).toBe("Logged 2016–2019");
+  });
+  it("says nothing for a fully covered decade", () => {
+    expect(decadeCoverageNote(trailingDecadePeriod("2026-10-16"), range)).toBeNull();
+    expect(decadeCoverageNote(decadePeriod(2010), { first: "2005-01-01", last: "2030-01-01" })).toBeNull();
+  });
+  it("handles a single covered year, an uncovered decade and an empty diary", () => {
+    expect(decadeCoverageNote(decadePeriod(2010), { first: "2019-06-01", last: "2026-01-01" })).toBe("Logged 2019 only");
+    expect(decadeCoverageNote(decadePeriod(2000), range)).toBeNull();
+    expect(decadeCoverageNote(decadePeriod(2010), null)).toBeNull();
+  });
+});
+
+describe("summarizeDecades / parseDecadeSegment (#520)", () => {
+  const years = (...entries: [number, number][]) =>
+    entries.map(([year, loggedDays]) => ({ year, loggedDays, published: true }));
+
+  it("lists the partial 2010s, withholds the unfinished 2020s, and adds the trailing ten", () => {
+    const list = summarizeDecades(years([2026, 280], [2025, 365], [2020, 300], [2019, 200], [2016, 100]), "2026-10-16");
+    expect(list.map((d) => d.segment)).toEqual([TRAILING_DECADE_SEGMENT, "2010s"]);
+    expect(list[0].loggedDays).toBe(365 + 300 + 200 + 100);
+    expect(list[1].loggedDays).toBe(300);
+  });
+
+  it("drops the trailing window when it would repeat a published calendar decade", () => {
+    const list = summarizeDecades(years([2029, 365], [2025, 365], [2021, 365], [2020, 10]), "2030-01-10");
+    expect(list.map((d) => d.segment)).toEqual(["2020s"]);
+  });
+
+  it("lists nothing for an empty diary", () => {
+    expect(summarizeDecades([], "2026-10-16")).toEqual([]);
+  });
+
+  it("parses calendar and trailing segments and rejects the rest", () => {
+    expect(parseDecadeSegment("2010s", "2026-10-16")).toEqual(decadePeriod(2010));
+    expect(parseDecadeSegment("last-10", "2026-10-16")?.label).toBe("2016–2025");
+    for (const bad of ["2015s", "2010", "201s", "x", ""]) {
+      expect(parseDecadeSegment(bad, "2026-10-16")).toBeNull();
+    }
   });
 });

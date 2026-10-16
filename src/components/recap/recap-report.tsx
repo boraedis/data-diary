@@ -1,4 +1,5 @@
 import { RecapBodySection } from "@/components/recap/recap-body-section";
+import { RecapDecadeStrip } from "@/components/recap/recap-decade-strip";
 import { RecapEntertainmentSection } from "@/components/recap/recap-entertainment-section";
 import { RecapHealthSection } from "@/components/recap/recap-health-section";
 import { RecapLifeEventsCard } from "@/components/recap/recap-life-events-card";
@@ -64,6 +65,13 @@ import {
 //   the interesting month — the one something started or ended — gets
 //   buried in them.
 //
+// **The decade card set (#520).** Every fetcher is shared unchanged, as for
+// months. The decade keeps the year's full set (it isn't `compact`) and adds
+// one card, `RecapDecadeStrip`, for happiness year by year. Cards built on a
+// single "best day" or top-N lists were left as they are: over ten years
+// they read as "the best day of the decade", which is still a true and
+// wanted answer. Anything fancier was filed rather than guessed at.
+//
 // Health, body & habits, work & screen time (#530), entertainment and
 // moments carry over whole. Their averages are
 // already held to `MIN_DAYS_FOR_AVERAGE` (14 days), which a well-logged
@@ -96,6 +104,7 @@ export async function RecapReport({
 }) {
   const unit = chapter ? "chapter" : periodUnit(period);
   const isMonth = unit === "month";
+  const isDecade = unit === "decade";
   const compact = isMonth || (chapter !== undefined && isCompactChapter(period));
   const prior = previousPeriod(period);
   const [
@@ -161,6 +170,8 @@ export async function RecapReport({
       </div>
 
       <RecapHealthSection health={health} periodLabel={period.label} priorLabel={prior.label} />
+
+      {isDecade ? <RecapDecadeStrip series={health.happiness.series} /> : null}
 
       <RecapBodySection body={body} periodLabel={period.label} priorLabel={prior.label} />
 

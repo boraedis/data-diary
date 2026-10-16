@@ -179,6 +179,32 @@ export function longestGoodStreak(scored: HappinessDay[], period: RecapPeriod): 
   return best;
 }
 
+/** One calendar year's mean happiness inside a longer period. */
+export type YearHappiness = { year: number; average: number; daysLogged: number };
+
+/**
+ * Mean happiness per calendar year, oldest first (#520) — the decade
+ * recap's one new ingredient. Computed from the period's already-fetched
+ * `series`, so a decade costs no extra query for it.
+ *
+ * Years with no scored days are absent rather than zero: a year before the
+ * diary began isn't a year of unhappiness. Thin years are kept and carry
+ * their `daysLogged`, so the strip can say how much each bar rests on.
+ */
+export function happinessByYear(series: HappinessDay[]): YearHappiness[] {
+  const totals = new Map<number, { sum: number; count: number }>();
+  for (const { date, happiness } of series) {
+    const year = Number(date.slice(0, 4));
+    const entry = totals.get(year) ?? { sum: 0, count: 0 };
+    entry.sum += happiness;
+    entry.count += 1;
+    totals.set(year, entry);
+  }
+  return [...totals.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([year, { sum, count }]) => ({ year, average: sum / count, daysLogged: count }));
+}
+
 /** Happiness for both periods, plus the period's high and low day. */
 async function getHappiness(period: RecapPeriod, prior: RecapPeriod): Promise<RecapHappiness> {
   const db = getDb();

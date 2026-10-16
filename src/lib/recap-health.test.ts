@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  happinessByYear,
   GOOD_DAY_THRESHOLD,
   longestGoodStreak,
   summarizeExercise,
@@ -270,5 +271,20 @@ describe("summarizeSleep locations and naps", () => {
     // The report and the story both gate the breakdown on this count.
     expect(summarizeSleep(located(MIN_DAYS_FOR_AVERAGE - 1), period, prior).locations.locatedNights).toBeLessThan(MIN_DAYS_FOR_AVERAGE);
     expect(summarizeSleep(located(MIN_DAYS_FOR_AVERAGE), period, prior).locations.locatedNights).toBe(MIN_DAYS_FOR_AVERAGE);
+  });
+});
+
+describe("happinessByYear (#520)", () => {
+  it("averages per calendar year, oldest first, skipping years with no scores", () => {
+    const rows = [
+      { date: "2018-05-01", happiness: 90 },
+      { date: "2016-02-01", happiness: 70 },
+      { date: "2016-03-01", happiness: 80 },
+    ];
+    expect(happinessByYear(rows)).toEqual([
+      { year: 2016, average: 75, daysLogged: 2 },
+      { year: 2018, average: 90, daysLogged: 1 },
+    ]);
+    expect(happinessByYear([])).toEqual([]);
   });
 });

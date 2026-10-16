@@ -66,16 +66,71 @@ export function monthPeriod(year: number, month: number): RecapPeriod {
   };
 }
 
+/**
+ * Ten whole calendar years, January 1 of `startYear` through December 31 of
+ * `startYear + 9`, with a caller-chosen label (#520).
+ *
+ * `decadePeriod` and `trailingDecadePeriod` below are the two ways to ask
+ * for one; they differ only in alignment and label. Both are "a decade" to
+ * everything downstream (`periodUnit`, `previousPeriod`), which is why this
+ * is the shared constructor rather than either one calling the other.
+ */
+function tenYearPeriod(startYear: number, label: string): RecapPeriod {
+  return { start: `${startYear}-01-01`, end: `${startYear + 9}-12-31`, label };
+}
+
+/**
+ * A calendar decade as a period (#520): `decadePeriod(2010)` is the 2010s,
+ * 2010-01-01 to 2019-12-31. `startYear` should be a multiple of ten; the
+ * route's `parseDecadeSegment` guarantees it, and nothing here re-checks.
+ *
+ * The decade recap's whole claim on the foundation is this constructor
+ * plus the decade branches in `periodUnit` and `previousPeriod` — no
+ * fetcher changed signature, the same test months passed (#176). The
+ * data starts mid-decade (2016), so the 2010s is partial by nature; that's
+ * `decadeCoverageNote`'s job to say, and `toRecapStat`'s to handle.
+ */
+export function decadePeriod(startYear: number): RecapPeriod {
+  return tenYearPeriod(startYear, `${startYear}s`);
+}
+
+/**
+ * The ten calendar years ending at the last *completed* year (#520).
+ *
+ * The 2020s can't be published until 2030, so a calendar-decade recap of
+ * the current decade won't exist for years; this is the decade there is
+ * something to open now. "Completed" means the year's own recap is
+ * published (`isPeriodPublished`, grace window included), so the window
+ * never ends in a year that's still being backfilled.
+ *
+ * It's a window, not a calendar unit, so its label is the year range and
+ * its prior (`previousPeriod`) is "the 10 years before" rather than a named
+ * decade. `periodUnit` still calls it a decade, because it is ten whole
+ * calendar years Jan–Dec.
+ */
+export function trailingDecadePeriod(today: string): RecapPeriod {
+  // Walk back to the newest published year: the previous year is still
+  // inside its grace window for the first few days of January.
+  let endYear = Number(today.slice(0, 4));
+  while (!isPeriodPublished(yearPeriod(endYear), today)) endYear -= 1;
+  const startYear = endYear - 9;
+  return tenYearPeriod(startYear, `${startYear}–${endYear}`);
+}
+
 /** Which whole calendar unit a period is, or null for an arbitrary window.
  *
  * Derived from the bounds rather than carried as a field on `RecapPeriod`,
  * so adding the month cadence didn't widen the type every fetcher takes.
- * Copy that needs to say "year" or "month" asks this instead. */
-export function periodUnit(period: RecapPeriod): "year" | "month" | null {
+ * Copy that needs to say "year", "month" or "decade" asks this instead.
+ *
+ * A "decade" is any ten whole calendar years, not only the aligned ones, so
+ * the trailing-ten window reads the same as the 2010s in the story copy. */
+export function periodUnit(period: RecapPeriod): "year" | "month" | "decade" | null {
   const year = Number(period.start.slice(0, 4));
   const month = Number(period.start.slice(5, 7));
   const asYear = yearPeriod(year);
   if (period.start === asYear.start && period.end === asYear.end) return "year";
+  if (period.start === `${year}-01-01` && period.end === `${year + 9}-12-31`) return "decade";
   const asMonth = monthPeriod(year, month);
   if (period.start === asMonth.start && period.end === asMonth.end) return "month";
   return null;
@@ -121,6 +176,14 @@ export function previousPeriod(period: RecapPeriod): RecapPeriod {
   const unit = periodUnit(period);
   const year = Number(period.start.slice(0, 4));
   if (unit === "year") return yearPeriod(year - 1);
+  // The ten whole years before, for the same leap-day reason as a year
+  // (ten years is 3,652 or 3,653 days, so an equal-length shift drifts). A
+  // calendar decade steps to the named decade before it; the trailing window
+  // gets the relative label chapters use, since "2006–2015" in a sentence
+  // reads as a date range where "the 10 years before" reads as a comparison.
+  if (unit === "decade") {
+    return year % 10 === 0 ? decadePeriod(year - 10) : tenYearPeriod(year - 10, "the 10 years before");
+  }
   // Same reasoning one level down, and more acute: months run 28-31 days,
   // so an equal-length shift from March would compare against a window
   // starting February 1 in a leap year and January 29 otherwise. A month
@@ -440,6 +503,97 @@ export function monthsInRange(
   return summaries;
 }
 
+export type RecapDecadeSummary = {
+  /** The route segment: "2010s", or `TRAILING_DECADE_SEGMENT`. */
+  segment: string;
+  period: RecapPeriod;
+  loggedDays: number;
+  /** True for the trailing-ten window rather than a calendar decade. */
+  trailing: boolean;
+};
+
+/** `/recap/decades/last-10`: the ten years ending at the last completed
+ * year (`trailingDecadePeriod`). A fixed word, not the years, so a bookmark
+ * keeps meaning "the latest ten" as the window moves. */
+export const TRAILING_DECADE_SEGMENT = "last-10";
+
+/**
+ * The decades worth listing on the index (#520), newest first, derived from
+ * the year list so no second query is needed.
+ *
+ * A calendar decade is listed once its own recap is published
+ * (`isPeriodPublished`, so not the 2020s until 2030) and it has logged days.
+ * Alongside them sits the trailing-ten window, which is how the current
+ * decade gets a recap now: it's omitted when it would just repeat a
+ * calendar decade already listed (the first days of 2030 and every tenth
+ * year after), and when it has nothing logged.
+ *
+ * `years` is `listRecapYears`' output, which already drops unpublished
+ * years — fine here, since a decade is only published after all ten of its
+ * years are, and the trailing window ends on a published year by
+ * construction.
+ */
+export function summarizeDecades(years: RecapYearSummary[], today: string): RecapDecadeSummary[] {
+  const countByYear = new Map(years.map((entry) => [entry.year, entry.loggedDays]));
+  const loggedIn = (period: RecapPeriod) => {
+    let total = 0;
+    for (let year = Number(period.start.slice(0, 4)); year <= Number(period.end.slice(0, 4)); year += 1) {
+      total += countByYear.get(year) ?? 0;
+    }
+    return total;
+  };
+
+  const summaries: RecapDecadeSummary[] = [];
+  const decadeStarts = new Set(years.map((entry) => Math.floor(entry.year / 10) * 10));
+  for (const startYear of [...decadeStarts].sort((a, b) => b - a)) {
+    const period = decadePeriod(startYear);
+    const loggedDays = loggedIn(period);
+    if (loggedDays === 0 || !isPeriodPublished(period, today)) continue;
+    summaries.push({ segment: period.label, period, loggedDays, trailing: false });
+  }
+
+  const trailing = trailingDecadePeriod(today);
+  const trailingDays = loggedIn(trailing);
+  const duplicatesCalendar = summaries.some(
+    (entry) => entry.period.start === trailing.start && entry.period.end === trailing.end
+  );
+  if (trailingDays > 0 && !duplicatesCalendar) {
+    summaries.unshift({
+      segment: TRAILING_DECADE_SEGMENT,
+      period: trailing,
+      loggedDays: trailingDays,
+      trailing: true,
+    });
+  }
+  return summaries;
+}
+
+export async function listRecapDecades(today: string = todayDateString()): Promise<RecapDecadeSummary[]> {
+  return summarizeDecades(await listRecapYears(today), today);
+}
+
+/**
+ * What a ten-year recap should say about how much of it the diary covers,
+ * or null when it covers all of it (#520).
+ *
+ * The data starts in 2016, so the 2010s is a partial-coverage decade: the
+ * page says "Logged 2016–2019" rather than letting ten years of headline
+ * imply ten years of data. Judged from the first and last logged day, not
+ * from per-year counts, because the low-data rules (`toRecapStat`) already
+ * handle a thin year inside the range — this note is about the edges.
+ */
+export function decadeCoverageNote(
+  period: RecapPeriod,
+  range: { first: string; last: string } | null
+): string | null {
+  if (range === null) return null;
+  const from = Math.max(Number(period.start.slice(0, 4)), Number(range.first.slice(0, 4)));
+  const to = Math.min(Number(period.end.slice(0, 4)), Number(range.last.slice(0, 4)));
+  if (from > to) return null;
+  if (from === Number(period.start.slice(0, 4)) && to === Number(period.end.slice(0, 4))) return null;
+  return from === to ? `Logged ${from} only` : `Logged ${from}–${to}`;
+}
+
 /**
  * How many days in the period have a `days` row.
  *
@@ -510,6 +664,15 @@ export function parseYearSegment(segment: string): number | null {
   if (!/^\d{4}$/.test(segment)) return null;
   const year = Number(segment);
   return isValidDateString(`${year}-01-01`) ? year : null;
+}
+
+/** Parses a `/recap/decades/[decade]` segment: "2010s" (a multiple of ten) or
+ * `TRAILING_DECADE_SEGMENT`. Returns the period, or null to 404. The trailing
+ * window needs `today` because it moves; a calendar decade doesn't. */
+export function parseDecadeSegment(segment: string, today: string): RecapPeriod | null {
+  if (segment === TRAILING_DECADE_SEGMENT) return trailingDecadePeriod(today);
+  const match = /^(\d{3})0s$/.exec(segment);
+  return match ? decadePeriod(Number(`${match[1]}0`)) : null;
 }
 
 /** Parses a `/recap/[year]/[month]` segment: exactly two digits, 01-12.

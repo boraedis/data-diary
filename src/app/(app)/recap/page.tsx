@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { todayDateString } from "@/lib/date";
-import { listRecapYears } from "@/lib/recap";
+import { decadeCoverageNote, getRecapDataRange, listRecapDecades, listRecapYears } from "@/lib/recap";
 import {
   CHAPTER_KIND_LABELS,
   chapterSpanLabel,
@@ -34,10 +34,12 @@ function NewBadge({ children }: { children: React.ReactNode }) {
 }
 
 export default async function RecapIndexPage() {
-  const [years, unseen, chapters] = await Promise.all([
+  const [years, unseen, chapters, decades, range] = await Promise.all([
     listRecapYears(),
     getUnseenRecaps(),
     listRecapChapters(),
+    listRecapDecades(),
+    getRecapDataRange(),
   ]);
 
   return (
@@ -87,6 +89,36 @@ export default async function RecapIndexPage() {
           })}
         </div>
       )}
+
+      {decades.length > 0 ? (
+        <section className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-heading text-xl font-medium tracking-tight">Decades</h2>
+            <p className="text-sm text-muted-foreground">
+              Ten years at a time. The current decade isn&apos;t complete, so the latest ten
+              finished years stand in for it.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
+            {decades.map((decade) => (
+              <Link key={decade.segment} href={`/recap/decades/${decade.segment}`}>
+                <Card className="h-full transition-colors hover:bg-accent">
+                  <CardHeader>
+                    <CardTitle>{decade.trailing ? `Last ten years · ${decade.period.label}` : decade.period.label}</CardTitle>
+                    <CardDescription>
+                      {decade.loggedDays.toLocaleString()} days logged.
+                      {(() => {
+                        const note = decadeCoverageNote(decade.period, range);
+                        return note ? ` ${note}.` : null;
+                      })()}
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {chapters.length > 0 ? <ChaptersIndex chapters={chapters} /> : null}
     </main>

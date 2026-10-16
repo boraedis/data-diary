@@ -150,7 +150,7 @@ export type RecapStoryInput = {
    * in mood") and for which cards and how many are dealt. Null for an
    * arbitrary window, which is told like a year. "chapter" is a life
    * chapter (#519): named as one, and dealt like a year unless `compact`. */
-  periodUnit: "year" | "month" | "chapter" | null;
+  periodUnit: "year" | "month" | "decade" | "chapter" | null;
   /** Deal the month-sized story — `MAX_MONTH_STORY_CARDS`, no year-only
    * cards — for a period that isn't a month but is about as short as one.
    * Set for short chapters (#519, `isCompactChapter`); a month is always
