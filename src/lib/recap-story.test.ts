@@ -55,7 +55,7 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         locations: { rows: [], locatedNights: 0, priorLocatedNights: 0 },
         naps: { totalMinutes: 0, daysWithNap: 0, priorTotalMinutes: 0, priorDaysWithNap: 0 },
       },
-      exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [] },
+      exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [], top: [] },
     },
     body: { weight: noMetric(), coffee: noMetric(), distance: noMetric(), training: { hours: 0, priorHours: 0, daysTrained: 0, priorDaysTrained: 0 } },
     work: {
@@ -83,7 +83,7 @@ function emptyInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       topArtist: null,
       topGenre: null,
       firsts: { newArtists: { total: 0, examples: [] }, newMovieGenres: [] },
-      picks: { songs: [], podcasts: [], games: [], sports: [], sportsMode: "team" },
+      picks: { songs: [], podcasts: [], games: [], shows: [], sports: [], sportsMode: "team" },
       rankings: { movie: { status: "unavailable", since: null }, book: { status: "unavailable", since: null } },
     },
     peoplePlaces: {
@@ -132,7 +132,7 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
         locations: { rows: [], locatedNights: 0, priorLocatedNights: 0 },
         naps: { totalMinutes: 0, daysWithNap: 0, priorTotalMinutes: 0, priorDaysWithNap: 0 },
       },
-      exercise: { daysTrained: 120, priorDaysTrained: 90, exercisesLogged: 400, mix: [] },
+      exercise: { daysTrained: 120, priorDaysTrained: 90, exercisesLogged: 400, mix: [], top: [] },
     },
     entertainment: {
       totals: [
@@ -144,7 +144,7 @@ function fullInput(overrides: Partial<RecapStoryInput> = {}): RecapStoryInput {
       topArtist: { name: "Radiohead", minutes: 1200 },
       topGenre: { name: "art rock", minutes: 2000 },
       firsts: { newArtists: { total: 30, examples: ["Alvvays", "Bicep"] }, newMovieGenres: [] },
-      picks: { songs: [], podcasts: [], games: [], sports: [], sportsMode: "team" },
+      picks: { songs: [], podcasts: [], games: [], shows: [], sports: [], sportsMode: "team" },
       rankings: { movie: { status: "unavailable", since: null }, book: { status: "unavailable", since: null } },
     },
     peoplePlaces: {
@@ -264,7 +264,7 @@ describe("buildRecapStory", () => {
           series: [],
         },
         // ...but four days trained is still four days trained.
-        exercise: { daysTrained: 4, priorDaysTrained: 0, exercisesLogged: 10, mix: [] },
+        exercise: { daysTrained: 4, priorDaysTrained: 0, exercisesLogged: 10, mix: [], top: [] },
       },
     });
     const ids = idsOf(thin);

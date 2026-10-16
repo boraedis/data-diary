@@ -125,6 +125,28 @@ describe("summarizeExercise", () => {
     expect(result.exercisesLogged).toBe(4);
   });
 
+  it("ranks the period's exercises by training time, not session count (#659)", () => {
+    const w = (exerciseId: number, exerciseName: string, hours: number, date = "2025-04-01") => ({
+      date,
+      category: "strength",
+      exerciseId,
+      exerciseName,
+      subtype: null,
+      hours,
+    });
+    const mix = [w(1, "Squat", 0.5), w(1, "Squat", 0.5, "2025-04-02"), w(2, "Run", 1.5), w(3, "Row", 0)];
+    const result = summarizeExercise([], period, prior, mix as never);
+    expect(result.top.map((r) => [r.name, r.count])).toEqual([
+      ["Run", 1],
+      ["Squat", 2],
+      ["Row", 1],
+    ]);
+  });
+
+  it("has no top exercises when nothing was trained (#659)", () => {
+    expect(summarizeExercise([], period, prior).top).toEqual([]);
+  });
+
   it("counts the prior period's days separately", () => {
     const result = summarizeExercise(
       [{ date: "2024-04-01" }, { date: "2024-04-02" }, { date: "2025-04-01" }],

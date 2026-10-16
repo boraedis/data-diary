@@ -24,7 +24,7 @@ function health(locatedNights: number, priorLocatedNights = 0): RecapHealth {
       },
       naps: { totalMinutes: 90, daysWithNap: 3, priorTotalMinutes: 0, priorDaysWithNap: 0 },
     },
-    exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [] },
+    exercise: { daysTrained: 0, priorDaysTrained: 0, exercisesLogged: 0, mix: [], top: [] },
   };
 }
 
