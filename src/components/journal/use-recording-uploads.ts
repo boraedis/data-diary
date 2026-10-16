@@ -52,7 +52,13 @@ export function useRecordingUploads({
     });
   }, []);
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (activeNow?: string | null) => {
+    // The recorder passes the active id as it is right now. activeIdRef
+    // only catches up in the effect above, after React commits, and a pass
+    // started from the stop handler can reach the row before that: the
+    // just-finished take would then be skipped as "still recording" and
+    // nothing would retry it until the next trigger.
+    if (activeNow !== undefined) activeIdRef.current = activeNow;
     // One pass at a time. A request during a pass (a new take finished
     // while an old one uploads) schedules exactly one more pass.
     if (busyRef.current) {
