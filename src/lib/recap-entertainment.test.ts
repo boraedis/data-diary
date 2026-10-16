@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { yearPeriod } from "@/lib/recap";
-import { buildGamePicks, buildSportsPicks, toRecapPicks } from "@/lib/recap-entertainment";
+import { buildGamePicks, buildShowPicks, buildSportsPicks, toRecapPicks } from "@/lib/recap-entertainment";
 import type { EntertainmentSession } from "@/lib/leaderboards/entertainment";
 import type { LeaderboardRow } from "@/lib/leaderboards/rows";
 import type { SportsWatch } from "@/lib/leaderboards/sports";
@@ -79,6 +79,35 @@ describe("buildGamePicks", () => {
 
   it("is empty when no game was played in the period", () => {
     expect(buildGamePicks([game("2024-05-01", "Celeste", 60)], period)).toEqual([]);
+  });
+});
+
+describe("buildShowPicks (#658)", () => {
+  const episode = (date: string, title: string, minutes: number): EntertainmentSession => ({
+    ...game(date, title, minutes),
+    type: "tv",
+    typeLabel: "TV",
+  });
+
+  it("ranks shows by hours, counting episodes, and ignores other mediums", () => {
+    const picks = buildShowPicks(
+      [
+        episode("2025-02-01", "Severance", 50),
+        episode("2025-02-02", "Severance", 50),
+        episode("2025-03-01", "Bluey", 7),
+        game("2025-03-01", "Celeste", 9999),
+        episode("2024-12-31", "Andor", 9999),
+      ],
+      period,
+    );
+    expect(picks.map((r) => [r.name, r.count])).toEqual([
+      ["Severance", 2],
+      ["Bluey", 1],
+    ]);
+  });
+
+  it("is empty when nothing was watched in the period", () => {
+    expect(buildShowPicks([episode("2024-05-01", "Andor", 50)], period)).toEqual([]);
   });
 });
 

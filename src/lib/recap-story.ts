@@ -319,6 +319,19 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
     });
   }
 
+  const topExercise = exercise.top[0];
+  if (topExercise) {
+    add({
+      id: "top-exercise",
+      domain: "health",
+      kicker: "Your most-trained exercise",
+      value: topExercise.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topExercise.value * 60))} across ${topExercise.count} ${plural(topExercise.count, "session")}.`,
+      detail: null,
+      weight: 58,
+    });
+  }
   if (exercise.daysTrained > 0) {
     add({
       id: "days-trained",
@@ -518,6 +531,19 @@ function buildCandidates(input: RecapStoryInput): Candidate[] {
       headline: `${formatMinutes(Math.round(topGame.value * 60))} played over ${topGame.count} ${plural(topGame.count, "session")}.`,
       detail: null,
       weight: 62,
+    });
+  }
+  const topShow = picks.shows[0];
+  if (topShow) {
+    add({
+      id: "top-show",
+      domain: "entertainment",
+      kicker: "Your top show",
+      value: topShow.name,
+      unit: null,
+      headline: `${formatMinutes(Math.round(topShow.value * 60))} watched across ${topShow.count} ${plural(topShow.count, "episode")}.`,
+      detail: null,
+      weight: 61,
     });
   }
   const topSports = picks.sports[0];

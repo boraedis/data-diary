@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ChartCard } from "@/components/charts/chart-card";
+import { LeaderboardTable } from "@/components/charts/leaderboard";
+import { exerciseColumns } from "@/lib/leaderboards/exercise";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { categoricalColor } from "@/lib/viz/color";
 import { formatDate, formatDuration, formatHoursTotal } from "@/lib/viz/format";
@@ -153,6 +155,19 @@ export function RecapHealthSection({
               Exercise mix
             </h3>
             <RecapExerciseMix rows={exercise.mix} periodLabel={periodLabel} />
+          </section>
+        ) : null}
+
+        {exercise.top.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+              Top exercises
+            </h3>
+            <LeaderboardTable
+              rows={exercise.top}
+              columns={exerciseColumns("exercise")}
+              ariaLabel={`Top exercises in ${periodLabel}, ranked by training time.`}
+            />
           </section>
         ) : null}
       </div>

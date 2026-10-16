@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, gte, isNotNull, lt, lte, min, sum } from "drizzle-orm";
+import { getRecapRankings, type RecapRankings } from "@/lib/recap-ranking";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   artistGenres,
@@ -285,6 +286,8 @@ export type RecapTopPicks = {
   songs: LeaderboardRow[];
   podcasts: LeaderboardRow[];
   games: LeaderboardRow[];
+  /** TV shows by hours watched (#658). */
+  shows: LeaderboardRow[];
   sports: LeaderboardRow[];
   /** What `sports` ranks, so the table's headers match its rows. */
   sportsMode: "team" | "league";
@@ -299,6 +302,12 @@ export type RecapTopPicks = {
  * - **Games**: hours played per title. A *session* is one `gameSessions`
  *   row — one logged sitting — and a title's count is how many of those
  *   there were.
+ * - **TV shows** (#658): hours watched per show, so a show you binged for
+ *   a weekend can outrank one you caught an episode of every week —
+ *   which is the same call the games list makes, and the one the
+ *   leaderboard page's By Title mode makes. A *session* is one logged
+ *   episode watch. Watches with no date (backfilled history) can't be
+ *   placed in a period and never match `inPeriod`.
  * - **Sports**: hours watched per *team*; a game credits both teams in
  *   full. A watch logged without teams can't be credited to one, so if
  *   no team was logged at all in the period the list falls back to leagues
@@ -322,6 +331,11 @@ const inPeriod = (date: string, period: RecapPeriod) => date >= period.start && 
 export function buildGamePicks(sessions: EntertainmentSession[], period: RecapPeriod): LeaderboardRow[] {
   const inWindow = sessions.filter((s) => inPeriod(s.date, period));
   return toRecapPicks(buildEntertainmentLeaderboard(inWindow, "title", "game"));
+}
+
+export function buildShowPicks(sessions: EntertainmentSession[], period: RecapPeriod): LeaderboardRow[] {
+  const inWindow = sessions.filter((s) => inPeriod(s.date, period));
+  return toRecapPicks(buildEntertainmentLeaderboard(inWindow, "title", "tv"));
 }
 
 export function buildSportsPicks(
@@ -350,6 +364,7 @@ async function topPicks(period: RecapPeriod): Promise<RecapTopPicks> {
     songs: toRecapPicks(songs),
     podcasts: toRecapPicks(podcasts),
     games: buildGamePicks(sessions, period),
+    shows: buildShowPicks(sessions, period),
     sports: sportsPicks.rows,
     sportsMode: sportsPicks.mode,
   };
@@ -430,13 +445,15 @@ export type RecapEntertainment = {
   topGenre: RecapListenPick | null;
   firsts: RecapFirsts;
   picks: RecapTopPicks;
+  /** How the movie and book rankings moved in the period (#660). */
+  rankings: RecapRankings;
 };
 
 export async function getRecapEntertainment(
   period: RecapPeriod,
   prior: RecapPeriod
 ): Promise<RecapEntertainment> {
-  const [current, previous, movie, book, artist, genre, firstTimes, picks] = await Promise.all([
+  const [current, previous, movie, book, artist, genre, firstTimes, picks, rankings] = await Promise.all([
     countsFor(period),
     countsFor(prior),
     topRankedMovie(period),
@@ -445,6 +462,7 @@ export async function getRecapEntertainment(
     topGenre(period),
     firsts(period),
     topPicks(period),
+    getRecapRankings(period),
   ]);
 
   const totals = (Object.keys(MEDIUM_LABELS) as RecapMediumKey[]).map((key) => ({
@@ -462,5 +480,6 @@ export async function getRecapEntertainment(
     topGenre: genre,
     firsts: firstTimes,
     picks,
+    rankings,
   };
 }

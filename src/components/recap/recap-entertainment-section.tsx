@@ -1,4 +1,5 @@
 import { ChartCard } from "@/components/charts/chart-card";
+import type { RecapRankings } from "@/lib/recap-ranking";
 import { LeaderboardTable } from "@/components/charts/leaderboard";
 import { RecapStatCard } from "@/components/recap/recap-stat-card";
 import { MIN_DAYS_FOR_TOTAL, toRecapStat } from "@/lib/recap";
@@ -34,6 +35,8 @@ const GAME_COLUMNS: LeaderboardColumns = {
   contextDescription: undefined,
 };
 
+const SHOW_COLUMNS: LeaderboardColumns = { ...GAME_COLUMNS, nameHeader: "Show" };
+
 export function RecapEntertainmentSection({
   entertainment,
   periodLabel,
@@ -48,6 +51,7 @@ export function RecapEntertainmentSection({
     { title: "Top songs", rows: picks.songs, columns: SONG_COLUMNS },
     { title: "Top podcasts", rows: picks.podcasts, columns: PODCAST_COLUMNS },
     { title: "Top games", rows: picks.games, columns: GAME_COLUMNS },
+    { title: "Top shows", rows: picks.shows, columns: SHOW_COLUMNS },
     { title: picks.sportsMode === "team" ? "Top teams" : "Top leagues", rows: picks.sports, columns: sportsColumns(picks.sportsMode) },
   ].filter((table) => table.rows.length > 0);
   // A medium with nothing in either period isn't a gap worth a tile — it's
@@ -106,6 +110,8 @@ export function RecapEntertainmentSection({
           </dl>
         ) : null}
 
+        <RankingMovementNote rankings={entertainment.rankings} />
+
         {pickTables.length > 0 ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {pickTables.map((table) => (
@@ -145,6 +151,54 @@ export function RecapEntertainmentSection({
         ) : null}
       </div>
     </ChartCard>
+  );
+}
+
+/**
+ * What happened to the film and book rankings in the period (#660): the
+ * biggest climber and any new entries. Report-only — no story card, since a
+ * ranking edit is a rare, deliberate act and the story's slots are better
+ * spent on the year's activity. A list whose history doesn't reach back to
+ * the period says so in one line; a list left untouched says nothing.
+ */
+function RankingMovementNote({ rankings }: { rankings: RecapRankings }) {
+  const lists = [
+    { label: "Films", movement: rankings.movie },
+    { label: "Books", movement: rankings.book },
+  ];
+  const lines = lists.flatMap(({ label, movement }) => {
+    if (movement.status !== "available") return [];
+    const parts: string[] = [];
+    if (movement.climber) {
+      const { title, from, to, places } = movement.climber;
+      parts.push(`${title} climbed ${places} ${places === 1 ? "place" : "places"} (#${from} to #${to})`);
+    }
+    if (movement.entryCount > 0) {
+      const named = movement.entries.map((entry) => `${entry.title} (#${entry.rank})`);
+      const more = movement.entryCount - named.length;
+      parts.push(
+        `${movement.entryCount} new ${movement.entryCount === 1 ? "entry" : "entries"}: ${listSentence(named)}${more > 0 ? ` and ${more} more` : ""}`
+      );
+    }
+    return parts.length > 0 ? [{ label, text: parts.join("; ") }] : [];
+  });
+  const unavailable = lists.filter(({ movement }) => movement.status === "unavailable");
+  if (lines.length === 0 && unavailable.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-border/60 pt-4">
+      <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">Rankings</p>
+      {lines.map(({ label, text }) => (
+        <p key={label} className="text-sm">
+          <span className="text-muted-foreground">{label}:</span> {text}
+        </p>
+      ))}
+      {lines.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Ranking history doesn&apos;t reach back to this period.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
