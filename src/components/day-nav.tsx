@@ -37,7 +37,7 @@ export function DayNav({
       <div className="flex flex-col items-center">
         <h1 className="font-mono text-xl font-medium text-primary md:text-2xl">{date}</h1>
         <ConfirmLink
-          href={category ? `/day/${date}` : "/"}
+          href={category ? `/day/${date}` : "/home"}
           className="text-sm text-muted-foreground hover:text-foreground"
         >
           {category ? "Summary" : "Home"}
