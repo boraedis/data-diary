@@ -1719,6 +1719,96 @@ export const videoLogs = pgTable(
   ]
 );
 
+// --- Inconsistency scan (#13, #670) ---------------------------------------
+//
+// What the periodic data-inconsistency scan flagged, and what you decided
+// about each one. The detectors live in src/lib/inconsistency-scan/.
+
+export const inconsistencyTypeEnum = pgEnum("inconsistency_type", [
+  "missing",
+  "partial",
+  "outlier",
+  "referential",
+]);
+
+export const inconsistencyStatusEnum = pgEnum("inconsistency_status", [
+  "open",
+  "dismissed",
+  "resolved",
+]);
+
+/**
+ * One row per thing the scan has ever flagged. Persisted rather than
+ * recomputed on every run, because a monthly scan that re-flags
+ * everything from scratch would bring back every item already reviewed
+ * and dismissed.
+ *
+ * `findingKey` is the identity (type + entity + field, built by
+ * `findingKey()` in src/lib/inconsistency-scan/types.ts). It's unique, so
+ * a re-run upserts onto the same row instead of adding a duplicate. A
+ * re-run never changes a `dismissed` row's status. An `open` one that
+ * doesn't reproduce becomes `resolved`. A `resolved` one that comes back
+ * is reopened, since whatever fixed it didn't stick.
+ *
+ * The entity is stored as plain columns, not foreign keys: a "missing"
+ * finding is about a date that has no `days` row by definition, and the
+ * rows a finding points at may be deleted while the finding is the
+ * record of why.
+ */
+export const inconsistencyFindings = pgTable(
+  "inconsistency_findings",
+  {
+    id: serial("id").primaryKey(),
+    findingKey: text("finding_key").notNull(),
+    type: inconsistencyTypeEnum("type").notNull(),
+    // Which table the finding is about ("days", "workouts", …).
+    entityTable: text("entity_table").notNull(),
+    // The row, for tables keyed by id. Null for day-level findings, where
+    // `date` is the key.
+    entityId: integer("entity_id"),
+    // The date the finding is about (or starts at, for a gap), which is
+    // where the review page links. Present for nearly every finding.
+    date: date("date", { mode: "string" }),
+    // A registry field key (src/lib/expected-fields.ts) or domain name.
+    // Null when the finding covers a whole day or several fields.
+    field: text("field"),
+    // Human-readable, refreshed each run: "Missing: weight, sub K".
+    detail: text("detail").notNull(),
+    status: inconsistencyStatusEnum("status").notNull().default("open"),
+    firstDetectedAt: timestamp("first_detected_at", { withTimezone: true }).notNull().defaultNow(),
+    // The start of the last run that reproduced this finding. Anything
+    // still open with an older value didn't reproduce, so the runner
+    // resolves it.
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    // When you dismissed or resolved it by hand. Null for open findings
+    // and for ones the runner resolved itself, which is how the review
+    // page tells "you fixed it" from "it went away".
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("inconsistency_findings_key_idx").on(table.findingKey),
+    index("inconsistency_findings_status_idx").on(table.status),
+  ]
+);
+
+/**
+ * One row per scan run, for "last scanned" on the review page and a
+ * history of how the counts move. Counts only, no finding details.
+ */
+export const inconsistencyScanRuns = pgTable("inconsistency_scan_runs", {
+  id: serial("id").primaryKey(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }).notNull().defaultNow(),
+  // "manual" (script or review page) or "scheduled" (#673's workflow).
+  trigger: text("trigger").notNull(),
+  // Findings the detectors produced this run, including dismissed ones.
+  detected: integer("detected").notNull(),
+  // Of those, how many had never been seen before.
+  added: integer("added").notNull(),
+  // Previously open findings that didn't reproduce and were resolved.
+  resolved: integer("resolved").notNull(),
+});
+
 // --- Convenience types -----------------------------------------------------
 export type DayType = (typeof dayTypeEnum.enumValues)[number];
 export type WorkLocationOption = (typeof workLocationEnum.enumValues)[number];
@@ -1728,6 +1818,8 @@ export type WorkoutDataSource = (typeof workoutDataSourceEnum.enumValues)[number
 export type ExerciseCategory = (typeof exerciseCategoryEnum.enumValues)[number];
 export type VideoLogStatus = (typeof videoLogStatusEnum.enumValues)[number];
 export type VideoLogJournalOutcome = (typeof videoLogJournalOutcomeEnum.enumValues)[number];
+export type InconsistencyType = (typeof inconsistencyTypeEnum.enumValues)[number];
+export type InconsistencyStatus = (typeof inconsistencyStatusEnum.enumValues)[number];
 // EntertainmentKind (used to be derived from entertainmentKindEnum here)
 // is gone along with the enum — see the entertainmentKinds table comment
 // above `entertainmentCatalog`. A kind is now just a row (id, name), read
