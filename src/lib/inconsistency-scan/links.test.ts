@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FIELDS } from "@/lib/expected-fields";
-import { findingHref, parseFindingStatus } from "./links";
+import { findingHref, parseFindingStatus, parseReviewStatus, partialFieldLinks } from "./links";
 import { ENTRY_TABLES } from "./types";
 
 // Covers where the review page (#672) links each finding, so a field
@@ -23,6 +23,9 @@ describe("findingHref", () => {
 
   it("sends multi-field and dateless findings to the overview or nowhere", () => {
     expect(findingHref({ date: D, entityTable: "days", field: null })).toBe(`/day/${D}`);
+    expect(
+      findingHref({ type: "partial", date: D, entityTable: "days", field: null, detail: "Missing: Weight, Journal" })
+    ).toBe(`/day/${D}`);
     expect(findingHref({ date: null, entityTable: "days", field: "weight" })).toBeNull();
   });
 
@@ -37,10 +40,43 @@ describe("findingHref", () => {
   });
 });
 
+describe("partialFieldLinks (#685)", () => {
+  it("links each missing field to its own section", () => {
+    expect(partialFieldLinks({ date: D, detail: "Missing: Weight, Sub K, Positive people" })).toEqual([
+      { label: "Weight", href: `/day/${D}/weight` },
+      { label: "Sub K", href: `/day/${D}/subs` },
+      { label: "Positive people", href: `/day/${D}/people` },
+    ]);
+  });
+
+  it("leaves an unknown label unlinked rather than guessing", () => {
+    expect(partialFieldLinks({ date: D, detail: "Missing: Renamed thing" })).toEqual([
+      { label: "Renamed thing", href: null },
+    ]);
+  });
+
+  it("links a partial finding to its one section when every field shares it", () => {
+    expect(
+      findingHref({ type: "partial", date: D, entityTable: "days", field: null, detail: "Missing: Sub A, Sub K" })
+    ).toBe(`/day/${D}/subs`);
+  });
+
+  it("can split every registry label back out of a detail", () => {
+    // partial.ts joins labels with ", ", so a comma inside one would break this.
+    for (const f of FIELDS) expect(f.label, f.key).not.toContain(",");
+  });
+});
+
 describe("parseFindingStatus", () => {
   it("accepts the three statuses only", () => {
     expect(parseFindingStatus("dismissed")).toBe("dismissed");
     expect(parseFindingStatus("deleted")).toBeNull();
     expect(parseFindingStatus(undefined)).toBeNull();
+  });
+
+  it("only lets a review dismiss or reopen; resolving is the scan's", () => {
+    expect(parseReviewStatus("dismissed")).toBe("dismissed");
+    expect(parseReviewStatus("open")).toBe("open");
+    expect(parseReviewStatus("resolved")).toBeNull();
   });
 });

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import type { InconsistencyStatus } from "@/db/schema";
+import type { ReviewStatus } from "@/lib/inconsistency-scan/links";
 
 /**
  * The review page's two client pieces (#672). Both write through the API
@@ -23,23 +23,20 @@ async function send(url: string, init: RequestInit): Promise<string | null> {
   }
 }
 
-// What each list offers: open findings can be dismissed or marked
-// resolved; a dismissed or resolved one can only be reopened (the undo).
-const ACTIONS: Record<InconsistencyStatus, { to: InconsistencyStatus; label: string }[]> = {
-  open: [
-    { to: "resolved", label: "Fixed" },
-    { to: "dismissed", label: "Dismiss" },
-  ],
-  dismissed: [{ to: "open", label: "Reopen" }],
-  resolved: [{ to: "open", label: "Reopen" }],
+// What each list offers: an open finding can be dismissed, and a dismissed
+// one reopened (the undo). There's no "fixed": fix the data and rescan,
+// and the scan resolves whatever no longer reproduces (#685).
+const ACTIONS: Record<ReviewStatus, { to: ReviewStatus; label: string }> = {
+  open: { to: "dismissed", label: "Dismiss" },
+  dismissed: { to: "open", label: "Reopen" },
 };
 
-export function FindingActions({ id, status }: { id: number; status: InconsistencyStatus }) {
+export function FindingActions({ id, status }: { id: number; status: ReviewStatus }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function move(to: InconsistencyStatus) {
+  async function move(to: ReviewStatus) {
     setPending(true);
     setError(null);
     const failure = await send(`/api/inconsistencies/${id}`, {
@@ -59,18 +56,9 @@ export function FindingActions({ id, status }: { id: number; status: Inconsisten
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       {error ? <span className="text-xs text-destructive">{error}</span> : null}
-      {ACTIONS[status].map((a) => (
-        <Button
-          key={a.to}
-          type="button"
-          size="xs"
-          variant={a.to === "dismissed" ? "ghost" : "outline"}
-          disabled={pending}
-          onClick={() => move(a.to)}
-        >
-          {a.label}
-        </Button>
-      ))}
+      <Button type="button" size="xs" variant="outline" disabled={pending} onClick={() => move(ACTIONS[status].to)}>
+        {ACTIONS[status].label}
+      </Button>
     </div>
   );
 }

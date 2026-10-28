@@ -6,6 +6,7 @@ import {
   type InconsistencyStatus,
   type InconsistencyType,
 } from "@/db/schema";
+import type { ReviewStatus } from "./links";
 
 /**
  * The review page's reads and writes (#672). The scan runner (run.ts)
@@ -71,13 +72,12 @@ export async function getLastScanRun() {
 }
 
 /**
- * Records a review decision. Any status can move to any other, so a
- * dismissal or a "resolved" can be undone by setting it back to open.
- * `reviewedAt` is set for a decision and cleared on reopening, which is
- * what tells a hand-resolved finding from one the scan resolved itself
- * (see the schema comment). Returns false when there's no such finding.
+ * Records a review decision: dismiss, or reopen to undo one. Resolving
+ * isn't offered; the scan does it when a finding stops reproducing
+ * (#685). `reviewedAt` is set on dismissal and cleared on reopening.
+ * Returns false when there's no such finding.
  */
-export async function setFindingStatus(id: number, status: InconsistencyStatus): Promise<boolean> {
+export async function setFindingStatus(id: number, status: ReviewStatus): Promise<boolean> {
   const rows = await getDb()
     .update(t)
     .set({ status, reviewedAt: status === "open" ? null : new Date() })

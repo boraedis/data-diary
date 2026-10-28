@@ -1,5 +1,6 @@
 import type { InconsistencyStatus, InconsistencyType } from "@/db/schema";
 import { SUB_NAMES } from "@/lib/days";
+import { FIELDS } from "@/lib/expected-fields";
 
 /**
  * Where the review page (#672) sends you to fix a finding, and how it
@@ -91,12 +92,51 @@ const TABLE_SECTIONS: Record<string, Section> = {
   entertainment_entries: "entertainment",
 };
 
+// Registry labels back to keys, for reading a partial finding's detail.
+const FIELD_BY_LABEL = new Map(FIELDS.map((f) => [f.label, f.key]));
+
+/**
+ * The fields a "partially filled" finding lists, each with the day
+ * section that fixes it (#685). The finding stores them only as its
+ * detail text ("Missing: Weight, Sub K", built in partial.ts from
+ * registry labels), because its `field` stays null so the finding keeps
+ * its identity as the list changes. Registry labels contain no commas, so
+ * splitting the detail recovers them exactly. A label that no longer
+ * matches the registry (renamed since the scan ran) comes back without a
+ * link rather than a wrong one.
+ */
+export function partialFieldLinks(f: {
+  date: string | null;
+  detail: string;
+}): { label: string; href: string | null }[] {
+  const prefix = "Missing: ";
+  if (!f.detail.startsWith(prefix)) return [];
+  return f.detail
+    .slice(prefix.length)
+    .split(", ")
+    .map((label) => {
+      const key = FIELD_BY_LABEL.get(label);
+      const section = key ? FIELD_SECTIONS[key] : undefined;
+      return { label, href: f.date && section ? `/day/${f.date}/${section}` : null };
+    });
+}
+
 export function findingHref(f: {
+  type?: InconsistencyType;
   date: string | null;
   entityTable: string;
   field: string | null;
+  detail?: string;
 }): string | null {
   if (!f.date) return null;
+  // A partial day whose missing fields all sit in one section links
+  // there; one spanning several goes to the overview, which shows every
+  // section's progress.
+  if (f.type === "partial" && f.detail) {
+    const hrefs = new Set(partialFieldLinks({ date: f.date, detail: f.detail }).map((l) => l.href));
+    const [only] = hrefs;
+    return hrefs.size === 1 && only ? only : `/day/${f.date}`;
+  }
   const section =
     f.entityTable === "days" ? (f.field ? FIELD_SECTIONS[f.field] : undefined) : TABLE_SECTIONS[f.entityTable];
   return section ? `/day/${f.date}/${section}` : `/day/${f.date}`;
@@ -128,4 +168,16 @@ export const FINDING_STATUSES: readonly InconsistencyStatus[] = ["open", "dismis
 
 export function parseFindingStatus(value: unknown): InconsistencyStatus | null {
   return FINDING_STATUSES.includes(value as InconsistencyStatus) ? (value as InconsistencyStatus) : null;
+}
+
+/**
+ * The statuses you can set by hand: dismiss, and reopen (undo a
+ * dismissal). "resolved" is the scan's alone (#685). It resolves any open
+ * finding that stops reproducing, so marking one fixed by hand only hid
+ * it until the next scan, which reopened it if it wasn't really fixed.
+ */
+export type ReviewStatus = Exclude<InconsistencyStatus, "resolved">;
+
+export function parseReviewStatus(value: unknown): ReviewStatus | null {
+  return value === "open" || value === "dismissed" ? value : null;
 }

@@ -1780,9 +1780,9 @@ export const inconsistencyFindings = pgTable(
     // still open with an older value didn't reproduce, so the runner
     // resolves it.
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
-    // When you dismissed or resolved it by hand. Null for open findings
-    // and for ones the runner resolved itself, which is how the review
-    // page tells "you fixed it" from "it went away".
+    // When you dismissed it. Null for open and resolved findings: only
+    // the runner resolves, when a finding stops reproducing (#685).
+    // Rows resolved by hand before #685 keep their timestamp.
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   },
   (table) => [
