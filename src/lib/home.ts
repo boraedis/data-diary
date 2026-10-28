@@ -2,10 +2,23 @@ import { eq, gte, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { days, people, profileSettings } from "@/db/schema";
 import { addDays, toDateString } from "@/lib/date";
+import {
+  HOME_LOGGED_SCORE,
+  HOME_SCORE_COLUMNS,
+  scoreDay,
+  type DayColumn,
+} from "@/lib/expected-fields";
+
+// The columns the home score reads, as a drizzle selection. Built from the
+// registry so a section added there is selected here without a second edit;
+// the cast is what Object.fromEntries can't infer on its own.
+const SCORE_SELECTION = Object.fromEntries(
+  HOME_SCORE_COLUMNS.map((c) => [c, days[c]])
+) as { [K in DayColumn]: (typeof days)[K] };
 
 export type RecentDay = {
   date: string;
-  score: number; // 0-10 sections filled
+  score: number; // 0-10 sections filled, see HOME_SECTIONS in expected-fields.ts
 };
 
 export type BirthdayEntry = {
@@ -22,41 +35,6 @@ export type HomeDashboardData = {
   recentDays: RecentDay[]; // 14 days, oldest first
   upcomingBirthdays: BirthdayEntry[]; // top 7 by days-until
 };
-
-// 10 sections checked from `days` own columns. Satellite tables
-// (workouts, entertainment, movies, etc.) aren't joined here — one
-// batch query for 90 days is much cheaper than joining 4+ tables, and
-// the core columns give a meaningful "how complete is this day" signal.
-// The 50%-threshold (score >= 5) drives daysBehind.
-function scoreDay(row: {
-  happiness: number | null;
-  sleepTime: string | null;
-  distanceWalkedKm: number | null;
-  coffees: number | null;
-  sick: boolean | null;
-  productivity: number | null;
-  workDurationMinutes: number | null;
-  positivePerson1Id: number | null;
-  place1Id: number | null;
-  subA: number | null;
-  weightKg: number | null;
-  phoneUsageMinutes: number | null;
-  laptopUsageMinutes: number | null;
-  instagramFollowers: number | null;
-}): number {
-  let score = 0;
-  if (row.happiness !== null) score++;
-  if (row.sleepTime !== null) score++;
-  if (row.distanceWalkedKm !== null || row.coffees !== null || row.sick !== null) score++;
-  if (row.productivity !== null || row.workDurationMinutes !== null) score++;
-  if (row.positivePerson1Id !== null) score++;
-  if (row.place1Id !== null) score++;
-  if (row.subA !== null) score++;
-  if (row.weightKg !== null) score++;
-  if (row.phoneUsageMinutes !== null || row.laptopUsageMinutes !== null) score++;
-  if (row.instagramFollowers !== null) score++;
-  return score;
-}
 
 function computeUpcomingBirthdays(
   rows: { name: string; birthdate: string }[],
@@ -106,23 +84,12 @@ export async function getHomeDashboardData(): Promise<HomeDashboardData> {
       .select({ birthdate: profileSettings.birthdate })
       .from(profileSettings)
       .where(eq(profileSettings.id, 1)),
+    // Satellite tables (workouts, entertainment, …) aren't joined: the
+    // home score is deliberately `days`-only, see HOME_SECTIONS.
     db
       .select({
         date: days.date,
-        happiness: days.happiness,
-        sleepTime: days.sleepTime,
-        distanceWalkedKm: days.distanceWalkedKm,
-        coffees: days.coffees,
-        sick: days.sick,
-        productivity: days.productivity,
-        workDurationMinutes: days.workDurationMinutes,
-        positivePerson1Id: days.positivePerson1Id,
-        place1Id: days.place1Id,
-        subA: days.subA,
-        weightKg: days.weightKg,
-        phoneUsageMinutes: days.phoneUsageMinutes,
-        laptopUsageMinutes: days.laptopUsageMinutes,
-        instagramFollowers: days.instagramFollowers,
+        ...SCORE_SELECTION,
       })
       .from(days)
       .where(gte(days.date, since90)),
@@ -150,13 +117,13 @@ export async function getHomeDashboardData(): Promise<HomeDashboardData> {
     }
   }
 
-  // Days behind: consecutive days from yesterday backward where score < 5
+  // Days behind: consecutive days from yesterday backward that score
+  // under HOME_LOGGED_SCORE (half the sections)
   let daysBehind = 0;
   let checkDate = addDays(today, -1);
   while (checkDate >= since90) {
     const row = rowByDate.get(checkDate);
-    const score = row ? scoreDay(row) : 0;
-    if (score >= 5) break;
+    if (scoreDay(row ?? null) >= HOME_LOGGED_SCORE) break;
     daysBehind++;
     checkDate = addDays(checkDate, -1);
   }
@@ -166,7 +133,7 @@ export async function getHomeDashboardData(): Promise<HomeDashboardData> {
   for (let i = 13; i >= 0; i--) {
     const date = addDays(today, -i);
     const row = rowByDate.get(date);
-    recentDays.push({ date, score: row ? scoreDay(row) : 0 });
+    recentDays.push({ date, score: scoreDay(row ?? null) });
   }
 
   const upcomingBirthdays = computeUpcomingBirthdays(
