@@ -1,5 +1,10 @@
 import { addDays, daysBetween } from "@/lib/date";
-import { isDayLogged, isFieldFilled, type FieldDef } from "@/lib/expected-fields";
+import {
+  isDayLogged,
+  isFieldFilled,
+  type FieldDef,
+  type SatelliteDomain,
+} from "@/lib/expected-fields";
 import { SCAN_FIELDS, type Finding, type ScanInput } from "./types";
 
 /**
@@ -21,6 +26,9 @@ export type MissingDayOptions = {
   fields?: readonly FieldDef[];
 };
 
+// Not tunable against production yet: every date from 2016-02-18 to today
+// has a logged row, so these produced zero findings at every setting
+// tried (0.7 to 0.9). They're here for the gap that hasn't happened.
 export const MISSING_DAY_DEFAULTS = { lookbackDays: 30, minLoggedRate: 0.8 } as const;
 
 /**
@@ -90,12 +98,24 @@ export type DomainGapOptions = {
   fields?: readonly FieldDef[];
 };
 
+// Tuned against production history (2016-02 to 2026-10) on #670: a 2x
+// multiplier gave 44 gaps over ten years, a reviewable one-off backlog, and
+// was the only setting that still caught the one live gap ("no books since
+// 2026-08"). 3x dropped to 27 by losing exactly that kind of finding.
 export const DOMAIN_GAP_DEFAULTS = {
   minEntries: 20,
   floorDays: 14,
   quantile: 0.9,
   multiplier: 2,
 } as const;
+
+/**
+ * Sports watching follows league calendars, so its long gaps are off
+ * seasons. On production history they were 13 of the 44 domain gaps,
+ * every one a summer or winter break. A per-season rhythm could judge
+ * sports fairly, but that's beyond what a gap check should know.
+ */
+const GAP_EXEMPT_DOMAINS: ReadonlySet<SatelliteDomain> = new Set(["sports"]);
 
 /** The q-quantile of `values` by nearest rank. Assumes a non-empty array. */
 function quantileOf(values: number[], q: number): number {
@@ -132,7 +152,7 @@ export function detectDomainGaps(input: ScanInput, options: DomainGapOptions = {
 
   const findings: Finding[] = [];
   for (const field of fields) {
-    if (field.source !== "satellite") continue;
+    if (field.source !== "satellite" || GAP_EXEMPT_DOMAINS.has(field.domain)) continue;
     // Positions in loggedDays of the days that have this domain.
     const hits: number[] = [];
     loggedDays.forEach((s, i) => {

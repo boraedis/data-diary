@@ -91,6 +91,14 @@ describe("detectDomainGaps", () => {
     expect(detectDomainGaps(input(snaps))).toEqual([]);
   });
 
+  it("skips sports, whose gaps are off seasons", () => {
+    const snaps = history(150, (i) => ({
+      day: { happiness: 60 },
+      satellites: { sports: i < 100 || i >= 130 ? 1 : 0 },
+    }));
+    expect(detectDomainGaps(input(snaps))).toEqual([]);
+  });
+
   it("leaves rarely used domains alone", () => {
     const snaps = history(100, (i) => ({
       day: { happiness: 60 },

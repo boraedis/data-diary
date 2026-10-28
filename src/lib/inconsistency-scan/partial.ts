@@ -13,6 +13,20 @@ import { SCAN_FIELDS, type Finding, type ScanInput } from "./types";
  */
 
 /**
+ * Stricter than the registry's generic 0.8: a field is only expected
+ * when you skip it on fewer than one logged day in ten. Tuned against
+ * production history on #670. Over ten years, 0.8 flagged 446 days,
+ * 0.9 flagged 256 and 0.95 flagged 131. The extra 190 at 0.8 were
+ * mostly positive people, Instagram counts and weight, the fields you
+ * log in phases, flagged at the edges of those phases. 0.9 keeps the
+ * real holes (missing sleep times and journal show up at every cutoff)
+ * at a backlog of about 25 a year. "Positive
+ * people" leads at any cutoff, and the empty ones are often genuine
+ * days alone, which is what dismissing is for.
+ */
+export const PARTIAL_CUTOFF = 0.9;
+
+/**
  * One finding per day, listing every expected field it's missing, rather
  * than one per (day, field). A day you only half logged is one thing to
  * go back and fix, and per-field rows would bury the review page under
@@ -31,7 +45,11 @@ export function detectPartialDays(
   options: Omit<ExpectationOptions, "fields"> = {}
 ): Finding[] {
   const fields = SCAN_FIELDS;
-  const expectedByDate = expectedFieldsByDate(input.snapshots, { ...options, fields });
+  const expectedByDate = expectedFieldsByDate(input.snapshots, {
+    cutoff: PARTIAL_CUTOFF,
+    ...options,
+    fields,
+  });
 
   const findings: Finding[] = [];
   for (const s of input.snapshots) {
