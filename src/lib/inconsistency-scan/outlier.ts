@@ -1,4 +1,4 @@
-import { MAX_DAILY_MINUTES } from "@/lib/duration-limits";
+import { MAX_DAILY_MINUTES, checkDayMinutes } from "@/lib/duration-limits";
 import type { DayColumn } from "@/lib/expected-fields";
 import { SUB_NAMES } from "@/lib/days";
 import { daysBetween } from "@/lib/date";
@@ -13,7 +13,17 @@ import { ENTRY_TABLES, type Finding, type ScanInput } from "./types";
  * detection is a later refinement, per the issue.
  */
 
-type Range = { column: DayColumn; label: string; min: number; max: number; unit?: string };
+type Range = {
+  column: DayColumn;
+  label: string;
+  min: number;
+  max: number;
+  unit?: string;
+  /** The write-time validator for this column, when one exists. It
+   * replaces min/max for the range finding, so the scan and the entry
+   * form can't disagree about what's valid. */
+  check?: (value: number) => string | null;
+};
 
 // What a value can be at all, not what's typical. Most of these are
 // enforced at write time now, but years of rows predate the validators.
@@ -38,7 +48,14 @@ const DAY_RANGES: readonly Range[] = [
       ["laptopUsageMinutes", "Laptop usage"],
       ["instagramUsageMinutes", "Instagram usage"],
     ] as const
-  ).map(([column, label]) => ({ column, label, min: 0, max: MAX_DAILY_MINUTES, unit: "min" })),
+  ).map(([column, label]) => ({
+    column,
+    label,
+    min: 0,
+    max: MAX_DAILY_MINUTES,
+    unit: "min",
+    check: (v: number) => checkDayMinutes(label, v),
+  })),
 ];
 
 const TIME_COLUMNS = [
@@ -70,15 +87,18 @@ export function detectRangeOutliers(input: ScanInput): Finding[] {
     if (s.date > input.lastJudgedDate || !s.day) continue;
     for (const r of DAY_RANGES) {
       const v = s.day[r.column];
-      if (typeof v !== "number" || !outOfRange(r, v)) continue;
-      const bound = r.max === Infinity ? `at least ${show(r.min, r.unit)}` : `${show(r.min, r.unit)} to ${show(r.max, r.unit)}`;
-      findings.push({
-        type: "outlier",
-        entityTable: "days",
-        date: s.date,
-        field: r.column,
-        detail: `${r.label} is ${show(v, r.unit)}, outside ${bound}`,
-      });
+      if (typeof v !== "number") continue;
+      let detail: string | null;
+      if (r.check) {
+        detail = r.check(v);
+      } else if (outOfRange(r, v)) {
+        const bound = r.max === Infinity ? `at least ${show(r.min, r.unit)}` : `${show(r.min, r.unit)} to ${show(r.max, r.unit)}`;
+        detail = `${r.label} is ${show(v, r.unit)}, outside ${bound}`;
+      } else {
+        detail = null;
+      }
+      if (!detail) continue;
+      findings.push({ type: "outlier", entityTable: "days", date: s.date, field: r.column, detail });
     }
     for (const [column, label] of TIME_COLUMNS) {
       const v = s.day[column];
