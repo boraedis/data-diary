@@ -4,7 +4,9 @@ import { inconsistencyFindings, inconsistencyScanRuns, type InconsistencyType } 
 import { toDateString } from "@/lib/date";
 import { loadScanInput } from "./load";
 import { detectDomainGaps, detectMissingDays } from "./missing";
+import { detectRangeOutliers, detectRollingOutliers } from "./outlier";
 import { detectPartialDays } from "./partial";
+import { detectMissingEntryFields, detectWorkoutJumps } from "./referential";
 import { findingKey, type Detector, type Finding, type ScanInput } from "./types";
 
 /**
@@ -14,12 +16,15 @@ import { findingKey, type Detector, type Finding, type ScanInput } from "./types
  * `runInconsistencyScan`.
  */
 
-// Add a detector here and it runs everywhere the scan does (#671 adds
-// the outlier and referential ones).
+// Add a detector here and it runs everywhere the scan does.
 export const DETECTORS: readonly Detector[] = [
   detectMissingDays,
   detectDomainGaps,
   detectPartialDays,
+  detectRangeOutliers,
+  detectRollingOutliers,
+  detectMissingEntryFields,
+  detectWorkoutJumps,
 ];
 
 /** Every detector's findings, one per key (the first wins on a collision). */
