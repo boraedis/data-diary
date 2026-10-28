@@ -57,6 +57,20 @@ export function checkEntryDurations(domain: DurationDomain, minutes: readonly (n
   return null;
 }
 
+/** A day-level minutes column (work hours, device usage) rather than an
+ * entry's duration. Zero is allowed here, unlike an entry: "0 minutes on
+ * the phone" is a real reading for a column that records a day's total.
+ * `null` means not recorded and passes. The same whole-minutes, up-to-a-day
+ * cap as `checkEntryDurations`, so a 30h laptop reading is caught the same
+ * way a 30h game session is. */
+export function checkDayMinutes(label: string, minutes: number | null): string | null {
+  if (minutes === null) return null;
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > MAX_DAILY_MINUTES) {
+    return `${label} can't be ${describe(minutes)}: it must be whole minutes, from 0 up to ${MAX_LABEL}.`;
+  }
+  return null;
+}
+
 /** The domain's total for the day can't exceed a day. */
 export function checkDayTotal(domain: DurationDomain, totalMinutes: number): string | null {
   if (totalMinutes <= MAX_DAILY_MINUTES) return null;

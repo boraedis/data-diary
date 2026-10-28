@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { diffRanking } from "@/lib/ranking-history";
 import { parseOptionalHexColor } from "@/lib/color";
 import { getDb } from "@/lib/db";
-import { checkDomainDurations, checkWorkoutDurations } from "@/lib/duration-limits";
+import { checkDayMinutes, checkDomainDurations, checkWorkoutDurations } from "@/lib/duration-limits";
 import { geocodeAddress } from "@/lib/geocode";
 import {
   bookRankingEvents,
@@ -839,6 +839,19 @@ function isPercent(value: unknown): value is number {
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/** A day-level minutes field from a request body. Absent or null means not
+ * recorded. Anything present must be a number of whole minutes within a
+ * day (see `checkDayMinutes`). A non-number is rejected rather than saved
+ * as null, since the old `typeof` fallback dropped a mistyped value without
+ * a word. */
+function parseDayMinutes(b: Record<string, unknown>, key: string, label: string): Result<number | null> {
+  const value = b[key];
+  if (value === null || value === undefined) return { ok: true, value: null };
+  if (typeof value !== "number") return { ok: false, error: `${label} must be a number of minutes` };
+  const error = checkDayMinutes(label, value);
+  return error ? { ok: false, error } : { ok: true, value };
+}
+
 function parseWorkouts(input: unknown): Result<WorkoutPayload[]> {
   const workoutsInput = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
   const parsed: WorkoutPayload[] = [];
@@ -1058,6 +1071,9 @@ export function validateWorkPayload(body: unknown): Result<WorkPayload> {
     return { ok: false, error: "Productivity must be between 0 and 100" };
   }
 
+  const workDuration = parseDayMinutes(b, "workDurationMinutes", "Work duration");
+  if (!workDuration.ok) return workDuration;
+
   const workLocation = Array.isArray(b.workLocation) ? (b.workLocation as string[]) : [];
   for (const loc of workLocation) {
     if (!WORK_LOCATIONS.has(loc)) {
@@ -1088,7 +1104,7 @@ export function validateWorkPayload(body: unknown): Result<WorkPayload> {
     ok: true,
     value: {
       productivity: typeof b.productivity === "number" ? b.productivity : null,
-      workDurationMinutes: typeof b.workDurationMinutes === "number" ? b.workDurationMinutes : null,
+      workDurationMinutes: workDuration.value,
       workLocation: workLocation as WorkLocationOption[],
       commute: commute as CommuteOption[],
     },
@@ -1101,13 +1117,19 @@ export function validateTechnologyPayload(body: unknown): Result<TechnologyPaylo
   }
   const b = body as Record<string, unknown>;
 
+  const phone = parseDayMinutes(b, "phoneUsageMinutes", "Phone usage");
+  if (!phone.ok) return phone;
+  const laptop = parseDayMinutes(b, "laptopUsageMinutes", "Laptop usage");
+  if (!laptop.ok) return laptop;
+  const instagram = parseDayMinutes(b, "instagramUsageMinutes", "Instagram usage");
+  if (!instagram.ok) return instagram;
+
   return {
     ok: true,
     value: {
-      phoneUsageMinutes: typeof b.phoneUsageMinutes === "number" ? b.phoneUsageMinutes : null,
-      laptopUsageMinutes: typeof b.laptopUsageMinutes === "number" ? b.laptopUsageMinutes : null,
-      instagramUsageMinutes:
-        typeof b.instagramUsageMinutes === "number" ? b.instagramUsageMinutes : null,
+      phoneUsageMinutes: phone.value,
+      laptopUsageMinutes: laptop.value,
+      instagramUsageMinutes: instagram.value,
     },
   };
 }
