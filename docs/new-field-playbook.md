@@ -38,13 +38,13 @@ says "Not yet recorded." for real data.
 | 5 | API route | Only for a new section | `src/app/api/days/[date]/<section>/route.ts` |
 | 6 | Entry form field | Yes | `src/components/entry-forms/<section>-entry-form.tsx` |
 | 7 | Day page tab + completeness | Yes | `src/app/(app)/day/[date]/<section>/page.tsx`, `src/app/(app)/day/[date]/page.tsx` |
-| 8 | Home recent-days score | Decide | `src/lib/home.ts` (`scoreDay`), `src/components/recent-days-scroller.tsx` |
+| 8 | Home recent-days score | Decide | `src/lib/expected-fields.ts` (`HOME_SECTIONS`), `src/components/recent-days-scroller.tsx` |
 | 9 | Chart data getter | If charted | `src/lib/charts.ts` |
 | 10 | Scroller / Trend / Calendar | Usually | `src/components/charts/`, `src/app/(app)/charts/` |
 | 11 | Chart catalog entry | If charted | `src/lib/charts-catalog.ts` |
 | 12 | Methodology, tracking span, interaction guide | If charted | `src/lib/viz/methodology.ts`, `tracking-span.ts`, `interaction-guides.ts` |
 | 13 | Recap | Decide | `src/lib/recap-*.ts`, `src/components/recap/` |
-| 14 | Inconsistency scan | Decide, and register once #13 lands | See section 7 |
+| 14 | Inconsistency scan | Yes (register the field) | `src/lib/expected-fields.ts`, `src/lib/inconsistency-scan/`; see section 14 |
 | 15 | Management pages | Catalog-backed only | `src/app/(app)/manage/`, `src/components/manage/` |
 | 16 | Public site | Decide, default no | `src/lib/public-content.ts`, `src/lib/public-charts.ts`, `src/lib/public-profile.ts` |
 | 17 | Other day readers | Check each | Section 10 |
@@ -138,35 +138,37 @@ needs a route modelled on the work route: `PATCH`, `isValidDateString`,
 
 ## 7. Completeness, and the home recent-days bar
 
-This is where the app currently has **three separate definitions of
-"filled in"**, and they disagree. Decide the field's status in all of them.
+The app has **two definitions of "filled in"**: the day overview's, and
+the shared expected-fields registry (`src/lib/expected-fields.ts`, #13),
+which both the home score and the inconsistency scan read. Decide the
+field's status in both.
 
 1. **Day overview** (`src/app/(app)/day/[date]/page.tsx`). Each section
    has a `filled` array and a `total`. Happiness counts three fields here,
    and Work counts four. Add the new field to its section's `present([...])`
    and bump `total` if it's a new counted slot.
-2. **Home recent-days bar** (`src/lib/home.ts`, `scoreDay`). Each section
-   scores 0 or 1 from a few columns, for a 0–10 total. The recent-days
-   query at the bottom of `getHomeDashboardData` selects columns by name,
-   so a new column used in `scoreDay` must also be added to that select
-   list and to the `scoreDay` parameter type. The `loggedResult` count is a
-   third, separate list of columns.
+2. **Home recent-days bar** (`HOME_SECTIONS` in `src/lib/expected-fields.ts`).
+   Each section scores 0 or 1 from registry fields, for a 0–10 total. To
+   count the new field, add its registry key (section 14) to a section's
+   `fields`. `home.ts` builds its select list from the registry
+   (`HOME_SCORE_COLUMNS`), so there's no column list to update by hand.
+   `home.ts`'s `loggedResult` count is still a separate list of columns.
 3. **Bar width** (`src/components/recent-days-scroller.tsx`, around line
-   18). It hardcodes `score / 10`. A new scored section changes the total,
-   so update this divisor too. The `scoreDay` comment says "10 sections"
-   and will need the same change.
+   18). It hardcodes `score / 10`. A new *section* changes
+   `HOME_SECTION_COUNT`, so update this divisor to match. The scroller is a
+   client component and can't import the registry, which pulls in the
+   database client through `days.ts`.
 
 Choose per field:
 
 - **Adding a field to an existing section:** usually the section's bar
   doesn't change. Add it to the day page `filled` only if it is a
   meaningful signal for completeness.
-- **Adding a new section:** it changes the denominator. Update
-  `scoreDay`, the select list, the divisor, and the comment together.
+- **Adding a new section:** it changes the denominator. Add it to
+  `HOME_SECTIONS` and update the scroller's divisor together.
 
-The three definitions should eventually come from one place. That is the
-shared expected-fields registry from issue #13. Until it exists, keep all
-three in sync by hand in the same PR.
+The day overview's `filled` lists are the one definition still kept by
+hand. Keep them in step with the registry in the same PR.
 
 ## 8. Charts
 
@@ -275,23 +277,35 @@ need:
 - Catalog-admin rules in `src/lib/catalog-admin.ts`, with a test beside
   `catalog-admin-validation.test.ts`.
 
-## 14. Inconsistency scan (issue #13, open)
+## 14. Inconsistency scan (issue #13)
 
-The scan doesn't exist yet. When it lands, a new field should only need to
-be registered, not hand-wired. Until then, record these facts about the
-field in the PR so the scan can be wired up later:
+The scan reads fields from the registry, so a new field is mostly a
+matter of registering it. `src/lib/expected-fields.test.ts` builds a full
+`days` row typed as every column, so a new `days` column fails `tsc`
+there until you've decided about it.
 
-- **Expected-field status.** The scan will decide "expected" from the
-  field's own historical fill rate, not a fixed list. Nothing to do now,
-  but the field must be a real column so it can be counted.
-- **Valid range.** Put the bounds in the validator (section 4). The scan's
-  fixed-range check should read the same bounds.
-- **Outlier candidate?** A numeric field with a stable personal baseline
-  (weight, happiness, productivity) is a rolling-average outlier candidate.
-  A count or a mostly-zero field usually isn't. Say which, in the PR.
-- **Registry.** Once #13 extracts `scoreDay` into a shared module, the
-  field gets registered there and section 7's three lists collapse into
-  that one. Until then section 7 is the registry.
+- **Register it** in `FIELDS` (`src/lib/expected-fields.ts`). Give it a
+  key, a label and its column(s). Group columns you log as one thing
+  (like the people slots). That's all "expected" needs. The scan learns
+  from the field's own trailing fill rate whether an empty value is a
+  finding, so there's no required/optional flag to set.
+- **Link it** in `FIELD_SECTIONS` (`src/lib/inconsistency-scan/links.ts`),
+  so the review page can send you to the right day section. A test there
+  fails if a registry field has no section.
+- **Valid range.** Bound it in the validator first (section 4). Then add
+  it to `DAY_RANGES` in `src/lib/inconsistency-scan/outlier.ts`. Where a
+  write-time check exists (like `checkDayMinutes`), pass it as `check`
+  rather than restating the bounds.
+- **Outlier candidate?** A measure with a stable personal baseline, where
+  a typo is plausible and a real day-to-day swing is small (weight, body
+  fat), belongs in `ROLLING_FIELDS` with a minimum-deviation floor.
+  Subjective daily ratings (happiness, productivity) don't, since a big
+  swing there is a real day; see that constant's comment for the
+  production numbers. Say which in the PR.
+- **A new satellite domain** (its own per-date table) also needs a
+  `SATELLITE_DOMAINS` entry, a count query in
+  `src/lib/inconsistency-scan/load.ts`, and, if it has per-entry details,
+  an `ENTRY_TABLES` entry in `types.ts`.
 
 ## 15. Copy
 
@@ -331,7 +345,7 @@ compare against:
 - Validation: `validateWorkPayload`. Range from `isPercent`.
 - Form: `src/components/entry-forms/work-entry-form.tsx`.
 - Day page: `src/app/(app)/day/[date]/work/page.tsx`, and the overview's Work bar.
-- Home: counted in `scoreDay` as "productivity or work duration".
+- Home: counted in `HOME_SECTIONS` (`src/lib/expected-fields.ts`) as "productivity or work duration". Scan: registered in `FIELDS`, ranged in `DAY_RANGES`, deliberately not in `ROLLING_FIELDS`.
 - Charts: work trend, daily, and calendar, plus work-happiness.
   Methodology is `WORK_METHODOLOGY`, tracking start is `WORK_TRACKING_SPAN`.
 - Recap: the work section, with a coverage gate.

@@ -27,7 +27,8 @@
     "geo:fetch-suburbs": "tsx scripts/geo-fetch-suburbs.mjs",
     "geo:fetch-istanbul-mahalles": "tsx scripts/geo-fetch-istanbul-mahalles.mjs",
     "migrate:entertainment-kinds": "node scripts/migrate-entertainment-kinds.mjs",
-    "seed:pr-fixture": "node scripts/seed-pr-fixture.mjs"
+    "seed:pr-fixture": "node scripts/seed-pr-fixture.mjs",
+    "scan:inconsistencies": "tsx scripts/run-inconsistency-scan.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

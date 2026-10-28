@@ -9,6 +9,7 @@ import { getLatestMusicListenAt } from "@/lib/music";
 import { daysSinceLatestListen, importFreshness } from "@/lib/music-staleness";
 import { getOnThisDayForHome } from "@/lib/on-this-day";
 import { countUnseen, getUnseenRecaps } from "@/lib/recap-seen";
+import { countOpenFindings } from "@/lib/inconsistency-scan/review";
 
 export const dynamic = "force-dynamic";
 
@@ -52,11 +53,12 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 export default async function HomePage() {
-  const [data, unseenRecaps, onThisDay, latestMusicListenAt] = await Promise.all([
+  const [data, unseenRecaps, onThisDay, latestMusicListenAt, openFindings] = await Promise.all([
     getHomeDashboardData(),
     getUnseenRecaps(),
     getOnThisDayForHome(todayDateString()),
     getLatestMusicListenAt(),
+    countOpenFindings(),
   ]);
   const newRecaps = countUnseen(unseenRecaps);
   // The Spotify export reminder (#651): shown on the Manage tile only once
@@ -146,6 +148,13 @@ export default async function HomePage() {
                       // the same alarm without that problem.
                       <span className="rounded-full border border-destructive px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-destructive">
                         Music export {musicOverdueDays}d old
+                      </span>
+                    ) : null}
+                    {/* The inconsistency scan's open findings (#672). Muted
+                        rather than alarming: a review backlog, not a fault. */}
+                    {href === "/manage" && openFindings > 0 ? (
+                      <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {openFindings} to review
                       </span>
                     ) : null}
                   </CardContent>
