@@ -11,6 +11,7 @@ import {
   listSportsCatalog,
 } from "@/lib/days";
 import { listSleepLocationTypes } from "@/lib/catalog-admin";
+import { countOpenFindings } from "@/lib/inconsistency-scan/review";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ const CATALOGS = [
 ] as const;
 
 export default async function ManagePage() {
-  const [people, places, exercises, entertainment, movies, sports, books, sleepLocationTypes] = await Promise.all([
+  const [people, places, exercises, entertainment, movies, sports, books, sleepLocationTypes, openFindings] = await Promise.all([
     listPeopleCatalog(),
     listPlacesCatalog(),
     listExercisesCatalog(),
@@ -40,6 +41,7 @@ export default async function ManagePage() {
     listSportsCatalog(),
     listBooksCatalog(),
     listSleepLocationTypes(),
+    countOpenFindings(),
   ]);
 
   const counts: Record<(typeof CATALOGS)[number]["key"], number> = {
@@ -75,6 +77,18 @@ export default async function ManagePage() {
           </Link>
         ))}
       </div>
+      {/* Not a catalog, so not in CATALOGS: the data-inconsistency scan's
+          review list (#672), and the count is what's left to review. */}
+      <Link href="/manage/inconsistencies">
+        <Card className="border-l-4 border-muted-foreground/40 transition-colors hover:bg-accent">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Inconsistencies</CardTitle>
+              <span className="font-mono text-lg text-muted-foreground">{openFindings}</span>
+            </div>
+          </CardHeader>
+        </Card>
+      </Link>
     </main>
   );
 }
