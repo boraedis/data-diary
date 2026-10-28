@@ -22,6 +22,7 @@ were established.
 ## Where to look first
 
 - **README.md** — features, install, env vars, scripts, DB/environments, deployment.
+- **docs/new-field-playbook.md** — every touch point for adding a daily field (schema through recap, charts, public site, and the inconsistency scan). Read it before adding a column to `days`.
 - **GitHub issue #14** — the chart-rebuild epic. Its pinned comment has the
   locked-in design decisions (drill-down scope, zoom/pan modes, color
   rules) and the sub-issue build order — read it before touching anything
