@@ -1,0 +1,89 @@
+name: Scheduled inconsistency scan
+
+# Monthly run of the data-inconsistency scan (#13, #673) against
+# production. Findings land in `inconsistency_findings` for review at
+# /manage/inconsistencies, where "Run scan now" runs the same runner on
+# demand. See README's "Inconsistency scan" section for one-time setup.
+#
+# Runs the scan as a script straight against the database
+# (scripts/run-inconsistency-scan.mjs) rather than calling an API route
+# on the deployed app. A route would need its own secret-checking auth
+# path through src/proxy.ts, a new way into the app that exists only for
+# this job, and the scan itself only needs a database connection.
+#
+# Credentials:
+# - SCAN_DATABASE_URL: a repo-level secret holding a dedicated Neon role's
+#   connection string. That role can read everything and write only the two
+#   scan tables. Not BACKUP_DATABASE_URL (read-only, and the scan has to
+#   write its findings), and not PROD_DATABASE_URL: that one lives in the
+#   "production" environment, whose required-reviewer gate would pause
+#   every monthly run for approval, and it can write every table.
+#
+# This repo is public, so these logs are too. The script prints counts
+# only, and in --scheduled mode reduces a failure to the error's type and
+# code, because a database error's message can carry the query's
+# parameters, and those are finding details (personal data).
+#
+# GitHub disables scheduled workflows in a public repo after 60 days with no
+# commits. If this repo ever goes quiet that long, re-enable it from the
+# Actions tab, same as scheduled-backup.yml.
+
+on:
+  schedule:
+    # The 1st of each month, 08:30 UTC. The scan leaves the last 7 days
+    # alone (JUDGE_LAG_DAYS), so it judges the month up to ~the 24th.
+    - cron: "30 8 1 * *"
+  workflow_dispatch: {}
+
+# Two overlapping runs would race on the same findings. Neither would
+# corrupt anything (the upsert is idempotent), but one would resolve what
+# the other just re-saw. Queue instead.
+concurrency:
+  group: scheduled-inconsistency-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run the scan
+        env:
+          DATABASE_URL: ${{ secrets.SCAN_DATABASE_URL }}
+        run: npm run scan:inconsistencies -- --commit --scheduled
+
+  # Same as scheduled-backup.yml: a scheduled job that silently stops
+  # working is the failure mode to guard against, so a failure opens an
+  # issue rather than only an Actions-tab entry. Only a run link, never
+  # log output.
+  report-failure:
+    needs: scan
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Scheduled inconsistency scan failed (run #${context.runNumber})`,
+              assignees: [context.repo.owner],
+              body: [
+                "This month's data-inconsistency scan didn't complete. Existing findings are untouched; nothing new was flagged or resolved.",
+                "",
+                `Run: ${runUrl}`,
+                "",
+                "Common causes: `SCAN_DATABASE_URL` is missing or its role's password was reset, the role lacks a grant on a scan table (see README's \"Inconsistency scan\" section), or the scan tables don't exist yet because the schema hasn't reached production. You can also run it by hand from /manage/inconsistencies. Close this once a run succeeds.",
+              ].join("\n"),
+            });

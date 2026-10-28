@@ -174,6 +174,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `npm run diagnose:place-cycles` | Read-only check for cyclical parent/child relationships in the places hierarchy. |
 | `npm run split:duplicate-places` | Splits merged/duplicate place records apart. Dry-run by default; `--commit` to write. |
 | `npm run seed:pr-fixture` | TRUNCATEs every table and replaces it with a small made-up fixture dataset — see `scripts/seed-pr-fixture.mjs`'s header. Only ever meant to run against a disposable PR database branch (`pr-db-branch-create.yml` runs it automatically after creating one); refuses to run against a `PROD_DB_HOSTS` match. Dry-run by default; `--commit` to write. |
+| `npm run scan:inconsistencies` | Runs the data-inconsistency scan (see "Inconsistency scan" below) and prints counts only. Dry-run by default; `--commit` to save findings; `--scheduled` is the monthly workflow's unattended mode. |
 
 Every write-capable script here runs through `scripts/lib/prod-guard.mjs`,
 which checks the active `DATABASE_URL`'s hostname against `PROD_DB_HOSTS`
@@ -274,6 +275,47 @@ gunzip -c data-diary-2026-09-25.sql.gz | psql "$TARGET_DATABASE_URL"
 
 The dump is made with `--no-owner --no-privileges`, so it restores under
 whatever role you connect as.
+
+### Inconsistency scan
+
+The scan (epic #13) looks for days with nothing logged, domains that went
+quiet, logged days missing fields you normally fill, impossible or
+typo-shaped values, and entries that don't fit their siblings. Detectors
+are in `src/lib/inconsistency-scan/`. Findings are saved to
+`inconsistency_findings`, and you review them at `/manage/inconsistencies`
+(Manage → Inconsistencies). A finding you dismiss stays dismissed on later
+runs, and one that stops reproducing is resolved automatically.
+
+`.github/workflows/scheduled-inconsistency-scan.yml` runs it on the 1st of
+each month at 08:30 UTC, and on demand from the Actions tab. "Run scan now"
+on the review page runs it too. If the scheduled run fails, it opens an
+issue here assigned to you.
+
+**One-time setup**: one repo-level Actions secret, **`SCAN_DATABASE_URL`**.
+It holds the connection string of a role that can read everything and write
+only the scan's two tables. Do this after the scan tables reach production,
+which happens when the epic PR merges and `migrate-prod.yml` runs. In the
+Neon console, create a role (e.g. `scan_writer`) on the production branch,
+then run this against production as the owner role:
+
+```sql
+GRANT pg_read_all_data TO scan_writer;
+GRANT INSERT, UPDATE ON inconsistency_findings, inconsistency_scan_runs TO scan_writer;
+GRANT USAGE ON SEQUENCE inconsistency_findings_id_seq, inconsistency_scan_runs_id_seq TO scan_writer;
+```
+
+The scan's upsert needs `SELECT` as well as `INSERT`/`UPDATE`, and
+`pg_read_all_data` covers that. Either connection string works (pooled or
+direct); the scan uses Neon's HTTP driver, not `pg_dump`. The existing
+secrets don't fit: `BACKUP_DATABASE_URL` is read-only, and
+`PROD_DATABASE_URL` sits behind the `production` environment's reviewer
+gate and can write every table.
+
+The workflow's logs are public, so the script prints counts only, and a
+scheduled failure prints just the error type. Run
+`npm run scan:inconsistencies` locally for the full error. A manual
+`--commit` against production goes through `prod-guard.mjs` like the other
+write scripts.
 
 ## Project structure
 
