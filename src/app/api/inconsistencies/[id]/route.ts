@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { parseFindingStatus } from "@/lib/inconsistency-scan/links";
+import { parseReviewStatus } from "@/lib/inconsistency-scan/links";
 import { setFindingStatus } from "@/lib/inconsistency-scan/review";
 
 export const dynamic = "force-dynamic";
 
-// The review page's dismiss / resolve / reopen (#672): one PATCH with the
-// new status rather than a route per action, since "undo" is just setting
-// it back to open.
+// The review page's dismiss and reopen (#672): one PATCH with the new
+// status rather than a route per action, since "undo" is just setting it
+// back to open. "resolved" is refused: only the scan resolves (#685).
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const id = Number((await params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -17,9 +17,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const status = parseFindingStatus((body as { status?: unknown } | null)?.status);
+  const status = parseReviewStatus((body as { status?: unknown } | null)?.status);
   if (!status) {
-    return NextResponse.json({ error: "status must be open, dismissed or resolved" }, { status: 400 });
+    return NextResponse.json(
+      { error: "status must be open or dismissed; findings are resolved by rescanning" },
+      { status: 400 }
+    );
   }
 
   try {

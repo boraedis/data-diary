@@ -9,6 +9,7 @@ import {
   TYPE_LABELS,
   findingHref,
   parseFindingStatus,
+  partialFieldLinks,
 } from "@/lib/inconsistency-scan/links";
 import {
   countFindingsByStatus,
@@ -46,13 +47,38 @@ function lastScanLine(run: Awaited<ReturnType<typeof getLastScanRun>>): string {
   return `Last scanned ${when} (${how}): ${run.added} new, ${run.resolved} resolved.`;
 }
 
-// Resolved findings say who resolved them: a null reviewedAt means the
-// scan did, because the problem stopped reproducing (see the schema).
+// Only the scan resolves findings (#685), when they stop reproducing, so
+// the Resolved tab is a read-only history. Dismissed ones say when.
 function reviewNote(f: ReviewFinding): string | null {
-  if (f.status === "open") return null;
-  if (!f.reviewedAt) return "Resolved by the scan";
-  const verb = f.status === "dismissed" ? "Dismissed" : "Marked fixed";
-  return `${verb} ${f.reviewedAt.toLocaleDateString(undefined, { dateStyle: "medium" })}`;
+  if (f.status === "resolved") return "No longer detected";
+  if (f.status === "dismissed" && f.reviewedAt) {
+    return `Dismissed ${f.reviewedAt.toLocaleDateString(undefined, { dateStyle: "medium" })}`;
+  }
+  return null;
+}
+
+// A partially filled day lists several fields; each links to the section
+// that fixes it (#685) instead of one link to the whole day.
+function Detail({ f }: { f: ReviewFinding }) {
+  const links = f.type === "partial" ? partialFieldLinks(f) : [];
+  if (links.length === 0) return <span className="text-sm text-muted-foreground">{f.detail}</span>;
+  return (
+    <span className="text-sm text-muted-foreground">
+      Missing:{" "}
+      {links.map((l, i) => (
+        <span key={l.label}>
+          {i > 0 ? ", " : null}
+          {l.href ? (
+            <Link href={l.href} className="underline underline-offset-4 hover:text-foreground">
+              {l.label}
+            </Link>
+          ) : (
+            l.label
+          )}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 export default async function InconsistenciesPage({
@@ -130,10 +156,10 @@ export default async function InconsistenciesPage({
                             {formatDate(f.date, "weekdayYear")}
                           </Link>
                         ) : null}
-                        <span className="text-sm text-muted-foreground">{f.detail}</span>
+                        <Detail f={f} />
                         {note ? <span className="text-xs text-muted-foreground/80">{note}</span> : null}
                       </div>
-                      <FindingActions id={f.id} status={f.status} />
+                      {f.status === "resolved" ? null : <FindingActions id={f.id} status={f.status} />}
                     </li>
                   );
                 })}
