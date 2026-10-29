@@ -3,7 +3,7 @@ import { DayNav } from "@/components/day-nav";
 import { PortraitCapture } from "@/components/entry-forms/portrait-capture";
 import { isValidDateString } from "@/lib/date";
 import { getDayPortrait } from "@/lib/day-portraits/store";
-import { getR2Config } from "@/lib/video-journal/r2";
+import { getR2PortraitsConfig } from "@/lib/video-journal/r2";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +17,10 @@ export default async function PortraitEntryPage({
     notFound();
   }
 
-  // Without R2 there is nowhere to keep a photo, so say so up front rather
+  // Without the portraits bucket there is nowhere to keep a photo, so say so up front rather
   // than letting someone take one that cannot be saved. A storage failure
   // on read just means no photo is shown; the capture card still works.
-  const configured = getR2Config() !== null;
+  const configured = getR2PortraitsConfig() !== null;
   const portrait = configured
     ? await getDayPortrait(date).catch((error: unknown) => {
         console.error("[portrait page] Could not load the day's portrait:", error);
@@ -35,7 +35,7 @@ export default async function PortraitEntryPage({
         <PortraitCapture date={date} initial={portrait} />
       ) : (
         <p className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-          Photo storage (R2) is not configured on this deployment, so portraits can&apos;t be saved here.
+          Portrait storage (R2_PORTRAITS_BUCKET) is not configured on this deployment, so portraits can&apos;t be saved here.
         </p>
       )}
     </main>

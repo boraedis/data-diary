@@ -158,6 +158,7 @@ All of these are documented inline in `.env.example`; summarized here:
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | For artist genre lookup on music import | Spotify [Client Credentials](https://developer.spotify.com/documentation/web-api/tutorials/client-credentials-flow) app keys, used by `/api/music/import` to resolve a newly-seen artist's genre tags. Without these, import still works — new artists just get no genres. |
 | `BLOB_READ_WRITE_TOKEN` | For serving binary media | [Vercel Blob](https://vercel.com/docs/vercel-blob) read/write token, used to store images and video (see `AGENTS.md`'s static asset strategy section for what goes here vs. what's committed to the repo). Auto-populated on Vercel once a Blob store is connected to the project; for local dev, pull it with `vercel env pull`. |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | For video journal uploads | Cloudflare R2 bucket + API token for video journal recordings (#338/#339). See [Video journal storage (R2)](#video-journal-storage-r2). Without these, recording still works: takes stay on the device and the upload API answers 503. |
+| `R2_PORTRAITS_BUCKET` | For day portraits | A second private R2 bucket, just for the daily portrait photos (#688). Uses the same `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` as the videos, so the API token must cover both buckets. No fallback to `R2_BUCKET`: without it the portrait page says storage isn't configured. See [Day portraits](#video-journal-storage-r2). |
 | `DEEPGRAM_API_KEY` | For video journal transcription | [Deepgram](https://deepgram.com) API key (#341). Stored recordings are transcribed with Nova-3; transcripts are kept on each recording and reach the day's journal when its recordings are finalized (#613), never silently replacing writing. Without it, recordings are stored but stay untranscribed until a key is added; the Journal page then starts them automatically. |
 
 ### Scripts
@@ -402,12 +403,20 @@ R2 aborts multipart uploads left incomplete for 7 days by default (bucket
 attempts. That's fine: a device keeps its local copy until an upload is
 verified, and starting over is automatic.
 
-**Day portraits** (#622, #688) use the same bucket and credentials, under
-the `day-portraits/` key prefix. The one-photo-a-day portrait taken at
-`/day/<date>/portrait` is small enough that the server uploads it directly
-(`PUT /api/day-portraits/<date>`) instead of using presigned multipart, so
-no extra CORS rule is needed for it. Portraits are private; they leave the
-app by hand, and the facelapse tool has no connection to this bucket.
+**Day portraits** (#622, #688) get a **second bucket**, named by
+`R2_PORTRAITS_BUCKET`, on the same account and API token. R2 tokens are
+scoped to whole buckets, never to a key prefix, so a shared bucket would
+mean any token made later for the facelapse tool could read every video
+recording as well. Create it like the video bucket (private, one for
+Production and one for Preview and Development), and make sure the API
+token's scope covers both buckets. It needs no CORS rule and no multipart
+lifecycle rule: the photo taken at `/day/<date>/portrait` is small enough
+that the server uploads it directly (`PUT /api/day-portraits/<date>`)
+rather than using presigned multipart. There is deliberately no fallback to
+`R2_BUCKET`; a missing `R2_PORTRAITS_BUCKET` shows as "not configured"
+instead of putting photos in the video bucket. Portraits are private; they
+leave the app by hand, and the facelapse tool has no connection to this
+bucket.
 
 ## Deployment
 

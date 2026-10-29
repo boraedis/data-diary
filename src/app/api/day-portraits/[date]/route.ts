@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidDateString } from "@/lib/date";
 import { MAX_PORTRAIT_BYTES, validatePortraitUpload } from "@/lib/day-portraits/rules";
 import { getDayPortrait, PortraitError, saveDayPortrait } from "@/lib/day-portraits/store";
-import { R2NotConfiguredError, getR2Config } from "@/lib/video-journal/r2";
+import { R2NotConfiguredError, getR2PortraitsConfig } from "@/lib/video-journal/r2";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // src/proxy.ts's public list; nothing here is public.
 
 function notConfigured(): NextResponse | null {
-  return getR2Config()
+  return getR2PortraitsConfig()
     ? null
     : NextResponse.json({ error: "Photo storage is not configured on this deployment" }, { status: 503 });
 }

@@ -1,12 +1,14 @@
 import { eq } from "drizzle-orm";
 import { dayPortraits, days } from "@/db/schema";
 import { getDb } from "@/lib/db";
-import { deleteObject, presignGetObject, putObject } from "@/lib/video-journal/r2";
+import { deleteObject, presignGetObject, putObject, requirePortraitsConfig } from "@/lib/video-journal/r2";
 import { portraitStorageKey, type DayPortrait, type PortraitMimeType } from "@/lib/day-portraits/rules";
 
 // Server-only storage for day portraits (#622, #688): the image goes to the
-// private R2 bucket, and one `day_portraits` row per day holds its key.
-// Never import this from a client component (it reaches R2 credentials).
+// portraits' own private R2 bucket (`R2_PORTRAITS_BUCKET`, see
+// getR2PortraitsConfig for why it is not the video bucket), and one
+// `day_portraits` row per day holds its key. Never import this from a
+// client component (it reaches R2 credentials).
 
 /** An API-mappable failure: `status` is the HTTP status the route returns. */
 export class PortraitError extends Error {
@@ -23,7 +25,7 @@ type PortraitRow = typeof dayPortraits.$inferSelect;
 async function toPortrait(row: PortraitRow): Promise<DayPortrait> {
   return {
     date: row.date,
-    url: await presignGetObject(row.storageKey),
+    url: await presignGetObject(row.storageKey, requirePortraitsConfig()),
     capturedAt: row.capturedAt.toISOString(),
     sizeBytes: row.sizeBytes,
   };
@@ -66,10 +68,13 @@ export async function saveDayPortrait(input: {
   capturedAt: Date;
 }): Promise<DayPortrait> {
   const db = getDb();
+  // Before any write, so an unconfigured deployment fails cleanly rather
+  // than half-way through.
+  const config = requirePortraitsConfig();
   const previous = await findRow(input.date);
   const storageKey = portraitStorageKey(input.date, crypto.randomUUID(), input.mimeType);
 
-  await putObject(storageKey, input.bytes, input.mimeType);
+  await putObject(storageKey, input.bytes, input.mimeType, config);
 
   let row: PortraitRow;
   try {
@@ -100,14 +105,14 @@ export async function saveDayPortrait(input: {
   } catch (error) {
     // The row never pointed at the new object, so it is an orphan; clear it
     // best-effort and surface the real failure.
-    await deleteObject(storageKey).catch((cleanupError: unknown) => {
+    await deleteObject(storageKey, config).catch((cleanupError: unknown) => {
       console.error("[day-portraits] Could not remove an orphaned upload:", storageKey, cleanupError);
     });
     throw error;
   }
 
   if (previous && previous.storageKey !== storageKey) {
-    await deleteObject(previous.storageKey).catch((cleanupError: unknown) => {
+    await deleteObject(previous.storageKey, config).catch((cleanupError: unknown) => {
       // The retake itself succeeded; a leftover old object is not worth
       // failing the request for.
       console.error("[day-portraits] Could not remove the replaced portrait:", previous.storageKey, cleanupError);

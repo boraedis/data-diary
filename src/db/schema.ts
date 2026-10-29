@@ -1722,8 +1722,9 @@ export const videoLogs = pgTable(
 // --- Day portraits (#622, #688) -------------------------------------------
 //
 // One face photo per diary day, taken in the browser with a framing guide
-// so the facelapse's source frames line up. Private R2 object, same bucket
-// as the video journal: portraits are personal, and only the finished
+// so the facelapse's source frames line up. Private R2 object in its own
+// bucket (R2_PORTRAITS_BUCKET, see getR2PortraitsConfig for why it is not
+// the video bucket): portraits are personal, and only the finished
 // facelapse is public (#12). Only the object key is stored; the page gets a
 // short-lived presigned GET (src/lib/video-journal/r2.ts).
 //
