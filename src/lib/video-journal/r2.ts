@@ -255,22 +255,38 @@ export async function headObject(key: string): Promise<{ size: number; contentTy
   return { size: Number(res.headers.get("Content-Length") ?? 0), contentType: res.headers.get("Content-Type") };
 }
 
+/** How long the one-off URL that putObject signs for itself stays valid.
+ * It is used immediately, so this only has to cover clock skew. */
+const PUT_SIGN_EXPIRES_SECONDS = 5 * 60;
+
 /** Writes a whole object in one request. Multipart is for recordings too
  * big for a single request; a day portrait (#688) is a few hundred KB, so
  * the server uploads it directly after validating it, rather than handing
  * the browser a presigned PUT it would then have to be trusted about.
- * `config` picks the bucket; it defaults to the video journal's. */
+ * `config` picks the bucket; it defaults to the video journal's.
+ *
+ * Signs the URL and sends the bytes with a plain `fetch(url, { body })`,
+ * not `client.fetch`. aws4fetch hands `fetch` a `Request` it built around
+ * the body, and under Next's patched `fetch` that body can reach R2 as a
+ * stream with no length, which R2 rejects with 411 MissingContentLength. A
+ * typed-array body on a plain call is sent with its Content-Length. */
 export async function putObject(
   key: string,
   body: ArrayBuffer | Uint8Array,
   contentType: string,
   config: R2Config = requireConfig(),
 ): Promise<void> {
-  await r2Fetch(
-    objectUrl(config, key),
-    { method: "PUT", headers: { "Content-Type": contentType }, body: body as BodyInit },
-    config,
-  );
+  const url = objectUrl(config, key);
+  url.searchParams.set("X-Amz-Expires", String(PUT_SIGN_EXPIRES_SECONDS));
+  // No body is passed to the signer: a query-signed S3 URL leaves the
+  // payload unsigned, and Content-Type is not a signed header, so the
+  // request below can carry whichever type the object should be served as.
+  const signed = await client(config).sign(url.toString(), { method: "PUT", aws: { signQuery: true } });
+  const res = await fetch(signed.url, { method: "PUT", headers: { "Content-Type": contentType }, body: body as BodyInit });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new R2RequestError(res.status, xmlTag(text, "Code") ?? null, xmlTag(text, "Message") ?? text.slice(0, 200));
+  }
 }
 
 /** Permanently deletes an object (#613: Finalize clears the takes that
