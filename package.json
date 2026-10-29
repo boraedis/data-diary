@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate:history": "node scripts/migrate-history.mjs",
+    "backfill:tv-episodes": "tsx scripts/backfill-tv-episodes.mjs",
     "backfill:place-paths": "node scripts/backfill-place-paths.mjs",
     "backfill:entertainment-duration-location": "node scripts/backfill-entertainment-duration-location.mjs",
     "migrate:watchlist-rankings": "node scripts/migrate-watchlist-rankings.mjs",

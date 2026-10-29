@@ -3500,33 +3500,45 @@ const TV_EPISODE_COLUMNS = {
 
 export type TvEpisodeWatchItem = { id: number; date: string | null; locationType: string | null };
 
-// Upserts one season's worth of episode metadata (by tmdbEpisodeId, which
-// never changes for a given episode) and returns every episode in that
-// show/season alongside its own logged watches, if any — one round trip
-// covers both refreshing stale metadata (a name/air date TMDB corrected)
+export type TvEpisodeMetadata = {
+  tmdbEpisodeId: number;
+  season: number;
+  episode: number;
+  name: string | null;
+  airDate: string | null;
+  runtimeMinutes: number | null;
+};
+
+// Upserts episode metadata by tmdbEpisodeId, which never changes for a given
+// episode, in one statement. Shared by the per-season picker sync below and
+// by syncAllTvShowEpisodes (src/lib/tv-episode-catalog.ts), which fills every
+// season of a show at once so the TV backlog sees unopened seasons too.
+export async function upsertTvEpisodeMetadata(showId: number, episodes: TvEpisodeMetadata[]): Promise<void> {
+  if (episodes.length === 0) return;
+  await getDb()
+    .insert(tvEpisodes)
+    .values(episodes.map((ep) => ({ showId, ...ep })))
+    .onConflictDoUpdate({
+      target: tvEpisodes.tmdbEpisodeId,
+      set: {
+        name: sql`excluded.name`,
+        airDate: sql`excluded.air_date`,
+        runtimeMinutes: sql`excluded.runtime_minutes`,
+      },
+    });
+}
+
+// Upserts one season's worth of episode metadata and returns every episode
+// in that show/season alongside its own logged watches, if any — one round
+// trip covers both refreshing stale metadata (a name/air date TMDB corrected)
 // and rendering the season list's "already watched" state.
 export async function syncTvShowSeasonEpisodes(
   showId: number,
-  episodes: {
-    tmdbEpisodeId: number;
-    season: number;
-    episode: number;
-    name: string | null;
-    airDate: string | null;
-    runtimeMinutes: number | null;
-  }[]
+  episodes: TvEpisodeMetadata[]
 ): Promise<(TvEpisodeItem & { watches: TvEpisodeWatchItem[] })[]> {
   const db = getDb();
   if (episodes.length === 0) return [];
-  for (const ep of episodes) {
-    await db
-      .insert(tvEpisodes)
-      .values({ showId, ...ep })
-      .onConflictDoUpdate({
-        target: tvEpisodes.tmdbEpisodeId,
-        set: { name: ep.name, airDate: ep.airDate, runtimeMinutes: ep.runtimeMinutes },
-      });
-  }
+  await upsertTvEpisodeMetadata(showId, episodes);
   const season = episodes[0].season;
   const episodeRows = await db
     .select(TV_EPISODE_COLUMNS)
