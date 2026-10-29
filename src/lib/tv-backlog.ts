@@ -6,6 +6,11 @@ import { addDays, todayDateString } from "@/lib/date";
 // were still unwatched on each day (#222's `unwatched_episodes`, decided to
 // stay a /charts page, not a /manage tracker).
 //
+// Episodes come from the `tv_episodes` catalog, which holds every season of
+// a show: adding or refreshing a show syncs all of them (see
+// syncAllTvShowEpisodes in src/lib/tv-episode-catalog.ts). A season that was
+// never opened in the episode picker would otherwise be missing here.
+//
 // An episode counts as backlog on day D when ALL of these hold:
 //   - it had aired (`air_date <= D`);
 //   - I was following its show: from the show's first *dated* watch, until

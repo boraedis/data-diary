@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTvShowCatalogEntry, listTvShowsCatalog, validateTvShowCatalogRequest } from "@/lib/days";
+import { syncAllTvShowEpisodes } from "@/lib/tv-episode-catalog";
 import { getTvShowDetails } from "@/lib/tmdb";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,9 @@ export async function GET() {
 /** Same shape as POST /api/movies — the client only ever sends a tmdbId,
  * the rest of the catalog row is fetched server-side from TMDB and upserted
  * here. A brand-new show starts `interested: true` (see
- * createTvShowCatalogEntry in src/lib/days.ts). */
+ * createTvShowCatalogEntry in src/lib/days.ts). Every season's episodes are
+ * synced too, so the TV backlog can see the whole show — see
+ * syncAllTvShowEpisodes in src/lib/tv-episode-catalog.ts. */
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -29,6 +32,7 @@ export async function POST(request: Request) {
   try {
     const details = await getTvShowDetails(parsed.value.tmdbId);
     const created = await createTvShowCatalogEntry(details);
+    await syncAllTvShowEpisodes(created.id, created.tmdbId);
     return NextResponse.json(created);
   } catch (error) {
     return NextResponse.json(
