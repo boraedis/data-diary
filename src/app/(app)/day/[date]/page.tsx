@@ -12,6 +12,7 @@ import {
   SUB_NAMES,
   type DayPayload,
 } from "@/lib/days";
+import { hasDayPortrait } from "@/lib/day-portraits/store";
 import { summarizeDayVideoNow, type DayVideoNote } from "@/lib/video-journal/day-status";
 import { listVideoLogStatesForDate } from "@/lib/video-journal/video-logs";
 
@@ -44,7 +45,7 @@ const NOTE_TONE: Record<DayVideoNote["tone"], string> = {
 // whether the day is "complete" — it's just enough to show at a glance
 // which sections you haven't touched yet, same idea as the legacy app's
 // per-category progress bars on its day dashboard.
-function summarize(day: DayPayload, videoNote: DayVideoNote | null): CategorySummary[] {
+function summarize(day: DayPayload, videoNote: DayVideoNote | null, hasPortrait: boolean): CategorySummary[] {
   const present = (values: unknown[]) => values.filter((v) => v !== null && v !== undefined).length;
 
   return [
@@ -103,6 +104,8 @@ function summarize(day: DayPayload, videoNote: DayVideoNote | null): CategorySum
       // alone can't say "transcribing" or "recorded but not finalized".
       note: videoNote,
     },
+    // One photo a day for the facelapse (#622, #688): there or not.
+    { key: "portrait", label: "Portrait", kind: "progress", filled: hasPortrait ? 1 : 0, total: 1 },
     { key: "subs", label: "Subs", kind: "progress", filled: day.subs.length, total: SUB_NAMES.length },
     {
       key: "entertainment",
@@ -149,7 +152,7 @@ export default async function DaySummaryPage({
     notFound();
   }
 
-  const [day, videoRows] = await Promise.all([
+  const [day, videoRows, hasPortrait] = await Promise.all([
     loadDay(date),
     // A video-side failure must not take the day summary down with it;
     // the card just loses its status line.
@@ -157,9 +160,15 @@ export default async function DaySummaryPage({
       console.error("[day summary] Could not load video log states:", error);
       return [];
     }),
+    // Same rule for the portrait: the card shows empty rather than the
+    // whole summary failing.
+    hasDayPortrait(date).catch((error: unknown) => {
+      console.error("[day summary] Could not check for a portrait:", error);
+      return false;
+    }),
   ]);
   const videoNote = summarizeDayVideoNow(videoRows);
-  const categories = summarize(day, videoNote);
+  const categories = summarize(day, videoNote, hasPortrait);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:py-12">

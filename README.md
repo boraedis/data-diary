@@ -402,6 +402,13 @@ R2 aborts multipart uploads left incomplete for 7 days by default (bucket
 attempts. That's fine: a device keeps its local copy until an upload is
 verified, and starting over is automatic.
 
+**Day portraits** (#622, #688) use the same bucket and credentials, under
+the `day-portraits/` key prefix. The one-photo-a-day portrait taken at
+`/day/<date>/portrait` is small enough that the server uploads it directly
+(`PUT /api/day-portraits/<date>`) instead of using presigned multipart, so
+no extra CORS rule is needed for it. Portraits are private; they leave the
+app by hand, and the facelapse tool has no connection to this bucket.
+
 ## Deployment
 
 Deploys to [Vercel](https://vercel.com), with the Neon Vercel integration

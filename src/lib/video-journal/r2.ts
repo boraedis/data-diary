@@ -213,6 +213,19 @@ export async function headObject(key: string): Promise<{ size: number; contentTy
   return { size: Number(res.headers.get("Content-Length") ?? 0), contentType: res.headers.get("Content-Type") };
 }
 
+/** Writes a whole object in one request. Multipart is for recordings too
+ * big for a single request; a day portrait (#688) is a few hundred KB, so
+ * the server uploads it directly after validating it, rather than handing
+ * the browser a presigned PUT it would then have to be trusted about. */
+export async function putObject(key: string, body: ArrayBuffer | Uint8Array, contentType: string): Promise<void> {
+  const config = requireConfig();
+  await r2Fetch(objectUrl(config, key), {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: body as BodyInit,
+  });
+}
+
 /** Permanently deletes an object (#613: Finalize clears the takes that
  * weren't chosen). An already-missing object counts as deleted, so a
  * retried Finalize doesn't fail on what the first attempt removed. */
