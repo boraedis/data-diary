@@ -26,18 +26,50 @@ export type R2Config = {
   bucket: string;
 };
 
-export function getR2Config(): R2Config | null {
+type R2Credentials = Omit<R2Config, "bucket">;
+
+/** The account and API token, shared by every bucket. Read apart from any
+ * bucket name so each bucket's config can be missing on its own. */
+function readCredentials(): R2Credentials | null {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!accountId || !accessKeyId || !secretAccessKey) return null;
+  return { accountId, accessKeyId, secretAccessKey };
+}
+
+/** The video journal's bucket (`R2_BUCKET`). */
+export function getR2Config(): R2Config | null {
+  const credentials = readCredentials();
   const bucket = process.env.R2_BUCKET;
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) return null;
-  return { accountId, accessKeyId, secretAccessKey, bucket };
+  if (!credentials || !bucket) return null;
+  return { ...credentials, bucket };
+}
+
+/**
+ * The day portraits' bucket (`R2_PORTRAITS_BUCKET`, #688), same account and
+ * API token as the videos. A bucket of its own because R2 tokens are scoped
+ * to whole buckets, never to a key prefix: sharing the video bucket would
+ * mean any token later made for the facelapse tool (#622) could read every
+ * recording too. CORS, lifecycle and public-access settings are per-bucket
+ * as well, and the video bucket's don't belong on photos.
+ *
+ * Deliberately no fallback to `R2_BUCKET`: a forgotten variable should read
+ * as "portraits are not configured", not quietly put photos in the video
+ * bucket.
+ */
+export function getR2PortraitsConfig(): R2Config | null {
+  const credentials = readCredentials();
+  const bucket = process.env.R2_PORTRAITS_BUCKET;
+  if (!credentials || !bucket) return null;
+  return { ...credentials, bucket };
 }
 
 export class R2NotConfiguredError extends Error {
-  constructor() {
-    super("Video storage (R2) is not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET");
+  constructor(
+    message = "Video storage (R2) is not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET",
+  ) {
+    super(message);
   }
 }
 
@@ -49,6 +81,17 @@ export const PRESIGN_EXPIRES_SECONDS = 60 * 60;
 function requireConfig(): R2Config {
   const config = getR2Config();
   if (!config) throw new R2NotConfiguredError();
+  return config;
+}
+
+/** For the day portraits' bucket (#688). */
+export function requirePortraitsConfig(): R2Config {
+  const config = getR2PortraitsConfig();
+  if (!config) {
+    throw new R2NotConfiguredError(
+      "Portrait storage (R2) is not configured: set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_PORTRAITS_BUCKET",
+    );
+  }
   return config;
 }
 
@@ -70,8 +113,7 @@ function objectUrl(config: R2Config, key: string): URL {
   return new URL(`https://${config.accountId}.r2.cloudflarestorage.com/${config.bucket}/${path}`);
 }
 
-async function r2Fetch(url: URL, init: RequestInit = {}): Promise<Response> {
-  const config = requireConfig();
+async function r2Fetch(url: URL, init: RequestInit = {}, config: R2Config = requireConfig()): Promise<Response> {
   const res = await client(config).fetch(url.toString(), init);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -213,11 +255,28 @@ export async function headObject(key: string): Promise<{ size: number; contentTy
   return { size: Number(res.headers.get("Content-Length") ?? 0), contentType: res.headers.get("Content-Type") };
 }
 
+/** Writes a whole object in one request. Multipart is for recordings too
+ * big for a single request; a day portrait (#688) is a few hundred KB, so
+ * the server uploads it directly after validating it, rather than handing
+ * the browser a presigned PUT it would then have to be trusted about.
+ * `config` picks the bucket; it defaults to the video journal's. */
+export async function putObject(
+  key: string,
+  body: ArrayBuffer | Uint8Array,
+  contentType: string,
+  config: R2Config = requireConfig(),
+): Promise<void> {
+  await r2Fetch(
+    objectUrl(config, key),
+    { method: "PUT", headers: { "Content-Type": contentType }, body: body as BodyInit },
+    config,
+  );
+}
+
 /** Permanently deletes an object (#613: Finalize clears the takes that
  * weren't chosen). An already-missing object counts as deleted, so a
  * retried Finalize doesn't fail on what the first attempt removed. */
-export async function deleteObject(key: string): Promise<void> {
-  const config = requireConfig();
+export async function deleteObject(key: string, config: R2Config = requireConfig()): Promise<void> {
   const res = await client(config).fetch(objectUrl(config, key).toString(), { method: "DELETE" });
   if (!res.ok && res.status !== 404) {
     const body = await res.text().catch(() => "");
@@ -227,8 +286,7 @@ export async function deleteObject(key: string): Promise<void> {
 
 /** A short-lived URL a `<video>` can play the object from. R2 serves range
  * requests on it, so seeking a long recording doesn't download the file. */
-export async function presignGetObject(key: string): Promise<string> {
-  const config = requireConfig();
+export async function presignGetObject(key: string, config: R2Config = requireConfig()): Promise<string> {
   const url = objectUrl(config, key);
   url.searchParams.set("X-Amz-Expires", String(PRESIGN_EXPIRES_SECONDS));
   const signed = await client(config).sign(url.toString(), { method: "GET", aws: { signQuery: true } });

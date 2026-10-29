@@ -1719,6 +1719,38 @@ export const videoLogs = pgTable(
   ]
 );
 
+// --- Day portraits (#622, #688) -------------------------------------------
+//
+// One face photo per diary day, taken in the browser with a framing guide
+// so the facelapse's source frames line up. Private R2 object in its own
+// bucket (R2_PORTRAITS_BUCKET, see getR2PortraitsConfig for why it is not
+// the video bucket): portraits are personal, and only the finished
+// facelapse is public (#12). Only the object key is stored; the page gets a
+// short-lived presigned GET (src/lib/video-journal/r2.ts).
+//
+// The facelapse tool is deliberately a separate program with no connection
+// to this table; photos leave by hand for now (#622).
+export const dayPortraits = pgTable("day_portraits", {
+  // The primary key makes "one per day" a database fact, not a convention.
+  // RESTRICT, like video_logs: deleting the day row would orphan the R2
+  // object with nothing pointing at it.
+  date: date("date", { mode: "string" })
+    .primaryKey()
+    .references(() => days.date, { onDelete: "restrict" }),
+  // "day-portraits/2026-10-29/<uuid>.jpg". A retake gets a fresh key rather
+  // than overwriting, so a presigned URL still open in another tab keeps
+  // showing the photo it was minted for, and a failed delete of the old
+  // object can't corrupt the new one.
+  storageKey: text("storage_key").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  // When the photo was taken, from the device clock. Not the same as
+  // `date`: a portrait for Tuesday taken just after midnight is Tuesday's.
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- Inconsistency scan (#13, #670) ---------------------------------------
 //
 // What the periodic data-inconsistency scan flagged, and what you decided
