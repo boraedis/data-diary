@@ -82,6 +82,32 @@ describe("object helpers use the bucket they are given", () => {
     }
   });
 
+  it("sends a PUT body as a plain typed array on a URL, not inside a Request", async () => {
+    // R2 answered 411 MissingContentLength when the body reached it inside
+    // a Request built by aws4fetch (a stream, under Next's patched fetch).
+    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    await putObject("day-portraits/2026-10-29/a.jpg", bytes, "image/jpeg", portraits);
+
+    const [input, init] = fetchMock.mock.calls[0] as [unknown, RequestInit];
+    expect(typeof input).toBe("string");
+    expect(String(input)).toContain("X-Amz-Signature=");
+    expect(init.method).toBe("PUT");
+    expect(init.body).toBe(bytes);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("image/jpeg");
+  });
+
+  it("surfaces R2's own error code when the PUT is refused", async () => {
+    const refusal = "<Error><Code>AccessDenied</Code><Message>token does not cover this bucket</Message></Error>";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(refusal, { status: 403 })));
+
+    await expect(putObject("k.jpg", new Uint8Array([1]), "image/jpeg", portraits)).rejects.toThrow(
+      /403 AccessDenied.*token does not cover this bucket/,
+    );
+  });
+
   it("presigns a read in the given bucket", async () => {
     const url = await presignGetObject("day-portraits/2026-10-29/a.jpg", portraits);
     expect(url).toContain("acct.r2.cloudflarestorage.com/portraits/day-portraits/2026-10-29/a.jpg");
