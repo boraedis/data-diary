@@ -70,6 +70,10 @@ function summarize(day: DayPayload, videoNote: DayVideoNote | null, hasPortrait:
       filled: present([day.weightKg, day.bodyFatPercent, day.muscleMassKg]),
       total: 3,
     },
+    // One photo a day for the facelapse (#622, #688): there or not. Sits
+    // right after the three sections filled in on the day itself (Sleep,
+    // Social media, Weight), since a portrait is taken that same day.
+    { key: "portrait", label: "Portrait", kind: "progress", filled: hasPortrait ? 1 : 0, total: 1 },
     {
       key: "technology",
       label: "Technology",
@@ -104,8 +108,6 @@ function summarize(day: DayPayload, videoNote: DayVideoNote | null, hasPortrait:
       // alone can't say "transcribing" or "recorded but not finalized".
       note: videoNote,
     },
-    // One photo a day for the facelapse (#622, #688): there or not.
-    { key: "portrait", label: "Portrait", kind: "progress", filled: hasPortrait ? 1 : 0, total: 1 },
     { key: "subs", label: "Subs", kind: "progress", filled: day.subs.length, total: SUB_NAMES.length },
     {
       key: "entertainment",
