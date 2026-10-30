@@ -9,6 +9,8 @@ import type { DayPortrait } from "@/lib/day-portraits/rules";
 // The framing overlay's real look and a real camera are not exercised here.
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+// The framing hints load a real model; here they simply aren't available.
+vi.mock("@/lib/day-portraits/face-landmarker", () => ({ loadFaceLandmarker: () => Promise.resolve(null) }));
 
 const SAVED: DayPortrait = {
   date: "2026-10-29",
@@ -25,6 +27,7 @@ describe("PortraitCapture", () => {
   beforeEach(() => {
     // jsdom has no media playback; the card calls play() on the live video.
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -70,5 +73,20 @@ describe("PortraitCapture", () => {
 
     expect(stop).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Take portrait" })).toBeTruthy();
+  });
+
+  it("never lets a framing hint stop you taking the photo", async () => {
+    setGetUserMedia(() => Promise.resolve({ getTracks: () => [{ stop: vi.fn() }] }));
+    render(<PortraitCapture date="2026-10-29" initial={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Take portrait" }));
+    const video = (await screen.findByLabelText("Live camera preview")) as HTMLVideoElement;
+
+    // The camera reports its size; the guide and its hint line appear.
+    Object.defineProperty(video, "videoWidth", { value: 1920 });
+    Object.defineProperty(video, "videoHeight", { value: 1080 });
+    fireEvent.loadedMetadata(video);
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect((screen.getByRole("button", { name: "Capture" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { portraitGuide } from "@/lib/day-portraits/guide";
+import { FramingGuide } from "@/components/entry-forms/framing-guide";
 import {
   fitWithin,
   PORTRAIT_JPEG_QUALITY,
@@ -19,8 +19,9 @@ import { classifyRecorderError, type RecorderErrorKind } from "@/lib/video-journ
 // not recording, but the camera permission and failure modes are the video
 // recorder's, so its classifier is reused.
 //
-// What it deliberately doesn't do: detect a face. The guide is a fixed
-// overlay (v1); the facelapse tool does the real eye alignment afterwards.
+// The guide and the live framing hints (v2, #689) are FramingGuide's.
+// Hints are advice only: nothing here is ever blocked or saved because of
+// one. The facelapse tool does the real eye alignment afterwards.
 
 const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
   video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1080 } },
@@ -174,7 +175,6 @@ export function PortraitCapture({ date, initial }: { date: string; initial: DayP
 
   const live = phase === "live";
   const showReview = (phase === "review" || phase === "saving") && captured;
-  const guide = frame ? portraitGuide(frame.width, frame.height) : null;
 
   return (
     <Card size="sm">
@@ -183,7 +183,7 @@ export function PortraitCapture({ date, initial }: { date: string; initial: DayP
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
-          Put your face in the oval and your eyes on the line, at the same distance and in the same light each day.
+          Put your face in the oval and your eyes on the line, at the same distance and in the same light each day. Hints appear as you line up, and they never stop you taking the photo.
         </p>
 
         {live ? (
@@ -203,50 +203,7 @@ export function PortraitCapture({ date, initial }: { date: string; initial: DayP
                 if (videoWidth && videoHeight) setFrame({ width: videoWidth, height: videoHeight });
               }}
             />
-            {frame && guide ? (
-              <svg
-                aria-hidden="true"
-                viewBox={`0 0 ${frame.width} ${frame.height}`}
-                className="pointer-events-none absolute inset-0 h-full w-full"
-              >
-                {/* Dim everything outside the oval so the target reads at a glance. */}
-                <path
-                  fillRule="evenodd"
-                  fill="rgba(0,0,0,0.35)"
-                  d={`M0 0H${frame.width}V${frame.height}H0Z M${guide.cx - guide.rx} ${guide.cy} a${guide.rx} ${guide.ry} 0 1 0 ${guide.rx * 2} 0 a${guide.rx} ${guide.ry} 0 1 0 ${-guide.rx * 2} 0Z`}
-                />
-                <ellipse
-                  cx={guide.cx}
-                  cy={guide.cy}
-                  rx={guide.rx}
-                  ry={guide.ry}
-                  fill="none"
-                  stroke="white"
-                  strokeWidth={2}
-                  vectorEffect="non-scaling-stroke"
-                />
-                <line
-                  x1={guide.cx - guide.rx}
-                  x2={guide.cx + guide.rx}
-                  y1={guide.eyeY}
-                  y2={guide.eyeY}
-                  stroke="white"
-                  strokeWidth={2}
-                  strokeDasharray="6 6"
-                  vectorEffect="non-scaling-stroke"
-                />
-                <line
-                  x1={guide.cx}
-                  x2={guide.cx}
-                  y1={guide.cy - guide.ry}
-                  y2={guide.cy + guide.ry}
-                  stroke="white"
-                  strokeOpacity={0.5}
-                  strokeWidth={1}
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            ) : null}
+            {frame ? <FramingGuide videoRef={videoRef} frame={frame} /> : null}
           </div>
         ) : showReview ? (
           // eslint-disable-next-line @next/next/no-img-element -- a local blob preview, not an optimizable asset

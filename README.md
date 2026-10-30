@@ -418,6 +418,16 @@ instead of putting photos in the video bucket. Portraits are private; they
 leave the app by hand, and the facelapse tool has no connection to this
 bucket.
 
+The live **framing hints** on the portrait camera (#689) run MediaPipe's
+face landmarker in the browser: camera frames never leave the device. Its
+WebAssembly loads from jsdelivr and its ~3.7MB model from Google's public
+`mediapipe-models` bucket, the first time the camera opens, and the
+library's JavaScript is lazy-loaded so it never touches the rest of the
+app's bundle. Without the network the hints fall back to a lighting check
+only, and the camera still works. The `@mediapipe/tasks-vision` version in
+`package.json` and `MEDIAPIPE_VERSION` in `src/lib/day-portraits/
+face-landmarker.ts` must match (a test checks).
+
 ## Deployment
 
 Deploys to [Vercel](https://vercel.com), with the Neon Vercel integration
